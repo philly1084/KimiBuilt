@@ -358,6 +358,17 @@ const config = {
         podcastOutroVolume: parseOptionalFloat(process.env.PODCAST_OUTRO_VOLUME) ?? 1,
     },
 
+    podcast: {
+        scriptRequestTimeoutMs: Math.max(
+            30000,
+            parseInt(process.env.PODCAST_SCRIPT_REQUEST_TIMEOUT_MS, 10) || (5 * 60 * 1000),
+        ),
+        scriptRetryAttempts: Math.max(
+            0,
+            parseInt(process.env.PODCAST_SCRIPT_RETRY_ATTEMPTS, 10) || 1,
+        ),
+    },
+
     auth: {
         username: process.env.LILLYBUILT_AUTH_USERNAME || process.env.KIMIBUILT_AUTH_USERNAME || '',
         password: process.env.LILLYBUILT_AUTH_PASSWORD || process.env.KIMIBUILT_AUTH_PASSWORD || '',

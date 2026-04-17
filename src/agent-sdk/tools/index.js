@@ -2517,6 +2517,7 @@ class ToolManager {
             mp3BitrateKbps: { type: 'integer', minimum: 64, maximum: 320 },
             model: { type: 'string' },
             reasoningEffort: { type: 'string' },
+            scriptTimeoutMs: { type: 'integer', minimum: 30000, maximum: 900000 },
             ttsTimeoutMs: { type: 'integer', minimum: 1000, maximum: 900000 },
             ttsChunkMaxChars: { type: 'integer', minimum: 250, maximum: 2400 },
           },

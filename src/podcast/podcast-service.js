@@ -20,8 +20,14 @@ const DEFAULT_MAX_SOURCES = 4;
 const DEFAULT_SILENCE_MS = 325;
 const DEFAULT_MINIMUM_VALID_TURNS = 4;
 const DEFAULT_PODCAST_SEARCH_TIMEOUT_MS = 45000;
-const DEFAULT_PODCAST_SCRIPT_REQUEST_TIMEOUT_MS = 120000;
-const DEFAULT_PODCAST_SCRIPT_RETRY_ATTEMPTS = 1;
+const DEFAULT_PODCAST_SCRIPT_REQUEST_TIMEOUT_MS = Math.max(
+  30000,
+  Number(config?.podcast?.scriptRequestTimeoutMs) || (5 * 60 * 1000),
+);
+const DEFAULT_PODCAST_SCRIPT_RETRY_ATTEMPTS = Math.max(
+  0,
+  Number(config?.podcast?.scriptRetryAttempts) || 1,
+);
 const DEFAULT_TRANSIENT_RETRY_ATTEMPTS = 2;
 const DEFAULT_TRANSIENT_RETRY_DELAY_MS = 1200;
 const DEFAULT_AUDIO_PROCESSING_RETRY_ATTEMPTS = 1;
@@ -529,6 +535,15 @@ function resolvePodcastChunkMaxChars(params = {}, voiceConfig = {}) {
   return clampNumber(params.ttsChunkMaxChars, 250, safeMaxChunkChars, configuredChunkChars);
 }
 
+function resolvePodcastScriptRequestTimeoutMs(params = {}) {
+  return clampNumber(
+    params.scriptTimeoutMs,
+    30000,
+    900000,
+    DEFAULT_PODCAST_SCRIPT_REQUEST_TIMEOUT_MS,
+  );
+}
+
 function buildResearchPrompt({
   topic,
   audience,
@@ -738,6 +753,7 @@ class PodcastService {
     sources,
     models = [],
     reasoningEffort,
+    requestTimeoutMs = DEFAULT_PODCAST_SCRIPT_REQUEST_TIMEOUT_MS,
   }) {
     const modelCandidates = uniqueOrdered(Array.isArray(models) ? models : [models]);
     const prompt = buildResearchPrompt({
@@ -760,7 +776,7 @@ class PodcastService {
           model: modelCandidate || undefined,
           reasoningEffort,
           enableAutomaticToolCalls: false,
-          requestTimeoutMs: DEFAULT_PODCAST_SCRIPT_REQUEST_TIMEOUT_MS,
+          requestTimeoutMs,
           requestMaxRetries: 0,
         }), {
           label: 'podcast script generation',
@@ -972,6 +988,7 @@ class PodcastService {
     const hosts = resolveHosts(params, voiceConfig);
     const podcastTtsTimeoutMs = resolvePodcastTtsTimeoutMs(params, voiceConfig);
     const podcastChunkMaxChars = resolvePodcastChunkMaxChars(params, voiceConfig);
+    const podcastScriptRequestTimeoutMs = resolvePodcastScriptRequestTimeoutMs(params);
     const executeTool = typeof context?.toolManager?.executeTool === 'function'
       ? context.toolManager.executeTool.bind(context.toolManager)
       : null;
@@ -994,6 +1011,7 @@ class PodcastService {
       sources,
       models: resolvePodcastScriptModelCandidates(params, context),
       reasoningEffort: params.reasoningEffort || context.reasoningEffort || undefined,
+      requestTimeoutMs: podcastScriptRequestTimeoutMs,
     });
     const turnVoicePlan = resolveTurnVoicePlan(script.turns, hosts, {
       cycleHostVoices: params.cycleHostVoices !== false,
@@ -1082,6 +1100,7 @@ class PodcastService {
           mixed: wantsMixing,
           enhanced: wantsEnhancement,
           mp3Exported: wantsMp3,
+          scriptRequestTimeoutMs: podcastScriptRequestTimeoutMs,
           ttsTimeoutMs: podcastTtsTimeoutMs,
           ttsChunkMaxChars: podcastChunkMaxChars,
         },

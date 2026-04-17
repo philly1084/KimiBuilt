@@ -213,7 +213,50 @@ describe('PodcastService', () => {
 
     expect(createResponse).toHaveBeenCalledWith(expect.objectContaining({
       model: 'gpt-4o',
-      requestTimeoutMs: 120000,
+      requestTimeoutMs: 300000,
+      requestMaxRetries: 0,
+    }));
+  });
+
+  test('allows longer podcast script request budgets to be overridden per run', async () => {
+    const service = new PodcastService();
+    const executeTool = jest.fn(async (toolId) => {
+      if (toolId === 'web-search') {
+        return {
+          success: true,
+          data: {
+            results: [
+              { title: 'Penguin field guide', url: 'https://example.com/penguins', snippet: 'Penguin ecology changes across species and latitudes.' },
+            ],
+          },
+        };
+      }
+
+      if (toolId === 'web-fetch') {
+        return {
+          success: true,
+          data: {
+            headers: { 'content-type': 'text/html' },
+            body: '<article><p>Penguin populations respond differently to changing sea ice, prey shifts, and warming waters.</p></article>',
+          },
+        };
+      }
+
+      throw new Error(`Unexpected tool: ${toolId}`);
+    });
+
+    await service.createPodcast({
+      topic: 'Penguin biology and climate change',
+      durationMinutes: 20,
+      scriptTimeoutMs: 420000,
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+      toolManager: { executeTool },
+    });
+
+    expect(createResponse).toHaveBeenCalledWith(expect.objectContaining({
+      requestTimeoutMs: 420000,
       requestMaxRetries: 0,
     }));
   });

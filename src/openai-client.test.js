@@ -97,6 +97,7 @@ function createToolManager() {
                     durationMinutes: { type: 'integer' },
                     audience: { type: 'string' },
                     tone: { type: 'string' },
+                    scriptTimeoutMs: { type: 'integer' },
                 },
             },
         }],
