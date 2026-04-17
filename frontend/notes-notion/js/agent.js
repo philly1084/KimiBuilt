@@ -2861,18 +2861,167 @@ GUIDELINES:
 - When improving layout or variety, prefer mixing headings, callouts, quotes, lists, databases, images, dividers, and tasteful color/textColor choices instead of only plain paragraphs`;
     }
 
+    function normalizeLooseStructuredToken(value = '', options = {}) {
+        const {
+            lowercase = true,
+            spacesToUnderscore = true,
+        } = options;
+        let normalized = stripUnsafeNullCharacters(value).trim();
+        if (!normalized) {
+            return '';
+        }
+
+        normalized = normalized
+            .replace(/\s*([_-])\s*/g, '$1')
+            .replace(/\s{2,}/g, ' ');
+
+        if (spacesToUnderscore) {
+            normalized = normalized.replace(/\s+/g, '_');
+        }
+
+        normalized = normalized.replace(/-/g, '_').replace(/_+/g, '_');
+        return lowercase ? normalized.toLowerCase() : normalized;
+    }
+
+    function normalizeLooseStructuredKeyName(key = '') {
+        const trimmed = stripUnsafeNullCharacters(key).trim();
+        if (!trimmed) {
+            return '';
+        }
+
+        const normalized = normalizeLooseStructuredToken(trimmed, {
+            lowercase: true,
+            spacesToUnderscore: true,
+        });
+        const compact = normalized.replace(/_/g, '');
+        const aliases = {
+            assistantreply: 'assistant_reply',
+            assistant_reply: 'assistant_reply',
+            assistantmessage: 'assistantMessage',
+            assistant_message: 'assistantMessage',
+            notesactions: 'notes-actions',
+            notes_actions: 'notes-actions',
+            blockid: 'blockId',
+            block_id: 'blockId',
+            targetblockid: 'targetBlockId',
+            target_block_id: 'targetBlockId',
+            imageurl: 'imageUrl',
+            image_url: 'imageUrl',
+            imageassetid: 'imageAssetId',
+            image_asset_id: 'imageAssetId',
+            downloadurl: 'downloadUrl',
+            download_url: 'downloadUrl',
+            sortcolumn: 'sortColumn',
+            sort_column: 'sortColumn',
+            sortdirection: 'sortDirection',
+            sort_direction: 'sortDirection',
+            defaultmodel: 'defaultModel',
+            default_model: 'defaultModel',
+            displaymode: 'displayMode',
+            display_mode: 'displayMode',
+            textcolor: 'textColor',
+            text_color: 'textColor',
+            unsplashresults: 'unsplashResults',
+            unsplash_results: 'unsplashResults',
+            selectedunsplashid: 'selectedUnsplashId',
+            selected_unsplash_id: 'selectedUnsplashId',
+            unsplashphotographer: 'unsplashPhotographer',
+            unsplash_photographer: 'unsplashPhotographer',
+            unsplashphotographerurl: 'unsplashPhotographerUrl',
+            unsplash_photographer_url: 'unsplashPhotographerUrl',
+            diagramtype: 'diagramType',
+            diagram_type: 'diagramType',
+            outputtext: 'output_text',
+            output_text: 'output_text',
+        };
+
+        if (aliases[normalized]) {
+            return aliases[normalized];
+        }
+        if (aliases[compact]) {
+            return aliases[compact];
+        }
+        if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(trimmed)) {
+            return trimmed;
+        }
+        return normalized;
+    }
+
+    function normalizeLooseStructuredObject(value) {
+        if (Array.isArray(value)) {
+            return value.map((entry) => normalizeLooseStructuredObject(entry));
+        }
+
+        if (!value || typeof value !== 'object') {
+            return value;
+        }
+
+        const normalized = {};
+        Object.entries(value).forEach(([key, entryValue]) => {
+            const normalizedKey = normalizeLooseStructuredKeyName(key);
+            const nextValue = normalizeLooseStructuredObject(entryValue);
+            const existingValue = normalized[normalizedKey];
+            if (Object.prototype.hasOwnProperty.call(normalized, normalizedKey)) {
+                const existingEmpty = existingValue == null
+                    || existingValue === ''
+                    || (Array.isArray(existingValue) && existingValue.length === 0);
+                if (existingEmpty && nextValue != null && nextValue !== '') {
+                    normalized[normalizedKey] = nextValue;
+                }
+                return;
+            }
+            normalized[normalizedKey] = nextValue;
+        });
+
+        return normalized;
+    }
+
+    function normalizeLooseStructuredJsonText(text = '') {
+        const cleaned = stripDiffStylePrefixes(stripUnsafeNullCharacters(text)).trim();
+        if (!cleaned) {
+            return '';
+        }
+
+        return cleaned.replace(/([{,]\s*)"([^"\r\n]+?)"\s*:/g, (_match, prefix, key) => {
+            const normalizedKey = normalizeLooseStructuredKeyName(key);
+            return `${prefix}"${normalizedKey}":`;
+        });
+    }
+
+    function parseStructuredJsonPayload(text = '') {
+        const cleaned = normalizeStructuredPayloadText(text);
+        if (!cleaned) {
+            return null;
+        }
+
+        const candidates = [cleaned];
+        const looseCandidate = normalizeLooseStructuredJsonText(cleaned);
+        if (looseCandidate && looseCandidate !== cleaned) {
+            candidates.push(looseCandidate);
+        }
+
+        for (const candidate of candidates) {
+            try {
+                return normalizeLooseStructuredObject(JSON.parse(candidate));
+            } catch (_error) {
+                // Try the next normalized candidate.
+            }
+        }
+
+        return null;
+    }
+
     function unwrapCodeFence(text = '') {
-        const trimmed = stripUnsafeNullCharacters(text).trim();
+        const trimmed = stripUnsafeNullCharacters(text)
+            .trim()
+            .replace(/^```+\s*notes\s*(?:[_-]|\s)\s*actions\b/i, '```notes-actions')
+            .replace(/^```+\s*json\b/i, '```json');
         const match = trimmed.match(/^```(?:json|notes-actions)?\s*([\s\S]*?)\s*```$/i);
         return match ? match[1].trim() : trimmed;
     }
 
     function safeJsonParse(text = '') {
-        try {
-            return JSON.parse(unwrapCodeFence(text));
-        } catch (_error) {
-            return null;
-        }
+        return parseStructuredJsonPayload(text);
     }
 
     function normalizeStructuredPayloadText(text = '') {
@@ -4780,30 +4929,28 @@ Silently verify the lead cluster, section order, and final polish before returni
     }
 
     function canonicalizeBlockType(type) {
-        const normalized = String(type || 'text').trim().toLowerCase();
+        const normalized = normalizeLooseStructuredToken(type || 'text', {
+            lowercase: true,
+            spacesToUnderscore: true,
+        });
         const aliases = {
             paragraph: 'text',
             p: 'text',
             h1: 'heading_1',
             heading1: 'heading_1',
-            'heading-1': 'heading_1',
             h2: 'heading_2',
             heading2: 'heading_2',
-            'heading-2': 'heading_2',
             h3: 'heading_3',
             heading3: 'heading_3',
-            'heading-3': 'heading_3',
             bullet: 'bulleted_list',
             bullets: 'bulleted_list',
             bullet_list: 'bulleted_list',
-            'bullet-list': 'bulleted_list',
             bulletedlist: 'bulleted_list',
             togglelist: 'toggle',
             collapsible: 'toggle',
             numberedlist: 'numbered_list',
             number_list: 'numbered_list',
             numberlist: 'numbered_list',
-            'number-list': 'numbered_list',
             checklist: 'todo',
             to_do: 'todo',
             todo: 'todo',
@@ -4812,7 +4959,6 @@ Silently verify the lead cluster, section order, and final polish before returni
             formula: 'math',
             diagram: 'mermaid',
             aiimage: 'ai_image',
-            'ai-image': 'ai_image',
             image_generation: 'ai_image',
             imagegeneration: 'ai_image',
             table: 'database'
@@ -4940,14 +5086,16 @@ Silently verify the lead cluster, section order, and final polish before returni
             return null;
         }
 
-        const op = String(rawAction.op || rawAction.action || rawAction.operation || '').trim().toLowerCase();
+        const op = normalizeLooseStructuredToken(rawAction.op || rawAction.action || rawAction.operation || '', {
+            lowercase: true,
+            spacesToUnderscore: true,
+        });
         const normalizedAction = {
             ...rawAction,
-            op: rawAction.op || rawAction.action || rawAction.operation || ''
+            op
         };
 
         switch (op) {
-            case 'replace-content':
             case 'replace_content': {
                 const blocks = buildBlocksFromLegacyActionContent(rawAction);
                 if (!blocks.length) {
@@ -4960,7 +5108,6 @@ Silently verify the lead cluster, section order, and final polish before returni
                     blocks
                 };
             }
-            case 'append-content':
             case 'append_content': {
                 const blocks = buildBlocksFromLegacyActionContent(rawAction);
                 if (!blocks.length) {
@@ -4973,7 +5120,6 @@ Silently verify the lead cluster, section order, and final polish before returni
                     blocks
                 };
             }
-            case 'prepend-content':
             case 'prepend_content': {
                 const blocks = buildBlocksFromLegacyActionContent(rawAction);
                 if (!blocks.length) {
@@ -4999,6 +5145,9 @@ Silently verify the lead cluster, section order, and final polish before returni
         const directAction = normalizeLegacyNotesAction(payload);
         if (directAction) {
             return [directAction];
+        }
+        if (isNotesBlockDefinition(payload)) {
+            return null;
         }
 
         const pageLikeBlocks = Array.isArray(payload.blocks)
@@ -5082,30 +5231,30 @@ Silently verify the lead cluster, section order, and final polish before returni
     function tryParseNotesActionPayload(payloadText) {
         if (!payloadText) return null;
 
-        try {
-            const payload = JSON.parse(normalizeStructuredPayloadText(payloadText));
-            if (Array.isArray(payload)) {
-                const normalizedActions = payload
-                    .map((action) => normalizeLegacyNotesAction(action))
-                    .filter(Boolean);
-                if (normalizedActions.length > 0) {
-                    return {
-                        displayText: '',
-                        actions: normalizedActions
-                    };
-                }
-                return null;
-            }
+        const payload = parseStructuredJsonPayload(payloadText);
+        if (!payload) {
+            return null;
+        }
 
-            const actions = getNotesPayloadActions(payload);
-            if (payload && typeof payload === 'object' && Array.isArray(actions)) {
+        if (Array.isArray(payload)) {
+            const normalizedActions = payload
+                .map((action) => normalizeLegacyNotesAction(action))
+                .filter(Boolean);
+            if (normalizedActions.length > 0) {
                 return {
-                    displayText: getNotesPayloadReply(payload),
-                    actions
+                    displayText: '',
+                    actions: normalizedActions
                 };
             }
-        } catch (_error) {
             return null;
+        }
+
+        const actions = getNotesPayloadActions(payload);
+        if (payload && typeof payload === 'object' && Array.isArray(actions)) {
+            return {
+                displayText: getNotesPayloadReply(payload),
+                actions
+            };
         }
 
         return null;
@@ -5146,11 +5295,7 @@ Silently verify the lead cluster, section order, and final polish before returni
             return null;
         }
 
-        try {
-            return JSON.parse(stripUnsafeNullCharacters(value));
-        } catch (_error) {
-            return null;
-        }
+        return parseStructuredJsonPayload(value);
     }
 
     function looksLikeBlockTypeToken(value = '') {
@@ -5327,38 +5472,33 @@ Silently verify the lead cluster, section order, and final polish before returni
             return null;
         }
 
-        const cleanedText = stripDiffStylePrefixes(unwrapCodeFence(payloadText));
-        if (!cleanedText) {
+        const payload = parseStructuredJsonPayload(payloadText);
+        if (!payload) {
             return null;
         }
 
-        try {
-            const payload = JSON.parse(cleanedText);
-            if (payload && typeof payload === 'object' && Array.isArray(payload.actions)) {
-                return null;
-            }
-            if (Array.isArray(payload) && payload.every((item) => typeof item === 'string' && looksLikeBlockTypeToken(item))) {
-                return null;
-            }
-            if (Array.isArray(payload) && payload.some((item) => isNotesBlockDefinition(item))) {
-                return null;
-            }
-            if (isNotesBlockDefinition(payload)) {
-                return null;
-            }
-
-            const content = extractGenericWrapperContent(payload);
-            if (!content || looksLikeInternalNotesScaffold(content)) {
-                return null;
-            }
-
-            return {
-                displayText: content,
-                actions: []
-            };
-        } catch (_error) {
+        if (payload && typeof payload === 'object' && Array.isArray(payload.actions)) {
             return null;
         }
+        if (Array.isArray(payload) && payload.every((item) => typeof item === 'string' && looksLikeBlockTypeToken(item))) {
+            return null;
+        }
+        if (Array.isArray(payload) && payload.some((item) => isNotesBlockDefinition(item))) {
+            return null;
+        }
+        if (isNotesBlockDefinition(payload)) {
+            return null;
+        }
+
+        const content = extractGenericWrapperContent(payload);
+        if (!content || looksLikeInternalNotesScaffold(content)) {
+            return null;
+        }
+
+        return {
+            displayText: content,
+            actions: []
+        };
     }
 
     function findBalancedGenericContentPayload(text) {
@@ -5555,6 +5695,60 @@ Silently verify the lead cluster, section order, and final polish before returni
         };
     }
 
+    function hasLooseNotesActionFence(text = '') {
+        return /```+\s*notes\s*(?:[_-]|\s)\s*actions\b/i.test(String(text || ''));
+    }
+
+    function hasLooseAssistantReplyKey(text = '') {
+        return /"\s*assistant\s*(?:[_-]|\s)?\s*reply\s*"\s*:/i.test(String(text || ''));
+    }
+
+    function hasLooseNotesActionsKey(text = '') {
+        return /"\s*notes\s*(?:[_-]|\s)?\s*actions\s*"\s*:/i.test(String(text || ''));
+    }
+
+    function hasLooseNotesActionCollectionKey(text = '') {
+        return /"\s*(?:actions|operations|edits)\s*"\s*:/i.test(String(text || ''));
+    }
+
+    function hasLooseLegacyContentAction(text = '') {
+        return /"\s*action\s*"\s*:\s*"\s*(?:replace|append|prepend)\s*(?:[_-]|\s)?\s*content\s*"/i.test(String(text || ''));
+    }
+
+    function hasLooseNotesBlockTypeMarker(text = '') {
+        return /"\s*type\s*"\s*:\s*"\s*(?:text|heading\s*(?:[_-]|\s)?\s*[123]|bulleted\s*(?:[_-]|\s)?\s*list|numbered\s*(?:[_-]|\s)?\s*list|todo|code|quote|callout|divider|mermaid|image|ai\s*(?:[_-]|\s)?\s*image|bookmark|database|ai|toggle|math)\s*"/i.test(String(text || ''));
+    }
+
+    function findStructuredMarkerIndex(text = '') {
+        const value = String(text || '');
+        return value.search(/```+\s*notes\s*(?:[_-]|\s)\s*actions|```+\s*json|"\s*assistant\s*(?:[_-]|\s)?\s*reply\s*"\s*:|"\s*notes\s*(?:[_-]|\s)?\s*actions\s*"\s*:|"\s*(?:actions|operations|edits)\s*"\s*:|"\s*action\s*"\s*:\s*"\s*(?:replace|append|prepend)\s*(?:[_-]|\s)?\s*content\s*"|"\s*type\s*"\s*:\s*"\s*function\s*"|"\s*name\s*"\s*:\s*"\s*update_notes_page\s*"|"\s*type\s*"\s*:\s*"\s*(?:text|heading\s*(?:[_-]|\s)?\s*[123]|bulleted\s*(?:[_-]|\s)?\s*list|numbered\s*(?:[_-]|\s)?\s*list|todo|code|quote|callout|divider|mermaid|image|ai\s*(?:[_-]|\s)?\s*image|bookmark|database|ai|toggle|math)\s*"/i);
+    }
+
+    function hasHighConfidenceRecoveredBlocks(blocks = []) {
+        if (!Array.isArray(blocks) || blocks.length === 0) {
+            return false;
+        }
+
+        if (blocks.length >= 2) {
+            return true;
+        }
+
+        const [block] = blocks;
+        const type = canonicalizeBlockType(block?.type || 'text');
+        const text = extractBlockDefinitionText(block).replace(/\s+/g, ' ').trim();
+
+        if (['mermaid', 'database', 'image', 'ai_image', 'bookmark', 'code', 'math'].includes(type)) {
+            return Boolean(text);
+        }
+        if (['callout', 'quote', 'todo'].includes(type)) {
+            return text.length >= 24;
+        }
+        if (/^heading_/.test(type)) {
+            return text.length >= 18 && text.split(/\s+/).length >= 3;
+        }
+        return text.length >= 60 && text.split(/\s+/).length >= 6;
+    }
+
     function extractBlockFragmentActions(text) {
         const source = String(text || '');
         const blockMatches = [];
@@ -5594,13 +5788,9 @@ Silently verify the lead cluster, section order, and final polish before returni
                     depth -= 1;
                     if (depth === 0) {
                         const candidate = source.slice(start, index + 1);
-                        try {
-                            const parsed = JSON.parse(candidate);
-                            if (isNotesBlockDefinition(parsed)) {
-                                blockMatches.push({ parsed, start, end: index + 1 });
-                            }
-                        } catch (error) {
-                            // Ignore malformed candidates and continue scanning.
+                        const parsed = parseStructuredJsonPayload(candidate);
+                        if (parsed && isNotesBlockDefinition(parsed)) {
+                            blockMatches.push({ parsed, start, end: index + 1 });
                         }
                         break;
                     }
@@ -5635,6 +5825,9 @@ Silently verify the lead cluster, section order, and final polish before returni
         if (!recoveredBlocks.length) {
             return null;
         }
+        if (!hasHighConfidenceRecoveredBlocks(recoveredBlocks)) {
+            return null;
+        }
 
         return [{
             op: 'append_to_page',
@@ -5644,7 +5837,7 @@ Silently verify the lead cluster, section order, and final polish before returni
 
     function findBalancedNotesActionPayload(text) {
         const source = String(text || '');
-        if (!/"(?:actions|operations|edits)"\s*:/i.test(source)) {
+        if (!(hasLooseNotesActionCollectionKey(source) || hasLooseNotesActionsKey(source))) {
             return null;
         }
 
@@ -5701,14 +5894,13 @@ Silently verify the lead cluster, section order, and final polish before returni
 
     function looksLikeNotesActionResponse(text) {
         const value = stripUnsafeNullCharacters(text);
-        return /```notes-actions/i.test(value) ||
+        return hasLooseNotesActionFence(value) ||
             /```json/i.test(value) ||
-            /"assistant_reply"\s*:/i.test(value) ||
-            /"assistantReply"\s*:/i.test(value) ||
-            /"notes-actions"\s*:/i.test(value) ||
-            /"(?:actions|operations|edits)"\s*:/i.test(value) ||
-            /"action"\s*:\s*"(?:replace-content|append-content|prepend-content)"/i.test(value) ||
-            /"type"\s*:\s*"(?:text|heading_1|heading_2|heading_3|bulleted_list|numbered_list|todo|code|quote|callout|divider|mermaid|image|ai_image|bookmark|database|ai|toggle|math)"/i.test(value) ||
+            hasLooseAssistantReplyKey(value) ||
+            hasLooseNotesActionsKey(value) ||
+            hasLooseNotesActionCollectionKey(value) ||
+            hasLooseLegacyContentAction(value) ||
+            hasLooseNotesBlockTypeMarker(value) ||
             startsWithMermaidResponse(value);
     }
 
@@ -5723,7 +5915,7 @@ Silently verify the lead cluster, section order, and final polish before returni
             return genericContent.displayText;
         }
 
-        const markerIndex = value.search(/```notes-actions|```json|"assistant_reply"\s*:|"assistantReply"\s*:|"notes-actions"\s*:|"(?:actions|operations|edits)"\s*:|"action"\s*:\s*"(?:replace-content|append-content|prepend-content)"|"type"\s*:\s*"function"|"name"\s*:\s*"update_notes_page"|"type"\s*:\s*"(?:text|heading_1|heading_2|heading_3|bulleted_list|numbered_list|todo|code|quote|callout|divider|mermaid|image|ai_image|bookmark|database|ai|toggle|math)"/i);
+        const markerIndex = findStructuredMarkerIndex(value);
         if (markerIndex >= 0) {
             return value.slice(0, markerIndex).trim();
         }
@@ -5732,9 +5924,9 @@ Silently verify the lead cluster, section order, and final polish before returni
 
     function extractNotesActionPlan(responseText) {
         const text = stripUnsafeNullCharacters(responseText);
-        const match = text.match(/```notes-actions\s*([\s\S]*?)```/i);
+        const match = text.match(/```+\s*notes\s*(?:[_-]|\s)\s*actions\b\s*([\s\S]*?)```/i);
         if (!match) {
-            const jsonFenceMatch = text.match(/```json\s*([\s\S]*?)```/i);
+            const jsonFenceMatch = text.match(/```+\s*json\b\s*([\s\S]*?)```/i);
             const directPayload = tryParseNotesActionPayload(text.trim());
             const fencedPayload = jsonFenceMatch ? tryParseNotesActionPayload(jsonFenceMatch[1].trim()) : null;
             const balancedPayload = findBalancedNotesActionPayload(text);
@@ -6107,8 +6299,8 @@ Silently verify the lead cluster, section order, and final polish before returni
         const value = stripUnsafeNullCharacters(text);
         const trimmed = value.trim();
 
-        if (/^\{[\s\S]*"(?:actions|operations|edits)"\s*:/i.test(trimmed)
-            && /"(?:assistant_reply|assistantReply)"\s*:/i.test(trimmed)) {
+        if (/^\{[\s\S]*"\s*(?:actions|operations|edits)\s*"\s*:/i.test(trimmed)
+            && hasLooseAssistantReplyKey(trimmed)) {
             return '';
         }
 
@@ -6118,8 +6310,8 @@ Silently verify the lead cluster, section order, and final polish before returni
 
         return stripStructuredResponseText(
             value
-                .replace(/```notes-actions[\s\S]*$/i, '')
-                .replace(/```json[\s\S]*?(?:"assistant_reply"|"actions")[\s\S]*$/i, '')
+                .replace(/```+\s*notes\s*(?:[_-]|\s)\s*actions[\s\S]*$/i, '')
+                .replace(/```+\s*json[\s\S]*?(?:"\s*assistant\s*(?:[_-]|\s)?\s*reply\s*"|"\s*actions\s*")[\s\S]*$/i, '')
         ).trimEnd();
     }
 
@@ -7925,7 +8117,7 @@ Silently verify the lead cluster, section order, and final polish before returni
                                     throw invalidGatewayError;
                                 }
 
-                                if (chunkText.includes('```notes-actions')) {
+                                if (hasLooseNotesActionFence(chunkText)) {
                                     inJsonBlock = true;
                                     jsonBuffer = chunkText;
                                 } else if (inJsonBlock) {

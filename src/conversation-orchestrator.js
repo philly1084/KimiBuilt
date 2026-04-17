@@ -3324,7 +3324,40 @@ function buildDocumentWorkflowFollowupPlanFromToolEvents({ objective = '', toolP
     }];
 }
 
+function isSerializedToolCallWrapperText(text = '') {
+    const trimmed = String(text || '').trim();
+    if (!trimmed || !/tool_calls|finish_reason|output_text/i.test(trimmed)) {
+        return false;
+    }
+
+    const parsed = safeJsonParse(trimmed);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return false;
+    }
+
+    const toolCalls = Array.isArray(parsed.tool_calls) ? parsed.tool_calls : [];
+    if (toolCalls.length === 0) {
+        return false;
+    }
+
+    const finishReason = String(parsed.finish_reason || parsed.finishReason || '').trim().toLowerCase();
+    const outputText = String(parsed.output_text || parsed.outputText || '').trim();
+    const displayText = [
+        parsed.assistant_reply,
+        parsed.assistantReply,
+        parsed.message,
+        parsed.content,
+        parsed.text,
+        parsed.answer,
+    ].find((entry) => typeof entry === 'string' && entry.trim());
+
+    return !displayText && (!outputText || finishReason === 'tool_calls');
+}
+
 function isInvalidRuntimeResponseText(text = '') {
+    if (isSerializedToolCallWrapperText(text)) {
+        return true;
+    }
     const normalized = String(text || '').trim().toLowerCase().replace(/[â€™]/g, '\'');
     if (!normalized) {
         return false;
@@ -7675,9 +7708,10 @@ class ConversationOrchestrator extends EventEmitter {
         });
 
         const repairPrompt = [
-            'The previous draft was invalid because it claimed runtime tools were unavailable after verified tool execution.',
+            'The previous draft was invalid after verified tool execution.',
+            'It may have denied runtime tool access, returned a tool-call wrapper object, or surfaced execution metadata instead of a user-facing answer.',
             'Rewrite the answer using only the verified tool results below.',
-            'Do not mention turn-level tool availability, missing tools, sandbox limits, or inability to execute commands.',
+            'Do not mention turn-level tool availability, missing tools, sandbox limits, inability to execute commands, or raw tool-call wrapper fields.',
             'If additional work may still be needed, explain what remains based on the verified results and the user request without claiming the tool is unavailable.',
             'If a tool failed, state the exact tool failure plainly.',
             'Do not mention the local CLI environment, local workspace state, startup health, or shell behavior unless a verified tool result is directly about that.',
@@ -8520,17 +8554,36 @@ class ConversationOrchestrator extends EventEmitter {
     }
 
     async completeText(prompt, options = {}) {
-        if (typeof options?.onModelResponse !== 'function' && typeof this.llmClient?.complete === 'function') {
-            return this.llmClient.complete(prompt, options);
+        const {
+            onModelResponse = null,
+            ...completionOptions
+        } = options || {};
+
+        if (typeof this.llmClient?.complete === 'function') {
+            const completion = await this.llmClient.complete(prompt, completionOptions);
+            const normalizedResponse = completion && typeof completion === 'object' && !Array.isArray(completion)
+                ? normalizeModelResponseShape(completion)
+                : buildSyntheticResponse({
+                    output: String(completion || ''),
+                    model: completionOptions.model || null,
+                });
+
+            if (typeof onModelResponse === 'function') {
+                onModelResponse(normalizedResponse);
+            }
+
+            return typeof completion === 'string'
+                ? completion
+                : extractResponseText(normalizedResponse);
         }
 
         const response = await this.requestResponse({
             input: prompt,
             stream: false,
-            model: options.model || null,
-            reasoningEffort: options.reasoningEffort || null,
+            model: completionOptions.model || null,
+            reasoningEffort: completionOptions.reasoningEffort || null,
             enableAutomaticToolCalls: false,
-            onModelResponse: options.onModelResponse,
+            onModelResponse,
         });
 
         return extractResponseText(response);

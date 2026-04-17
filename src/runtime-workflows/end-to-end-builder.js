@@ -1083,6 +1083,9 @@ function buildEndToEndWorkflowPlan({
                     ...(currentWorkflow.remoteTarget?.username ? { username: currentWorkflow.remoteTarget.username } : {}),
                     ...(currentWorkflow.remoteTarget?.port ? { port: currentWorkflow.remoteTarget.port } : {}),
                     timeout: REMOTE_VERIFICATION_TIMEOUT_MS,
+                    workflowAction: currentWorkflow.lane === 'inspect-only'
+                        ? 'inspect-remote-state'
+                        : 'verify-deployment',
                     command: currentWorkflow.lane === 'inspect-only'
                         ? buildInspectCommand(currentWorkflow)
                         : buildVerificationCommand(currentWorkflow, deployDefaults),
@@ -1220,14 +1223,26 @@ function advanceEndToEndBuilderWorkflow({
                 continue;
             }
 
+            if (workflowAction === 'verify-deployment'
+                || (currentWorkflow.lane === 'inspect-only' && workflowAction === 'inspect-remote-state')) {
+                currentWorkflow = markMeaningfulProgress({
+                    ...currentWorkflow,
+                    progress: {
+                        ...currentWorkflow.progress,
+                        verified: true,
+                    },
+                    stage: 'completed',
+                    status: COMPLETED_WORKFLOW_STATUS,
+                });
+                continue;
+            }
+
+            const stillVerifying = currentWorkflow.requiresVerification === true
+                && currentWorkflow.progress.verified !== true;
             currentWorkflow = markMeaningfulProgress({
                 ...currentWorkflow,
-                progress: {
-                    ...currentWorkflow.progress,
-                    verified: true,
-                },
-                stage: 'completed',
-                status: COMPLETED_WORKFLOW_STATUS,
+                stage: stillVerifying ? 'verifying' : currentWorkflow.stage,
+                status: stillVerifying ? ACTIVE_WORKFLOW_STATUS : currentWorkflow.status,
             });
         }
     }

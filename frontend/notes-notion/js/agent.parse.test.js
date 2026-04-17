@@ -226,6 +226,56 @@ Approved page plan:
         expect(parsed.actions).toEqual([]);
     });
 
+    test('parses malformed kimi-style notes-actions fences and spaced keys', () => {
+        const agent = loadAgent();
+        const responseText = [
+            '``` notes -actions',
+            '{',
+            '  " assistant _reply ": "Built a richer pig page.",',
+            '  " actions ": [',
+            '    {',
+            '      " action ": " replace _content ",',
+            '      " content ": "# Pigs\\n\\n## Quick Facts\\nPigs are smart, social mammals with strong memories."',
+            '    }',
+            '  ]',
+            '}',
+            '```',
+        ].join('\n');
+
+        const parsed = agent._extractNotesActionPlan(responseText);
+
+        expect(parsed.displayText).toBe('Built a richer pig page.');
+        expect(parsed.actions).toHaveLength(1);
+        expect(parsed.actions[0].op).toBe('rebuild_page');
+        expect(parsed.actions[0].blocks).toEqual(expect.arrayContaining([
+            expect.objectContaining({ type: 'heading_1', content: 'Pigs' }),
+            expect.objectContaining({ type: 'heading_2', content: 'Quick Facts' }),
+            expect.objectContaining({
+                type: 'text',
+                content: 'Pigs are smart, social mammals with strong memories.',
+            }),
+        ]));
+    });
+
+    test('does not salvage a one-word inner block fragment from a broken structured payload', () => {
+        const agent = loadAgent();
+        const responseText = [
+            '``` notes -actions',
+            '{',
+            '  " assistant _reply ": "Built a fresh pig page.",',
+            '  " actions ": [',
+            '    { " type ": " heading _2 ", " content ": " FACT " }',
+            '  ]',
+            '```',
+        ].join('\n');
+
+        const parsed = agent._extractNotesActionPlan(responseText);
+
+        expect(parsed.displayText).toBe('');
+        expect(parsed.actions).toEqual([]);
+        expect(parsed.parseFailed).toBe(true);
+    });
+
     test('strips null bytes from wrapped function payload text', () => {
         const agent = loadAgent();
         const responseText = JSON.stringify({

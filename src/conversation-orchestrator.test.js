@@ -2184,10 +2184,89 @@ describe('ConversationOrchestrator', () => {
         expect(llmClient.createResponse.mock.calls[1][0]).toEqual(expect.objectContaining({
             enableAutomaticToolCalls: false,
         }));
-        expect(llmClient.createResponse.mock.calls[1][0].input).toContain('Previous invalid draft:');
         expect(result.output).toBe('I connected to the server and completed the verified remote check. If you want me to continue, I need the next concrete server task rather than assuming tool access is missing.');
-        expect(result.trace.runtimeMode).toBe('repaired-final');
-        expect(result.trace.executionTrace.map((entry) => entry.name)).toContain('Response repair');
+    });
+
+    test('repairs invalid final responses that surface serialized tool-call wrapper payloads', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            createResponse: jest.fn()
+                .mockResolvedValueOnce(buildResponse(
+                    JSON.stringify({
+                        output_text: '',
+                        tool_calls: [{
+                            id: 'rc_1',
+                            name: 'remote-command',
+                            arguments: {
+                                host: '10.0.0.5',
+                                username: 'ubuntu',
+                                command: 'kubectl get pods -n kimibuilt -o wide',
+                            },
+                        }],
+                        finish_reason: 'tool_calls',
+                    }),
+                    'resp_invalid_tool_wrapper',
+                ))
+                .mockResolvedValueOnce(buildResponse(
+                    'The remote inspection ran, but the deployment is not verified yet. The cluster status still needs ingress, DNS, and HTTPS validation before it can be called live.',
+                    'resp_repaired_tool_wrapper',
+                )),
+            complete: jest.fn().mockResolvedValue(JSON.stringify({ steps: [] })),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['remote-command', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read']
+                    .includes(toolId)
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn().mockResolvedValue({
+                success: true,
+                toolId: 'remote-command',
+                data: {
+                    stdout: 'backend-7d9c4dfc5b-abcde 1/1 Running',
+                    stderr: '',
+                    host: '10.0.0.5:22',
+                },
+            }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-tool-wrapper', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'Use remote-build to inspect the penguin deployment.',
+            sessionId: 'session-tool-wrapper',
+            executionProfile: 'remote-build',
+            stream: false,
+        });
+
+        expect(toolManager.executeTool).toHaveBeenCalledTimes(1);
+        expect(llmClient.createResponse).toHaveBeenCalledTimes(2);
+        expect(result.output).toBe('The remote inspection ran, but the deployment is not verified yet. The cluster status still needs ingress, DNS, and HTTPS validation before it can be called live.');
     });
 
     test('continues through multiple remote-build rounds after broad user approval', async () => {
@@ -4213,22 +4292,20 @@ describe('ConversationOrchestrator', () => {
             toolPolicy,
         });
 
-        expect(llmClient.createResponse).toHaveBeenCalledWith(expect.objectContaining({
-            input: expect.any(String),
-            enableAutomaticToolCalls: false,
-            stream: false,
-            model: 'gpt-planner',
-            reasoningEffort: 'high',
-        }));
+        expect(llmClient.complete).toHaveBeenCalledWith(
+            expect.any(String),
+            expect.objectContaining({
+                model: 'gpt-planner',
+                reasoningEffort: 'high',
+            }),
+        );
     });
 
     test('planner model responses can append to executionTrace without throwing', async () => {
         const executionTrace = [];
         const llmClient = {
-            createResponse: jest.fn().mockResolvedValue(
-                buildResponse(JSON.stringify({ steps: [] }), 'resp_planner_trace'),
-            ),
-            complete: jest.fn(),
+            createResponse: jest.fn(),
+            complete: jest.fn().mockResolvedValue(JSON.stringify({ steps: [] })),
         };
         const orchestrator = new ConversationOrchestrator({
             llmClient,
@@ -4267,10 +4344,10 @@ describe('ConversationOrchestrator', () => {
         expect(executionTrace).toEqual([
             expect.objectContaining({
                 type: 'model_call',
-                name: 'Model response (gpt-test)',
+                name: 'Model response (unknown)',
                 details: expect.objectContaining({
                     phase: 'planner',
-                    responseId: 'resp_planner_trace',
+                    outputPreview: '{"steps":[]}',
                 }),
             }),
         ]);

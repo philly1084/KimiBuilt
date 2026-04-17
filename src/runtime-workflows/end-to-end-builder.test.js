@@ -335,10 +335,58 @@ describe('end-to-end builder workflow', () => {
                     username: 'ubuntu',
                     port: 22,
                     timeout: 240000,
+                    workflowAction: 'verify-deployment',
                     command: expect.stringContaining("kubectl get svc,ingress -n 'kimibuilt'"),
                 }),
             }),
         ]);
+    });
+
+    test('does not mark deployment verification complete for generic remote-command success without a verification workflow action', () => {
+        const workflow = inferEndToEndBuilderWorkflow({
+            objective: 'Deploy the penguin site to penguin.demoserver2.buzz on k3s with Traefik TLS and Let\'s Encrypt.',
+            remoteTarget: {
+                host: '10.0.0.5',
+                username: 'ubuntu',
+                port: 22,
+            },
+        });
+
+        const afterDeploy = advanceEndToEndBuilderWorkflow({
+            workflow,
+            toolEvents: [
+                buildToolEvent('k3s-deploy', {
+                    action: 'sync-and-apply',
+                }, {
+                    data: {
+                        action: 'sync-and-apply',
+                        stdout: 'deployment "backend" successfully rolled out',
+                    },
+                }),
+            ],
+        });
+
+        const afterGenericRemoteInspection = advanceEndToEndBuilderWorkflow({
+            workflow: afterDeploy,
+            toolEvents: [
+                buildToolEvent('remote-command', {
+                    command: 'kubectl get pods -n kimibuilt -o wide',
+                }, {
+                    data: {
+                        stdout: 'backend-7d9c4dfc5b-abcde 1/1 Running',
+                    },
+                }),
+            ],
+        });
+
+        expect(afterGenericRemoteInspection).toEqual(expect.objectContaining({
+            stage: 'verifying',
+            status: 'active',
+            progress: expect.objectContaining({
+                deployed: true,
+                verified: false,
+            }),
+        }));
     });
 
     test('requires ingress and HTTPS verification for public website deployments before completing the workflow', () => {
@@ -388,6 +436,7 @@ describe('end-to-end builder workflow', () => {
                 tool: 'remote-command',
                 reason: expect.stringContaining('ingress, TLS, and public site reachability'),
                 params: expect.objectContaining({
+                    workflowAction: 'verify-deployment',
                     command: expect.stringContaining("expected_host='penguin.demoserver2.buzz'"),
                 }),
             }),
