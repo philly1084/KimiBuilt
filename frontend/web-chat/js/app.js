@@ -2560,6 +2560,7 @@ class ChatApp {
             let hasReceivedContent = false;
             let retryCount = 0;
             let streamFailed = false;
+            let receivedTerminalChunk = false;
 
             // Stream the chat
             for await (const chunk of apiClient.streamChat(
@@ -2609,9 +2610,11 @@ class ChatApp {
                         this.handleToolEvent(chunk);
                         break;
                     case 'done':
+                        receivedTerminalChunk = true;
                         this.handleDone(chunk);
                         break;
                     case 'error':
+                        receivedTerminalChunk = true;
                         streamFailed = true;
                         if (chunk.cancelled) {
                             this.handleCancelled();
@@ -2630,10 +2633,16 @@ class ChatApp {
                         }
                         break;
                     case 'resync_required':
+                        receivedTerminalChunk = true;
                         streamFailed = true;
                         this.handleInterruptedStreamResync(chunk);
                         break;
                 }
+            }
+
+            if (!receivedTerminalChunk && this.isProcessing && this.currentStreamingMessageId === storedAssistantMessage.id) {
+                streamFailed = true;
+                this.handleError('The reply stream ended before completion.', 502);
             }
 
             return !streamFailed;
@@ -5102,6 +5111,52 @@ class ChatApp {
         });
     }
 
+    finalizeActiveStreamState(options = {}) {
+        const {
+            clearPendingResync = true,
+            clearActiveStreamRequest = true,
+            clearStreamingMessageId = true,
+            hideTypingIndicator = false,
+            scheduleIndicatorHide = false,
+            resetRetryAttempt = false,
+        } = options;
+
+        if (scheduleIndicatorHide) {
+            this.scheduleLiveIndicatorHide();
+        } else {
+            this.clearLiveIndicatorTimer();
+            if (hideTypingIndicator) {
+                uiHelpers.hideTypingIndicator();
+            }
+        }
+
+        this.resetAmbientReasoningState();
+        if (resetRetryAttempt) {
+            this.retryAttempt = 0;
+        }
+
+        if (clearPendingResync) {
+            this.clearPendingStreamResync();
+        }
+        if (clearActiveStreamRequest) {
+            this.activeStreamRequest = null;
+        }
+
+        this.isProcessing = false;
+        this.isCancellingCurrentRequest = false;
+        if (clearStreamingMessageId) {
+            this.currentStreamingMessageId = null;
+        }
+
+        this.liveResponseState = {
+            phase: 'idle',
+            detail: '',
+            reasoningSummary: '',
+            hasRealReasoning: false,
+        };
+        this.updateSendButton();
+    }
+
     handleDone(chunk = {}) {
         if (!this.currentStreamingMessageId) return;
 
@@ -5172,6 +5227,7 @@ class ChatApp {
             const resurfacedMessage = this.attachPendingCheckpointDisplayContent(currentMessage, sessionId);
             if (resurfacedMessage !== currentMessage) {
                 this.upsertSessionMessage(sessionId, resurfacedMessage);
+                currentMessage = resurfacedMessage;
             }
         }
 
@@ -5224,19 +5280,11 @@ class ChatApp {
             this.persistSessionMessageIfNeeded(sessionId, persistedAssistantMessage);
         }
         
-        this.isProcessing = false;
-        this.isCancellingCurrentRequest = false;
-        this.currentStreamingMessageId = null;
-        this.liveResponseState = {
-            phase: 'idle',
-            detail: '',
-            reasoningSummary: '',
-            hasRealReasoning: false,
-        };
-        this.activeStreamRequest = null;
-        this.resetAmbientReasoningState();
-        this.updateSendButton();
-        this.scheduleLiveIndicatorHide();
+        this.finalizeActiveStreamState({
+            clearPendingResync: false,
+            scheduleIndicatorHide: true,
+            resetRetryAttempt: true,
+        });
 
         if (Array.isArray(chunk.toolEvents) && chunk.toolEvents.length > 0) {
             this.appendToolSelectionMessages(parentMessageId, chunk.toolEvents);
@@ -5319,11 +5367,6 @@ class ChatApp {
         }
         
         // Max retries exceeded or non-network error - show the error
-        this.retryAttempt = 0;
-        this.clearLiveIndicatorTimer();
-        this.resetAmbientReasoningState();
-        uiHelpers.hideTypingIndicator();
-        
         // Remove the streaming message placeholder
         if (this.currentStreamingMessageId) {
             const el = document.getElementById(this.currentStreamingMessageId);
@@ -5343,19 +5386,10 @@ class ChatApp {
                 }
             }
         }
-        
-        this.isProcessing = false;
-        this.isCancellingCurrentRequest = false;
-        this.currentStreamingMessageId = null;
-        this.clearPendingStreamResync();
-        this.activeStreamRequest = null;
-        this.liveResponseState = {
-            phase: 'idle',
-            detail: '',
-            reasoningSummary: '',
-            hasRealReasoning: false,
-        };
-        this.updateSendButton();
+        this.finalizeActiveStreamState({
+            hideTypingIndicator: true,
+            resetRetryAttempt: true,
+        });
         
         // Show appropriate error message
         let errorTitle = 'Error';
@@ -5387,19 +5421,10 @@ class ChatApp {
             this.currentAbortController = null;
         }
 
-        this.isProcessing = false;
-        this.isCancellingCurrentRequest = false;
-        this.liveResponseState = {
-            phase: 'idle',
-            detail: '',
-            reasoningSummary: '',
-            hasRealReasoning: false,
-        };
-        this.clearLiveIndicatorTimer();
-        this.resetAmbientReasoningState();
-        uiHelpers.hideTypingIndicator();
         this.clearCurrentStreamingMessage();
-        this.updateSendButton();
+        this.finalizeActiveStreamState({
+            hideTypingIndicator: true,
+        });
         
         if (lastUserMessage) {
             // Retry sending
@@ -5414,12 +5439,6 @@ class ChatApp {
     }
 
     handleCancelled(options = {}) {
-        this.clearLiveIndicatorTimer();
-        this.resetAmbientReasoningState();
-        uiHelpers.hideTypingIndicator();
-        this.clearPendingStreamResync();
-        this.activeStreamRequest = null;
-
         const sessionId = sessionManager.currentSessionId;
         if (this.currentStreamingMessageId && sessionId) {
             const currentMessage = this.getSessionMessage(sessionId, this.currentStreamingMessageId);
@@ -5451,17 +5470,9 @@ class ChatApp {
                 this.persistSessionMessageIfNeeded(sessionId, stoppedMessage);
             }
         }
-
-        this.isProcessing = false;
-        this.isCancellingCurrentRequest = false;
-        this.currentStreamingMessageId = null;
-        this.liveResponseState = {
-            phase: 'idle',
-            detail: '',
-            reasoningSummary: '',
-            hasRealReasoning: false,
-        };
-        this.updateSendButton();
+        this.finalizeActiveStreamState({
+            hideTypingIndicator: true,
+        });
         this.updateSessionInfo();
         uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
         void this.processMessageQueue();
@@ -5551,6 +5562,7 @@ class ChatApp {
         try {
             apiClient.setSessionId(sessionId);
             const history = this.buildMessageHistory(sessionId);
+            let receivedTerminalChunk = false;
             
             for await (const chunk of apiClient.streamChat(
                 history,
@@ -5597,9 +5609,11 @@ class ChatApp {
                         this.handleToolEvent(chunk);
                         break;
                     case 'done':
+                        receivedTerminalChunk = true;
                         this.handleDone(chunk);
                         break;
                     case 'error':
+                        receivedTerminalChunk = true;
                         if (chunk.cancelled) {
                             this.handleCancelled();
                         } else {
@@ -5612,9 +5626,14 @@ class ChatApp {
                         }
                         break;
                     case 'resync_required':
+                        receivedTerminalChunk = true;
                         this.handleInterruptedStreamResync(chunk);
                         break;
                 }
+            }
+
+            if (!receivedTerminalChunk && this.isProcessing && this.currentStreamingMessageId === storedAssistantMessage.id) {
+                this.handleError('The reply stream ended before completion.', 502);
             }
         } catch (error) {
             console.error('Regenerate error:', error);
@@ -6478,21 +6497,10 @@ class ChatApp {
                 this.playCueForNewAssistantMessages(trackedRequest.previousMessages, messages);
                 this.updateSessionInfo();
                 uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
-                this.clearPendingStreamResync();
-                this.activeStreamRequest = null;
-                this.isProcessing = false;
-                this.isCancellingCurrentRequest = false;
-                this.currentStreamingMessageId = null;
-                this.liveResponseState = {
-                    phase: 'idle',
-                    detail: '',
-                    reasoningSummary: '',
-                    hasRealReasoning: false,
-                };
-                uiHelpers.hideTypingIndicator();
-                this.resetAmbientReasoningState();
-                this.updateSendButton();
-                this.scheduleLiveIndicatorHide();
+                this.finalizeActiveStreamState({
+                    hideTypingIndicator: true,
+                    scheduleIndicatorHide: true,
+                });
                 void this.processMessageQueue();
                 return;
             }
@@ -6581,7 +6589,9 @@ class ChatApp {
 
     finalizeInterruptedStreamFailure() {
         const trackedRequest = this.pendingStreamResync || this.activeStreamRequest;
-        if (trackedRequest?.acceptedByServer) {
+        const maxResyncAttempts = Math.max(1, Number(trackedRequest?.maxResyncAttempts) || 6);
+        const resyncAttempts = Math.max(0, Number(trackedRequest?.resyncAttempts) || 0);
+        if (trackedRequest?.acceptedByServer && resyncAttempts < maxResyncAttempts) {
             this.enterBackgroundStreamMode({
                 detail: this.getBackgroundStreamDetail(),
             });
@@ -6609,22 +6619,13 @@ class ChatApp {
             }
         }
 
-        this.isProcessing = false;
-        this.isCancellingCurrentRequest = false;
-        this.currentStreamingMessageId = null;
-        this.clearLiveIndicatorTimer();
-        this.clearPendingStreamResync();
-        this.activeStreamRequest = null;
-        this.liveResponseState = {
-            phase: 'idle',
-            detail: '',
-            reasoningSummary: '',
-            hasRealReasoning: false,
-        };
-        this.resetAmbientReasoningState();
-        this.updateSendButton();
-        uiHelpers.hideTypingIndicator();
-        uiHelpers.showToast('Connection was restored, but the latest reply could not be synced. Retry if needed.', 'warning', 'Sync incomplete');
+        this.finalizeActiveStreamState({
+            hideTypingIndicator: true,
+        });
+        const syncWarning = trackedRequest?.acceptedByServer
+            ? 'The reply could not be resynced after reconnecting. You can retry or send the next message.'
+            : 'Connection was restored, but the latest reply could not be synced. Retry if needed.';
+        uiHelpers.showToast(syncWarning, 'warning', 'Sync incomplete');
         void this.processMessageQueue();
     }
 

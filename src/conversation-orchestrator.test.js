@@ -4039,6 +4039,42 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
+    test('treats plural podcast workflow prompts as explicit podcast tool requests', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['podcast', 'web-search'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Use the podcast workflow to create podcasts about Kentville gym options.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            toolPolicy,
+        });
+
+        expect(toolPolicy.candidateToolIds).toContain('podcast');
+        expect(directAction).toEqual({
+            tool: 'podcast',
+            reason: 'Explicit podcast request should start with the podcast workflow tool.',
+            params: {
+                topic: 'Kentville gym options',
+            },
+        });
+    });
+
     test('upgrades explicit deep research requests to the deep-research Perplexity mode', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {

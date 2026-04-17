@@ -319,6 +319,57 @@ describe('PodcastService', () => {
     expect(result.processing.enhanced).toBe(true);
   });
 
+  test('retries transient ffmpeg post-processing failures once for podcast mastering and mp3 export', async () => {
+    const audioTimeout = new Error('ffmpeg timed out while processing audio.');
+    audioTimeout.statusCode = 504;
+    audioTimeout.code = 'audio_processing_timeout';
+
+    persistGeneratedAudio
+      .mockResolvedValueOnce({
+        artifact: { id: 'artifact-podcast-wav', filename: 'battery-breakdown.wav' },
+        artifactIds: ['artifact-podcast-wav'],
+        audio: { artifactId: 'artifact-podcast-wav', downloadUrl: '/api/artifacts/artifact-podcast-wav/download' },
+      })
+      .mockResolvedValueOnce({
+        artifact: { id: 'artifact-podcast-mp3', filename: 'battery-breakdown.mp3' },
+        artifactIds: ['artifact-podcast-mp3'],
+        audio: { artifactId: 'artifact-podcast-mp3', downloadUrl: '/api/artifacts/artifact-podcast-mp3/download' },
+      });
+    audioProcessingService.composePodcastAudio
+      .mockRejectedValueOnce(audioTimeout)
+      .mockResolvedValueOnce(createTestWav([9, 10, 11, 12]));
+    audioProcessingService.transcodeWavToMp3
+      .mockRejectedValueOnce(audioTimeout)
+      .mockResolvedValueOnce(Buffer.from('mp3-bytes-retry'));
+
+    const service = new PodcastService();
+    const executeTool = jest.fn(async (toolId) => {
+      if (toolId === 'web-search') {
+        return { success: true, data: { results: [{ title: 'A', url: 'https://example.com/a', snippet: 'A' }] } };
+      }
+      if (toolId === 'web-fetch') {
+        return { success: true, data: { headers: { 'content-type': 'text/html' }, body: '<p>Battery systems store energy.</p>' } };
+      }
+      throw new Error(`Unexpected tool: ${toolId}`);
+    });
+
+    const result = await service.createPodcast({
+      topic: 'How grid batteries work',
+      exportMp3: true,
+      includeIntro: true,
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+      toolManager: { executeTool },
+    });
+
+    expect(audioProcessingService.composePodcastAudio).toHaveBeenCalledTimes(2);
+    expect(audioProcessingService.transcodeWavToMp3).toHaveBeenCalledTimes(2);
+    expect(result.audio).toEqual(expect.objectContaining({
+      artifactId: 'artifact-podcast-mp3',
+    }));
+  });
+
   test('passes podcast-specific Piper timeout settings into synthesis and retries timed out chunks with smaller splits', async () => {
     const timeoutError = new Error('Piper TTS timed out before audio generation completed.');
     timeoutError.statusCode = 504;
@@ -362,6 +413,47 @@ describe('PodcastService', () => {
     }));
     expect(piperTtsService.synthesize.mock.calls[1][0].text.length).toBeLessThan(longTurn.length);
     expect(piperTtsService.synthesize.mock.calls[2][0].text.length).toBeLessThan(longTurn.length);
+  });
+
+  test('falls back to the next configured host voice before splitting podcast chunks on timeout', async () => {
+    const timeoutError = new Error('Piper TTS timed out before audio generation completed.');
+    timeoutError.statusCode = 504;
+    timeoutError.code = 'tts_timeout';
+
+    piperTtsService.synthesize
+      .mockRejectedValueOnce(timeoutError)
+      .mockResolvedValueOnce({
+        audioBuffer: createTestWav([1, 2, 3, 4]),
+        voice: { provider: 'piper' },
+        contentType: 'audio/wav',
+        text: 'segment',
+      });
+
+    const service = new PodcastService();
+    const result = await service.synthesizeTurns(
+      [{ speaker: 'Maya', text: 'Battery storage helps the grid absorb extra power without wasting generation.' }],
+      [{
+        name: 'Maya',
+        voiceId: 'hfc-female-rich',
+        voiceIds: ['hfc-female-rich', 'amy-expressive'],
+      }],
+      {
+        silenceMs: 250,
+        chunkMaxChars: 1600,
+        ttsTimeoutMs: 180000,
+      },
+    );
+
+    expect(Buffer.isBuffer(result)).toBe(true);
+    expect(piperTtsService.synthesize).toHaveBeenCalledTimes(2);
+    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      voiceId: 'hfc-female-rich',
+      timeoutMs: 180000,
+    }));
+    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      voiceId: 'amy-expressive',
+      timeoutMs: 180000,
+    }));
   });
 
   test('cycles host voices across repeated turns from the same speaker', async () => {

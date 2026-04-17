@@ -55,6 +55,41 @@ function stripMarkdownForSpeech(input = '') {
     return stripHtml(markdown);
 }
 
+function stripMalformedUnicodeEscapes(input = '') {
+    return String(input || '')
+        .replace(/\\u(?![0-9a-fA-F]{4})/g, '')
+        .replace(/\\u[0-9a-fA-F]{1,3}(?![0-9a-fA-F])/g, '')
+        .replace(/\\x(?![0-9a-fA-F]{2})/g, '')
+        .replace(/\\x[0-9a-fA-F](?![0-9a-fA-F])/g, '')
+        .replace(/\\u\{[0-9a-fA-F]+\}(?![0-9a-fA-F])/g, '');
+}
+
+function stripUnpairedSurrogates(input = '') {
+    const value = String(input || '');
+    let output = '';
+
+    for (let index = 0; index < value.length; index += 1) {
+        const codeUnit = value.charCodeAt(index);
+
+        if (codeUnit >= 0xD800 && codeUnit <= 0xDBFF) {
+            const nextCodeUnit = value.charCodeAt(index + 1);
+            if (nextCodeUnit >= 0xDC00 && nextCodeUnit <= 0xDFFF) {
+                output += value[index] + value[index + 1];
+                index += 1;
+            }
+            continue;
+        }
+
+        if (codeUnit >= 0xDC00 && codeUnit <= 0xDFFF) {
+            continue;
+        }
+
+        output += value[index];
+    }
+
+    return output;
+}
+
 function clampSpeechText(text = '', maxTextChars = 2400) {
     if (!text || text.length <= maxTextChars) {
         return text;
@@ -73,13 +108,15 @@ function clampSpeechText(text = '', maxTextChars = 2400) {
 }
 
 function normalizeTextForSpeech(input = '', maxTextChars = 2400) {
-    const stripped = stripMarkdownForSpeech(stripNullCharacters(input || ''));
+    const sanitizedInput = stripMalformedUnicodeEscapes(stripUnpairedSurrogates(stripNullCharacters(input || '')));
+    const stripped = stripMarkdownForSpeech(sanitizedInput);
     const normalized = normalizeWhitespace(stripped)
         .split('\n')
         .map((line) => line.trim())
         .filter(Boolean)
         .map(normalizeSpeechSentence)
         .join(' ')
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, ' ')
         .replace(/\s{2,}/g, ' ')
         .trim();
 

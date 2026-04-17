@@ -33,6 +33,15 @@ Read the [docs](https://example.com/docs).
         expect(normalized.length).toBeLessThanOrEqual(323);
         expect(normalized.endsWith('...')).toBe(true);
     });
+
+    test('strips malformed unicode escapes and unpaired surrogates before speech normalization', () => {
+        const normalized = normalizeTextForSpeech('Broken \\\\u12 text \uD800 and a clean sentence.', 400);
+        expect(normalized).toContain('Broken');
+        expect(normalized).toContain('text');
+        expect(normalized).toContain('and a clean sentence.');
+        expect(normalized).not.toContain('\\u12');
+        expect(normalized).not.toContain('\uD800');
+    });
 });
 
 describe('PiperTtsService voice manifests', () => {

@@ -24,6 +24,7 @@ const DEFAULT_PODCAST_SCRIPT_REQUEST_TIMEOUT_MS = 120000;
 const DEFAULT_PODCAST_SCRIPT_RETRY_ATTEMPTS = 1;
 const DEFAULT_TRANSIENT_RETRY_ATTEMPTS = 2;
 const DEFAULT_TRANSIENT_RETRY_DELAY_MS = 1200;
+const DEFAULT_AUDIO_PROCESSING_RETRY_ATTEMPTS = 1;
 const PODCAST_HIGH_QUALITY_VOICE_IDS = Object.freeze([
   'amy-expressive',
   'amy-medium',
@@ -31,6 +32,7 @@ const PODCAST_HIGH_QUALITY_VOICE_IDS = Object.freeze([
   'hfc-female-medium',
   'kathleen-low',
 ]);
+const DEFAULT_MAX_VOICE_FALLBACK_ATTEMPTS = 2;
 const DEFAULT_HOSTS = Object.freeze([
   {
     key: 'hostA',
@@ -99,6 +101,23 @@ function stripUnpairedSurrogates(value = '') {
   }
 
   return output;
+}
+
+function stripMalformedUnicodeEscapes(value = '') {
+  return String(value || '')
+    .replace(/\\u(?![0-9a-fA-F]{4})/g, '')
+    .replace(/\\u[0-9a-fA-F]{1,3}(?![0-9a-fA-F])/g, '')
+    .replace(/\\x(?![0-9a-fA-F]{2})/g, '')
+    .replace(/\\x[0-9a-fA-F](?![0-9a-fA-F])/g, '')
+    .replace(/\\u\{[0-9a-fA-F]+\}(?![0-9a-fA-F])/g, '');
+}
+
+function sanitizePodcastTextForSpeech(value = '') {
+  return stripMalformedUnicodeEscapes(stripUnpairedSurrogates(stripNullCharacters(value || '')))
+    .replace(/\u200B/g, ' ')
+    .replace(/[^\x20-\x7E\n\r\t]+/gu, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 }
 
 function normalizeStringList(value = []) {
@@ -278,6 +297,46 @@ function isTransientPodcastError(error = {}) {
   ].some((pattern) => message.includes(pattern) || code.includes(pattern));
 }
 
+function isRetryablePodcastAudioError(error = {}) {
+  const message = String(error?.message || '').trim().toLowerCase();
+  const code = String(error?.code || '').trim().toLowerCase();
+  const statusCode = Number(error?.statusCode || error?.status || 0);
+
+  if (statusCode >= 400 && statusCode < 500) {
+    return false;
+  }
+
+  if (['audio_asset_missing', 'audio_processing_invalid_input'].includes(code)) {
+    return false;
+  }
+
+  if ([
+    'no ffmpeg binary path is configured',
+    'ffmpeg is missing at',
+    'audio post-processing is unavailable',
+    'podcast intro audio was not found at',
+    'podcast outro audio was not found at',
+    'podcast music bed audio was not found at',
+  ].some((pattern) => message.includes(pattern))) {
+    return false;
+  }
+
+  if (['audio_processing_timeout', 'audio_processing_unavailable'].includes(code)) {
+    return true;
+  }
+
+  return [
+    'timed out',
+    'timeout',
+    'resource temporarily unavailable',
+    'temporarily unavailable',
+    'device or resource busy',
+    'connection reset',
+    'broken pipe',
+    'could not be started',
+  ].some((pattern) => message.includes(pattern) || code.includes(pattern));
+}
+
 function getResponseText(response = {}) {
   if (typeof response?.output_text === 'string' && response.output_text.trim()) {
     return response.output_text.trim();
@@ -379,6 +438,7 @@ function resolveTurnVoicePlan(turns = [], hosts = [], options = {}) {
       text: turn.text,
       voiceId,
       host,
+      voiceIds: Array.isArray(host?.voiceIds) ? host.voiceIds.slice() : [],
     });
   }
 
@@ -390,8 +450,14 @@ function resolveTurnVoicePlan(turns = [], hosts = [], options = {}) {
 function resolveHosts(params = {}, voiceConfig = {}) {
   const availableVoices = Array.isArray(voiceConfig?.voices) ? voiceConfig.voices : [];
   const usedVoiceIds = new Set();
+  const explicitARequested = Boolean(
+    String(params.hostAVoiceId || '').trim() || params.hostAVoiceIds?.length,
+  );
+  const explicitBRequested = Boolean(
+    String(params.hostBVoiceId || '').trim() || params.hostBVoiceIds?.length,
+  );
 
-  return DEFAULT_HOSTS.map((defaultHost, index) => {
+  const hosts = DEFAULT_HOSTS.map((defaultHost, index) => {
     const suffix = index === 0 ? 'A' : 'B';
     const providedVoiceId = String(params[`host${suffix}VoiceId`] || '').trim();
     const requestedVoiceIds = normalizeStringList(params[`host${suffix}VoiceIds`]);
@@ -426,6 +492,17 @@ function resolveHosts(params = {}, voiceConfig = {}) {
       voiceId,
     };
   });
+
+  if (!explicitARequested && !explicitBRequested && hosts.length >= 2) {
+    const hostAVoices = hosts[0].voiceIds;
+    const hostBVoices = hosts[1].voiceIds;
+    if (hostAVoices.length > 1 && hostBVoices.length > 1
+      && hostAVoices.join('|') === hostBVoices.join('|')) {
+      hosts[1].voiceIds = hostBVoices.slice(1).concat(hostBVoices.slice(0, 1));
+    }
+  }
+
+  return hosts;
 }
 
 function resolvePodcastTtsTimeoutMs(params = {}, voiceConfig = {}) {
@@ -522,7 +599,12 @@ class PodcastService {
     this.audioProcessingService = dependencies.audioProcessingService || audioProcessingService;
   }
 
-  async retryTransientOperation(operation, { label = 'podcast operation', retries = DEFAULT_TRANSIENT_RETRY_ATTEMPTS } = {}) {
+  async retryTransientOperation(operation, {
+    label = 'podcast operation',
+    retries = DEFAULT_TRANSIENT_RETRY_ATTEMPTS,
+    retryDelayMs = DEFAULT_TRANSIENT_RETRY_DELAY_MS,
+    shouldRetry = isTransientPodcastError,
+  } = {}) {
     let lastError = null;
 
     for (let attempt = 0; attempt <= retries; attempt += 1) {
@@ -530,12 +612,12 @@ class PodcastService {
         return await operation();
       } catch (error) {
         lastError = error;
-        if (!isTransientPodcastError(error) || attempt >= retries) {
+        if (typeof shouldRetry !== 'function' || !shouldRetry(error) || attempt >= retries) {
           throw error;
         }
 
         console.warn(`[PodcastService] Retrying ${label} after transient failure: ${error.message}`);
-        await wait(DEFAULT_TRANSIENT_RETRY_DELAY_MS * (attempt + 1));
+        await wait(Math.max(0, Number(retryDelayMs) || 0) * (attempt + 1));
       }
     }
 
@@ -716,41 +798,74 @@ class PodcastService {
   async synthesizeChunkBuffer(text = '', host = {}, options = {}, splitDepth = 0) {
     const timeoutMs = Math.max(1000, Number(options.ttsTimeoutMs) || 45000);
     const minimumChunkChars = Math.max(250, Number(options.minimumChunkChars) || 350);
-
-    try {
-      const synthesis = await this.ttsService.synthesize({
-        text,
-        voiceId: host.voiceId,
-        timeoutMs,
-      });
-      return [synthesis];
-    } catch (error) {
-      if (error?.code !== 'tts_timeout' || splitDepth >= 2 || text.length <= minimumChunkChars) {
-        throw error;
-      }
-
-      const nextChunkSize = Math.max(minimumChunkChars, Math.floor(text.length / 2));
-      if (nextChunkSize >= text.length) {
-        throw error;
-      }
-
-      const retryChunks = chunkText(text, nextChunkSize);
-      if (retryChunks.length <= 1) {
-        throw error;
-      }
-
-      const syntheses = [];
-      for (const retryChunk of retryChunks) {
-        const nestedSyntheses = await this.synthesizeChunkBuffer(
-          retryChunk,
-          host,
-          options,
-          splitDepth + 1,
-        );
-        syntheses.push(...nestedSyntheses);
-      }
-      return syntheses;
+    const candidateVoices = uniqueOrdered([
+      options.voiceId,
+      host?.voiceId,
+      ...(Array.isArray(options.voiceIds) ? options.voiceIds : []),
+      ...(Array.isArray(host?.voiceIds) ? host.voiceIds : []),
+    ].filter(Boolean));
+    const resolvedHostName = String(host?.name || '').trim() || 'podcast host';
+    if (candidateVoices.length === 0) {
+      throw new Error(`No Piper voice is configured for speaker "${resolvedHostName}".`);
     }
+
+    const maxVoiceAttempts = Math.max(
+      1,
+      Math.min(candidateVoices.length, DEFAULT_MAX_VOICE_FALLBACK_ATTEMPTS),
+    );
+    const preferredVoiceOffset = Math.max(0, Number(options.voiceAttemptOffset) || 0);
+    let lastTimeoutError = null;
+
+    for (let attempt = 0; attempt < maxVoiceAttempts; attempt += 1) {
+      const voiceId = candidateVoices[(preferredVoiceOffset + attempt) % candidateVoices.length];
+      try {
+        const synthesis = await this.ttsService.synthesize({
+          text,
+          voiceId,
+          timeoutMs,
+        });
+        return [synthesis];
+      } catch (error) {
+        if (error?.code !== 'tts_timeout') {
+          throw error;
+        }
+
+        lastTimeoutError = error;
+      }
+    }
+
+    if (!lastTimeoutError || splitDepth >= 2 || text.length <= minimumChunkChars) {
+      throw lastTimeoutError;
+    }
+
+    const nextChunkSize = Math.max(minimumChunkChars, Math.floor(text.length / 2));
+    if (nextChunkSize >= text.length) {
+      throw lastTimeoutError;
+    }
+
+    const retryChunks = chunkText(text, nextChunkSize);
+    if (retryChunks.length <= 1) {
+      throw lastTimeoutError;
+    }
+
+    const syntheses = [];
+    const fallbackOffset = (preferredVoiceOffset + 1) % candidateVoices.length;
+    for (const retryChunk of retryChunks) {
+      const nestedSyntheses = await this.synthesizeChunkBuffer(
+        retryChunk,
+        host,
+        {
+          ...options,
+          voiceAttemptOffset: fallbackOffset,
+          voiceIds: candidateVoices,
+          minimumChunkChars,
+        },
+        splitDepth + 1,
+      );
+      syntheses.push(...nestedSyntheses);
+    }
+
+    return syntheses;
   }
 
   async synthesizeTurns(turns = [], hosts = [], options = {}) {
@@ -794,7 +909,13 @@ class PodcastService {
       };
       const chunks = chunkText(turn.text, chunkMaxChars);
       for (const chunk of chunks) {
-        const syntheses = await this.synthesizeChunkBuffer(chunk, hostForTurn, {
+        const sanitizedChunk = sanitizePodcastTextForSpeech(chunk);
+        if (!sanitizedChunk) {
+          continue;
+        }
+        const syntheses = await this.synthesizeChunkBuffer(sanitizedChunk, hostForTurn, {
+          voiceId: resolvedVoiceId,
+          voiceIds: Array.isArray(hostForTurn.voiceIds) ? hostForTurn.voiceIds : [],
           ttsTimeoutMs: options.ttsTimeoutMs,
           minimumChunkChars,
         });
@@ -899,20 +1020,28 @@ class PodcastService {
       },
     );
     const finalAudioBuffer = (wantsMixing || wantsEnhancement)
-      ? await this.audioProcessingService.composePodcastAudio({
-        speechWavBuffer,
-        includeIntro: params.includeIntro === true,
-        includeOutro: params.includeOutro === true,
-        includeMusicBed: params.includeMusicBed === true,
-        enhanceSpeech: wantsEnhancement,
-        introPath: params.introPath || '',
-        outroPath: params.outroPath || '',
-        musicBedPath: params.musicBedPath || '',
-        speechVolume: params.speechVolume,
-        musicVolume: params.musicVolume,
-        introVolume: params.introVolume,
-        outroVolume: params.outroVolume,
-      })
+      ? await this.retryTransientOperation(
+        () => this.audioProcessingService.composePodcastAudio({
+          speechWavBuffer,
+          includeIntro: params.includeIntro === true,
+          includeOutro: params.includeOutro === true,
+          includeMusicBed: params.includeMusicBed === true,
+          enhanceSpeech: wantsEnhancement,
+          introPath: params.introPath || '',
+          outroPath: params.outroPath || '',
+          musicBedPath: params.musicBedPath || '',
+          speechVolume: params.speechVolume,
+          musicVolume: params.musicVolume,
+          introVolume: params.introVolume,
+          outroVolume: params.outroVolume,
+        }),
+        {
+          label: 'podcast audio post-processing',
+          retries: DEFAULT_AUDIO_PROCESSING_RETRY_ATTEMPTS,
+          retryDelayMs: 900,
+          shouldRetry: isRetryablePodcastAudioError,
+        },
+      )
       : speechWavBuffer;
     const episodeTitle = sanitizePodcastText(params.title || script.title || `${normalizedTopic} Podcast`);
     const persistedArtifacts = [];
@@ -970,10 +1099,18 @@ class PodcastService {
 
     let persistedMp3 = null;
     if (wantsMp3) {
-      const mp3Buffer = await this.audioProcessingService.transcodeWavToMp3({
-        wavBuffer: finalAudioBuffer,
-        bitrateKbps: params.mp3BitrateKbps,
-      });
+      const mp3Buffer = await this.retryTransientOperation(
+        () => this.audioProcessingService.transcodeWavToMp3({
+          wavBuffer: finalAudioBuffer,
+          bitrateKbps: params.mp3BitrateKbps,
+        }),
+        {
+          label: 'podcast mp3 export',
+          retries: DEFAULT_AUDIO_PROCESSING_RETRY_ATTEMPTS,
+          retryDelayMs: 900,
+          shouldRetry: isRetryablePodcastAudioError,
+        },
+      );
       persistedMp3 = await this.persistGeneratedAudio({
         sessionId,
         sourceMode: String(context?.clientSurface || context?.taskType || 'chat').trim() || 'chat',

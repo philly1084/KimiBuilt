@@ -932,6 +932,8 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(__testUtils.hasExplicitPodcastIntent('podcast')).toBe(true);
         expect(__testUtils.hasExplicitPodcastIntent('Make a podcast about battery storage.')).toBe(true);
         expect(__testUtils.extractExplicitPodcastTopic('Make a podcast about battery storage.')).toBe('battery storage');
+        expect(__testUtils.hasExplicitPodcastIntent('Use the podcast workflow to create podcasts about battery storage.')).toBe(true);
+        expect(__testUtils.extractExplicitPodcastTopic('Use the podcast workflow to create podcasts about battery storage.')).toBe('battery storage');
     });
 
     test('builds deterministic podcast preflight actions for explicit podcast prompts', () => {

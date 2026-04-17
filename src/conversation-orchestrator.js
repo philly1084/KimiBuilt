@@ -52,6 +52,10 @@ const {
     extractUsageMetadataFromTrace,
 } = require('./utils/token-usage');
 const {
+    hasExplicitPodcastIntent,
+    extractExplicitPodcastTopic,
+} = require('./podcast/podcast-intent');
+const {
     USER_CHECKPOINT_TOOL_ID,
     buildUserCheckpointMessage,
     normalizeCheckpointRequest,
@@ -556,49 +560,7 @@ function hasCurrentInfoIntentText(text = '') {
 }
 
 function hasExplicitPodcastIntentText(text = '') {
-    const normalized = String(text || '').trim().toLowerCase();
-    if (!normalized) {
-        return false;
-    }
-
-    return [
-        /\bpodcast\b/,
-        /\bpodcast episode\b/,
-        /\btwo[- ]host podcast\b/,
-        /\btwo[- ]agent podcast\b/,
-        /\brecord\b[\s\S]{0,40}\bpodcast\b/,
-        /\bmake\b[\s\S]{0,40}\bpodcast\b/,
-        /\bcreate\b[\s\S]{0,40}\bpodcast\b/,
-        /\bgenerate\b[\s\S]{0,40}\bpodcast\b/,
-        /\bproduce\b[\s\S]{0,40}\bpodcast\b/,
-    ].some((pattern) => pattern.test(normalized));
-}
-
-function extractExplicitPodcastTopic(text = '') {
-    const normalized = String(text || '').trim();
-    if (!normalized) {
-        return null;
-    }
-
-    const cleaned = normalized
-        .replace(/\b(can you|could you|please|let'?s|lets|i want|we need to|help me)\b/gi, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-
-    const matchers = [
-        /\bpodcast(?: episode)?\b[\s\S]{0,30}\b(?:about|on|regarding|covering)\b\s+(.+)$/i,
-        /\b(?:make|create|generate|record|produce)\b[\s\S]{0,20}\bpodcast\b[\s\S]{0,20}\b(?:about|on)\b\s+(.+)$/i,
-        /\b(?:about|on)\b\s+(.+?)\s*\b(?:for a podcast|in a podcast)\b/i,
-    ];
-
-    for (const matcher of matchers) {
-        const candidate = String(cleaned.match(matcher)?.[1] || '').trim();
-        if (candidate) {
-            return candidate.replace(/[.?!]+$/, '').trim();
-        }
-    }
-
-    return cleaned.replace(/[.?!]+$/, '').trim() || null;
+    return hasExplicitPodcastIntent(text);
 }
 
 function extractRequestedPodcastDurationMinutes(text = '') {

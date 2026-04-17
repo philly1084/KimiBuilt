@@ -36,6 +36,10 @@ const {
     extractResponseUsageMetadata,
     mergeUsageMetadata,
 } = require('./utils/token-usage');
+const {
+    hasExplicitPodcastIntent,
+    extractExplicitPodcastTopic,
+} = require('./podcast/podcast-intent');
 const DOCUMENT_WORKFLOW_TOOL_ID = 'document-workflow';
 const DEEP_RESEARCH_PRESENTATION_TOOL_ID = 'deep-research-presentation';
 
@@ -1047,52 +1051,6 @@ function hasExplicitWebResearchIntent(prompt = '') {
         /\bsearch online\b/i,
         /\bbrowse online\b/i,
     ].some((pattern) => pattern.test(text));
-}
-
-function hasExplicitPodcastIntent(prompt = '') {
-    const text = String(prompt || '').trim();
-    if (!text) {
-        return false;
-    }
-
-    return [
-        /\bpodcast\b/i,
-        /\bpodcast episode\b/i,
-        /\btwo[- ]host podcast\b/i,
-        /\btwo[- ]agent podcast\b/i,
-        /\brecord\b[\s\S]{0,40}\bpodcast\b/i,
-        /\bmake\b[\s\S]{0,40}\bpodcast\b/i,
-        /\bcreate\b[\s\S]{0,40}\bpodcast\b/i,
-        /\bgenerate\b[\s\S]{0,40}\bpodcast\b/i,
-    ].some((pattern) => pattern.test(text));
-}
-
-function extractExplicitPodcastTopic(prompt = '') {
-    const text = String(prompt || '').trim();
-    if (!text) {
-        return null;
-    }
-
-    const normalized = text
-        .replace(/\b(can you|could you|please|let'?s|lets|i want|we need to|help me)\b/gi, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-
-    const topicMatchers = [
-        /\bpodcast(?: episode)?\b[\s\S]{0,30}\b(?:about|on|regarding|covering)\b\s+(.+)$/i,
-        /\b(?:make|create|generate|record|produce)\b[\s\S]{0,20}\bpodcast\b[\s\S]{0,20}\b(?:about|on)\b\s+(.+)$/i,
-        /\b(?:about|on)\b\s+(.+?)\s*\b(?:for a podcast|in a podcast)\b/i,
-    ];
-
-    for (const pattern of topicMatchers) {
-        const match = normalized.match(pattern);
-        const candidate = String(match?.[1] || '').trim();
-        if (candidate) {
-            return candidate.replace(/[.?!]+$/, '').trim();
-        }
-    }
-
-    return normalized.replace(/[.?!]+$/, '').trim() || null;
 }
 
 function hasDeepResearchPresentationIntent(prompt = '') {
