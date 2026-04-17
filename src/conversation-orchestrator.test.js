@@ -1,6 +1,7 @@
 jest.mock('./routes/admin/settings.controller', () => ({
     getEffectiveSshConfig: jest.fn(),
     getEffectiveOpencodeConfig: jest.fn(),
+    getEffectiveDeployConfig: jest.fn(),
 }));
 
 const settingsController = require('./routes/admin/settings.controller');
@@ -65,6 +66,18 @@ describe('ConversationOrchestrator', () => {
             remoteDefaultWorkspace: '',
             providerEnvAllowlist: ['OPENAI_API_KEY', 'OPENAI_BASE_URL'],
             remoteAutoInstall: false,
+        });
+        settingsController.getEffectiveDeployConfig.mockReturnValue({
+            repositoryUrl: '',
+            targetDirectory: '',
+            manifestsPath: 'k8s',
+            namespace: 'kimibuilt',
+            deployment: 'backend',
+            container: 'backend',
+            branch: 'master',
+            publicDomain: 'demoserver2.buzz',
+            ingressClassName: 'traefik',
+            tlsClusterIssuer: 'letsencrypt-prod',
         });
     });
 
@@ -6180,6 +6193,56 @@ describe('ConversationOrchestrator', () => {
             reason: 'OpenCode usage or command requests should load the tool documentation instead of executing repository work.',
             params: {
                 toolId: 'opencode-run',
+            },
+        });
+    });
+
+    test('loads the remote-command docs for kubectl and k3s command catalog requests', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['remote-command', 'k3s-deploy', 'tool-doc-read', 'web-search']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Give me the kubectl command catalog and docs reference for deploying websites on k3s with Rancher, TLS, and DNS.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            session: {
+                metadata: {},
+            },
+            toolPolicy,
+            toolContext: {},
+        });
+
+        expect(toolPolicy.candidateToolIds).toContain('tool-doc-read');
+        expect(directAction).toEqual({
+            tool: 'tool-doc-read',
+            reason: 'Remote k3s, kubectl, and deployment command requests should load the relevant tool documentation before execution.',
+            params: {
+                toolId: 'remote-command',
             },
         });
     });

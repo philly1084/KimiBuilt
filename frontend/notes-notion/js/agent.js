@@ -562,6 +562,7 @@ const Agent = (function() {
             || normalized.includes('return notes-actions that apply the content to the current notes page')
             || normalized.includes('use this approved page plan:')
             || normalized.includes('use these expanded section briefs:')
+            || normalized.includes('use this section-by-section application brief:')
             || normalized.includes('hidden planning pass for a substantial notes-writing request')
             || normalized.includes('hidden section-expansion pass for a substantial notes-writing request');
     }
@@ -706,6 +707,130 @@ const Agent = (function() {
             flow,
             mix ? `Top-level mix: ${mix}` : '',
         ].filter(Boolean).join('\n');
+    }
+
+    function buildSectionEditMap(pageContext = null) {
+        const blocks = Array.isArray(pageContext?.blocks) ? pageContext.blocks : [];
+        if (!blocks.length) {
+            return '- No section anchors yet. Create a lead cluster first, then add clear section headings before deep expansion.';
+        }
+
+        const sections = [];
+        let currentSection = null;
+
+        const commitSection = () => {
+            if (!currentSection) {
+                return;
+            }
+
+            const anchorLabel = currentSection.anchorId
+                ? `[${currentSection.anchorId}]`
+                : '[lead-cluster]';
+            const rangeLabel = currentSection.blockIds.length > 1
+                ? `${currentSection.blockIds[0]} -> ${currentSection.blockIds[currentSection.blockIds.length - 1]}`
+                : (currentSection.blockIds[0] || 'n/a');
+            const supportTypes = Array.from(currentSection.supportTypes);
+            const preview = currentSection.preview.length
+                ? ` | preview: ${currentSection.preview.join(' | ')}`
+                : '';
+
+            sections.push(
+                `${sections.length + 1}. ${currentSection.label} ${anchorLabel} | ${currentSection.level} | blocks: ${currentSection.blockIds.length} | ids: ${rangeLabel}${supportTypes.length ? ` | support: ${supportTypes.join(', ')}` : ''}${preview}`
+            );
+            currentSection = null;
+        };
+
+        const ensureLeadSection = (block) => {
+            if (currentSection) {
+                return currentSection;
+            }
+
+            currentSection = {
+                label: 'Lead cluster before first heading',
+                anchorId: block?.id || null,
+                level: 'lead',
+                blockIds: [],
+                supportTypes: new Set(),
+                preview: [],
+            };
+            return currentSection;
+        };
+
+        blocks.forEach((block) => {
+            const type = canonicalizeBlockType(block?.type || 'text');
+            const text = truncateStructuredSummary(extractBlockTextValue(block), 72) || '(empty)';
+            const isHeading = ['heading_1', 'heading_2', 'heading_3'].includes(type);
+
+            if (isHeading) {
+                commitSection();
+                currentSection = {
+                    label: extractBlockTextValue(block) || 'Untitled section',
+                    anchorId: block?.id || null,
+                    level: type.replace('heading_', 'H'),
+                    blockIds: [block?.id || ''],
+                    supportTypes: new Set(),
+                    preview: [],
+                };
+                return;
+            }
+
+            const section = currentSection || ensureLeadSection(block);
+            section.blockIds.push(block?.id || '');
+
+            if (!['text', 'heading_1', 'heading_2', 'heading_3'].includes(type)) {
+                section.supportTypes.add(type);
+            }
+
+            if (section.preview.length < 2) {
+                section.preview.push(`${type}: ${text}`);
+            }
+        });
+
+        commitSection();
+
+        return sections.length
+            ? sections.join('\n')
+            : '- The page has content but no reliable sections yet. Add headings before making heavy edits.';
+    }
+
+    function buildPageEditWorkflowGuidance(question = '', pageContext = null) {
+        const normalized = String(question || '').trim().toLowerCase();
+        const blockCount = Number(pageContext?.blockCount || 0);
+        const outlineCount = Array.isArray(pageContext?.outline) ? pageContext.outline.length : 0;
+        const wantsRebuild = /\b(rebuild|from scratch|start over|replace the page|turn this into|restyle|redesign|rework)\b/.test(normalized);
+        const hasUsableSections = outlineCount >= 2 || blockCount >= 6;
+
+        const lines = [
+            '- Work in order: lead cluster first, then main sections, then support/source cluster, then a final polish pass.',
+            blockCount === 0
+                ? '- The page is empty, so create the full section structure first before expanding the details.'
+                : (wantsRebuild || !hasUsableSections)
+                    ? '- The current page is weak or mismatched enough that a rebuild_page response is acceptable if it produces a cleaner structure.'
+                    : '- Reuse the existing section anchors when they still fit the request; replace or move weak blocks instead of appending duplicate sections.',
+            '- Treat each section as a small editing job: decide its role, choose the right block mix, then write only that section.',
+            '- Prefer section-level edits over append-only drift: replace weak blocks, insert support blocks beside them, and only append at the bottom for genuinely new trailing content.',
+            '- Finish with a polish pass: remove repeated wording, tighten headings, audit block variety, and make sure the first screenful has a focal block.',
+        ];
+
+        return lines.join('\n');
+    }
+
+    function buildEditResponsePatterns(pageContext = null) {
+        const firstHeadingId = Array.isArray(pageContext?.outline) ? pageContext.outline[0]?.id : null;
+        const firstBodyBlockId = Array.isArray(pageContext?.blocks)
+            ? pageContext.blocks.find((block) => !/^heading_/.test(canonicalizeBlockType(block?.type || '')))?.id || pageContext.blocks[0]?.id
+            : null;
+
+        return [
+            '- Full-page reset: use update_page + rebuild_page when the title, opening cluster, and section order all need to change together.',
+            firstBodyBlockId
+                ? `- Section upgrade: target an existing weak block like [${firstBodyBlockId}] with replace_block or update_block, then insert_after a richer support block beside it.`
+                : '- Section upgrade: replace a weak block and add one richer support block beside it instead of appending a duplicate section elsewhere.',
+            firstHeadingId
+                ? `- Layout cleanup: move_block around a section anchor like [${firstHeadingId}] to reorder sections, then delete_block any duplicate leftovers.`
+                : '- Layout cleanup: use move_block and delete_block to remove duplicate sections once the new order is clear.',
+            '- Final polish: after the structure is correct, update page metadata if needed and add one focal callout, visual, database, bookmark, toggle, or divider where it strengthens the page.',
+        ].join('\n');
     }
 
     function buildPageDesignCriteria(pageContext) {
@@ -2373,7 +2498,10 @@ const Agent = (function() {
         const blockMap = buildPageContentSnapshot(pageContext);
         const pageContent = buildFullPageContentFromContext(pageContext).slice(0, 6000);
         const topLevelLayout = buildTopLevelLayoutSnapshot(pageContext);
+        const sectionEditMap = buildSectionEditMap(pageContext);
         const visualAnchors = buildVisualAnchorSnapshot(pageContext);
+        const pageEditWorkflow = buildPageEditWorkflowGuidance(question, pageContext);
+        const editResponsePatterns = buildEditResponsePatterns(pageContext);
         const blockOpportunities = buildBlockOpportunityGuidance(question, pageContext, templateMatches);
         const designManual = buildNotesPageDesignManual();
         const templateChecklist = buildTemplateExecutionChecklist(templateMatches);
@@ -2403,6 +2531,9 @@ ${blockMap || '(page is empty)'}
 
 TOP-LEVEL LAYOUT:
 ${topLevelLayout}
+
+SECTION EDIT MAP:
+${sectionEditMap}
 
 OUTLINE (Headings):
 ${outline}
@@ -2448,6 +2579,12 @@ ${designSchemeChecklist}
 PAGE DESIGN CRITERIA:
 ${designCriteria}
 
+PAGE EDIT WORKFLOW:
+${pageEditWorkflow}
+
+EDIT RESPONSE PATTERNS:
+${editResponsePatterns}
+
 AVAILABLE ACTIONS - Respond with JSON:
 When the user asks you to edit, create, delete, or reorganize content, respond with a JSON action block like this:
 
@@ -2455,10 +2592,11 @@ When the user asks you to edit, create, delete, or reorganize content, respond w
 {
   "assistant_reply": "Brief, friendly explanation of what I did",
   "actions": [
-    { "op": "update_page", "title": "Research Brief", "icon": "brief" },
+    { "op": "update_page", "title": "Research Brief", "icon": "🔎" },
     { "op": "update_block", "blockId": "block_abc123", "type": "text", "content": "New content here" },
+    { "op": "replace_block", "blockId": "block_abc123", "blocks": [{ "type": "heading_2", "content": "New Section" }, { "type": "text", "content": "Fresh opening" }] },
     { "op": "move_block", "blockId": "block_abc123", "targetBlockId": "block_xyz789", "position": "before" },
-    { "op": "insert_after", "blockId": "block_abc123", "blocks": [{ "type": "heading_2", "content": "New Section" }] },
+    { "op": "insert_after", "blockId": "block_abc123", "blocks": [{ "type": "callout", "content": { "text": "Key takeaway", "icon": "⚡" }, "color": "yellow" }] },
     { "op": "rebuild_page", "blocks": [{ "type": "heading_1", "content": "New Structure" }, { "type": "text", "content": "Fresh opening" }] },
     { "op": "delete_block", "blockId": "block_def456" },
     { "op": "append_to_page", "blocks": [{ "type": "text", "content": "Added at end" }] }
@@ -2478,21 +2616,58 @@ VALID OPERATIONS:
 - rebuild_page: Replace the full page body with a new block structure when a clean rebuild is better than incremental edits (requires blocks array)
 - delete_block: Remove a block (requires blockId)
 
+BLOCK TYPES:
+- text: Plain text paragraph
+- heading_1, heading_2, heading_3: Section headings
+- bulleted_list and numbered_list: grouped items
+- todo: checkbox item using {text, checked}
+- callout: highlighted note using {text, icon}
+- quote: emphasized excerpt or standout line
+- divider: section separator
+- image and ai_image: visual support blocks
+- bookmark: linked source/reference block
+- database: comparison, tracker, or quick-facts table
+- toggle: collapsible detail section
+- mermaid: diagram block
+- code and math: technical support blocks
+
+BLOCK DESIGN HEURISTICS:
+- Use heading blocks to create hierarchy before adding details.
+- Use callout blocks for takeaways, warnings, decisions, or highlighted facts.
+- Use list, todo, database, bookmark, image, toggle, quote, divider, or mermaid blocks when they communicate the section better than another paragraph.
+- Do not leave markdown markers like \`##\`, \`-\`, or \`[ ]\` inside block content when a native block type exists.
+- For polished Notion-like pages, treat visual hierarchy as required work, not optional polish.
+
 GUIDELINES:
 - Always reference blocks by their exact ID in [brackets]
 - assistant_reply should be brief and user-friendly
 - The editor will automatically apply your actions and show the assistant_reply to the user
 - Your default job in this interface is to edit the current notes page itself through block updates.
+- When notes mode is active, the only supporting tools you may rely on are web-search, web-fetch, and web-scrape.
+- Do not rely on document creation, artifact generation, filesystem writes, image tools, Git, deployment tools, or remote/server commands from this surface.
 - Use any gathered web information only to improve the current page blocks or to answer the user in chat while planning.
+- When the user asks for page changes, put the final content into page blocks instead of replying with standalone HTML, artifact info, download links, or chat-only prose.
 - Only stay in planning/chat mode when the user is explicitly brainstorming, outlining, asking for options, or says not to edit the page yet.
+- When the user is brainstorming or asking for layout help, offer 2-3 template directions by name, explain the block structure briefly, and then adapt the chosen direction on the page.
 - In this notes interface, "page" means the current notes document unless the user explicitly says web page, site page, route, component, repo file, or server page.
-- For substantial page-writing requests such as briefs, reports, specs, plans, guides, proposals, or polished notes pages, work in passes: decide the sections first, then expand each section, then polish the full page before returning the final answer or notes-actions block.
+- If the user says "put this on the page", "add this to the page", "insert this into the page", or similar, treat that as a request to edit the current notes page using notes-actions.
+- Never satisfy a notes-page edit by writing a local repo/runtime file or by mentioning /app or filesystem write failures.
+- For substantial page-writing requests such as briefs, reports, specs, plans, guides, proposals, or polished notes pages, think in three silent passes: architecture, section briefs, then final articulation into notes-actions.
+- Work section by section. Decide the role of each section before writing it, and treat the lead cluster as its own designed editing job.
 - Choose a best-fit page template from the template guidance above and adapt it to the user's request instead of inventing the page layout from scratch every time.
 - Also choose a matching visual recipe from the recipe guidance above so the page has a clear opening cluster, body rhythm, and support cluster.
 - Also choose a dominant design scheme from the scheme guidance above so the page has a coherent palette and header treatment.
 - When building a full page, prefer a clear structure with headings first and then supporting blocks under each heading instead of one long undifferentiated dump.
 - For non-trivial page builds, returns should usually involve multiple blocks with hierarchy, not a single oversized text block.
 - If a generated text block would carry multiple sections, multiple ideas, or more than a short paragraph, split it into separate blocks before returning notes-actions.
+- Prefer structural edits over append-only edits when the page needs organization: use update_block to convert block types, replace_block to rebuild a section, move_block to reorder sections, and rebuild_page when the current layout should be replaced wholesale.
+- It is acceptable to replace a single block with multiple blocks, or to rebuild the full page, if that is the clearest way to satisfy the request.
+- Do not ship a substantial page as only heading + text + list blocks unless the user explicitly asked for a minimal/plain layout.
+- Research pages should usually use at least one richer support block such as callout, bookmark, image, ai_image, toggle, or database when the content supports it.
+- In notes, Mermaid usually belongs as a mermaid block inside the page. Do not switch to a downloadable Mermaid artifact unless the user explicitly asks for a file, export, download, or shareable artifact.
+- Use plain strings for text-like blocks and structured objects for todo, callout, code, math, mermaid, image, ai_image, bookmark, database, and ai blocks.
+- You may include formatting on text-like blocks using {bold, italic, underline, strikethrough, code}.
+- You may include children on blocks when nested content improves the page, especially under toggles.
 - Do not invent block IDs - only use IDs that exist in the page
 - Keep assistant_reply concise unless the user asks for detailed explanation
 - When the user asks for a redesign, dashboard, brief, report, or polished layout, consider updating the page title, icon, or cover with update_page in addition to the blocks.
@@ -2734,19 +2909,29 @@ GUIDELINES:
         }
 
         const normalized = String(question || '').trim().toLowerCase();
-        if (!normalized || normalized.length < 40) {
+        if (!normalized) {
             return false;
         }
 
-        if (/\b(ssh|remote|server|cluster|k8s|kubernetes|kubectl|deploy|deployment|docker|traefik|let'?s encrypt|acme|cert-manager|research|search the web|browse|scrape|tool)\b/.test(normalized)) {
+        const pageHasEnoughSurface = (context?.blockCount || 0) > 3 || (context?.outline?.length || 0) > 1;
+        if (normalized.length < 28 && !pageHasEnoughSurface) {
+            return false;
+        }
+
+        if (/\b(ssh|remote|server|cluster|k8s|kubernetes|kubectl|deploy|deployment|docker|traefik|let'?s encrypt|acme|cert-manager|search the web|browse|scrape|tool)\b/.test(normalized)) {
+            return false;
+        }
+
+        if (/\b(research|look up|find|gather)\b[\s\S]{0,30}\b(web|online|site|website)\b/.test(normalized)) {
             return false;
         }
 
         const writingVerb = /\b(create|make|build|draft|write|expand|organize|polish|rewrite|turn|convert|structure|format)\b/.test(normalized);
+        const improvementVerb = /\b(restructure|rework|refresh|improve|clean up|tighten|finish|continue|fill out|work on)\b/.test(normalized);
         const substantialTarget = /\b(page|document|report|brief|spec|proposal|plan|guide|memo|summary|notes|runbook|dashboard|playbook)\b/.test(normalized);
-        const pageHasEnoughSurface = (context?.blockCount || 0) > 3 || (context?.outline?.length || 0) > 1;
+        const sectionTarget = /\b(section|sections|block|blocks|layout|structure|flow)\b/.test(normalized);
 
-        return writingVerb && (substantialTarget || pageHasEnoughSurface);
+        return (writingVerb || improvementVerb) && (substantialTarget || pageHasEnoughSurface || sectionTarget);
     }
 
     function supportsStructuredNotesDrafting(modelId = '') {
@@ -4269,6 +4454,48 @@ If the request is for a substantial page, brief, report, plan, or rewrite, prefe
         return fallback;
     }
 
+    function buildHiddenDraftApplicationBrief(planText = '', expansionText = '') {
+        const plan = safeJsonParse(planText);
+        const expansion = safeJsonParse(expansionText);
+        const sections = Array.isArray(expansion?.sections) && expansion.sections.length > 0
+            ? expansion.sections
+            : (Array.isArray(plan?.sections) ? plan.sections : []);
+
+        if (!sections.length) {
+            return '';
+        }
+
+        const editMode = String(expansion?.editMode || plan?.editMode || '').trim() || 'hybrid_refresh';
+        const leadGoal = String(expansion?.leadGoal || plan?.leadGoal || '').trim();
+        const polishChecks = Array.isArray(expansion?.polishChecks) && expansion.polishChecks.length > 0
+            ? expansion.polishChecks
+            : (Array.isArray(plan?.polishChecks) ? plan.polishChecks : []);
+
+        return [
+            `Edit mode: ${editMode}`,
+            plan?.templateId ? `Template: ${plan.templateId}` : '',
+            plan?.title ? `Target title: ${plan.title}` : '',
+            leadGoal ? `Lead cluster goal: ${leadGoal}` : '',
+            'Section sequence:',
+            ...sections.map((section, index) => {
+                const heading = String(section?.heading || `Section ${index + 1}`).trim();
+                const anchorHint = String(section?.anchorHint || '').trim();
+                const purpose = String(section?.summary || section?.goal || '').trim();
+                const blockMix = Array.isArray(section?.suggestedBlocks) && section.suggestedBlocks.length > 0
+                    ? section.suggestedBlocks
+                        .map((block) => canonicalizeBlockType(block?.type || 'text'))
+                        .filter(Boolean)
+                        .join(', ')
+                    : (Array.isArray(section?.blockTypes) ? section.blockTypes.join(', ') : '');
+
+                return `${index + 1}. ${heading}${anchorHint ? ` (${anchorHint})` : ''}${purpose ? ` -> ${purpose}` : ''}${blockMix ? ` | block mix: ${blockMix}` : ''}`;
+            }),
+            polishChecks.length
+                ? `Final polish: ${polishChecks.join(' | ')}`
+                : 'Final polish: tighten repetition, keep the lead cluster designed, and check block variety before returning notes-actions.',
+        ].filter(Boolean).join('\n');
+    }
+
     async function buildMultiPassNotesMessages({
         apiClient,
         model,
@@ -4288,11 +4515,15 @@ Do not plan filesystem writes, repo paths, or local file creation.
 Return JSON only in this shape:
 {
   "templateId": "brief",
+  "editMode": "rebuild_page | targeted_section_edits | hybrid_refresh",
   "title": "Page title",
+  "leadGoal": "What the first screenful should achieve",
+  "polishChecks": ["Keep the lead cluster designed", "Avoid long runs of plain text"],
   "sections": [
     {
       "heading": "Section heading",
       "goal": "Why this section exists",
+      "anchorHint": "Reuse [block_id] or create a new section",
       "blockTypes": ["heading_2", "text", "bulleted_list"],
       "keyPoints": ["Point 1", "Point 2"]
     }
@@ -4323,10 +4554,14 @@ Keep the chosen template consistent while expanding sections.
 Return JSON only in this shape:
 {
   "templateId": "brief",
+  "editMode": "hybrid_refresh",
   "title": "Page title",
+  "leadGoal": "What the first screenful should achieve",
+  "polishChecks": ["Keep the lead cluster designed", "Avoid long runs of plain text"],
   "sections": [
     {
       "heading": "Section heading",
+      "anchorHint": "Reuse [block_id] or create a new section",
       "summary": "Detailed summary of what this section should say",
       "suggestedBlocks": [
         { "type": "heading_2", "content": "Section heading" },
@@ -4353,13 +4588,16 @@ Return JSON only in this shape:
             return null;
         }
 
+        const applicationBrief = buildHiddenDraftApplicationBrief(normalizedPlan, normalizedExpansion);
+
         return [
             {
                 role: 'system',
                 content: `${systemPrompt}
 
 Use the hidden planning work below as internal guidance.
-For this final pass, return the finished answer only.
+This request already completed the silent architecture and section-brief passes.
+For this final pass, do the articulation pass and return the finished answer only.
 Do not mention local file writes, /app paths, or filesystem errors.
 If the user is editing the page, return notes-actions as needed.
 Do not switch this final pass into standalone HTML, artifact output, or download-link language unless the user explicitly asked for that.`
@@ -4374,8 +4612,9 @@ ${normalizedPlan}
 Use these expanded section briefs:
 ${normalizedExpansion}
 
-Preserve the chosen template's layout rhythm and block variety.
-Build the page in a structured, polished way instead of one-shotting the whole document.`
+${applicationBrief ? `Use this section-by-section application brief:\n${applicationBrief}\n\n` : ''}Preserve the chosen template's layout rhythm and block variety.
+Apply the page section by section instead of one-shotting the whole document.
+Silently verify the lead cluster, section order, and final polish before returning the page edits.`
             }
         ];
     }
@@ -8473,6 +8712,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         _normalizeStructuredPageActions: normalizeStructuredPageActions,
         _hasNonPageRuntimeIntent: hasNonPageRuntimeIntent,
         _shouldForcePageEditActions: shouldForcePageEditActions,
+        _shouldUseMultiPassNotesDraft: shouldUseMultiPassNotesDraft,
         _shouldSuppressRequestedArtifactFormat: shouldSuppressRequestedArtifactFormat
     };
 })();

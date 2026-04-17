@@ -306,6 +306,9 @@ Approved page plan:
         expect(prompt).toContain('CURRENT PAGE CONTENT (excerpt):');
         expect(prompt).toContain('ROUTING PRIORITY:');
         expect(prompt).toContain('PAGE DESIGN CRITERIA:');
+        expect(prompt).toContain('SECTION EDIT MAP:');
+        expect(prompt).toContain('PAGE EDIT WORKFLOW:');
+        expect(prompt).toContain('EDIT RESPONSE PATTERNS:');
         expect(prompt).toContain('CURRENT VISUAL ANCHORS:');
         expect(prompt).toContain('BEST-FIT PAGE TEMPLATES:');
         expect(prompt).toContain('VISUAL PAGE RECIPES:');
@@ -325,6 +328,8 @@ Approved page plan:
         expect(prompt).toContain('Lead focal blocks');
         expect(prompt).toContain('prefer notes-actions that update the page blocks instead of artifact, file, or export output');
         expect(prompt).toContain('VALID OPERATIONS:');
+        expect(prompt).toContain('BLOCK TYPES:');
+        expect(prompt).toContain('BLOCK DESIGN HEURISTICS:');
         expect(prompt).toContain('Recommended metadata: Evidence: Source-linked');
         expect(prompt).not.toContain('Recommended metadata: Type: Research');
         expect(prompt).not.toContain('Audience: General reader');
@@ -332,9 +337,20 @@ Approved page plan:
         expect(prompt).toContain('Required palette: callout + hero image/ai_image + bookmark source cluster + toggle for deep detail');
         expect(prompt).toContain('Executive Brief [brief]');
         expect(prompt).toContain('Research Page [research]');
-        expect(prompt).not.toContain('BLOCK CAPABILITY PLAYBOOK:');
-        expect(prompt).not.toContain('FRONTEND FEATURES YOU CAN USE:');
-        expect(prompt).not.toContain('BLOCK TYPES:');
+        expect(prompt).toContain('think in three silent passes');
+    });
+
+    test('uses multi-pass drafting for research-backed notes pages instead of treating "research" as a non-page task', () => {
+        const agent = loadAgent();
+
+        expect(agent._shouldUseMultiPassNotesDraft(
+            'Create a research brief about penguins with sources, key findings, and a stronger page layout.',
+            {
+                blockCount: 5,
+                outline: [{ id: 'block_h1', content: 'Overview' }],
+            },
+            {}
+        )).toBe(true);
     });
 
     test('selects a project-oriented template for project planning requests', () => {

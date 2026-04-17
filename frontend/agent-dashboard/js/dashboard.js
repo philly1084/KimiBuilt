@@ -285,6 +285,11 @@ class Dashboard {
             e.preventDefault();
             this.saveApiSettings();
         });
+
+        document.getElementById('deploySettingsForm')?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.saveDeploySettings();
+        });
         
         document.getElementById('testConnectionBtn')?.addEventListener('click', () => {
             this.testConnection();
@@ -3503,6 +3508,34 @@ class Dashboard {
         }
     }
 
+    async saveDeploySettings() {
+        try {
+            const settings = {
+                integrations: {
+                    deploy: {
+                        repositoryUrl: document.getElementById('deployRepositoryUrl').value.trim(),
+                        branch: document.getElementById('deployBranch').value.trim(),
+                        targetDirectory: document.getElementById('deployTargetDirectory').value.trim(),
+                        manifestsPath: document.getElementById('deployManifestsPath').value.trim(),
+                        namespace: document.getElementById('deployNamespace').value.trim(),
+                        deployment: document.getElementById('deployDeployment').value.trim(),
+                        container: document.getElementById('deployContainer').value.trim(),
+                        publicDomain: document.getElementById('deployPublicDomain').value.trim(),
+                        ingressClassName: document.getElementById('deployIngressClassName').value.trim(),
+                        tlsClusterIssuer: document.getElementById('deployTlsClusterIssuer').value.trim(),
+                    },
+                },
+            };
+
+            const response = await apiClient.put('/api/admin/settings', settings);
+            this.applySettings(this.unwrapApiPayload(response, settings));
+            this.showToast('Deploy defaults saved', 'success');
+        } catch (error) {
+            console.error('Error saving deploy defaults:', error);
+            this.showToast('Failed to save deploy defaults', 'error');
+        }
+    }
+
     parseDelimitedList(value = '') {
         return String(value || '')
             .split(/\r?\n|,/)
@@ -3888,6 +3921,7 @@ class Dashboard {
         }
 
         const opencode = settings.integrations?.opencode || {};
+        const deploy = settings.integrations?.deploy || {};
         this.setInputValue('opencodeEnabled', opencode.enabled !== false ? 'true' : 'false');
         this.setInputValue('opencodeBinaryPath', opencode.binaryPath || 'opencode');
         this.setInputValue('opencodeDefaultAgentInput', opencode.defaultAgent || 'build');
@@ -3902,6 +3936,17 @@ class Dashboard {
                 ? 'Remote auto-install is enabled. Bootstrap will install `opencode` on the remote host if it is missing.'
                 : 'Remote auto-install is disabled. Install `opencode` on the remote host manually or enable auto-install before bootstrapping.';
         }
+
+        this.setInputValue('deployRepositoryUrl', deploy.repositoryUrl || '');
+        this.setInputValue('deployBranch', deploy.branch || 'master');
+        this.setInputValue('deployTargetDirectory', deploy.targetDirectory || '');
+        this.setInputValue('deployManifestsPath', deploy.manifestsPath || 'k8s');
+        this.setInputValue('deployNamespace', deploy.namespace || 'kimibuilt');
+        this.setInputValue('deployDeployment', deploy.deployment || 'backend');
+        this.setInputValue('deployContainer', deploy.container || 'backend');
+        this.setInputValue('deployPublicDomain', deploy.publicDomain || 'demoserver2.buzz');
+        this.setInputValue('deployIngressClassName', deploy.ingressClassName || 'traefik');
+        this.setInputValue('deployTlsClusterIssuer', deploy.tlsClusterIssuer || 'letsencrypt-prod');
     }
 
     renderOpenCodeRuntime(runtime = null, error = null) {

@@ -9,6 +9,14 @@ const AgentUI = (function() {
         { label: 'Skipping', hint: 'Skipping across structure and tone', motion: 'skipping' },
         { label: 'Gliding', hint: 'Gliding through edits and context', motion: 'gliding' }
     ];
+    const STARTER_ACTIONS = Object.freeze([
+        { id: 'summarize', label: 'Summarize page', title: 'Summarize the entire page' },
+        { id: 'restructure', label: 'Restructure sections', title: 'Rework the page section by section' },
+        { id: 'polish_layout', label: 'Polish layout', title: 'Make the page feel more designed' },
+        { id: 'multi_pass', label: 'Work in passes', title: 'Plan, expand, and apply the page in multiple passes' },
+        { id: 'brief', label: 'Turn into brief', title: 'Convert the page into an executive brief' },
+        { id: 'grammar', label: 'Fix grammar', title: 'Fix grammar and spelling' }
+    ]);
 
     let elements = {};
     let initialized = false;
@@ -228,7 +236,11 @@ const AgentUI = (function() {
             explain: 'Explain the current page content.',
             grammar: 'Fix grammar and spelling in the selected text or last paragraph.',
             shorter: 'Make the selected text or last paragraph shorter and more concise.',
-            expand: 'Expand on the last paragraph with more details and examples.'
+            expand: 'Expand on the last paragraph with more details and examples.',
+            restructure: 'Restructure this page section by section. Reuse strong blocks, replace weak ones, and improve the block flow.',
+            polish_layout: 'Polish this page so it feels designed. Improve the hierarchy, add stronger support blocks where needed, and tighten the section rhythm.',
+            multi_pass: 'Work through this page in multiple passes. First decide the best section structure, then expand each section, then apply the final page edits.',
+            brief: 'Turn this page into an executive brief with a clear lead, key takeaways, and next steps.'
         };
 
         if (action === 'outline') {
@@ -349,6 +361,14 @@ const AgentUI = (function() {
         syncProcessingUI();
     }
 
+    function renderStarterButtons() {
+        return STARTER_ACTIONS.map((action) => `
+            <button class="agent-quick-action-btn" data-action="${escapeHtmlAttr(action.id)}" title="${escapeHtmlAttr(action.title)}">
+                ${escapeHtml(action.label)}
+            </button>
+        `).join('');
+    }
+
     function renderMessages() {
         if (!elements.messagesContainer || !window.Agent) return;
 
@@ -360,38 +380,9 @@ const AgentUI = (function() {
                 <div class="agent-empty-state">
                     <div class="agent-empty-icon">AI</div>
                     <p>Ask me anything about your notes</p>
-                    <p class="agent-empty-hint">I can summarize, continue writing, help restructure the page, or run /tools commands.</p>
+                    <p class="agent-empty-hint">I can plan the page, work section by section, polish the layout, or turn rough notes into a stronger block flow.</p>
                     <div class="agent-quick-actions">
-                        <button class="agent-quick-action-btn" data-action="summarize" title="Summarize the entire page">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                                <polyline points="14 2 14 8 20 8"></polyline>
-                                <line x1="16" y1="13" x2="8" y2="13"></line>
-                                <line x1="16" y1="17" x2="8" y2="17"></line>
-                                <polyline points="10 9 9 9 8 9"></polyline>
-                            </svg>
-                            Summarize page
-                        </button>
-                        <button class="agent-quick-action-btn" data-action="expand" title="Expand on the last paragraph">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <line x1="12" y1="5" x2="12" y2="19"></line>
-                                <line x1="5" y1="12" x2="19" y2="12"></line>
-                            </svg>
-                            Expand on last paragraph
-                        </button>
-                        <button class="agent-quick-action-btn" data-action="grammar" title="Fix grammar and spelling">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                            </svg>
-                            Fix grammar
-                        </button>
-                        <button class="agent-quick-action-btn" data-action="shorter" title="Make text shorter and concise">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <line x1="5" y1="12" x2="19" y2="12"></line>
-                            </svg>
-                            Make it shorter
-                        </button>
+                        ${renderStarterButtons()}
                     </div>
                 </div>
             `;

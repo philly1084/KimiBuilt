@@ -1,6 +1,7 @@
 const path = require('path');
 const { ToolBase } = require('../../ToolBase');
 const { config } = require('../../../../config');
+const settingsController = require('../../../../routes/admin/settings.controller');
 const {
   buildGitCredentialEnvironment,
   normalizeGitHubRepositoryUrlForToken,
@@ -161,13 +162,28 @@ class K3sDeployTool extends ToolBase {
     }
   }
 
+  getDeployDefaults() {
+    return typeof settingsController.getEffectiveDeployConfig === 'function'
+      ? settingsController.getEffectiveDeployConfig()
+      : {
+        repositoryUrl: config.deploy.defaultRepositoryUrl || '',
+        targetDirectory: config.deploy.defaultTargetDirectory || '',
+        manifestsPath: config.deploy.defaultManifestsPath || 'k8s',
+        namespace: config.deploy.defaultNamespace || 'kimibuilt',
+        deployment: config.deploy.defaultDeployment || 'backend',
+        container: config.deploy.defaultContainer || 'backend',
+        branch: config.deploy.defaultBranch || 'master',
+      };
+  }
+
   buildSyncRepoCommand(params = {}) {
+    const deployDefaults = this.getDeployDefaults();
     const repositoryUrl = normalizeGitHubRepositoryUrlForToken(
-      this.sanitizeRepositoryUrl(params.repositoryUrl || config.deploy.defaultRepositoryUrl),
+      this.sanitizeRepositoryUrl(params.repositoryUrl || deployDefaults.repositoryUrl),
       process.env,
     );
-    const ref = this.sanitizeRef(params.ref || config.deploy.defaultBranch);
-    const targetDirectory = this.sanitizeRemotePath(params.targetDirectory || config.deploy.defaultTargetDirectory, 'targetDirectory');
+    const ref = this.sanitizeRef(params.ref || deployDefaults.branch);
+    const targetDirectory = this.sanitizeRemotePath(params.targetDirectory || deployDefaults.targetDirectory, 'targetDirectory');
     const parentDirectory = path.posix.dirname(targetDirectory);
 
     return [
@@ -249,9 +265,10 @@ class K3sDeployTool extends ToolBase {
   }
 
   buildSetImageCommand(params = {}) {
-    const namespace = this.sanitizeKubernetesName(params.namespace || config.deploy.defaultNamespace, 'namespace');
-    const deployment = this.sanitizeKubernetesName(params.deployment || config.deploy.defaultDeployment, 'deployment');
-    const container = this.sanitizeKubernetesName(params.container || config.deploy.defaultContainer, 'container');
+    const deployDefaults = this.getDeployDefaults();
+    const namespace = this.sanitizeKubernetesName(params.namespace || deployDefaults.namespace, 'namespace');
+    const deployment = this.sanitizeKubernetesName(params.deployment || deployDefaults.deployment, 'deployment');
+    const container = this.sanitizeKubernetesName(params.container || deployDefaults.container, 'container');
     const image = this.sanitizeImage(params.image);
     const timeoutSeconds = this.normalizeTimeoutSeconds(params.timeoutSeconds);
 
@@ -264,12 +281,13 @@ class K3sDeployTool extends ToolBase {
   }
 
   buildRolloutStatusCommand(params = {}, options = {}) {
-    const deployment = params.deployment || (options.allowDefaultDeployment ? config.deploy.defaultDeployment : '');
+    const deployDefaults = this.getDeployDefaults();
+    const deployment = params.deployment || (options.allowDefaultDeployment ? deployDefaults.deployment : '');
     if (!deployment) {
       return '';
     }
 
-    const namespace = this.sanitizeKubernetesName(params.namespace || config.deploy.defaultNamespace, 'namespace');
+    const namespace = this.sanitizeKubernetesName(params.namespace || deployDefaults.namespace, 'namespace');
     const sanitizedDeployment = this.sanitizeKubernetesName(deployment, 'deployment');
     const timeoutSeconds = this.normalizeTimeoutSeconds(params.timeoutSeconds);
 
@@ -281,7 +299,8 @@ class K3sDeployTool extends ToolBase {
   }
 
   resolveManifestsPath(params = {}) {
-    const manifestsPath = String(params.manifestsPath || config.deploy.defaultManifestsPath || '').trim();
+    const deployDefaults = this.getDeployDefaults();
+    const manifestsPath = String(params.manifestsPath || deployDefaults.manifestsPath || '').trim();
     if (!manifestsPath) {
       throw new Error('k3s-deploy apply-manifests requires manifestsPath or KIMIBUILT_DEPLOY_MANIFESTS_PATH.');
     }
@@ -290,7 +309,7 @@ class K3sDeployTool extends ToolBase {
       return this.sanitizeRemotePath(manifestsPath, 'manifestsPath');
     }
 
-    const baseDirectory = String(params.targetDirectory || config.deploy.defaultTargetDirectory || '').trim();
+    const baseDirectory = String(params.targetDirectory || deployDefaults.targetDirectory || '').trim();
     if (!baseDirectory) {
       return this.sanitizeRemotePath(manifestsPath, 'manifestsPath');
     }

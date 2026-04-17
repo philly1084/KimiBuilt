@@ -63,6 +63,9 @@ function isInternalClusterBaseURL(baseURL = '') {
 
 function buildRuntimeSummary(toolManager, options = {}) {
   const ssh = settingsController.getEffectiveSshConfig();
+  const deploy = typeof settingsController.getEffectiveDeployConfig === 'function'
+    ? settingsController.getEffectiveDeployConfig()
+    : {};
   const opencode = typeof settingsController.getEffectiveOpencodeConfig === 'function'
     ? settingsController.getEffectiveOpencodeConfig()
     : {};
@@ -85,6 +88,18 @@ function buildRuntimeSummary(toolManager, options = {}) {
       username: ssh.username || '',
       hasPassword: Boolean(ssh.password),
       hasPrivateKey: Boolean(ssh.privateKeyPath),
+    },
+    deployDefaults: {
+      repositoryUrl: deploy.repositoryUrl || '',
+      targetDirectory: deploy.targetDirectory || '',
+      manifestsPath: deploy.manifestsPath || '',
+      namespace: deploy.namespace || '',
+      deployment: deploy.deployment || '',
+      container: deploy.container || '',
+      branch: deploy.branch || '',
+      publicDomain: deploy.publicDomain || '',
+      ingressClassName: deploy.ingressClassName || '',
+      tlsClusterIssuer: deploy.tlsClusterIssuer || '',
     },
     opencode: {
       enabled: opencode.enabled !== false,
@@ -121,14 +136,23 @@ function buildToolRuntime(toolId, options = {}) {
 
   if (toolId === 'k3s-deploy') {
     const ssh = settingsController.getEffectiveSshConfig();
+    const deploy = typeof settingsController.getEffectiveDeployConfig === 'function'
+      ? settingsController.getEffectiveDeployConfig()
+      : {};
     return {
       configured: Boolean(ssh.enabled && ssh.host && ssh.username && (ssh.password || ssh.privateKeyPath)),
       source: ssh.source || 'dashboard',
       defaultTarget: ssh.host ? `${ssh.username || 'unknown'}@${ssh.host}:${ssh.port || 22}` : null,
-      defaultRepositoryUrl: config.deploy.defaultRepositoryUrl || '',
-      defaultTargetDirectory: config.deploy.defaultTargetDirectory || '',
-      defaultNamespace: config.deploy.defaultNamespace || '',
-      defaultDeployment: config.deploy.defaultDeployment || '',
+      defaultRepositoryUrl: deploy.repositoryUrl || '',
+      defaultTargetDirectory: deploy.targetDirectory || '',
+      defaultManifestsPath: deploy.manifestsPath || '',
+      defaultNamespace: deploy.namespace || '',
+      defaultDeployment: deploy.deployment || '',
+      defaultContainer: deploy.container || '',
+      defaultBranch: deploy.branch || '',
+      defaultPublicDomain: deploy.publicDomain || '',
+      defaultIngressClassName: deploy.ingressClassName || '',
+      defaultTlsClusterIssuer: deploy.tlsClusterIssuer || '',
     };
   }
 

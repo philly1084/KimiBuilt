@@ -400,15 +400,35 @@ function shouldResumeStoredWorkflow({
     return hasLikelyDecisionReplyIntent(normalized);
 }
 
-function buildDeployState(seed = {}) {
+function resolveDeployDefaults(defaults = null) {
+    const source = defaults && typeof defaults === 'object' ? defaults : {};
     return {
-        repositoryUrl: normalizeText(seed.repositoryUrl || config.deploy.defaultRepositoryUrl) || null,
-        ref: normalizeText(seed.ref || config.deploy.defaultBranch) || null,
-        targetDirectory: normalizeText(seed.targetDirectory || config.deploy.defaultTargetDirectory) || null,
-        manifestsPath: normalizeText(seed.manifestsPath || config.deploy.defaultManifestsPath) || null,
-        namespace: normalizeText(seed.namespace || config.deploy.defaultNamespace) || 'kimibuilt',
-        deployment: normalizeText(seed.deployment || config.deploy.defaultDeployment) || null,
-        container: normalizeText(seed.container || config.deploy.defaultContainer) || null,
+        repositoryUrl: normalizeText(source.repositoryUrl || config.deploy.defaultRepositoryUrl) || null,
+        ref: normalizeText(source.ref || source.branch || config.deploy.defaultBranch) || 'master',
+        targetDirectory: normalizeText(source.targetDirectory || config.deploy.defaultTargetDirectory) || null,
+        manifestsPath: normalizeText(source.manifestsPath || config.deploy.defaultManifestsPath) || 'k8s',
+        namespace: normalizeText(source.namespace || config.deploy.defaultNamespace) || 'kimibuilt',
+        deployment: normalizeText(source.deployment || config.deploy.defaultDeployment) || 'backend',
+        container: normalizeText(source.container || config.deploy.defaultContainer) || 'backend',
+        publicDomain: normalizeText(source.publicDomain || config.deploy.defaultPublicDomain) || 'demoserver2.buzz',
+        ingressClassName: normalizeText(source.ingressClassName || config.deploy.defaultIngressClassName) || 'traefik',
+        tlsClusterIssuer: normalizeText(source.tlsClusterIssuer || config.deploy.defaultTlsClusterIssuer) || 'letsencrypt-prod',
+    };
+}
+
+function buildDeployState(seed = {}, defaults = null) {
+    const deployDefaults = resolveDeployDefaults(defaults);
+    return {
+        repositoryUrl: normalizeText(seed.repositoryUrl || deployDefaults.repositoryUrl) || null,
+        ref: normalizeText(seed.ref || deployDefaults.ref) || null,
+        targetDirectory: normalizeText(seed.targetDirectory || deployDefaults.targetDirectory) || null,
+        manifestsPath: normalizeText(seed.manifestsPath || deployDefaults.manifestsPath) || null,
+        namespace: normalizeText(seed.namespace || deployDefaults.namespace) || 'kimibuilt',
+        deployment: normalizeText(seed.deployment || deployDefaults.deployment) || null,
+        container: normalizeText(seed.container || deployDefaults.container) || null,
+        publicDomain: normalizeText(seed.publicDomain || deployDefaults.publicDomain) || null,
+        ingressClassName: normalizeText(seed.ingressClassName || deployDefaults.ingressClassName) || null,
+        tlsClusterIssuer: normalizeText(seed.tlsClusterIssuer || deployDefaults.tlsClusterIssuer) || null,
     };
 }
 
@@ -507,7 +527,7 @@ function normalizeProgress(progress = {}) {
     };
 }
 
-function normalizeWorkflowState(workflow = null) {
+function normalizeWorkflowState(workflow = null, options = {}) {
     if (!isEndToEndBuilderWorkflow(workflow)) {
         return null;
     }
@@ -518,7 +538,7 @@ function normalizeWorkflowState(workflow = null) {
     const status = [ACTIVE_WORKFLOW_STATUS, COMPLETED_WORKFLOW_STATUS, BLOCKED_WORKFLOW_STATUS].includes(String(workflow.status || '').trim())
         ? String(workflow.status).trim()
         : ACTIVE_WORKFLOW_STATUS;
-    const deploy = buildDeployState(workflow.deploy || {});
+    const deploy = buildDeployState(workflow.deploy || {}, options.deployDefaults);
     const progress = normalizeProgress(workflow.progress);
     const deliveryMode = VALID_DELIVERY_MODES.has(String(workflow.deliveryMode || '').trim())
         ? String(workflow.deliveryMode).trim()
@@ -581,8 +601,11 @@ function inferEndToEndBuilderWorkflow({
     repositoryPath = '',
     opencodeTarget = 'local',
     remoteTarget = null,
+    deployDefaults = null,
 } = {}) {
-    const storedWorkflow = normalizeWorkflowState(getSessionControlState(session).workflow);
+    const storedWorkflow = normalizeWorkflowState(getSessionControlState(session).workflow, {
+        deployDefaults,
+    });
     if (storedWorkflow && shouldResumeStoredWorkflow({
         objective,
         storedWorkflow,
@@ -595,6 +618,8 @@ function inferEndToEndBuilderWorkflow({
             opencodeTarget: normalizeText(opencodeTarget) || storedWorkflow.opencodeTarget,
             remoteTarget: remoteTarget || storedWorkflow.remoteTarget,
             source: 'stored',
+        }, {
+            deployDefaults,
         });
     }
 
@@ -614,7 +639,7 @@ function inferEndToEndBuilderWorkflow({
         repositoryPath: normalizeText(repositoryPath) || null,
         opencodeTarget: normalizeText(opencodeTarget) || 'local',
         remoteTarget,
-        deploy: buildDeployState(),
+        deploy: buildDeployState({}, deployDefaults),
         progress: normalizeProgress(),
         requiresVerification: resolveWorkflowRequiresVerification({
             lane,
@@ -631,6 +656,8 @@ function inferEndToEndBuilderWorkflow({
         lastMeaningfulProgressAt: null,
         lastError: null,
         source: 'objective',
+    }, {
+        deployDefaults,
     });
 }
 
@@ -701,11 +728,18 @@ function requiresPublicDeploymentVerification(workflow = null) {
     return hasWebsiteTarget && hasPublicIngressSignals;
 }
 
-function buildVerificationCommand(workflow = null) {
+function resolveRequestedPublicHost(workflow = null, deployDefaults = null) {
+    return extractRequestedHost(workflow?.objective || '')
+        || normalizeText(workflow?.deploy?.publicDomain)
+        || resolveDeployDefaults(deployDefaults).publicDomain
+        || '';
+}
+
+function buildVerificationCommand(workflow = null, deployDefaults = null) {
     const deploy = workflow?.deploy || {};
     const namespace = normalizeText(deploy.namespace) || 'kimibuilt';
     const deployment = normalizeText(deploy.deployment) || 'backend';
-    const expectedHost = extractRequestedHost(workflow?.objective || '');
+    const expectedHost = resolveRequestedPublicHost(workflow, deployDefaults);
 
     const command = [
         'set -e',
@@ -857,8 +891,11 @@ function evaluateEndToEndBuilderWorkflow({
     workflow = null,
     toolPolicy = {},
     remoteToolId = 'remote-command',
+    deployDefaults = null,
 } = {}) {
-    const currentWorkflow = normalizeWorkflowState(workflow);
+    const currentWorkflow = normalizeWorkflowState(workflow, {
+        deployDefaults,
+    });
     if (!currentWorkflow || currentWorkflow.status !== ACTIVE_WORKFLOW_STATUS) {
         return currentWorkflow;
     }
@@ -932,8 +969,11 @@ function buildEndToEndWorkflowPlan({
     workflow = null,
     toolPolicy = {},
     remoteToolId = 'remote-command',
+    deployDefaults = null,
 } = {}) {
-    const currentWorkflow = normalizeWorkflowState(workflow);
+    const currentWorkflow = normalizeWorkflowState(workflow, {
+        deployDefaults,
+    });
     if (!currentWorkflow || currentWorkflow.status === COMPLETED_WORKFLOW_STATUS || currentWorkflow.status === BLOCKED_WORKFLOW_STATUS) {
         return [];
     }
@@ -1045,7 +1085,7 @@ function buildEndToEndWorkflowPlan({
                     timeout: REMOTE_VERIFICATION_TIMEOUT_MS,
                     command: currentWorkflow.lane === 'inspect-only'
                         ? buildInspectCommand(currentWorkflow)
-                        : buildVerificationCommand(currentWorkflow),
+                        : buildVerificationCommand(currentWorkflow, deployDefaults),
                 },
             }];
         }

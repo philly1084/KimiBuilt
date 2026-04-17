@@ -448,6 +448,9 @@ const config = {
         defaultDeployment: process.env.KIMIBUILT_DEPLOY_DEPLOYMENT || 'backend',
         defaultContainer: process.env.KIMIBUILT_DEPLOY_CONTAINER || 'backend',
         defaultBranch: process.env.KIMIBUILT_DEPLOY_BRANCH || 'master',
+        defaultPublicDomain: process.env.KIMIBUILT_DEPLOY_PUBLIC_DOMAIN || 'demoserver2.buzz',
+        defaultIngressClassName: process.env.KIMIBUILT_DEPLOY_INGRESS_CLASS || 'traefik',
+        defaultTlsClusterIssuer: process.env.KIMIBUILT_DEPLOY_TLS_CLUSTER_ISSUER || 'letsencrypt-prod',
     },
 
     opencode: {

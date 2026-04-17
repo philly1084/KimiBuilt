@@ -3402,6 +3402,46 @@ function hasOpencodeToolUsageIntent(text = '') {
     ].some((pattern) => pattern.test(normalized));
 }
 
+function hasRemoteInfraToolUsageIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    const requestsDocsOrCommands = [
+        /\b(command|commands|syntax|usage|docs?|documentation|example|examples|playbook|reference|references)\b/,
+        // Treat `.help` domains like `example.help` as hostnames, not doc requests.
+        /\b(give|show|list|need|want|open|read|pull|fetch)\b[\s\S]{0,24}(?<!\.)\bhelp\b/,
+        /(?<!\.)\bhelp\b[\s\S]{0,24}\b(with|for|on|about)\b/,
+        /\bhow\b[\s\S]{0,24}\b(use|run|invoke|call)\b/,
+        /\bgive\b[\s\S]{0,24}\b(command|commands|example|examples|playbook|reference)\b/,
+    ].some((pattern) => pattern.test(normalized));
+    const mentionsRemoteInfra = /\b(k3s-deploy|remote-command|ssh-execute|kubectl|k3s|kubernetes|rancher|ingress|traefik|cert-manager|tls|dns)\b/.test(normalized);
+
+    return requestsDocsOrCommands && mentionsRemoteInfra;
+}
+
+function resolveToolDocTargetToolId(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return '';
+    }
+
+    if (hasOpencodeToolUsageIntent(normalized)) {
+        return 'opencode-run';
+    }
+
+    if (!hasRemoteInfraToolUsageIntent(normalized)) {
+        return '';
+    }
+
+    if (/\b(k3s-deploy|sync-and-apply|apply manifests|set image|rollout status)\b/.test(normalized)) {
+        return 'k3s-deploy';
+    }
+
+    return 'remote-command';
+}
+
 function hasExplicitOpencodeImplementationIntent(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -4811,6 +4851,9 @@ class ConversationOrchestrator extends EventEmitter {
                 workflow: endToEndWorkflow,
                 toolPolicy,
                 remoteToolId: toolPolicy.preferredRemoteToolId,
+                deployDefaults: typeof settingsController.getEffectiveDeployConfig === 'function'
+                    ? settingsController.getEffectiveDeployConfig()
+                    : {},
             });
             toolPolicy.workflow = endToEndWorkflow;
             activeProjectPlan = advanceForegroundProjectPlan({
@@ -5297,6 +5340,9 @@ class ConversationOrchestrator extends EventEmitter {
                         workflow: endToEndWorkflow,
                         toolPolicy,
                         remoteToolId: toolPolicy.preferredRemoteToolId,
+                        deployDefaults: typeof settingsController.getEffectiveDeployConfig === 'function'
+                            ? settingsController.getEffectiveDeployConfig()
+                            : {},
                     });
                     toolPolicy.workflow = endToEndWorkflow;
                     activeProjectPlan = advanceForegroundProjectPlan({
@@ -5342,6 +5388,9 @@ class ConversationOrchestrator extends EventEmitter {
                         workflow: endToEndWorkflow,
                         toolPolicy,
                         remoteToolId: toolPolicy.preferredRemoteToolId,
+                        deployDefaults: typeof settingsController.getEffectiveDeployConfig === 'function'
+                            ? settingsController.getEffectiveDeployConfig()
+                            : {},
                     });
                     if (nextPlan.length > 0) {
                         runtimeMode = 'workflow-tools';
@@ -6319,6 +6368,9 @@ class ConversationOrchestrator extends EventEmitter {
         const hasSshDefaults = hasUsableSshDefaults();
         const hasReachableSshTarget = Boolean(hasSshDefaults || sshContext.target?.host);
         const workflowOpencodeTarget = inferOpencodeTarget(objective, session);
+        const deployDefaults = typeof settingsController.getEffectiveDeployConfig === 'function'
+            ? settingsController.getEffectiveDeployConfig()
+            : {};
         const repositoryPath = String(
             toolContext?.repositoryPath
             || config.deploy.defaultRepositoryPath
@@ -6336,6 +6388,7 @@ class ConversationOrchestrator extends EventEmitter {
                 repositoryPath,
                 opencodeTarget: workflowOpencodeTarget,
                 remoteTarget: sshContext.target || null,
+                deployDefaults,
             })
             : null;
         const projectPlanSeed = inferForegroundProjectPlan({
@@ -6577,7 +6630,9 @@ class ConversationOrchestrator extends EventEmitter {
                 && allowedToolIds.includes('k3s-deploy')) {
                 candidates.add('k3s-deploy');
             }
-            if (/\btool\b[\s\S]{0,40}\b(help|doc|docs|documentation|how)\b/.test(prompt) && allowedToolIds.includes('tool-doc-read')) {
+            if ((/\btool\b[\s\S]{0,40}\b(help|doc|docs|documentation|how)\b/.test(prompt)
+                || hasRemoteInfraToolUsageIntent(prompt))
+                && allowedToolIds.includes('tool-doc-read')) {
                 candidates.add('tool-doc-read');
             }
             if (hasOpencodeUsageIntent && allowedToolIds.includes('tool-doc-read')) {
@@ -6766,13 +6821,16 @@ class ConversationOrchestrator extends EventEmitter {
             });
         }
 
+        const toolDocTargetToolId = resolveToolDocTargetToolId(objective);
         if (toolPolicy.candidateToolIds.includes('tool-doc-read')
-            && hasOpencodeToolUsageIntent(objective)) {
+            && toolDocTargetToolId) {
             return finalizeAction({
                 tool: 'tool-doc-read',
-                reason: 'OpenCode usage or command requests should load the tool documentation instead of executing repository work.',
+                reason: toolDocTargetToolId === 'opencode-run'
+                    ? 'OpenCode usage or command requests should load the tool documentation instead of executing repository work.'
+                    : 'Remote k3s, kubectl, and deployment command requests should load the relevant tool documentation before execution.',
                 params: {
-                    toolId: 'opencode-run',
+                    toolId: toolDocTargetToolId,
                 },
             });
         }
@@ -6793,6 +6851,9 @@ class ConversationOrchestrator extends EventEmitter {
                 workflow: toolPolicy.workflow,
                 toolPolicy,
                 remoteToolId,
+                deployDefaults: typeof settingsController.getEffectiveDeployConfig === 'function'
+                    ? settingsController.getEffectiveDeployConfig()
+                    : {},
             });
             if (workflowPlan.length === 1) {
                 return finalizeAction(workflowPlan[0]);

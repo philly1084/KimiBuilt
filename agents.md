@@ -190,6 +190,7 @@ The common remote operations target for this project is an Ubuntu Linux ARM64 se
 When agents are using SSH or remote command tools:
 - Prefer `k3s-deploy` for standard deploy operations: repo sync, manifest apply, image update, and rollout checks.
 - Prefer `remote-command` for kubectl inspection, logs, service status, network checks, package installs, one-off fixes, and post-deploy verification.
+- Default public web domain is `demoserver2.buzz` unless Admin deploy settings override it.
 - Start with a short baseline command when reconnecting:
 
 ```bash
@@ -207,6 +208,7 @@ hostname && whoami && uname -m && (test -f /etc/os-release && sed -n '1,6p' /etc
 - Keep remote command batches small and purposeful: baseline -> inspect -> fix -> verify.
 - Avoid interactive commands and editors unless the user explicitly asks for that style of access.
 - See `src/agent-sdk/tool-docs/remote-command.md` for the reusable command catalog.
+- See `k8s/K3S_RANCHER_PLAYBOOK.md` for the repo-local k3s/Rancher deployment and TLS/DNS playbook.
 
 ---
 

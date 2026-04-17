@@ -1215,6 +1215,66 @@
                                 </div>
 
                                 <div class="card">
+                                    <div class="card-body">
+                                        <h3>k3s Deploy Defaults</h3>
+                                        <p class="text-muted">Fallback values for `k3s-deploy`, public ingress verification, and remote website rollout checks. If no public host is configured, the backend defaults to `demoserver2.buzz`.</p>
+                                        <form id="deploySettingsForm">
+                                            <div class="form-row">
+                                                <div class="form-group">
+                                                    <label for="deployRepositoryUrl">Repository URL</label>
+                                                    <input type="text" class="form-control" id="deployRepositoryUrl" placeholder="https://github.com/philly1084/KimiBuilt.git">
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="deployBranch">Default Branch</label>
+                                                    <input type="text" class="form-control" id="deployBranch" placeholder="master">
+                                                </div>
+                                            </div>
+                                            <div class="form-row">
+                                                <div class="form-group">
+                                                    <label for="deployTargetDirectory">Remote Target Directory</label>
+                                                    <input type="text" class="form-control" id="deployTargetDirectory" placeholder="/opt/kimibuilt">
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="deployManifestsPath">Manifests Path</label>
+                                                    <input type="text" class="form-control" id="deployManifestsPath" placeholder="k8s">
+                                                </div>
+                                            </div>
+                                            <div class="form-row">
+                                                <div class="form-group">
+                                                    <label for="deployNamespace">Namespace</label>
+                                                    <input type="text" class="form-control" id="deployNamespace" placeholder="kimibuilt">
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="deployDeployment">Deployment</label>
+                                                    <input type="text" class="form-control" id="deployDeployment" placeholder="backend">
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="deployContainer">Container</label>
+                                                    <input type="text" class="form-control" id="deployContainer" placeholder="backend">
+                                                </div>
+                                            </div>
+                                            <div class="form-row">
+                                                <div class="form-group">
+                                                    <label for="deployPublicDomain">Default Public Domain</label>
+                                                    <input type="text" class="form-control" id="deployPublicDomain" placeholder="demoserver2.buzz">
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="deployIngressClassName">Ingress Class</label>
+                                                    <input type="text" class="form-control" id="deployIngressClassName" placeholder="traefik">
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="deployTlsClusterIssuer">TLS ClusterIssuer</label>
+                                                    <input type="text" class="form-control" id="deployTlsClusterIssuer" placeholder="letsencrypt-prod">
+                                                </div>
+                                            </div>
+                                            <div class="form-actions">
+                                                <button type="submit" class="btn btn-primary">Save Deploy Defaults</button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                </div>
+
+                                <div class="card">
                                     <div class="card-header">
                                         <div>
                                             <h3>OpenCode Gateway</h3>

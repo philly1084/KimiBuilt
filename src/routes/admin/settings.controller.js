@@ -84,6 +84,18 @@ class SettingsController {
           password: '',
           privateKeyPath: '',
         },
+        deploy: {
+          repositoryUrl: config.deploy.defaultRepositoryUrl || '',
+          targetDirectory: config.deploy.defaultTargetDirectory || '',
+          manifestsPath: config.deploy.defaultManifestsPath || 'k8s',
+          namespace: config.deploy.defaultNamespace || 'kimibuilt',
+          deployment: config.deploy.defaultDeployment || 'backend',
+          container: config.deploy.defaultContainer || 'backend',
+          branch: config.deploy.defaultBranch || 'master',
+          publicDomain: config.deploy.defaultPublicDomain || 'demoserver2.buzz',
+          ingressClassName: config.deploy.defaultIngressClassName || 'traefik',
+          tlsClusterIssuer: config.deploy.defaultTlsClusterIssuer || 'letsencrypt-prod',
+        },
         opencode: {
           enabled: config.opencode.enabled !== false,
           binaryPath: config.opencode.binaryPath || 'opencode',
@@ -374,6 +386,39 @@ class SettingsController {
     }
 
     const opencodeUpdate = normalized.integrations?.opencode;
+    const deployUpdate = normalized.integrations?.deploy;
+    if (deployUpdate) {
+      const currentDeploy = this.settings?.integrations?.deploy || {};
+      const nextDeploy = {
+        ...deployUpdate,
+      };
+
+      [
+        'repositoryUrl',
+        'targetDirectory',
+        'manifestsPath',
+        'namespace',
+        'deployment',
+        'container',
+        'branch',
+        'publicDomain',
+        'ingressClassName',
+        'tlsClusterIssuer',
+      ].forEach((key) => {
+        if (nextDeploy[key] !== undefined) {
+          nextDeploy[key] = String(nextDeploy[key] || '').trim();
+        }
+      });
+
+      normalized.integrations = {
+        ...(normalized.integrations || {}),
+        deploy: {
+          ...currentDeploy,
+          ...nextDeploy,
+        },
+      };
+    }
+
     if (opencodeUpdate) {
       const currentOpencode = this.settings?.integrations?.opencode || {};
       const nextOpencode = {
@@ -442,6 +487,10 @@ class SettingsController {
 
     if (publicSettings.integrations?.opencode) {
       publicSettings.integrations.opencode = this.getEffectiveOpencodeConfig();
+    }
+
+    if (publicSettings.integrations?.deploy) {
+      publicSettings.integrations.deploy = this.getEffectiveDeployConfig();
     }
 
     if (publicSettings.security) {
@@ -548,6 +597,23 @@ class SettingsController {
     };
   }
 
+  getEffectiveDeployConfig() {
+    const stored = this.settings?.integrations?.deploy || {};
+
+    return {
+      repositoryUrl: String(stored.repositoryUrl || config.deploy.defaultRepositoryUrl || '').trim(),
+      targetDirectory: String(stored.targetDirectory || config.deploy.defaultTargetDirectory || '').trim(),
+      manifestsPath: String(stored.manifestsPath || config.deploy.defaultManifestsPath || 'k8s').trim() || 'k8s',
+      namespace: String(stored.namespace || config.deploy.defaultNamespace || 'kimibuilt').trim() || 'kimibuilt',
+      deployment: String(stored.deployment || config.deploy.defaultDeployment || 'backend').trim() || 'backend',
+      container: String(stored.container || config.deploy.defaultContainer || 'backend').trim() || 'backend',
+      branch: String(stored.branch || config.deploy.defaultBranch || 'master').trim() || 'master',
+      publicDomain: String(stored.publicDomain || config.deploy.defaultPublicDomain || 'demoserver2.buzz').trim() || 'demoserver2.buzz',
+      ingressClassName: String(stored.ingressClassName || config.deploy.defaultIngressClassName || 'traefik').trim() || 'traefik',
+      tlsClusterIssuer: String(stored.tlsClusterIssuer || config.deploy.defaultTlsClusterIssuer || 'letsencrypt-prod').trim() || 'letsencrypt-prod',
+    };
+  }
+
   normalizeStringArray(value, fallback = []) {
     const source = Array.isArray(value)
       ? value
@@ -625,6 +691,18 @@ class SettingsController {
           username: '',
           password: '',
           privateKeyPath: '',
+        },
+        deploy: {
+          repositoryUrl: config.deploy.defaultRepositoryUrl || '',
+          targetDirectory: config.deploy.defaultTargetDirectory || '',
+          manifestsPath: config.deploy.defaultManifestsPath || 'k8s',
+          namespace: config.deploy.defaultNamespace || 'kimibuilt',
+          deployment: config.deploy.defaultDeployment || 'backend',
+          container: config.deploy.defaultContainer || 'backend',
+          branch: config.deploy.defaultBranch || 'master',
+          publicDomain: config.deploy.defaultPublicDomain || 'demoserver2.buzz',
+          ingressClassName: config.deploy.defaultIngressClassName || 'traefik',
+          tlsClusterIssuer: config.deploy.defaultTlsClusterIssuer || 'letsencrypt-prod',
         },
         opencode: {
           enabled: config.opencode.enabled !== false,

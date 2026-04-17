@@ -395,6 +395,48 @@ describe('end-to-end builder workflow', () => {
         expect(verificationPlan[0].params.command).toContain('curl -fsSIL --max-time 20 "https://$host"');
     });
 
+    test('falls back to the configured public domain when website deployment verification omits an explicit host', () => {
+        const workflow = inferEndToEndBuilderWorkflow({
+            objective: 'Deploy the penguin site to k3s with Traefik TLS and Let\'s Encrypt.',
+            remoteTarget: {
+                host: '10.0.0.5',
+                username: 'ubuntu',
+                port: 22,
+            },
+            deployDefaults: {
+                publicDomain: 'demoserver2.buzz',
+            },
+        });
+
+        const afterDeploy = advanceEndToEndBuilderWorkflow({
+            workflow,
+            toolEvents: [
+                buildToolEvent('k3s-deploy', {
+                    action: 'sync-and-apply',
+                }, {
+                    data: {
+                        action: 'sync-and-apply',
+                        stdout: 'deployment "backend" successfully rolled out',
+                    },
+                }),
+            ],
+        });
+
+        const verificationPlan = buildEndToEndWorkflowPlan({
+            workflow: afterDeploy,
+            toolPolicy: {
+                candidateToolIds: ['k3s-deploy', 'remote-command'],
+                preferredRemoteToolId: 'remote-command',
+            },
+            remoteToolId: 'remote-command',
+            deployDefaults: {
+                publicDomain: 'demoserver2.buzz',
+            },
+        });
+
+        expect(verificationPlan[0].params.command).toContain("expected_host='demoserver2.buzz'");
+    });
+
     test('blocks public website deploy verification when only rollout-status access is available', () => {
         const workflow = inferEndToEndBuilderWorkflow({
             objective: 'Deploy the penguin site to penguin.demoserver2.buzz on k3s with Traefik TLS and Let\'s Encrypt.',

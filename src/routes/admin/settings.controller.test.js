@@ -18,6 +18,18 @@ jest.mock('../../config', () => ({
       password: '',
       jwtSecret: '',
     },
+    deploy: {
+      defaultRepositoryUrl: 'https://github.com/philly1084/KimiBuilt.git',
+      defaultTargetDirectory: '/opt/kimibuilt',
+      defaultManifestsPath: 'k8s',
+      defaultNamespace: 'kimibuilt',
+      defaultDeployment: 'backend',
+      defaultContainer: 'backend',
+      defaultBranch: 'master',
+      defaultPublicDomain: 'demoserver2.buzz',
+      defaultIngressClassName: 'traefik',
+      defaultTlsClusterIssuer: 'letsencrypt-prod',
+    },
     opencode: {
       enabled: true,
       binaryPath: 'opencode',
@@ -208,6 +220,28 @@ describe('settings.controller personality support', () => {
       'GITHUB_TOKEN',
       'GH_TOKEN',
     ]));
+  });
+
+  test('prefers stored deploy defaults over config defaults and exposes them publicly', () => {
+    controller.settings.integrations.deploy.publicDomain = 'apps.demoserver2.buzz';
+    controller.settings.integrations.deploy.namespace = 'web';
+    controller.settings.integrations.deploy.deployment = 'site';
+
+    const effective = controller.getEffectiveDeployConfig();
+    const publicSettings = controller.getPublicSettings();
+
+    expect(effective).toEqual(expect.objectContaining({
+      publicDomain: 'apps.demoserver2.buzz',
+      namespace: 'web',
+      deployment: 'site',
+      ingressClassName: 'traefik',
+      tlsClusterIssuer: 'letsencrypt-prod',
+    }));
+    expect(publicSettings.integrations.deploy).toEqual(expect.objectContaining({
+      publicDomain: 'apps.demoserver2.buzz',
+      namespace: 'web',
+      deployment: 'site',
+    }));
   });
 
   test('resetting the personality restores default settings and soul file content', async () => {

@@ -265,8 +265,194 @@ const Sidebar = (function() {
     /**
      * Show template modal for new pages
      */
+    function getPageTemplateBlueprints() {
+        const today = new Date();
+        const journalTitle = today.toLocaleDateString('en-US', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+        });
+
+        return {
+            blank: {
+                id: 'blank',
+                name: 'Blank Page',
+                icon: '📝',
+                desc: 'Start from scratch',
+                title: 'Untitled',
+                pageIcon: '📝',
+                properties: [],
+                blocks: [
+                    { type: 'text', content: '' }
+                ]
+            },
+            brief: {
+                id: 'brief',
+                name: 'Executive Brief',
+                icon: '📌',
+                desc: 'Lead, takeaways, next steps',
+                title: 'Executive Brief',
+                pageIcon: '📌',
+                properties: [
+                    { key: 'Format', value: 'Brief' },
+                    { key: 'Status', value: 'Draft' }
+                ],
+                blocks: [
+                    { type: 'heading_1', content: 'Executive Brief' },
+                    { type: 'callout', content: { text: 'Lead with the bottom line, then make the page easy to scan.', icon: '⚡' }, options: { color: 'yellow' } },
+                    { type: 'heading_2', content: 'Context', options: { textColor: 'blue' } },
+                    { type: 'text', content: 'Add the short setup or decision context here.' },
+                    { type: 'heading_2', content: 'Key Takeaways', options: { textColor: 'blue' } },
+                    { type: 'bulleted_list', content: 'Main takeaway' },
+                    { type: 'bulleted_list', content: 'Supporting point' },
+                    { type: 'heading_2', content: 'Next Steps', options: { textColor: 'green' } },
+                    { type: 'todo', content: { text: 'Action item', checked: false } }
+                ]
+            },
+            research: {
+                id: 'research',
+                name: 'Research Page',
+                icon: '🔎',
+                desc: 'Summary, findings, sources',
+                title: 'Research Page',
+                pageIcon: '🔎',
+                properties: [
+                    { key: 'Evidence', value: 'Source-linked' },
+                    { key: 'Status', value: 'Draft' }
+                ],
+                blocks: [
+                    { type: 'heading_1', content: 'Research Page' },
+                    { type: 'callout', content: { text: 'Summarize the topic, why it matters, and what the reader should notice first.', icon: '🧭' }, options: { color: 'blue' } },
+                    { type: 'heading_2', content: 'Quick Facts', options: { textColor: 'blue' } },
+                    {
+                        type: 'database',
+                        content: {
+                            columns: ['Fact', 'Detail'],
+                            rows: [
+                                ['Scope', 'Define the topic'],
+                                ['Question', 'State the main question'],
+                                ['Why it matters', 'Add the payoff']
+                            ],
+                            sortColumn: null,
+                            sortDirection: 'asc'
+                        }
+                    },
+                    { type: 'heading_2', content: 'Findings', options: { textColor: 'blue' } },
+                    { type: 'bulleted_list', content: 'Finding or theme' },
+                    { type: 'bulleted_list', content: 'Evidence or example' },
+                    { type: 'heading_2', content: 'Sources', options: { textColor: 'gray' } },
+                    { type: 'toggle', content: 'Add bookmarks, verification notes, and supporting source details here.', options: { color: 'gray' } }
+                ]
+            },
+            project: {
+                id: 'project',
+                name: 'Project Board',
+                icon: '🚀',
+                desc: 'Goals, owners, next moves',
+                title: 'Project Board',
+                pageIcon: '🚀',
+                properties: [
+                    { key: 'Status', value: 'Planning' },
+                    { key: 'Owner', value: 'TBD' }
+                ],
+                blocks: [
+                    { type: 'heading_1', content: 'Project Board' },
+                    { type: 'callout', content: { text: 'Keep the goal, current status, and immediate next moves visible near the top.', icon: '📍' }, options: { color: 'green' } },
+                    {
+                        type: 'database',
+                        content: {
+                            columns: ['Workstream', 'Owner', 'Status'],
+                            rows: [
+                                ['Planning', 'TBD', 'Active'],
+                                ['Execution', 'TBD', 'Queued']
+                            ],
+                            sortColumn: null,
+                            sortDirection: 'asc'
+                        }
+                    },
+                    { type: 'heading_2', content: 'Goals', options: { textColor: 'green' } },
+                    { type: 'bulleted_list', content: 'Primary goal' },
+                    { type: 'heading_2', content: 'Next Moves', options: { textColor: 'green' } },
+                    { type: 'todo', content: { text: 'Immediate action', checked: false } },
+                    { type: 'todo', content: { text: 'Owner follow-up', checked: false } }
+                ]
+            },
+            notes: {
+                id: 'notes',
+                name: 'Meeting Notes',
+                icon: '🗒️',
+                desc: 'Agenda, notes, actions',
+                title: 'Meeting Notes',
+                pageIcon: '🗒️',
+                properties: [
+                    { key: 'Date', value: today.toLocaleDateString() },
+                    { key: 'Owner', value: 'TBD' }
+                ],
+                blocks: [
+                    { type: 'heading_1', content: 'Meeting Notes' },
+                    { type: 'callout', content: { text: 'Capture the headline takeaway before the detailed discussion notes.', icon: '👥' }, options: { color: 'gray' } },
+                    { type: 'heading_2', content: 'Agenda', options: { textColor: 'brown' } },
+                    { type: 'numbered_list', content: 'Agenda item' },
+                    { type: 'heading_2', content: 'Notes', options: { textColor: 'brown' } },
+                    { type: 'text', content: 'Add the main discussion points here.' },
+                    { type: 'heading_2', content: 'Decisions', options: { textColor: 'brown' } },
+                    { type: 'bulleted_list', content: 'Decision or takeaway' },
+                    { type: 'heading_2', content: 'Action Items', options: { textColor: 'green' } },
+                    { type: 'todo', content: { text: 'Follow-up item', checked: false } }
+                ]
+            },
+            doc: {
+                id: 'doc',
+                name: 'Documentation',
+                icon: '🧩',
+                desc: 'Overview, steps, examples',
+                title: 'Documentation',
+                pageIcon: '🧩',
+                properties: [
+                    { key: 'Audience', value: 'Internal' },
+                    { key: 'Status', value: 'Draft' }
+                ],
+                blocks: [
+                    { type: 'heading_1', content: 'Documentation' },
+                    { type: 'callout', content: { text: 'Clarify the scope, audience, and prerequisites before the main steps.', icon: 'ℹ️' }, options: { color: 'blue' } },
+                    { type: 'heading_2', content: 'Overview', options: { textColor: 'blue' } },
+                    { type: 'text', content: 'Describe what this document covers and who it is for.' },
+                    { type: 'heading_2', content: 'Steps', options: { textColor: 'blue' } },
+                    { type: 'numbered_list', content: 'Step one' },
+                    { type: 'numbered_list', content: 'Step two' },
+                    { type: 'heading_2', content: 'Example', options: { textColor: 'blue' } },
+                    { type: 'code', content: { language: 'javascript', text: '// Add a real example here' } },
+                    { type: 'heading_2', content: 'FAQ', options: { textColor: 'gray' } },
+                    { type: 'toggle', content: 'Use this section for troubleshooting or deeper detail.', options: { color: 'gray' } }
+                ]
+            },
+            journal: {
+                id: 'journal',
+                name: 'Daily Journal',
+                icon: '📔',
+                desc: 'Highlights, reflections, tomorrow',
+                title: journalTitle,
+                pageIcon: '📔',
+                properties: [
+                    { key: 'Focus', value: 'Daily check-in' }
+                ],
+                blocks: [
+                    { type: 'heading_1', content: journalTitle },
+                    { type: 'callout', content: { text: 'Start with the mood, focus, or theme for the day.', icon: '🌤️' }, options: { color: 'purple' } },
+                    { type: 'heading_2', content: 'Highlights', options: { textColor: 'purple' } },
+                    { type: 'text', content: 'What stood out today?' },
+                    { type: 'heading_2', content: 'Reflections', options: { textColor: 'purple' } },
+                    { type: 'text', content: 'What felt important, difficult, or worth remembering?' },
+                    { type: 'heading_2', content: 'Tomorrow', options: { textColor: 'green' } },
+                    { type: 'todo', content: { text: 'Priority for tomorrow', checked: false } }
+                ]
+            }
+        };
+    }
+
     function showTemplateModal() {
-        const templates = [
+        let templates = [
             { id: 'blank', name: 'Blank Page', icon: '📄', desc: 'Start from scratch' },
             { id: 'todo', name: 'To-do List', icon: '☑️', desc: 'Track tasks' },
             { id: 'notes', name: 'Meeting Notes', icon: '📝', desc: 'Meeting agenda & notes' },
@@ -274,6 +460,7 @@ const Sidebar = (function() {
             { id: 'journal', name: 'Daily Journal', icon: '📔', desc: 'Daily reflections' },
             { id: 'project', name: 'Project Plan', icon: '🎯', desc: 'Project planning' }
         ];
+        templates = Object.values(getPageTemplateBlueprints());
         
         const modal = document.createElement('div');
         modal.className = 'template-modal';
@@ -325,6 +512,25 @@ const Sidebar = (function() {
      * Create new page with template
      */
     function createNewPageWithTemplate(templateId) {
+        const blueprints = getPageTemplateBlueprints();
+        const blueprint = blueprints[templateId];
+        if (blueprint) {
+            const page = Storage.createPage(blueprint.title || 'Untitled');
+            page.title = blueprint.title || page.title;
+            page.icon = blueprint.pageIcon || '';
+            page.properties = Array.isArray(blueprint.properties) ? blueprint.properties : [];
+            page.blocks = (blueprint.blocks || [{ type: 'text', content: '' }]).map((block) =>
+                Blocks.createBlock(block.type, block.content, block.options || {})
+            );
+            Storage.updatePage(page.id, page);
+
+            refreshPageTree();
+            loadPage(page.id);
+
+            showToast(`Created ${blueprint.name}`, 'success');
+            return;
+        }
+
         const templateBlocks = {
             blank: [
                 { type: 'text', content: '' }

@@ -2,11 +2,14 @@
 
 Purpose: run non-interactive commands on the configured remote host over SSH.
 
-Project assumptions:
-- The common remote target for this repo is Ubuntu Linux on ARM64 (`aarch64`) running k3s.
-- Prefer Bash/POSIX shell syntax.
-- Prefer short, purposeful command batches over giant all-in-one scripts.
+Project defaults:
+- The common remote target is Ubuntu Linux on ARM64 (`aarch64`) running k3s.
+- Prefer Bash or POSIX shell syntax.
+- Prefer short inspect -> fix -> verify command batches over giant scripts.
 - Prefer verified command output over assumptions.
+- The saved deploy defaults may provide a public domain, namespace, deployment name, ingress class, and TLS `ClusterIssuer`.
+- If no public domain is configured in Admin Settings, the backend falls back to `demoserver2.buzz`.
+- Project playbook: `k8s/K3S_RANCHER_PLAYBOOK.md`
 
 Use `remote-command` when:
 - inspecting host or cluster state
@@ -14,6 +17,7 @@ Use `remote-command` when:
 - checking services, ingress, DNS, TLS, or networking
 - installing packages or making one-off host fixes
 - verifying a deployment after `k3s-deploy`
+- deploying directly from a remote workspace on the same host
 
 Use `k3s-deploy` instead when:
 - syncing the GitHub repo on the server
@@ -23,13 +27,13 @@ Use `k3s-deploy` instead when:
 
 ## Baseline
 
-Start here when you need to reconnect or confirm what machine you are on:
+Reconnect or confirm the target host:
 
 ```bash
 hostname && whoami && uname -m && (test -f /etc/os-release && sed -n '1,6p' /etc/os-release || true) && uptime
 ```
 
-For a quick host health read:
+Quick host health:
 
 ```bash
 hostname && uptime && (df -h / || true) && (free -m || true)
@@ -37,9 +41,7 @@ hostname && uptime && (df -h / || true) && (free -m || true)
 
 ## K3s and kubectl access
 
-K3s ships an embedded `kubectl`. Official K3s docs note that `k3s kubectl` uses `/etc/rancher/k3s/k3s.yaml` by default, and the bundled `kubectl` is also configured for that kubeconfig on K3s hosts.
-
-Use this when `kubectl` context is uncertain:
+K3s ships an embedded `kubectl`. If upstream `kubectl` context is uncertain, prefer:
 
 ```bash
 command -v kubectl || true
@@ -72,7 +74,7 @@ kubectl get events -n kimibuilt --sort-by=.lastTimestamp | tail -n 50
 
 ### 3. Logs
 
-Current container logs:
+Current logs:
 
 ```bash
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
@@ -86,7 +88,7 @@ export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 kubectl logs <pod-name> -n kimibuilt -c <container-name> --tail=200
 ```
 
-Previous container logs after a crash or restart:
+Previous logs after a crash or restart:
 
 ```bash
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
@@ -94,7 +96,7 @@ kubectl logs <pod-name> -n kimibuilt -c <container-name> --previous --tail=200
 ```
 
 Rule of thumb:
-- If `kubectl describe` or pod status shows `CrashLoopBackOff`, an init-container failure, or a non-zero exit code, follow with `kubectl logs` for the failing container or init container.
+- If `kubectl describe` shows `CrashLoopBackOff`, an init-container failure, or a non-zero exit code, follow with `kubectl logs` for the failing container or init container.
 
 ### 4. Rollout and restart
 
@@ -122,7 +124,50 @@ kubectl get pods -n kube-system -l app.kubernetes.io/name=traefik -o wide
 kubectl logs -n kube-system deployment/traefik --tail=200
 ```
 
-### 6. k3s service health
+### 6. Deploy a simple web workload with kubectl
+
+Use this only for ad hoc or diagnostic deployments. For repo-managed manifests, prefer `k3s-deploy`.
+
+```bash
+set -e
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+ns=web
+app=hello-web
+host=hello.demoserver2.buzz
+issuer=letsencrypt-prod
+class=traefik
+
+kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
+kubectl create deployment "$app" --image=nginx:1.27 --replicas=2 -n "$ns" --dry-run=client -o yaml | kubectl apply -f -
+kubectl expose deployment "$app" --name "$app" --port=80 --target-port=80 -n "$ns" --dry-run=client -o yaml | kubectl apply -f -
+kubectl create ingress "$app" --class="$class" --rule="$host/*=$app:80,tls=$app-tls" --annotation=cert-manager.io/cluster-issuer="$issuer" -n "$ns" --dry-run=client -o yaml | kubectl apply -f -
+kubectl rollout status deployment/"$app" -n "$ns" --timeout=180s
+kubectl get svc,ingress -n "$ns"
+```
+
+### 7. TLS, cert-manager, and DNS checks
+
+Ingress and TLS objects:
+
+```bash
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+kubectl get ingress -A
+kubectl get certificate -A || true
+kubectl get challenge -A || true
+kubectl describe ingress/<ingress-name> -n <namespace>
+kubectl describe certificate/<certificate-name> -n <namespace> || true
+```
+
+Public DNS and HTTPS:
+
+```bash
+host=hello.demoserver2.buzz
+getent ahosts "$host" || true
+curl -fsSIL --max-time 20 "https://$host"
+curl -fsS --max-time 20 "https://$host" | sed -n '1,20p'
+```
+
+### 8. k3s service health
 
 Server nodes usually use `k3s`; agent-only nodes use `k3s-agent`.
 
@@ -133,7 +178,7 @@ sudo systemctl status k3s-agent --no-pager
 sudo journalctl -u k3s-agent --no-pager -n 200
 ```
 
-### 7. k3s packaged manifests and add-ons
+### 9. Packaged manifests and add-ons
 
 K3s automatically applies manifests from `/var/lib/rancher/k3s/server/manifests`.
 
@@ -144,7 +189,7 @@ kubectl get addon -n kube-system
 kubectl describe addon <addon-name> -n kube-system
 ```
 
-### 8. Host files, repo, and search
+### 10. Host files, repo, and search
 
 Do not assume `rg` is installed on Ubuntu servers.
 
@@ -154,7 +199,7 @@ find /path/to/check -maxdepth 2 -type f | sort | head -n 200
 grep -R --line-number "needle" /path/to/check
 ```
 
-### 9. Networking and ports
+### 11. Networking and ports
 
 Prefer modern Ubuntu tooling.
 
@@ -165,18 +210,28 @@ ss -tulpn
 curl -I https://example.com
 ```
 
-### 10. Package install on Ubuntu
+### 12. Package install on Ubuntu
 
-Avoid interactive package prompts:
+Avoid interactive prompts:
 
 ```bash
 sudo DEBIAN_FRONTEND=noninteractive apt-get update
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y jq curl ca-certificates
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y jq curl ca-certificates dnsutils
 ```
+
+## Rancher mapping
+
+Useful Rancher UI locations:
+- Cluster Management -> Explore -> Workloads
+- Cluster Management -> Explore -> Service Discovery -> Services
+- Cluster Management -> Explore -> Service Discovery -> Ingresses
+- Cluster Management -> Explore -> Storage -> Secrets
+
+Rancher is a control plane and UI, not a different Kubernetes API. The same `kubectl` commands remain the source of truth for troubleshooting and automation.
 
 ## Preferred structure for a remote-command call
 
-When a task needs more than one command, prefer a compact script like:
+One goal per call: inspect, fix, or verify.
 
 ```bash
 set -e
@@ -187,10 +242,10 @@ kubectl logs deployment/backend -n kimibuilt --all-containers=true --tail=200
 ```
 
 Good habits:
-- One main goal per call: inspect, fix, or verify.
 - Use explicit namespaces.
 - Re-run a verification command only after a change or a new hypothesis.
 - If you need root-only service inspection, use non-interactive sudo.
+- If the user wants a new app live on a domain, verify deployment, service, ingress, TLS secret, and public HTTPS before claiming success.
 
 Avoid:
 - interactive editors (`vim`, `nano`)
@@ -199,11 +254,14 @@ Avoid:
 - assuming x86_64 binaries on this host
 - assuming old net tools exist
 
-## References
+## Official document locations
 
-- K3s CLI Tools: [docs.k3s.io/cli](https://docs.k3s.io/cli)
-- K3s Cluster Access: [docs.k3s.io/cluster-access](https://docs.k3s.io/cluster-access)
-- K3s Advanced Options / service logs: [docs.k3s.io/advanced](https://docs.k3s.io/advanced)
-- Kubernetes `kubectl get`: [kubernetes.io/docs/reference/kubectl/generated/kubectl_get/](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_get/)
-- Kubernetes `kubectl logs`: [kubernetes.io/docs/reference/kubectl/generated/kubectl_logs/](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_logs/)
-- Kubernetes `kubectl rollout status`: [kubernetes.io/docs/reference/kubectl/generated/kubectl_rollout/kubectl_rollout_status/](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_rollout/kubectl_rollout_status/)
+- K3s cluster access: https://docs.k3s.io/cluster-access
+- K3s packaged components: https://docs.k3s.io/installation/packaged-components
+- K3s networking services: https://docs.k3s.io/networking/networking-services
+- Rancher ingresses: https://ranchermanager.docs.rancher.com/how-to-guides/new-user-guides/kubernetes-resources-setup/load-balancer-and-ingress-controller/add-ingresses
+- cert-manager ingress TLS: https://cert-manager.io/docs/usage/ingress/
+- kubectl create deployment: https://kubernetes.io/docs/reference/kubectl/generated/kubectl_create/kubectl_create_deployment/
+- kubectl expose: https://kubernetes.io/docs/reference/kubectl/generated/kubectl_expose/
+- kubectl create ingress: https://kubernetes.io/docs/reference/kubectl/generated/kubectl_create/kubectl_create_ingress/
+- kubectl create secret tls: https://kubernetes.io/docs/reference/kubectl/generated/kubectl_create/kubectl_create_secret_tls/

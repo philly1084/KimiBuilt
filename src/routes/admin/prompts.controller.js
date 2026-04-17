@@ -76,6 +76,8 @@ function buildPlannerPromptSurface() {
     'On remote Ubuntu hosts, prefer find and grep -R, docker compose, ip addr, and ss -tulpn instead of rg, docker-compose, ifconfig, and netstat.',
     'If kubectl looks missing on a k3s host, try export KUBECONFIG=/etc/rancher/k3s/k3s.yaml or use k3s kubectl before assuming cluster access is broken.',
     'For k3s incidents, prefer a sequence of kubectl get pods -A -o wide, kubectl describe, kubectl logs --previous, kubectl rollout status, then systemctl status k3s or journalctl -u k3s --no-pager -n 200 when control-plane health is suspect.',
+    'For public website deployment requests that omit the hostname, prefer the saved deploy default public domain and otherwise fall back to demoserver2.buzz instead of inventing a random host.',
+    'When the user asks for kubectl, k3s, Rancher, or remote deployment command help, prefer tool-doc-read for remote-command or k3s-deploy before improvising a command catalog from memory.',
     'Do not repeat the same remote-command call back-to-back without an intervening fix or new reason. Re-running a verification command after a fix is allowed.',
   ].join('\n');
 }

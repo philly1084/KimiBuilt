@@ -1,3 +1,19 @@
+jest.mock('../../../../routes/admin/settings.controller', () => ({
+  getEffectiveDeployConfig: jest.fn(() => ({
+    repositoryUrl: '',
+    targetDirectory: '/opt/kimibuilt',
+    manifestsPath: 'k8s',
+    namespace: 'kimibuilt',
+    deployment: 'backend',
+    container: 'backend',
+    branch: 'master',
+    publicDomain: 'demoserver2.buzz',
+    ingressClassName: 'traefik',
+    tlsClusterIssuer: 'letsencrypt-prod',
+  })),
+}));
+
+const settingsController = require('../../../../routes/admin/settings.controller');
 const { K3sDeployTool } = require('./K3sDeployTool');
 
 describe('K3sDeployTool', () => {
@@ -75,5 +91,25 @@ describe('K3sDeployTool', () => {
     });
 
     expect(command).toContain("git clone --branch 'main' --single-branch 'https://github.com/example/app.git' '/opt/app'");
+  });
+
+  test('uses admin deploy defaults when rollout-status omits deployment details', () => {
+    settingsController.getEffectiveDeployConfig.mockReturnValue({
+      repositoryUrl: '',
+      targetDirectory: '/opt/kimibuilt',
+      manifestsPath: 'k8s',
+      namespace: 'web',
+      deployment: 'site',
+      container: 'site',
+      branch: 'main',
+      publicDomain: 'demoserver2.buzz',
+      ingressClassName: 'traefik',
+      tlsClusterIssuer: 'letsencrypt-prod',
+    });
+
+    const tool = new K3sDeployTool();
+    const command = tool.buildRolloutStatusCommand({}, { allowDefaultDeployment: true });
+
+    expect(command).toContain("kubectl rollout status deployment/site -n 'web' --timeout=180s");
   });
 });
