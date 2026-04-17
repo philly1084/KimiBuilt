@@ -231,6 +231,174 @@ function buildForegroundStatusSummary({ workflow = null, projectPlan = null, com
     return 'Status: Paused before the next step.';
 }
 
+function normalizeProgressStepStatus(status = '') {
+    const normalized = normalizeInlineText(status).toLowerCase();
+    switch (normalized) {
+    case 'completed':
+    case 'done':
+        return 'completed';
+    case 'in_progress':
+    case 'running':
+    case 'active':
+        return 'in_progress';
+    case 'blocked':
+    case 'failed':
+    case 'error':
+        return 'failed';
+    case 'skipped':
+        return 'skipped';
+    default:
+        return 'pending';
+    }
+}
+
+function buildProgressTitleFromPlannedStep(step = {}, index = 0) {
+    const reason = truncateText(normalizeInlineText(step?.reason || ''), 88);
+    if (reason) {
+        return reason;
+    }
+
+    const toolLabel = normalizeInlineText(step?.tool || '').replace(/[_-]+/g, ' ');
+    if (toolLabel) {
+        return `Use ${toolLabel}`;
+    }
+
+    return `Step ${index + 1}`;
+}
+
+function buildProgressStepsFromProjectPlan(projectPlan = null) {
+    const milestones = Array.isArray(projectPlan?.milestones) ? projectPlan.milestones : [];
+    if (milestones.length === 0) {
+        return [];
+    }
+
+    return milestones.map((milestone, index) => ({
+        id: normalizeInlineText(milestone?.id || '') || `project-step-${index + 1}`,
+        title: truncateText(normalizeInlineText(milestone?.title || `Step ${index + 1}`), 88),
+        status: normalizeProgressStepStatus(milestone?.status),
+    }));
+}
+
+function buildProgressStepsFromWorkflow(workflow = null) {
+    const taskList = Array.isArray(workflow?.taskList) ? workflow.taskList : [];
+    if (taskList.length === 0) {
+        return [];
+    }
+
+    return taskList.map((task, index) => ({
+        id: normalizeInlineText(task?.id || '') || `workflow-step-${index + 1}`,
+        title: truncateText(normalizeInlineText(task?.title || `Task ${index + 1}`), 88),
+        status: normalizeProgressStepStatus(task?.status),
+    }));
+}
+
+function buildProgressStepsFromPlan(plan = [], {
+    activePlanIndex = -1,
+    completedPlanSteps = 0,
+    failedPlanStepIndex = -1,
+} = {}) {
+    const normalizedPlan = Array.isArray(plan) ? plan : [];
+    if (normalizedPlan.length === 0) {
+        return [];
+    }
+
+    return normalizedPlan.map((step, index) => ({
+        id: `plan-step-${index + 1}`,
+        title: buildProgressTitleFromPlannedStep(step, index),
+        status: failedPlanStepIndex === index
+            ? 'failed'
+            : (index < completedPlanSteps
+                ? 'completed'
+                : (index === activePlanIndex ? 'in_progress' : 'pending')),
+    }));
+}
+
+function buildConversationProgressSnapshot({
+    phase = 'thinking',
+    detail = '',
+    projectPlan = null,
+    workflow = null,
+    plan = [],
+    activePlanIndex = -1,
+    completedPlanSteps = 0,
+    failedPlanStepIndex = -1,
+    estimated = true,
+    source = '',
+} = {}) {
+    let steps = buildProgressStepsFromProjectPlan(projectPlan);
+    let resolvedSource = 'project-plan';
+
+    if (steps.length === 0) {
+        steps = buildProgressStepsFromWorkflow(workflow);
+        resolvedSource = 'workflow';
+    }
+
+    if (steps.length === 0) {
+        steps = buildProgressStepsFromPlan(plan, {
+            activePlanIndex,
+            completedPlanSteps,
+            failedPlanStepIndex,
+        });
+        resolvedSource = 'tool-plan';
+    }
+
+    if (steps.length < 2) {
+        return null;
+    }
+
+    const completedSteps = steps.filter((step) => ['completed', 'skipped'].includes(step.status)).length;
+    let activeStepIndex = steps.findIndex((step) => step.status === 'in_progress');
+    if (activeStepIndex < 0 && completedSteps < steps.length) {
+        activeStepIndex = steps.findIndex((step) => step.status === 'pending');
+    }
+    const activeStep = activeStepIndex >= 0 ? steps[activeStepIndex] : null;
+
+    return {
+        phase: normalizeInlineText(phase || 'thinking').toLowerCase() || 'thinking',
+        detail: normalizeInlineText(detail || ''),
+        summary: `${completedSteps}/${steps.length} steps complete`,
+        estimated: estimated !== false,
+        source: normalizeInlineText(source || resolvedSource) || resolvedSource,
+        totalSteps: steps.length,
+        completedSteps,
+        activeStepId: activeStep?.id || null,
+        activeStepIndex,
+        steps,
+        updatedAt: new Date().toISOString(),
+    };
+}
+
+function emitConversationProgress(onProgress = null, snapshot = null) {
+    if (typeof onProgress !== 'function' || !snapshot) {
+        return;
+    }
+
+    try {
+        onProgress(snapshot);
+    } catch (error) {
+        console.warn(`[ConversationOrchestrator] Failed to emit progress update: ${error.message}`);
+    }
+}
+
+function buildConversationProgressFingerprint(snapshot = null) {
+    if (!snapshot || typeof snapshot !== 'object') {
+        return '';
+    }
+
+    return JSON.stringify({
+        phase: snapshot.phase || '',
+        detail: snapshot.detail || '',
+        source: snapshot.source || '',
+        completedSteps: snapshot.completedSteps || 0,
+        totalSteps: snapshot.totalSteps || 0,
+        steps: (Array.isArray(snapshot.steps) ? snapshot.steps : []).map((step) => ({
+            id: step.id,
+            title: step.title,
+            status: step.status,
+        })),
+    });
+}
+
 function buildAutonomyBudgetPauseUpdate({ toolEvents = [], workflow = null, projectPlan = null } = {}) {
     const completedEvents = (Array.isArray(toolEvents) ? toolEvents : [])
         .filter((event) => (event?.result?.success !== false) && ((event?.toolCall?.function?.name || event?.result?.toolId || '') !== USER_CHECKPOINT_TOOL_ID));
@@ -4468,6 +4636,7 @@ class ConversationOrchestrator extends EventEmitter {
         stream = false,
         model = null,
         reasoningEffort = null,
+        signal = null,
         toolManager = null,
         toolContext = {},
         loadContextMessages = true,
@@ -4480,6 +4649,7 @@ class ConversationOrchestrator extends EventEmitter {
         memoryInput = '',
         requestedToolIds = [],
         toolBudget = null,
+        onProgress = null,
     } = {}) {
         const startedAt = Date.now();
         const setupStartedAt = new Date().toISOString();
@@ -4534,6 +4704,7 @@ class ConversationOrchestrator extends EventEmitter {
         }, session || null);
         toolContext = {
             ...toolContext,
+            ...(signal ? { signal } : {}),
             ...(clientSurface ? { clientSurface } : {}),
             ...(memoryScope ? { memoryScope } : {}),
             ...(projectKey ? { projectKey } : {}),
@@ -4665,11 +4836,46 @@ class ConversationOrchestrator extends EventEmitter {
         let toolEvents = [];
         let plan = [];
         let runtimeMode = 'plain';
+        let lastProgressFingerprint = '';
         const traceModelResponse = (response, phase = 'final-response', startedAtOverride = null) => {
             appendModelResponseTrace(executionTrace, response, {
                 phase,
                 startedAt: startedAtOverride,
             });
+        };
+        const publishProgress = ({
+            phase = 'thinking',
+            detail = '',
+            planOverride = null,
+            activePlanIndex = -1,
+            completedPlanSteps = 0,
+            failedPlanStepIndex = -1,
+            estimated = true,
+            source = '',
+        } = {}) => {
+            const snapshot = buildConversationProgressSnapshot({
+                phase,
+                detail,
+                projectPlan: activeProjectPlan,
+                workflow: endToEndWorkflow,
+                plan: Array.isArray(planOverride) ? planOverride : plan,
+                activePlanIndex,
+                completedPlanSteps,
+                failedPlanStepIndex,
+                estimated,
+                source,
+            });
+            if (!snapshot) {
+                return;
+            }
+
+            const fingerprint = buildConversationProgressFingerprint(snapshot);
+            if (fingerprint === lastProgressFingerprint) {
+                return;
+            }
+
+            lastProgressFingerprint = fingerprint;
+            emitConversationProgress(onProgress, snapshot);
         };
         const requestedAutonomyApproval = Boolean(
             metadata?.remoteBuildAutonomyApproved
@@ -4713,6 +4919,10 @@ class ConversationOrchestrator extends EventEmitter {
             ),
             extensionsUsed: 0,
         };
+        publishProgress({
+            phase: 'planning',
+            detail: 'Estimating the work and lining up the steps.',
+        });
 
         try {
             executionTrace.push(createExecutionTraceEntry({
@@ -4860,6 +5070,15 @@ class ConversationOrchestrator extends EventEmitter {
                         stepCount: deterministicWorkflow.steps.length,
                     },
                 }));
+                publishProgress({
+                    phase: 'planning',
+                    detail: 'A multi-step workflow is ready. Starting the first step.',
+                    planOverride: deterministicWorkflow.steps,
+                    activePlanIndex: 0,
+                    completedPlanSteps: 0,
+                    estimated: false,
+                    source: 'tool-plan',
+                });
 
                 const deterministicExecutionStartedAt = new Date().toISOString();
                 const {
@@ -4875,6 +5094,12 @@ class ConversationOrchestrator extends EventEmitter {
                     recentMessages: resolvedRecentMessages,
                     executionTrace,
                     round: 1,
+                    onProgress: (progress) => publishProgress({
+                        ...progress,
+                        planOverride: progress.plan,
+                        estimated: false,
+                        source: 'tool-plan',
+                    }),
                 });
 
                 toolEvents = deterministicToolEvents;
@@ -4889,6 +5114,16 @@ class ConversationOrchestrator extends EventEmitter {
                         stepCount: deterministicToolEvents.length,
                     },
                 }));
+                publishProgress({
+                    phase: 'finalizing',
+                    detail: 'Preparing the final summary from the completed steps.',
+                    planOverride: deterministicWorkflow.steps,
+                    activePlanIndex: -1,
+                    completedPlanSteps: deterministicToolEvents.filter((event) => event?.result?.success !== false).length,
+                    failedPlanStepIndex: deterministicToolEvents.findIndex((event) => event?.result?.success === false),
+                    estimated: false,
+                    source: 'tool-plan',
+                });
 
                 finalResponse = this.withResponseMetadata(buildSyntheticResponse({
                     output: buildDeterministicRemoteWorkflowOutput({
@@ -5277,6 +5512,17 @@ class ConversationOrchestrator extends EventEmitter {
                     break;
                 }
 
+                publishProgress({
+                    phase: 'planning',
+                    detail: nextPlan.length === 1
+                        ? 'A next step is ready. Starting it now.'
+                        : `A ${nextPlan.length}-step pass is ready. Starting it now.`,
+                    planOverride: nextPlan,
+                    activePlanIndex: 0,
+                    completedPlanSteps: 0,
+                    estimated: !activeProjectPlan && !endToEndWorkflow,
+                    source: 'tool-plan',
+                });
                 plan.push(...nextPlan);
                 const executionStartedAt = new Date().toISOString();
 
@@ -5295,6 +5541,12 @@ class ConversationOrchestrator extends EventEmitter {
                     autonomyDeadline: (autonomyApproved || hasCustomToolBudget) ? budgetState.autonomyDeadline : null,
                     executionTrace,
                     round,
+                    onProgress: (progress) => publishProgress({
+                        ...progress,
+                        planOverride: progress.plan,
+                        estimated: !activeProjectPlan && !endToEndWorkflow,
+                        source: 'tool-plan',
+                    }),
                 });
 
                 toolEvents.push(...roundToolEvents);
@@ -5390,6 +5642,16 @@ class ConversationOrchestrator extends EventEmitter {
                     });
                     toolPolicy.projectPlan = activeProjectPlan;
                 }
+                publishProgress({
+                    phase: blockingRoundFailure
+                        ? 'blocked'
+                        : (roundFailed ? 'planning' : 'executing'),
+                    detail: blockingRoundFailure
+                        ? (roundFailureSummary.blockingFailures[0]?.error || 'A blocking step failed. Adjusting the plan may be required.')
+                        : (lastAutonomyProgress || (roundFailed
+                            ? 'Some steps failed, so the next pass may change.'
+                            : `Completed round ${round}.`)),
+                });
 
                 if (autonomyApproved && budgetExceeded) {
                     executionTrace.push(createExecutionTraceEntry({
@@ -5739,6 +6001,12 @@ class ConversationOrchestrator extends EventEmitter {
                 });
             }
 
+            publishProgress({
+                phase: 'finalizing',
+                detail: toolEvents.length > 0
+                    ? 'Writing the final response from the completed work.'
+                    : 'Writing the response.',
+            });
             const finalResponseStartedAt = new Date().toISOString();
             finalResponse = await this.buildFinalResponse({
                 input: transcriptObjective.usedTranscriptContext ? objective : input,
@@ -5748,6 +6016,7 @@ class ConversationOrchestrator extends EventEmitter {
                 recentMessages: resolvedRecentMessages,
                 model,
                 reasoningEffort,
+                signal,
                 taskType,
                 executionProfile: resolvedProfile,
                 toolPolicy,
@@ -5794,6 +6063,15 @@ class ConversationOrchestrator extends EventEmitter {
                             })),
                         },
                     }));
+                    publishProgress({
+                        phase: 'planning',
+                        detail: 'Repairing the workflow after an invalid draft.',
+                        planOverride: filteredRecoveryPlan,
+                        activePlanIndex: 0,
+                        completedPlanSteps: 0,
+                        estimated: false,
+                        source: 'tool-plan',
+                    });
 
                     const recoveryExecutionStartedAt = new Date().toISOString();
                     const {
@@ -5808,6 +6086,12 @@ class ConversationOrchestrator extends EventEmitter {
                         session,
                         recentMessages: resolvedRecentMessages,
                         executionTrace,
+                        onProgress: (progress) => publishProgress({
+                            ...progress,
+                            planOverride: progress.plan,
+                            estimated: false,
+                            source: 'tool-plan',
+                        }),
                     });
                     toolEvents.push(...recoveryToolEvents);
                     recordExecutedStepSignatures(recoveryToolEvents, executedStepSignatures, executedStepSignatureCounts);
@@ -5837,6 +6121,7 @@ class ConversationOrchestrator extends EventEmitter {
                         recentMessages: resolvedRecentMessages,
                         model,
                         reasoningEffort,
+                        signal,
                         taskType,
                         executionProfile: resolvedProfile,
                         toolPolicy,
@@ -5874,6 +6159,7 @@ class ConversationOrchestrator extends EventEmitter {
                     recentMessages: resolvedRecentMessages,
                     model,
                     reasoningEffort,
+                    signal,
                     taskType,
                     executionProfile: resolvedProfile,
                     toolPolicy,
@@ -7150,6 +7436,7 @@ class ConversationOrchestrator extends EventEmitter {
         autonomyDeadline = null,
         executionTrace = [],
         round = null,
+        onProgress = null,
     }) {
         const toolEvents = [];
         let budgetExceeded = false;
@@ -7182,6 +7469,14 @@ class ConversationOrchestrator extends EventEmitter {
                 },
             };
             const toolStartedAt = new Date().toISOString();
+            emitConversationProgress(onProgress, {
+                phase: 'executing',
+                detail: step.reason || `Running ${normalizeInlineText(step.tool).replace(/[_-]+/g, ' ')}`,
+                plan,
+                activePlanIndex: index,
+                completedPlanSteps: index,
+                failedPlanStepIndex: -1,
+            });
 
             try {
                 const effectiveRecentMessages = Array.isArray(toolContext?.recentMessages)
@@ -7222,6 +7517,16 @@ class ConversationOrchestrator extends EventEmitter {
                         error: normalizedResult.error || null,
                     },
                 }));
+                emitConversationProgress(onProgress, {
+                    phase: normalizedResult.success ? 'executing' : 'blocked',
+                    detail: normalizedResult.success
+                        ? `Completed ${normalizeInlineText(step.tool).replace(/[_-]+/g, ' ')}`
+                        : (normalizedResult.error || `The ${normalizeInlineText(step.tool).replace(/[_-]+/g, ' ')} step failed.`),
+                    plan,
+                    activePlanIndex: normalizedResult.success && index + 1 < plan.length ? index + 1 : -1,
+                    completedPlanSteps: normalizedResult.success ? (index + 1) : index,
+                    failedPlanStepIndex: normalizedResult.success ? -1 : index,
+                });
                 budgetExceeded = budgetExceeded || (Number.isFinite(autonomyDeadline) && Date.now() >= autonomyDeadline);
 
                 if (result?.success === false || budgetExceeded) {
@@ -7254,6 +7559,14 @@ class ConversationOrchestrator extends EventEmitter {
                         error: normalizedResult.error || null,
                     },
                 }));
+                emitConversationProgress(onProgress, {
+                    phase: 'blocked',
+                    detail: normalizedResult.error || `The ${normalizeInlineText(step.tool).replace(/[_-]+/g, ' ')} step failed.`,
+                    plan,
+                    activePlanIndex: -1,
+                    completedPlanSteps: index,
+                    failedPlanStepIndex: index,
+                });
                 budgetExceeded = budgetExceeded || (Number.isFinite(autonomyDeadline) && Date.now() >= autonomyDeadline);
                 break;
             }
@@ -7273,6 +7586,7 @@ class ConversationOrchestrator extends EventEmitter {
         recentMessages = [],
         model = null,
         reasoningEffort = null,
+        signal = null,
         taskType = 'chat',
         executionProfile = DEFAULT_EXECUTION_PROFILE,
         toolPolicy = {},
@@ -7355,6 +7669,7 @@ class ConversationOrchestrator extends EventEmitter {
             stream: false,
             model: roleOptions.model,
             reasoningEffort: roleOptions.reasoningEffort,
+            signal,
             enableAutomaticToolCalls: false,
         }), {
             objective,
@@ -7383,6 +7698,7 @@ class ConversationOrchestrator extends EventEmitter {
         recentMessages = [],
         model = null,
         reasoningEffort = null,
+        signal = null,
         taskType = 'chat',
         executionProfile = DEFAULT_EXECUTION_PROFILE,
         toolPolicy = {},
@@ -7418,6 +7734,7 @@ class ConversationOrchestrator extends EventEmitter {
                 stream: false,
                 model: roleOptions.model,
                 reasoningEffort: roleOptions.reasoningEffort,
+                signal,
                 enableAutomaticToolCalls: false,
             }), {
                 objective,
@@ -7518,6 +7835,7 @@ class ConversationOrchestrator extends EventEmitter {
             stream: false,
             model: roleOptions.model,
             reasoningEffort: roleOptions.reasoningEffort,
+            signal,
             enableAutomaticToolCalls: false,
         });
 
@@ -7542,6 +7860,7 @@ class ConversationOrchestrator extends EventEmitter {
                 stream: false,
                 model: roleOptions.model,
                 reasoningEffort: roleOptions.reasoningEffort,
+                signal,
                 enableAutomaticToolCalls: false,
             });
         }
@@ -8102,17 +8421,17 @@ class ConversationOrchestrator extends EventEmitter {
             await this.sessionStore.updateControlState(sessionId, nextControlState);
         }
 
-        if (this.sessionStore?.update) {
-            const projectMemory = mergeProjectMemory(
-                currentSession?.metadata?.projectMemory || {},
-                buildProjectMemoryUpdate({
-                    userText,
-                    assistantText,
-                    toolEvents,
-                    artifacts: persistedArtifacts,
-                }),
-            );
+        const projectMemory = mergeProjectMemory(
+            currentSession?.metadata?.projectMemory || {},
+            buildProjectMemoryUpdate({
+                userText,
+                assistantText,
+                toolEvents,
+                artifacts: persistedArtifacts,
+            }),
+        );
 
+        if (this.sessionStore?.update) {
             await this.sessionStore.update(sessionId, {
                 metadata: {
                     ...legacyControlMetadata,
@@ -8121,6 +8440,19 @@ class ConversationOrchestrator extends EventEmitter {
                         : {}),
                     projectMemory,
                 },
+            });
+        }
+
+        if (this.sessionStore?.maybeCompactSession) {
+            const effectiveControlState = mergeControlState(
+                getSessionControlState(currentSession),
+                nextControlState,
+            );
+
+            await this.sessionStore.maybeCompactSession(sessionId, {
+                ownerId,
+                workflow: effectiveControlState.workflow || null,
+                projectMemory,
             });
         }
     }

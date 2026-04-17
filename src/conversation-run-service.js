@@ -259,12 +259,19 @@ class ConversationRunService {
         }
         const runtimeArtifacts = mergeRuntimeArtifacts(toolArtifacts, persistedDeferredArtifacts);
 
-        await this.updateProjectMemory(sessionId, ownerId, {
+        const updatedProjectSession = await this.updateProjectMemory(sessionId, ownerId, {
             userText: message,
             assistantText: outputText,
             toolEvents,
             artifacts: runtimeArtifacts,
         });
+        if (this.sessionStore?.maybeCompactSession) {
+            await this.sessionStore.maybeCompactSession(sessionId, {
+                ownerId,
+                workflow: null,
+                projectMemory: updatedProjectSession?.metadata?.projectMemory || null,
+            });
+        }
 
         return {
             execution,
@@ -427,12 +434,19 @@ class ConversationRunService {
             })
             : { artifacts: [], artifactMessage: '' };
 
-        await this.updateProjectMemory(sessionId, ownerId, {
+        const updatedProjectSession = await this.updateProjectMemory(sessionId, ownerId, {
             userText: metadata.prompt || `Deferred execution via ${toolId}`,
             assistantText: outputText,
             toolEvents,
             artifacts: artifactOutcome.artifacts,
         });
+        if (this.sessionStore?.maybeCompactSession) {
+            await this.sessionStore.maybeCompactSession(sessionId, {
+                ownerId,
+                workflow: null,
+                projectMemory: updatedProjectSession?.metadata?.projectMemory || null,
+            });
+        }
 
         return {
             result,

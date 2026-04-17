@@ -291,6 +291,7 @@ class ChatApp {
         this.closeWorkloadModalBtn = document.getElementById('close-workload-modal-btn');
         
         this.isProcessing = false;
+        this.isCancellingCurrentRequest = false;
         this.currentStreamingMessageId = null;
         this.liveIndicatorHideTimer = null;
         this.liveResponseState = {
@@ -320,6 +321,7 @@ class ChatApp {
         
         // Abort controller for current stream
         this.currentAbortController = null;
+        this.isCancellingCurrentRequest = false;
         this.voiceInputState = {
             mode: 'idle',
             recorder: null,
@@ -422,7 +424,14 @@ class ChatApp {
 
     setupEventListeners() {
         // Send button
-        this.sendBtn?.addEventListener('click', () => this.sendMessage());
+        this.sendBtn?.addEventListener('click', () => {
+            if (this.isProcessing) {
+                void this.cancelCurrentRequest();
+                return;
+            }
+
+            this.sendMessage();
+        });
         this.voiceInputBtn?.addEventListener('click', () => this.toggleVoiceInput());
         this.voiceOutputBtn?.addEventListener('click', () => this.toggleLatestAssistantSpeech());
         
@@ -783,8 +792,8 @@ class ChatApp {
         }
         
         // Priority 5: Cancel current streaming if active
-        if (this.isProcessing && this.currentAbortController) {
-            this.cancelCurrentRequest();
+        if (this.isProcessing) {
+            void this.cancelCurrentRequest();
         }
     }
 
@@ -2504,11 +2513,17 @@ class ChatApp {
             content: '',
             timestamp: new Date().toISOString(),
             isStreaming: true,
+            metadata: {
+                foregroundRequestId: '',
+                pendingForeground: true,
+                isStreaming: true,
+            },
             model: model // Track which model generated this response
         };
         
         this.currentStreamingMessageId = uiHelpers.generateMessageId();
         assistantMessage.id = this.currentStreamingMessageId;
+        assistantMessage.metadata.foregroundRequestId = assistantMessage.id;
 
         const storedAssistantMessage = sessionManager.addMessage(sessionId, assistantMessage);
         const assistantMessageEl = uiHelpers.renderMessage(storedAssistantMessage, true);
@@ -2578,6 +2593,9 @@ class ChatApp {
                         break;
                     case 'status':
                         this.handleStreamStatus(chunk);
+                        break;
+                    case 'progress':
+                        this.handleProgress(chunk);
                         break;
                     case 'text_delta':
                         hasReceivedContent = true;
@@ -2996,12 +3014,72 @@ class ChatApp {
     /**
      * Cancel the current streaming request
      */
-    cancelCurrentRequest() {
-        if (this.currentAbortController) {
+    async cancelCurrentRequest() {
+        if (this.isCancellingCurrentRequest) {
+            return false;
+        }
+
+        const trackedRequest = this.pendingStreamResync || this.activeStreamRequest;
+        if (!this.isProcessing && !trackedRequest) {
+            return false;
+        }
+
+        this.isCancellingCurrentRequest = true;
+        this.updateSendButton();
+
+        const sessionId = String(trackedRequest?.sessionId || sessionManager.currentSessionId || '').trim();
+        const requestId = String(
+            trackedRequest?.requestId
+            || trackedRequest?.assistantMessageId
+            || this.currentStreamingMessageId
+            || '',
+        ).trim();
+        const needsServerCancel = Boolean(
+            trackedRequest?.acceptedByServer
+            && sessionId
+            && requestId
+            && !sessionManager.isLocalSession?.(sessionId)
+        );
+        const hadLocalController = Boolean(this.currentAbortController);
+        const serverCancelPromise = needsServerCancel
+            ? apiClient.cancelForegroundTurn(sessionId, requestId)
+            : Promise.resolve(null);
+
+        if (hadLocalController) {
             this.currentAbortController.abort();
             this.currentAbortController = null;
-            uiHelpers.showToast('Request cancelled', 'info');
         }
+
+        let serverResult = null;
+        try {
+            serverResult = await serverCancelPromise;
+        } catch (error) {
+            console.warn('Failed to cancel foreground turn on the server:', error);
+        }
+
+        const serverCancelled = Boolean(serverResult?.cancelled || serverResult?.persisted);
+        const serverSettledElsewhere = serverResult?.reason === 'not_found';
+
+        if (!hadLocalController) {
+            if (serverCancelled || serverSettledElsewhere || !needsServerCancel) {
+                this.handleCancelled({ reason: 'user_cancelled' });
+                uiHelpers.showToast('Reply stopped', 'info');
+                return true;
+            }
+
+            this.isCancellingCurrentRequest = false;
+            this.updateSendButton();
+            uiHelpers.showToast('Could not stop the reply on the server.', 'warning');
+            return false;
+        }
+
+        if (needsServerCancel && !serverCancelled && !serverSettledElsewhere) {
+            uiHelpers.showToast('Stopped locally. Server cancellation could not be confirmed.', 'warning');
+        } else {
+            uiHelpers.showToast('Stopping reply...', 'info');
+        }
+
+        return true;
     }
 
     /**
@@ -3013,7 +3091,13 @@ class ChatApp {
         
         // Convert to OpenAI format: [{role, content}, ...]
         return messages
-            .filter(m => (m.role === 'user' || m.role === 'assistant') && !m.isStreaming && String(m.content || '').trim())
+            .filter((m) => (
+                (m.role === 'user' || m.role === 'assistant')
+                && !m.isStreaming
+                && m.excludeFromTranscript !== true
+                && m.metadata?.excludeFromTranscript !== true
+                && String(m.content || '').trim()
+            ))
             .map(m => ({
                 role: m.role,
                 content: m.content || ''
@@ -4806,6 +4890,7 @@ class ChatApp {
                 phase: 'thinking',
                 detail: this.liveResponseState.detail,
             },
+            progressState: null,
             reasoningSummary: '',
             reasoningDisplaySource: 'generated',
             reasoningDisplayText: initialAmbientFrame.visibleText,
@@ -4925,6 +5010,31 @@ class ChatApp {
         const phase = String(chunk.phase || '').trim() || 'thinking';
         const detail = String(chunk.detail || '').trim();
         this.updateLiveResponsePhase(phase, detail);
+    }
+
+    handleProgress(chunk = {}) {
+        if (!this.currentStreamingMessageId) {
+            return;
+        }
+
+        const progress = chunk.progress && typeof chunk.progress === 'object'
+            ? chunk.progress
+            : {};
+        const phase = String(progress.phase || chunk.phase || '').trim() || 'thinking';
+        const detail = String(progress.detail || chunk.detail || '').trim();
+
+        this.updateLiveResponsePhase(phase, detail);
+        this.updateStreamingMessageState({
+            progressState: {
+                ...progress,
+                phase,
+                detail,
+            },
+            isStreaming: true,
+        }, {
+            render: true,
+            scroll: false,
+        });
     }
 
     handleReasoningSummaryDelta(chunk = {}) {
@@ -5071,6 +5181,7 @@ class ChatApp {
         this.updateLiveResponsePhase('ready', readyDetail);
         const finalizedStreamingMessage = this.updateStreamingMessageState({
             liveState: null,
+            progressState: null,
             isStreaming: false,
             reasoningDisplaySource: streamedReasoningSummary ? 'final' : '',
             reasoningDisplayText: streamedReasoningSummary,
@@ -5114,6 +5225,7 @@ class ChatApp {
         }
         
         this.isProcessing = false;
+        this.isCancellingCurrentRequest = false;
         this.currentStreamingMessageId = null;
         this.liveResponseState = {
             phase: 'idle',
@@ -5233,6 +5345,7 @@ class ChatApp {
         }
         
         this.isProcessing = false;
+        this.isCancellingCurrentRequest = false;
         this.currentStreamingMessageId = null;
         this.clearPendingStreamResync();
         this.activeStreamRequest = null;
@@ -5275,6 +5388,7 @@ class ChatApp {
         }
 
         this.isProcessing = false;
+        this.isCancellingCurrentRequest = false;
         this.liveResponseState = {
             phase: 'idle',
             detail: '',
@@ -5299,30 +5413,47 @@ class ChatApp {
         }
     }
 
-    handleCancelled() {
+    handleCancelled(options = {}) {
         this.clearLiveIndicatorTimer();
         this.resetAmbientReasoningState();
         uiHelpers.hideTypingIndicator();
         this.clearPendingStreamResync();
         this.activeStreamRequest = null;
-        
-        // Remove the streaming message placeholder
-        if (this.currentStreamingMessageId) {
-            const el = document.getElementById(this.currentStreamingMessageId);
-            if (el) {
-                el.remove();
-            }
-            
-            // Remove from session
-            const sessionId = sessionManager.currentSessionId;
-            const messages = sessionManager.getMessages(sessionId);
-            if (messages.length > 0 && messages[messages.length - 1].role === 'assistant') {
-                messages.pop();
-                sessionManager.saveToStorage();
+
+        const sessionId = sessionManager.currentSessionId;
+        if (this.currentStreamingMessageId && sessionId) {
+            const currentMessage = this.getSessionMessage(sessionId, this.currentStreamingMessageId);
+            const currentContent = String(currentMessage?.content || '').trim();
+            const hasMeaningfulContent = Boolean(currentContent) && !this.isBackgroundPlaceholderContent(currentContent);
+            const stoppedMessage = this.upsertSessionMessage(sessionId, {
+                ...(currentMessage || {}),
+                id: this.currentStreamingMessageId,
+                role: 'assistant',
+                content: hasMeaningfulContent ? currentContent : 'Stopped.',
+                isStreaming: false,
+                cancelled: true,
+                excludeFromTranscript: !hasMeaningfulContent,
+                liveState: null,
+                metadata: {
+                    ...(currentMessage?.metadata || {}),
+                    cancelled: true,
+                    pendingForeground: false,
+                    isStreaming: false,
+                    excludeFromTranscript: !hasMeaningfulContent,
+                    stopReason: String(options.reason || 'user_cancelled').trim() || 'user_cancelled',
+                    liveState: null,
+                },
+            });
+
+            if (stoppedMessage) {
+                this.renderOrReplaceMessage(stoppedMessage);
+                uiHelpers.markMessageSettled(stoppedMessage.id);
+                this.persistSessionMessageIfNeeded(sessionId, stoppedMessage);
             }
         }
-        
+
         this.isProcessing = false;
+        this.isCancellingCurrentRequest = false;
         this.currentStreamingMessageId = null;
         this.liveResponseState = {
             phase: 'idle',
@@ -5331,6 +5462,8 @@ class ChatApp {
             hasRealReasoning: false,
         };
         this.updateSendButton();
+        this.updateSessionInfo();
+        uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
         void this.processMessageQueue();
     }
 
@@ -5378,11 +5511,17 @@ class ChatApp {
             role: 'assistant',
             content: '',
             timestamp: new Date().toISOString(),
-            isStreaming: true
+            isStreaming: true,
+            metadata: {
+                foregroundRequestId: '',
+                pendingForeground: true,
+                isStreaming: true,
+            },
         };
         
         this.currentStreamingMessageId = uiHelpers.generateMessageId();
         assistantMessage.id = this.currentStreamingMessageId;
+        assistantMessage.metadata.foregroundRequestId = assistantMessage.id;
         
         const storedAssistantMessage = sessionManager.addMessage(sessionId, assistantMessage);
         const assistantMessageEl = uiHelpers.renderMessage(storedAssistantMessage, true);
@@ -5444,6 +5583,9 @@ class ChatApp {
                         break;
                     case 'status':
                         this.handleStreamStatus(chunk);
+                        break;
+                    case 'progress':
+                        this.handleProgress(chunk);
                         break;
                     case 'text_delta':
                         this.handleDelta(chunk.content);
@@ -5870,24 +6012,29 @@ class ChatApp {
         const hasContent = this.messageInput?.value?.trim()?.length > 0;
         const canQueue = this.messageQueue.length < WEB_CHAT_QUEUE_MAX_SIZE;
         const canSend = hasContent && canQueue && !this.isGeneratingImage;
+        const showStopControl = this.isProcessing;
         
         if (this.sendBtn) {
-            this.sendBtn.disabled = !canSend;
-            this.sendBtn.classList.toggle('is-processing', this.isProcessing);
+            this.sendBtn.disabled = showStopControl
+                ? this.isCancellingCurrentRequest
+                : !canSend;
+            this.sendBtn.classList.toggle('is-processing', showStopControl);
             
-            if (this.isProcessing) {
-                this.sendBtn.innerHTML = `
-                    <span class="composer-send-btn__busy-orb" aria-hidden="true">
-                        <span class="assistant-stream-placeholder__phase-icon composer-send-btn__busy-icon" aria-hidden="true">
-                            <i data-lucide="sparkles" class="w-3.5 h-3.5" aria-hidden="true"></i>
-                        </span>
-                    </span>
-                `;
-                this.sendBtn.setAttribute('aria-label', 'Sending...');
+            if (showStopControl) {
+                this.sendBtn.innerHTML = `<i data-lucide="square" class="w-4 h-4" aria-hidden="true"></i>`;
+                this.sendBtn.setAttribute(
+                    'aria-label',
+                    this.isCancellingCurrentRequest ? 'Stopping response' : 'Stop response',
+                );
+                this.sendBtn.setAttribute(
+                    'title',
+                    this.isCancellingCurrentRequest ? 'Stopping response' : 'Stop response',
+                );
                 uiHelpers.reinitializeIcons(this.sendBtn);
             } else {
                 this.sendBtn.innerHTML = `<i data-lucide="send" class="w-5 h-5" aria-hidden="true"></i>`;
                 this.sendBtn.setAttribute('aria-label', 'Send message');
+                this.sendBtn.setAttribute('title', 'Send message');
                 uiHelpers.reinitializeIcons(this.sendBtn);
             }
         }
@@ -5942,6 +6089,12 @@ class ChatApp {
         this.activeStreamRequest = {
             sessionId,
             requestType: String(context.requestType || 'chat'),
+            requestId: String(
+                context.requestId
+                || context.placeholderMessage?.metadata?.foregroundRequestId
+                || context.placeholderMessage?.id
+                || '',
+            ).trim(),
             startedAt: Date.now(),
             acceptedByServer: false,
             lifecycleInterrupted: false,
@@ -6328,6 +6481,7 @@ class ChatApp {
                 this.clearPendingStreamResync();
                 this.activeStreamRequest = null;
                 this.isProcessing = false;
+                this.isCancellingCurrentRequest = false;
                 this.currentStreamingMessageId = null;
                 this.liveResponseState = {
                     phase: 'idle',
@@ -6456,6 +6610,7 @@ class ChatApp {
         }
 
         this.isProcessing = false;
+        this.isCancellingCurrentRequest = false;
         this.currentStreamingMessageId = null;
         this.clearLiveIndicatorTimer();
         this.clearPendingStreamResync();

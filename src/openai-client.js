@@ -2652,6 +2652,28 @@ function buildToolExecutionContext(toolManager, context = {}) {
     };
 }
 
+function throwIfAborted(signal = null) {
+    if (!signal?.aborted) {
+        return;
+    }
+
+    const reason = signal.reason;
+    if (reason instanceof Error) {
+        if (!reason.name || reason.name === 'Error') {
+            reason.name = 'AbortError';
+        }
+        throw reason;
+    }
+
+    const error = new Error(
+        typeof reason === 'string' && reason.trim()
+            ? reason.trim()
+            : 'Request aborted',
+    );
+    error.name = 'AbortError';
+    throw error;
+}
+
 function normalizeToolCall(toolCall = {}) {
     const rawArguments = toolCall.function?.arguments;
 
@@ -2933,6 +2955,7 @@ function maybeRecoverUserCheckpointResponse({
 
 async function executeAutomaticToolCall(toolManager, toolCall, context = {}) {
     const toolId = toolCall.function?.name;
+    throwIfAborted(context?.signal);
 
     if (!toolId || !AUTO_TOOL_ALLOWLIST.has(toolId)) {
         return {
@@ -2958,6 +2981,7 @@ async function executeAutomaticToolCall(toolManager, toolCall, context = {}) {
             params,
             buildToolExecutionContext(toolManager, context),
         );
+        throwIfAborted(context?.signal);
         return normalizeToolResultForModel(result, toolId);
     } catch (error) {
         return {
@@ -2974,6 +2998,7 @@ async function runDeterministicToolPreflight({
     prompt,
     toolContext = {},
 }) {
+    throwIfAborted(toolContext?.signal);
     const actions = buildDeterministicPreflightActions(automaticTools, prompt);
 
     if (!actions.length) {
@@ -2987,6 +3012,7 @@ async function runDeterministicToolPreflight({
     console.log(`[OpenAI] Deterministic tool preflight: ${actions.map((action) => action.toolId).join(', ')}`);
 
     for (let index = 0; index < actions.length; index += 1) {
+        throwIfAborted(toolContext?.signal);
         const action = actions[index];
         const toolCall = {
             id: `preflight_${index + 1}`,
@@ -3406,6 +3432,7 @@ async function runAutomaticToolLoopWithResponses(openai, {
     reasoningEffort = null,
     toolContext = {},
 }) {
+    const requestOptions = toolContext?.signal ? { signal: toolContext.signal } : undefined;
     const prompt = getLastUserText(messages);
     const normalizedReasoningEffort = normalizeReasoningEffort(reasoningEffort || config.openai.reasoningEffort);
     if (selectedTools.length === 0) {
@@ -3443,12 +3470,13 @@ async function runAutomaticToolLoopWithResponses(openai, {
     ));
 
     if (remainingTools.length === 0) {
+        throwIfAborted(toolContext?.signal);
         finalResponse = await openai.responses.create({
             model,
             input: buildResponsesInput(workingMessages),
             tool_choice: 'none',
             ...(normalizedReasoningEffort ? { reasoning: { effort: normalizedReasoningEffort } } : {}),
-        });
+        }, requestOptions);
         aggregatedUsage = mergeUsageMetadata(aggregatedUsage, extractResponseUsageMetadata(finalResponse));
 
         const recoveredCheckpointResponse = maybeRecoverUserCheckpointResponse({
@@ -3479,6 +3507,7 @@ async function runAutomaticToolLoopWithResponses(openai, {
     console.log(`[OpenAI] Automatic tools enabled for prompt. Candidates: ${remainingTools.map((entry) => entry.id).join(', ')}`);
 
     for (let round = 0; round < AUTO_TOOL_MAX_ROUNDS; round += 1) {
+        throwIfAborted(toolContext?.signal);
         finalResponse = await openai.responses.create({
             model,
             input: nextInput,
@@ -3487,7 +3516,7 @@ async function runAutomaticToolLoopWithResponses(openai, {
             tool_choice: round === 0 ? buildAutomaticToolChoice(remainingTools, 'responses', { model, prompt, toolContext }) : 'auto',
             parallel_tool_calls: false,
             ...(normalizedReasoningEffort ? { reasoning: { effort: normalizedReasoningEffort } } : {}),
-        });
+        }, requestOptions);
         aggregatedUsage = mergeUsageMetadata(aggregatedUsage, extractResponseUsageMetadata(finalResponse));
 
         const toolCalls = getResponseFunctionCalls(finalResponse);
@@ -3542,6 +3571,7 @@ async function runAutomaticToolLoopWithResponses(openai, {
 
         const toolResults = [];
         for (const toolCall of toolCalls) {
+            throwIfAborted(toolContext?.signal);
             const result = await executeAutomaticToolCall(toolContext.toolManager, {
                 id: toolCall.id || toolCall.call_id,
                 type: 'function',
@@ -3576,6 +3606,7 @@ async function runAutomaticToolLoopWithResponses(openai, {
         nextInput = buildResponsesToolOutputItems(toolCalls, toolResults);
     }
 
+    throwIfAborted(toolContext?.signal);
     finalResponse = await openai.responses.create({
         model,
         input: nextInput,
@@ -3583,7 +3614,7 @@ async function runAutomaticToolLoopWithResponses(openai, {
         tools: remainingTools.map((entry) => entry.responseDefinition),
         tool_choice: 'none',
         ...(normalizedReasoningEffort ? { reasoning: { effort: normalizedReasoningEffort } } : {}),
-    });
+    }, requestOptions);
     aggregatedUsage = mergeUsageMetadata(aggregatedUsage, extractResponseUsageMetadata(finalResponse));
 
     const recoveredCheckpointResponse = maybeRecoverUserCheckpointResponse({
@@ -3614,6 +3645,7 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
     reasoningEffort = null,
     toolContext = {},
 }) {
+    const requestOptions = toolContext?.signal ? { signal: toolContext.signal } : undefined;
     if (selectedTools.length === 0) {
         return null;
     }
@@ -3655,12 +3687,13 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
     ));
 
     if (remainingTools.length === 0) {
+        throwIfAborted(toolContext?.signal);
         finalResponse = await openai.chat.completions.create({
             model,
             messages: workingMessages,
             stream: false,
             ...chatReasoningParams,
-        });
+        }, requestOptions);
         aggregatedUsage = mergeUsageMetadata(aggregatedUsage, extractResponseUsageMetadata(finalResponse));
 
         const recoveredCheckpointResponse = maybeRecoverUserCheckpointResponse({
@@ -3689,6 +3722,7 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
     console.log(`[OpenAI] Automatic tools enabled for prompt. Candidates: ${remainingTools.map((entry) => entry.id).join(', ')}`);
 
     for (let round = 0; round < AUTO_TOOL_MAX_ROUNDS; round += 1) {
+        throwIfAborted(toolContext?.signal);
         finalResponse = await openai.chat.completions.create({
             model,
             messages: workingMessages,
@@ -3696,7 +3730,7 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
             tool_choice: round === 0 ? buildAutomaticToolChoice(remainingTools, 'chat', { model, prompt, toolContext }) : 'auto',
             stream: false,
             ...chatReasoningParams,
-        });
+        }, requestOptions);
         aggregatedUsage = mergeUsageMetadata(aggregatedUsage, extractResponseUsageMetadata(finalResponse));
 
         const assistantMessage = finalResponse.choices[0]?.message || {};
@@ -3754,6 +3788,7 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
         });
 
         for (const toolCall of toolCalls) {
+            throwIfAborted(toolContext?.signal);
             const result = await executeAutomaticToolCall(toolContext.toolManager, toolCall, toolContext);
             const toolEvent = {
                 toolCall: normalizeToolCall(toolCall),
@@ -3775,12 +3810,13 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
         }
     }
 
+    throwIfAborted(toolContext?.signal);
     finalResponse = await openai.chat.completions.create({
         model,
         messages: workingMessages,
         stream: false,
         ...chatReasoningParams,
-    });
+    }, requestOptions);
     aggregatedUsage = mergeUsageMetadata(aggregatedUsage, extractResponseUsageMetadata(finalResponse));
 
     const recoveredCheckpointResponse = maybeRecoverUserCheckpointResponse({
@@ -3811,6 +3847,7 @@ async function runAutomaticToolLoop(openai, {
     toolManager,
     toolContext = {},
 }) {
+    throwIfAborted(toolContext?.signal);
     const prompt = getLastUserText(messages);
     const automaticTools = buildAutomaticToolDefinitions(toolManager, prompt, toolContext);
     const selectedTools = selectAutomaticToolDefinitions(automaticTools, prompt, { toolContext });
@@ -4096,6 +4133,7 @@ async function createResponse({
     executionProfile = 'default',
     requestTimeoutMs = null,
     requestMaxRetries = null,
+    signal = null,
 }) {
     const openai = getClient();
     const apiMode = resolveOpenAIApiMode();
@@ -4137,6 +4175,7 @@ async function createResponse({
             ? toolContext.recentMessages
             : recentMessages,
         model: toolContext?.model || model || null,
+        ...(signal ? { signal } : {}),
     };
     if (normalizedReasoningEffort) {
         params.reasoning = { effort: normalizedReasoningEffort };
@@ -4159,8 +4198,12 @@ async function createResponse({
     if (Number.isFinite(Number(requestMaxRetries)) && Number(requestMaxRetries) >= 0) {
         requestOptions.maxRetries = Number(requestMaxRetries);
     }
+    if (signal) {
+        requestOptions.signal = signal;
+    }
 
     try {
+        throwIfAborted(signal);
         if (enableAutomaticToolCalls) {
             const requiredToolId = inferRequiredAutomaticToolId(prompt, [], effectiveToolContext);
 
@@ -4221,6 +4264,7 @@ async function createResponse({
                     toolManager,
                     toolContext: toolExecutionContext,
                 });
+                throwIfAborted(signal);
 
                 if (toolResponse) {
                     console.log('[OpenAI] Automatic tool orchestration completed');
@@ -4252,6 +4296,7 @@ async function createResponse({
         }
 
         if (apiMode === 'responses') {
+            throwIfAborted(signal);
             const response = await openai.responses.create(params, requestOptions);
             attachKimibuiltMetadata(response, kimibuiltMetadata);
             if (stream) {
@@ -4274,6 +4319,7 @@ async function createResponse({
         })) {
             chatParams.reasoning_effort = normalizedReasoningEffort;
         }
+        throwIfAborted(signal);
         const response = await openai.chat.completions.create(chatParams, requestOptions);
         attachKimibuiltMetadata(response, kimibuiltMetadata);
         if (stream) {

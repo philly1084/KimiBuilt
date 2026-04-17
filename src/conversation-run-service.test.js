@@ -62,6 +62,7 @@ describe('ConversationRunService', () => {
             get: jest.fn(),
             appendMessages: jest.fn(async () => null),
             update: jest.fn(async () => null),
+            maybeCompactSession: jest.fn(async () => null),
         };
         const memoryService = {
             rememberResponse: jest.fn(),
@@ -117,6 +118,11 @@ describe('ConversationRunService', () => {
             result.outputText,
             expect.objectContaining({ ownerId: 'user-1', memoryScope: 'chat' }),
         );
+        expect(sessionStore.maybeCompactSession).toHaveBeenCalledWith('session-1', {
+            ownerId: 'user-1',
+            workflow: null,
+            projectMemory: null,
+        });
     });
 
     test('packages deferred workload chat output into an artifact after runtime execution', async () => {
@@ -166,6 +172,7 @@ describe('ConversationRunService', () => {
             appendMessages: jest.fn(async () => null),
             update: jest.fn(async () => null),
             recordResponse: jest.fn(async () => null),
+            maybeCompactSession: jest.fn(async () => null),
         };
         const memoryService = {
             rememberResponse: jest.fn(),
@@ -228,6 +235,11 @@ describe('ConversationRunService', () => {
             }),
         ]);
         expect(result.artifactMessage).toBe('Created the PDF artifact (penguins.pdf).');
+        expect(sessionStore.maybeCompactSession).toHaveBeenCalledWith('session-1', {
+            ownerId: 'user-1',
+            workflow: null,
+            projectMemory: null,
+        });
     });
 
     test('honors an explicit workload output format even when the prompt does not mention it', async () => {

@@ -132,6 +132,36 @@ describe('openai-sse helpers', () => {
     });
   });
 
+  test('normalizes progress payloads from /api/chat streams', () => {
+    const events = normalizeGatewayEventPayload({
+      type: 'progress',
+      sessionId: 'session-456',
+      progress: {
+        phase: 'executing',
+        detail: 'Inspecting the current state',
+        totalSteps: 3,
+        completedSteps: 1,
+        steps: [
+          { id: 'inspect', title: 'Inspect the current state', status: 'completed' },
+          { id: 'implement', title: 'Implement the requested changes', status: 'in_progress' },
+          { id: 'validate', title: 'Validate the result', status: 'pending' },
+        ],
+      },
+    });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: 'progress',
+      sessionId: 'session-456',
+      phase: 'executing',
+      detail: 'Inspecting the current state',
+      progress: expect.objectContaining({
+        totalSteps: 3,
+        completedSteps: 1,
+      }),
+    });
+  });
+
   test('normalizes final JSON chat completion fallback text', () => {
     const events = normalizeGatewayEventPayload({
       object: 'chat.completion',

@@ -39,9 +39,14 @@ const { buildFrontendAssistantMetadata, buildWebChatSessionMessages } = require(
 const {
     beginForegroundTurn,
     buildForegroundTurnMessageOptions,
+    cancelForegroundTurn,
     failForegroundTurn,
     persistForegroundTurnMessages,
 } = require('../foreground-turn-state');
+const {
+    clearForegroundRequest,
+    registerForegroundRequest,
+} = require('../foreground-request-registry');
 const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
 const { extractArtifactsFromToolEvents, mergeRuntimeArtifacts } = require('../runtime-artifacts');
 const { toPublicChatModelList } = require('../model-catalog');
@@ -71,6 +76,21 @@ function buildOwnerMemoryMetadata(ownerId = null, memoryScope = null, extra = {}
         ...(memoryScope ? { memoryScope } : {}),
         ...extra,
     });
+}
+
+function isAbortLikeError(error, signal = null) {
+    if (signal?.aborted === true) {
+        return true;
+    }
+
+    const name = String(error?.name || '').trim();
+    const code = String(error?.code || '').trim().toLowerCase();
+    const message = String(error?.message || '').trim().toLowerCase();
+
+    return ['AbortError', 'APIUserAbortError'].includes(name)
+        || ['abort', 'aborted', 'foreground_request_aborted'].includes(code)
+        || message.includes('aborted')
+        || message.includes('cancelled');
 }
 
 function normalizeClientNow(value = '') {
@@ -635,9 +655,11 @@ router.post('/chat/completions', async (req, res, next) => {
     let runtimeTask = null;
     let trackedSessionId = null;
     let pendingForegroundTurn = null;
+    let requestAbortSignal = null;
     let foregroundTurnFinalized = false;
     let streamRequested = false;
     let activeSse = null;
+    let partialAssistantText = '';
     const startedAt = Date.now();
     try {
         const {
@@ -752,6 +774,16 @@ router.post('/chat/completions', async (req, res, next) => {
                 ...effectiveRequestMetadata,
                 foregroundTurn: pendingForegroundTurn,
             };
+            const registeredForegroundRequest = registerForegroundRequest({
+                sessionId,
+                requestId: pendingForegroundTurn.requestId,
+                ownerId,
+                clientSurface,
+                taskType,
+                assistantMessageId: pendingForegroundTurn.assistantMessageId,
+                userMessageId: pendingForegroundTurn.userMessageId,
+            });
+            requestAbortSignal = registeredForegroundRequest?.signal || null;
         }
         const effectiveMessages = messages.map((message) => (
             message.role === 'user' && message === lastUserMessage
@@ -882,12 +914,14 @@ router.post('/chat/completions', async (req, res, next) => {
                     memoryScope,
                     sessionIsolation,
                     memoryKeywords,
+                    signal: requestAbortSignal,
                     timezone: requestTimezone,
                     now: requestNow,
                     workloadService: req.app.locals.agentWorkloadService,
                 },
                 executionProfile: effectiveExecutionProfile,
             });
+            partialAssistantText = generation.assistantMessage;
             const responseArtifacts = mergeRuntimeArtifacts(
                 preparedImages.artifacts,
                 generation.artifacts,
@@ -1033,6 +1067,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 stream: true,
                 model,
                 reasoningEffort,
+                signal: requestAbortSignal,
                 toolManager,
                 toolContext: {
                     sessionId,
@@ -1044,6 +1079,7 @@ router.post('/chat/completions', async (req, res, next) => {
                     memoryScope,
                     sessionIsolation,
                     memoryKeywords,
+                    signal: requestAbortSignal,
                     timezone: requestTimezone,
                     now: requestNow,
                     workloadService: req.app.locals.agentWorkloadService,
@@ -1067,6 +1103,7 @@ router.post('/chat/completions', async (req, res, next) => {
             for await (const event of response) {
                 if (event.type === 'response.output_text.delta') {
                     fullText += event.delta;
+                    partialAssistantText = fullText;
                     activeSse.write(`data: ${JSON.stringify({
                         id: `chatcmpl-${sessionId}-${chunkIndex}`,
                         object: 'chat.completion.chunk',
@@ -1115,6 +1152,7 @@ router.post('/chat/completions', async (req, res, next) => {
                     const missingDelta = getMissingCompletionDelta(fullText, resolvedCompletion.outputText);
                     if (missingDelta) {
                         fullText = resolvedCompletion.outputText;
+                        partialAssistantText = fullText;
                         activeSse.write(`data: ${JSON.stringify({
                             id: `chatcmpl-${sessionId}-${chunkIndex}`,
                             object: 'chat.completion.chunk',
@@ -1125,6 +1163,7 @@ router.post('/chat/completions', async (req, res, next) => {
                         chunkIndex += 1;
                     } else {
                         fullText = resolvedCompletion.outputText;
+                        partialAssistantText = fullText;
                     }
 
                     const toolEvents = resolvedCompletion.response?.metadata?.toolEvents || [];
@@ -1236,6 +1275,7 @@ router.post('/chat/completions', async (req, res, next) => {
             stream: false,
             model,
             reasoningEffort,
+            signal: requestAbortSignal,
             toolManager: runtimeToolManager,
             toolContext: {
                 sessionId,
@@ -1247,6 +1287,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 memoryScope,
                 sessionIsolation,
                 memoryKeywords,
+                signal: requestAbortSignal,
                 timezone: requestTimezone,
                 now: requestNow,
                 workloadService: req.app.locals.agentWorkloadService,
@@ -1277,6 +1318,7 @@ router.post('/chat/completions', async (req, res, next) => {
         });
         response = resolvedCompatResponse.response;
         outputText = resolvedCompatResponse.outputText;
+        partialAssistantText = outputText;
         if (shouldRetryPlaceholderAsRemoteBuild({
             session,
             executionProfile: effectiveExecutionProfile,
@@ -1297,6 +1339,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 stream: false,
                 model,
                 reasoningEffort,
+                signal: requestAbortSignal,
                 toolManager: runtimeToolManager,
                 toolContext: {
                     sessionId,
@@ -1308,6 +1351,7 @@ router.post('/chat/completions', async (req, res, next) => {
                     memoryScope,
                     sessionIsolation,
                     memoryKeywords,
+                    signal: requestAbortSignal,
                     timezone: requestTimezone,
                     now: requestNow,
                     workloadService: req.app.locals.agentWorkloadService,
@@ -1327,6 +1371,7 @@ router.post('/chat/completions', async (req, res, next) => {
             });
             response = retriedExecution.response;
             outputText = extractResponseText(response);
+            partialAssistantText = outputText;
         }
         if (!execution.handledPersistence) {
             memoryService.rememberResponse(sessionId, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope, {
@@ -1424,6 +1469,37 @@ router.post('/chat/completions', async (req, res, next) => {
             }),
         });
     } catch (err) {
+        if (isAbortLikeError(err, requestAbortSignal)) {
+            completeRuntimeTask(runtimeTask?.id, {
+                output: partialAssistantText || 'Stopped.',
+                model: req.body?.model || null,
+                duration: Date.now() - startedAt,
+                metadata: { cancelled: true },
+            });
+            if (pendingForegroundTurn && !foregroundTurnFinalized) {
+                try {
+                    await cancelForegroundTurn(
+                        sessionStore,
+                        trackedSessionId,
+                        pendingForegroundTurn,
+                        {
+                            message: partialAssistantText,
+                            cancelledBy: 'user',
+                            reason: 'user_cancelled',
+                        },
+                    );
+                    foregroundTurnFinalized = true;
+                } catch (foregroundError) {
+                    console.warn('[OpenAICompat] Failed to persist foreground turn cancellation:', foregroundError.message);
+                }
+            }
+            if (activeSse && !activeSse.isClosed()) {
+                activeSse.end();
+            }
+            console.warn(`[OpenAICompat] chat/completions cancelled sessionId=${trackedSessionId || 'unknown'}`);
+            return;
+        }
+
         failRuntimeTask(runtimeTask?.id, {
             error: err,
             duration: Date.now() - startedAt,
@@ -1447,6 +1523,11 @@ router.post('/chat/completions', async (req, res, next) => {
             return;
         }
         next(err);
+    } finally {
+        clearForegroundRequest({
+            sessionId: trackedSessionId,
+            requestId: pendingForegroundTurn?.requestId || null,
+        });
     }
 });
 

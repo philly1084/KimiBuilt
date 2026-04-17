@@ -696,6 +696,24 @@ class OpenAIAPIClient extends EventTarget {
             return events;
         }
 
+        if (parsed.type === 'progress') {
+            const progress = parsed.progress && typeof parsed.progress === 'object'
+                ? parsed.progress
+                : {};
+            const phase = String(progress.phase || parsed.phase || 'thinking').trim() || 'thinking';
+            const detail = String(progress.detail || parsed.detail || '').trim();
+            events.push(this.buildStatusEvent(phase, detail));
+            events.push({
+                type: 'progress',
+                progress: {
+                    ...progress,
+                    phase,
+                    detail,
+                },
+            });
+            return events;
+        }
+
         const streamedReasoning = extractReasoningSummary(
             parsed?.choices?.[0]?.delta?.reasoning
             || parsed?.choices?.[0]?.delta?.reasoning_text
@@ -1042,6 +1060,24 @@ class OpenAIAPIClient extends EventTarget {
                                 };
                             }
                             break;
+                        case 'progress': {
+                            const progress = event.progress && typeof event.progress === 'object'
+                                ? event.progress
+                                : {};
+                            const phase = String(progress.phase || event.phase || 'thinking').trim() || 'thinking';
+                            const detail = String(progress.detail || event.detail || '').trim();
+                            yield this.buildStatusEvent(phase, detail);
+                            yield {
+                                type: 'progress',
+                                progress: {
+                                    ...progress,
+                                    phase,
+                                    detail,
+                                },
+                                sessionId: event.sessionId || pendingDone.sessionId,
+                            };
+                            break;
+                        }
                         case 'done':
                             doneEmitted = true;
                             yield this.buildStatusEvent('ready', 'Reply complete');
@@ -1223,6 +1259,38 @@ class OpenAIAPIClient extends EventTarget {
             controller.abort();
         }
         this.abortControllers.clear();
+    }
+
+    async cancelForegroundTurn(sessionId, requestId = '') {
+        const normalizedSessionId = String(sessionId || '').trim();
+        if (!normalizedSessionId) {
+            throw new Error('A session ID is required to cancel the active reply.');
+        }
+
+        const payload = {};
+        const normalizedRequestId = String(requestId || '').trim();
+        if (normalizedRequestId) {
+            payload.requestId = normalizedRequestId;
+        }
+
+        const response = await fetch(`${BASE_URL_WITHOUT_API}/api/sessions/${encodeURIComponent(normalizedSessionId)}/foreground/cancel`, {
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+            const error = new Error(`HTTP ${response.status}`);
+            error.status = response.status;
+            error.response = await this.parseErrorPayload(response);
+            throw error;
+        }
+
+        return response.json();
     }
 
     /**

@@ -18,6 +18,10 @@ jest.mock('./project-memory', () => ({
   buildProjectMemoryInstructions: jest.fn(() => ''),
 }));
 
+jest.mock('./session-compaction', () => ({
+  buildSessionCompactionInstructions: jest.fn(() => ''),
+}));
+
 jest.mock('./routes/admin/settings.controller', () => ({
   settings: {
     personality: {
@@ -38,6 +42,7 @@ jest.mock('./runtime-control-state', () => ({
 const { buildSoulInstructions } = require('./agent-soul');
 const { buildAgentNotesInstructions } = require('./agent-notes');
 const { buildAssetManagerInstructions } = require('./asset-manager');
+const { buildSessionCompactionInstructions } = require('./session-compaction');
 const { buildSessionInstructions } = require('./session-instructions');
 
 describe('buildSessionInstructions', () => {
@@ -46,6 +51,7 @@ describe('buildSessionInstructions', () => {
     buildSoulInstructions.mockReturnValue('[Agent soul]\nSoul content');
     buildAgentNotesInstructions.mockReturnValue('[Carryover notes memory]\nNotes content');
     buildAssetManagerInstructions.mockReturnValue('[Indexed asset manager]\nAsset search content');
+    buildSessionCompactionInstructions.mockReturnValue('');
   });
 
   test('injects the shared soul, carryover notes, and indexed asset guidance between base instructions and saved agent metadata', () => {
@@ -105,5 +111,19 @@ describe('buildSessionInstructions', () => {
     expect(result).toContain('Treat this chat as isolated from other chats by default.');
     expect(result).not.toContain('[Carryover notes memory]');
     expect(result).not.toContain('[Indexed asset manager]');
+  });
+
+  test('includes the session compaction carryover block for isolated sessions', () => {
+    buildSessionCompactionInstructions.mockReturnValue('[Session compaction]\nCompacted summary');
+
+    const result = buildSessionInstructions({
+      metadata: {
+        sessionIsolation: true,
+      },
+    }, 'Base instructions');
+
+    expect(buildSessionCompactionInstructions).toHaveBeenCalled();
+    expect(result).toContain('[Session isolation]');
+    expect(result).toContain('[Session compaction]\nCompacted summary');
   });
 });

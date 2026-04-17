@@ -2,6 +2,7 @@ const { v4: uuidv4 } = require('uuid');
 const { getSessionControlState } = require('./runtime-control-state');
 
 const DEFAULT_FOREGROUND_PLACEHOLDER = 'Working in background...';
+const DEFAULT_CANCELLED_PLACEHOLDER = 'Stopped.';
 
 function isPlainObject(value) {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -265,9 +266,45 @@ async function failForegroundTurn(sessionStore, sessionId, turn = null, message 
     return sessionStore.get(sessionId);
 }
 
+async function cancelForegroundTurn(sessionStore, sessionId, turn = null, options = {}) {
+    const normalizedTurn = normalizeForegroundTurn(turn);
+    if (!sessionStore || !sessionId || !normalizedTurn || typeof sessionStore.upsertMessage !== 'function') {
+        return null;
+    }
+
+    const cancelledMessage = normalizeString(options.message || options.content);
+    const finalContent = cancelledMessage || DEFAULT_CANCELLED_PLACEHOLDER;
+    const excludeFromTranscript = options.excludeFromTranscript === true || !cancelledMessage;
+    const cancelledBy = normalizeString(options.cancelledBy || options.cancelled_by || 'user');
+    const reason = normalizeString(options.reason || 'user_cancelled') || 'user_cancelled';
+
+    await sessionStore.upsertMessage(sessionId, {
+        id: normalizedTurn.assistantMessageId,
+        role: 'assistant',
+        content: finalContent,
+        timestamp: normalizedTurn.assistantTimestamp,
+        metadata: {
+            foregroundRequestId: normalizedTurn.requestId,
+            isStreaming: false,
+            pendingForeground: false,
+            cancelled: true,
+            cancelledBy,
+            stopReason: reason,
+            excludeFromTranscript,
+            liveState: null,
+        },
+    });
+    await sessionStore.updateControlState(sessionId, {
+        foregroundTurn: null,
+    });
+
+    return sessionStore.get(sessionId);
+}
+
 module.exports = {
     beginForegroundTurn,
     buildForegroundTurnMessageOptions,
+    cancelForegroundTurn,
     failForegroundTurn,
     persistForegroundTurnMessages,
     resolveForegroundTurn,

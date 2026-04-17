@@ -249,6 +249,18 @@ function closeSseWithError(sse, sessionId, err) {
     return true;
 }
 
+function writeSseProgressPayload(sse, sessionId, progress = {}) {
+    if (!sse || sse.isClosed()) {
+        return false;
+    }
+
+    return sse.write(`data: ${JSON.stringify({
+        type: 'progress',
+        sessionId,
+        progress,
+    })}\n\n`);
+}
+
 router.post('/', validate(chatSchema), async (req, res, next) => {
     let runtimeTask = null;
     let streamRequested = false;
@@ -615,6 +627,9 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 memoryScope,
                 metadata: effectiveRequestMetadata,
                 ownerId,
+                onProgress: (progress) => {
+                    writeSseProgressPayload(activeSse, sessionId, progress);
+                },
             });
             const response = execution.response;
 

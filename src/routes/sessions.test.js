@@ -14,6 +14,8 @@ jest.mock('../session-store', () => ({
         setActiveSession: jest.fn(),
         listMessages: jest.fn(),
         update: jest.fn(),
+        updateControlState: jest.fn(),
+        upsertMessage: jest.fn(),
         delete: jest.fn(),
         get: jest.fn(),
     },
@@ -32,14 +34,32 @@ jest.mock('../artifacts/artifact-service', () => ({
     },
 }));
 
+jest.mock('../foreground-request-registry', () => ({
+    abortForegroundRequest: jest.fn(),
+}));
+
+jest.mock('../foreground-turn-state', () => ({
+    cancelForegroundTurn: jest.fn(),
+    resolveForegroundTurn: jest.fn(),
+}));
+
 const { sessionStore } = require('../session-store');
 const { artifactService } = require('../artifacts/artifact-service');
+const { abortForegroundRequest } = require('../foreground-request-registry');
+const { cancelForegroundTurn, resolveForegroundTurn } = require('../foreground-turn-state');
 const sessionsRouter = require('./sessions');
 
 describe('/api/sessions route', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         sessionStore.isPersistent.mockReturnValue(true);
+        abortForegroundRequest.mockReturnValue({
+            cancelled: false,
+            active: false,
+            reason: 'not_found',
+        });
+        resolveForegroundTurn.mockReturnValue(null);
+        cancelForegroundTurn.mockResolvedValue(null);
     });
 
     test('enriches session list responses with workload summaries', async () => {
@@ -213,8 +233,6 @@ describe('/api/sessions route', () => {
             metadata: expect.objectContaining({
                 ownerId: 'phill',
                 clientSurface: 'web-chat',
-                memoryScope: 'web-chat',
-                mode: 'chat',
                 title: 'Release Checklist',
             }),
         });
@@ -305,5 +323,106 @@ describe('/api/sessions route', () => {
                 format: 'pdf',
             }),
         ]);
+    });
+
+    test('cancels an active foreground request for the owned session', async () => {
+        sessionStore.getOwned.mockResolvedValue({
+            id: 'session-1',
+            metadata: { ownerId: 'phill', clientSurface: 'web-chat' },
+        });
+        resolveForegroundTurn.mockReturnValue({
+            requestId: 'request-1',
+            assistantMessageId: 'assistant-1',
+            clientSurface: 'web-chat',
+            status: 'running',
+        });
+        abortForegroundRequest.mockReturnValue({
+            cancelled: true,
+            active: true,
+            reason: 'user_cancelled',
+            sessionId: 'session-1',
+            requestId: 'request-1',
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use((req, _res, next) => {
+            req.user = { username: 'phill' };
+            next();
+        });
+        app.use('/api/sessions', sessionsRouter);
+
+        const response = await request(app)
+            .post('/api/sessions/session-1/foreground/cancel')
+            .send({ requestId: 'request-1' });
+
+        expect(response.status).toBe(200);
+        expect(abortForegroundRequest).toHaveBeenCalledWith({
+            sessionId: 'session-1',
+            requestId: 'request-1',
+            ownerId: 'phill',
+            reason: 'user_cancelled',
+        });
+        expect(cancelForegroundTurn).not.toHaveBeenCalled();
+        expect(response.body).toEqual(expect.objectContaining({
+            sessionId: 'session-1',
+            requestId: 'request-1',
+            cancelled: true,
+            active: true,
+            persisted: false,
+            reason: 'user_cancelled',
+        }));
+    });
+
+    test('persists cancellation when the foreground request is no longer registered', async () => {
+        sessionStore.getOwned.mockResolvedValue({
+            id: 'session-1',
+            metadata: { ownerId: 'phill', clientSurface: 'web-chat' },
+        });
+        const persistedTurn = {
+            requestId: 'request-2',
+            assistantMessageId: 'assistant-2',
+            clientSurface: 'web-chat',
+            status: 'running',
+        };
+        resolveForegroundTurn.mockReturnValue(persistedTurn);
+        abortForegroundRequest.mockReturnValue({
+            cancelled: false,
+            active: false,
+            reason: 'not_found',
+            sessionId: 'session-1',
+            requestId: 'request-2',
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use((req, _res, next) => {
+            req.user = { username: 'phill' };
+            next();
+        });
+        app.use('/api/sessions', sessionsRouter);
+
+        const response = await request(app)
+            .post('/api/sessions/session-1/foreground/cancel')
+            .send({ requestId: 'request-2' });
+
+        expect(response.status).toBe(200);
+        expect(cancelForegroundTurn).toHaveBeenCalledWith(
+            sessionStore,
+            'session-1',
+            persistedTurn,
+            expect.objectContaining({
+                cancelledBy: 'user',
+                reason: 'user_cancelled',
+            }),
+        );
+        expect(response.body).toEqual(expect.objectContaining({
+            sessionId: 'session-1',
+            requestId: 'request-2',
+            cancelled: true,
+            active: false,
+            persisted: true,
+            reason: 'not_found',
+        }));
     });
 });

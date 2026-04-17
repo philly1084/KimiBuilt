@@ -3,6 +3,7 @@ const { buildSoulInstructions } = require('./agent-soul');
 const { buildAssetManagerInstructions } = require('./asset-manager');
 const { buildAgentNotesInstructions } = require('./agent-notes');
 const { buildProjectMemoryInstructions } = require('./project-memory');
+const { buildSessionCompactionInstructions } = require('./session-compaction');
 const settingsController = require('./routes/admin/settings.controller');
 const { getSessionControlState } = require('./runtime-control-state');
 const { isSessionIsolationEnabled } = require('./session-scope');
@@ -118,6 +119,11 @@ function buildSessionInstructions(session, baseInstructions = '') {
     const projectMemory = buildProjectMemoryInstructions(session);
     if (projectMemory) {
         parts.push(projectMemory);
+    }
+
+    const sessionCompaction = buildSessionCompactionInstructions(session);
+    if (sessionCompaction) {
+        parts.push(sessionCompaction);
     }
 
     const remoteWorkingState = buildRemoteWorkingStateInstructions(session);

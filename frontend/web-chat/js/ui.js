@@ -2269,6 +2269,22 @@ class UIHelpers {
 
     getLivePhaseMeta(phase = 'thinking') {
         switch (String(phase || '').trim().toLowerCase()) {
+            case 'planning':
+                return {
+                    phase: 'planning',
+                    label: 'Planning',
+                    text: 'Planning the work',
+                    detail: 'Estimating the steps and ordering the work.',
+                    icon: 'list-todo',
+                };
+            case 'executing':
+                return {
+                    phase: 'executing',
+                    label: 'Working',
+                    text: 'Working through the steps',
+                    detail: 'Executing the planned steps and updating progress.',
+                    icon: 'hammer',
+                };
             case 'reasoning':
                 return {
                     phase: 'reasoning',
@@ -2284,6 +2300,22 @@ class UIHelpers {
                     text: 'Checking tools',
                     detail: 'Reviewing tool results and pulling in context.',
                     icon: 'wrench',
+                };
+            case 'finalizing':
+                return {
+                    phase: 'finalizing',
+                    label: 'Finalizing',
+                    text: 'Finalizing the reply',
+                    detail: 'Turning the completed work into the final response.',
+                    icon: 'sparkles',
+                };
+            case 'blocked':
+                return {
+                    phase: 'blocked',
+                    label: 'Blocked',
+                    text: 'Work is blocked',
+                    detail: 'A blocking issue needs attention before the task can continue.',
+                    icon: 'triangle-alert',
                 };
             case 'writing':
                 return {
@@ -2444,6 +2476,137 @@ class UIHelpers {
         return Boolean(this.getMessageReasoningDisplayState(message, isStreaming));
     }
 
+    normalizeAssistantProgressStepStatus(status = '') {
+        switch (String(status || '').trim().toLowerCase()) {
+            case 'completed':
+            case 'done':
+                return 'completed';
+            case 'in_progress':
+            case 'running':
+            case 'active':
+                return 'in_progress';
+            case 'failed':
+            case 'error':
+            case 'blocked':
+                return 'failed';
+            case 'skipped':
+                return 'skipped';
+            default:
+                return 'pending';
+        }
+    }
+
+    getAssistantProgressState(message = null) {
+        const rawProgress = message?.progressState
+            || message?.metadata?.progressState
+            || null;
+        if (!rawProgress || typeof rawProgress !== 'object') {
+            return null;
+        }
+
+        const steps = (Array.isArray(rawProgress.steps) ? rawProgress.steps : [])
+            .map((step, index) => {
+                const title = String(step?.title || '').trim();
+                if (!title) {
+                    return null;
+                }
+
+                return {
+                    id: String(step?.id || `progress-step-${index + 1}`).trim() || `progress-step-${index + 1}`,
+                    title,
+                    status: this.normalizeAssistantProgressStepStatus(step?.status),
+                };
+            })
+            .filter(Boolean);
+        if (steps.length < 2) {
+            return null;
+        }
+
+        const totalSteps = Number.isFinite(Number(rawProgress.totalSteps)) && Number(rawProgress.totalSteps) > 0
+            ? Number(rawProgress.totalSteps)
+            : steps.length;
+        const completedSteps = Number.isFinite(Number(rawProgress.completedSteps)) && Number(rawProgress.completedSteps) >= 0
+            ? Math.min(totalSteps, Number(rawProgress.completedSteps))
+            : steps.filter((step) => ['completed', 'skipped'].includes(step.status)).length;
+        let activeStepIndex = steps.findIndex((step) => step.status === 'in_progress');
+        if (activeStepIndex < 0 && completedSteps < totalSteps) {
+            activeStepIndex = steps.findIndex((step) => step.status === 'pending');
+        }
+        const detail = String(rawProgress.detail || '').trim();
+        const phase = String(rawProgress.phase || '').trim().toLowerCase() || 'thinking';
+        const estimated = rawProgress.estimated !== false;
+        const summary = String(rawProgress.summary || '').trim()
+            || `${completedSteps}/${totalSteps} steps complete`;
+        const progressUnits = Math.min(totalSteps, completedSteps + (activeStepIndex >= 0 && completedSteps < totalSteps ? 0.45 : 0));
+        const percent = totalSteps > 0
+            ? Math.max(8, Math.min(100, Math.round((progressUnits / totalSteps) * 100)))
+            : 0;
+
+        return {
+            phase,
+            detail,
+            estimated,
+            summary,
+            totalSteps,
+            completedSteps,
+            activeStepIndex,
+            percent,
+            steps,
+        };
+    }
+
+    buildProgressTrackerMarkup(message = null, isStreaming = false) {
+        const progressState = this.getAssistantProgressState(message);
+        if (!progressState) {
+            return '';
+        }
+
+        const liveBadge = isStreaming
+            ? '<span class="assistant-progress-card__badge assistant-progress-card__badge--live"><span class="assistant-progress-card__pulse" aria-hidden="true"></span>Live</span>'
+            : '<span class="assistant-progress-card__badge">Snapshot</span>';
+        const noteText = progressState.estimated
+            ? 'Estimated steps may adjust as the task changes.'
+            : 'Progress reflects the active execution plan.';
+        const stepsHtml = progressState.steps.map((step, index) => {
+            const isActive = index === progressState.activeStepIndex;
+            const stateLabel = ({
+                completed: 'Done',
+                in_progress: 'Working',
+                failed: 'Failed',
+                skipped: 'Skipped',
+                pending: 'Pending',
+            })[step.status] || 'Pending';
+
+            return `
+                <li class="assistant-progress-card__step assistant-progress-card__step--${step.status}${isActive ? ' is-active' : ''}">
+                    <span class="assistant-progress-card__step-dot" aria-hidden="true"></span>
+                    <span class="assistant-progress-card__step-title">${this.escapeHtml(step.title)}</span>
+                    <span class="assistant-progress-card__step-state">${this.escapeHtml(stateLabel)}</span>
+                </li>
+            `;
+        }).join('');
+
+        return `
+            <div class="assistant-progress-card${isStreaming ? ' is-live' : ''}">
+                <div class="assistant-progress-card__surface" aria-live="polite">
+                    <div class="assistant-progress-card__header">
+                        <div class="assistant-progress-card__copy">
+                            <span class="assistant-progress-card__eyebrow">${progressState.estimated ? 'Estimated Steps' : 'Progress'}</span>
+                            <span class="assistant-progress-card__summary">${this.escapeHtml(progressState.summary)}</span>
+                        </div>
+                        ${liveBadge}
+                    </div>
+                    ${progressState.detail ? `<div class="assistant-progress-card__detail">${this.escapeHtml(progressState.detail)}</div>` : ''}
+                    <div class="assistant-progress-card__bar" aria-hidden="true">
+                        <span style="width:${progressState.percent}%"></span>
+                    </div>
+                    <ol class="assistant-progress-card__steps">${stepsHtml}</ol>
+                    <div class="assistant-progress-card__note">${this.escapeHtml(noteText)}</div>
+                </div>
+            </div>
+        `;
+    }
+
     buildReasoningSummaryPreview(summary = '', maxLength = 140) {
         const normalized = String(summary || '').replace(/\s+/g, ' ').trim();
         if (!normalized) {
@@ -2524,10 +2687,11 @@ class UIHelpers {
             : { content: messageOrContent };
         const effectiveStreaming = isStreaming === true || message?.isStreaming === true;
         const content = this.resolveAssistantVisibleContent(message);
+        const progressTracker = this.buildProgressTrackerMarkup(message, effectiveStreaming);
         const reasoningRibbon = this.buildReasoningRibbonMarkup(message, effectiveStreaming);
         if (!content) {
             return {
-                html: reasoningRibbon || (effectiveStreaming ? this.buildStreamingPlaceholderMarkup(message) : ''),
+                html: `${progressTracker}${reasoningRibbon || (effectiveStreaming ? this.buildStreamingPlaceholderMarkup(message) : '')}`,
                 variant: 'default',
             };
         }
@@ -2571,7 +2735,7 @@ class UIHelpers {
             }
 
             return {
-                html: `${reasoningRibbon}${html}`,
+                html: `${progressTracker}${reasoningRibbon}${html}`,
                 variant: 'agent-brief',
             };
         }
@@ -2584,7 +2748,7 @@ class UIHelpers {
         }
 
         return {
-            html: `${reasoningRibbon}${html}`,
+            html: `${progressTracker}${reasoningRibbon}${html}`,
             variant: 'default',
         };
     }

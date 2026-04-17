@@ -4329,6 +4329,174 @@ body.layout-minimal #input-meta-row {
     padding-top: 0.9rem;
 }
 
+.assistant-progress-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 0.85rem;
+    padding: 0.2rem 0.25rem 0;
+}
+
+.assistant-progress-card__surface {
+    display: flex;
+    flex-direction: column;
+    gap: 0.72rem;
+    width: 100%;
+    padding: 0.78rem 0.88rem;
+    border: 1px solid rgba(88, 166, 255, 0.16);
+    border-radius: 0.95rem;
+    background: rgba(88, 166, 255, 0.06);
+}
+
+.assistant-progress-card__header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.8rem;
+}
+
+.assistant-progress-card__copy {
+    display: flex;
+    flex-direction: column;
+    gap: 0.12rem;
+    min-width: 0;
+}
+
+.assistant-progress-card__eyebrow {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+}
+
+.assistant-progress-card__summary {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.assistant-progress-card__badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.38rem;
+    padding: 0.28rem 0.52rem;
+    border-radius: 999px;
+    border: 1px solid rgba(88, 166, 255, 0.2);
+    background: rgba(255, 255, 255, 0.04);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+}
+
+.assistant-progress-card__badge--live {
+    color: var(--accent);
+}
+
+.assistant-progress-card__pulse {
+    width: 0.42rem;
+    height: 0.42rem;
+    border-radius: 999px;
+    background: var(--accent);
+    animation: live-orb-pulse 1.6s ease-in-out infinite;
+}
+
+.assistant-progress-card__detail {
+    font-size: 0.83rem;
+    color: var(--text-secondary);
+}
+
+.assistant-progress-card__bar {
+    position: relative;
+    overflow: hidden;
+    height: 0.42rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.assistant-progress-card__bar > span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, rgba(88, 166, 255, 0.62), rgba(88, 166, 255, 0.92));
+    transition: width var(--transition-normal);
+}
+
+.assistant-progress-card__steps {
+    display: flex;
+    flex-direction: column;
+    gap: 0.42rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.assistant-progress-card__step {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.55rem;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+}
+
+.assistant-progress-card__step-dot {
+    width: 0.62rem;
+    height: 0.62rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.assistant-progress-card__step-title {
+    min-width: 0;
+    color: var(--text-primary);
+}
+
+.assistant-progress-card__step-state {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+}
+
+.assistant-progress-card__step--completed .assistant-progress-card__step-dot,
+.assistant-progress-card__step--skipped .assistant-progress-card__step-dot {
+    background: rgba(52, 211, 153, 0.92);
+    border-color: rgba(52, 211, 153, 0.92);
+}
+
+.assistant-progress-card__step--in_progress .assistant-progress-card__step-dot {
+    background: var(--accent);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 4px rgba(88, 166, 255, 0.14);
+}
+
+.assistant-progress-card__step--failed .assistant-progress-card__step-dot {
+    background: rgba(248, 113, 113, 0.92);
+    border-color: rgba(248, 113, 113, 0.92);
+}
+
+.assistant-progress-card__step--skipped .assistant-progress-card__step-state {
+    color: var(--text-tertiary);
+}
+
+.assistant-progress-card__step--failed .assistant-progress-card__step-state {
+    color: #f87171;
+}
+
+.assistant-progress-card__step.is-active .assistant-progress-card__step-title {
+    font-weight: 600;
+}
+
+.assistant-progress-card__note {
+    font-size: 0.74rem;
+    color: var(--text-tertiary);
+}
+
 .assistant-reasoning-ribbon {
     display: flex;
     flex-direction: column;

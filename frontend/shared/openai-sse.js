@@ -646,6 +646,21 @@
       return events;
     }
 
+    if (payload.type === 'progress') {
+      const progress = payload.progress && typeof payload.progress === 'object'
+        ? payload.progress
+        : {};
+      events.push({
+        type: 'progress',
+        progress,
+        phase: stripNullCharacters(progress.phase || payload.phase || ''),
+        detail: stripNullCharacters(progress.detail || payload.detail || ''),
+        raw: payload,
+        ...metadata,
+      });
+      return events;
+    }
+
     if (payload.type === 'delta') {
       events.push({
         type: 'text_delta',

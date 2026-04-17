@@ -16,6 +16,11 @@ const {
     mergeControlState,
     normalizeRuntimeControlState,
 } = require('./runtime-control-state');
+const {
+    buildSessionCompaction,
+    normalizeSessionCompaction,
+    shouldCompactSession,
+} = require('./session-compaction');
 
 const MAX_RECENT_MESSAGES = config.memory.recentMessageWindow;
 const MAX_RECENT_MESSAGE_LENGTH = config.memory.recentMessageCharLimit;
@@ -159,13 +164,39 @@ class SessionStore {
             }));
     }
 
-    normalizeRecentMessages(messages = []) {
+    normalizeRecentMessages(messages = [], limit = MAX_RECENT_MESSAGES) {
+        const normalizedLimit = Math.max(0, limit);
+        if (normalizedLimit === 0) {
+            return [];
+        }
+
         return this.normalizeTranscriptMessages(messages)
             .map((entry) => ({
                 ...entry,
                 content: this.trimRecentMessageContent(entry.content || ''),
             }))
-            .slice(-MAX_RECENT_MESSAGES);
+            .slice(-normalizedLimit);
+    }
+
+    buildCompactionAwareRecentMessages(messages = [], limit = MAX_RECENT_MESSAGES, sessionCompaction = null) {
+        const normalizedLimit = Math.max(0, limit);
+        if (normalizedLimit === 0) {
+            return [];
+        }
+
+        const compaction = normalizeSessionCompaction(sessionCompaction || {});
+        const transcriptMessages = this.normalizeTranscriptMessages(messages);
+        const visibleMessages = transcriptMessages.slice(Math.min(
+            compaction.compactedMessageCount,
+            transcriptMessages.length,
+        ));
+
+        return visibleMessages
+            .map((entry) => ({
+                ...entry,
+                content: this.trimRecentMessageContent(entry.content || ''),
+            }))
+            .slice(-normalizedLimit);
     }
 
     normalizeRecentMessageRow(row) {
@@ -173,7 +204,7 @@ class SessionStore {
             role: row?.role,
             content: row?.content,
             timestamp: row?.created_at instanceof Date ? row.created_at.toISOString() : row?.created_at,
-        }]);
+        }], 1);
 
         return normalized[0] || null;
     }
@@ -194,6 +225,10 @@ class SessionStore {
 
         if ('recentMessages' in metadata) {
             normalized.recentMessages = this.normalizeRecentMessages(metadata.recentMessages);
+        }
+
+        if ('sessionCompaction' in metadata) {
+            normalized.sessionCompaction = normalizeSessionCompaction(metadata.sessionCompaction || {});
         }
 
         return normalized;
@@ -1002,31 +1037,12 @@ class SessionStore {
             return [];
         }
 
-        if (this.usePostgres) {
-            const result = await postgres.query(
-                `
-                    SELECT id, role, content, created_at, metadata
-                    FROM session_messages
-                    WHERE session_id = $1
-                      AND COALESCE(metadata->>'excludeFromTranscript', 'false') <> 'true'
-                    ORDER BY created_at DESC
-                    LIMIT $2
-                `,
-                [sessionId, Math.max(0, limit)],
-            );
-
-            return result.rows
-                .map((row) => this.normalizeRecentMessageRow({
-                    role: row?.role,
-                    content: row?.content,
-                    created_at: row?.created_at,
-                }))
-                .filter(Boolean)
-                .reverse();
-        }
-
-        const transcript = this.sessionMessages.get(sessionId) || [];
-        return this.normalizeRecentMessages(transcript.slice(-Math.max(0, limit)));
+        const transcript = await this.loadAllSessionMessages(sessionId);
+        return this.buildCompactionAwareRecentMessages(
+            transcript,
+            limit,
+            session?.metadata?.sessionCompaction || null,
+        );
     }
 
     async appendMessages(id, messages = []) {
@@ -1062,7 +1078,11 @@ class SessionStore {
 
             return this.update(id, {
                 metadata: {
-                    recentMessages: this.normalizeRecentMessages(await this.listMessages(id, MAX_RECENT_MESSAGES)),
+                    recentMessages: this.buildCompactionAwareRecentMessages(
+                        await this.loadAllSessionMessages(id),
+                        MAX_RECENT_MESSAGES,
+                        current?.metadata?.sessionCompaction || null,
+                    ),
                 },
             });
         }
@@ -1078,7 +1098,11 @@ class SessionStore {
 
         const updated = await this.update(id, {
             metadata: {
-                recentMessages: this.normalizeRecentMessages(nextMessages),
+                recentMessages: this.buildCompactionAwareRecentMessages(
+                    nextMessages,
+                    MAX_RECENT_MESSAGES,
+                    current?.metadata?.sessionCompaction || null,
+                ),
             },
         });
         await this.persistFallbackState();
@@ -1125,6 +1149,16 @@ class SessionStore {
                 return null;
             }
 
+            await this.update(id, {
+                metadata: {
+                    recentMessages: this.buildCompactionAwareRecentMessages(
+                        await this.loadAllSessionMessages(id),
+                        MAX_RECENT_MESSAGES,
+                        current?.metadata?.sessionCompaction || null,
+                    ),
+                },
+            });
+
             return this.toClientMessage({
                 id: result.rows[0].id,
                 role: result.rows[0].role,
@@ -1157,7 +1191,11 @@ class SessionStore {
 
         await this.update(id, {
             metadata: {
-                recentMessages: this.normalizeRecentMessages(nextMessages),
+                recentMessages: this.buildCompactionAwareRecentMessages(
+                    nextMessages,
+                    MAX_RECENT_MESSAGES,
+                    current?.metadata?.sessionCompaction || null,
+                ),
             },
         });
         await this.persistFallbackState();
@@ -1215,6 +1253,89 @@ class SessionStore {
         );
 
         return this.toSession(result.rows[0]);
+    }
+
+    async loadAllSessionMessages(sessionId) {
+        await this.initialize();
+
+        const normalizedSessionId = this.normalizeSessionId(sessionId);
+        if (!normalizedSessionId) {
+            return [];
+        }
+
+        if (this.usePostgres) {
+            const result = await postgres.query(
+                `
+                    SELECT id, role, content, created_at, metadata
+                    FROM session_messages
+                    WHERE session_id = $1
+                    ORDER BY created_at ASC
+                `,
+                [normalizedSessionId],
+            );
+
+            return result.rows
+                .map((row) => this.toClientMessage({
+                    id: row?.id,
+                    role: ['user', 'assistant', 'system', 'tool'].includes(row?.role) ? row.role : null,
+                    content: stripNullCharacters(row?.content || '').trim(),
+                    timestamp: row?.created_at instanceof Date ? row.created_at.toISOString() : row?.created_at,
+                    metadata: row?.metadata || {},
+                }))
+                .filter((row) => row.role && row.content);
+        }
+
+        return (this.sessionMessages.get(normalizedSessionId) || [])
+            .map((message) => this.toClientMessage(message));
+    }
+
+    async maybeCompactSession(id, {
+        ownerId = null,
+        workflow = null,
+        projectMemory = null,
+    } = {}) {
+        await this.initialize();
+
+        const session = ownerId
+            ? await this.getOwned(id, ownerId)
+            : await this.get(id);
+        if (!session) {
+            return null;
+        }
+
+        const messages = await this.loadAllSessionMessages(session.id);
+        const existingCompaction = normalizeSessionCompaction(
+            session?.metadata?.sessionCompaction || {},
+        );
+
+        if (!shouldCompactSession({
+            messages,
+            existingCompaction,
+            workflow,
+        })) {
+            return session;
+        }
+
+        const nextCompaction = buildSessionCompaction({
+            messages,
+            existingCompaction,
+            workflow,
+            projectMemory,
+        });
+        if (!nextCompaction) {
+            return session;
+        }
+
+        return this.update(session.id, {
+            metadata: {
+                sessionCompaction: nextCompaction,
+                recentMessages: this.buildCompactionAwareRecentMessages(
+                    messages,
+                    MAX_RECENT_MESSAGES,
+                    nextCompaction,
+                ),
+            },
+        });
     }
 
     async delete(id) {

@@ -815,6 +815,83 @@ describe('/api/chat route', () => {
         ]));
     });
 
+    test('streams progress updates for long-running chat work through /api/chat', async () => {
+        ensureRuntimeToolManager.mockResolvedValue({
+            getTool: jest.fn(),
+        });
+        resolveSshRequestContext.mockReturnValue({
+            effectivePrompt: 'Investigate and fix the issue.',
+        });
+        executeConversationRuntime.mockImplementation(async (_app, params) => {
+            params.onProgress?.({
+                phase: 'planning',
+                detail: 'Estimating the work and lining up the steps.',
+                summary: '0/3 steps complete',
+                totalSteps: 3,
+                completedSteps: 0,
+                estimated: true,
+                steps: [
+                    { id: 'inspect', title: 'Inspect the current state', status: 'in_progress' },
+                    { id: 'implement', title: 'Implement the requested changes', status: 'pending' },
+                    { id: 'validate', title: 'Validate the result', status: 'pending' },
+                ],
+            });
+            params.onProgress?.({
+                phase: 'executing',
+                detail: 'Inspect the current state',
+                summary: '1/3 steps complete',
+                totalSteps: 3,
+                completedSteps: 1,
+                estimated: true,
+                steps: [
+                    { id: 'inspect', title: 'Inspect the current state', status: 'completed' },
+                    { id: 'implement', title: 'Implement the requested changes', status: 'in_progress' },
+                    { id: 'validate', title: 'Validate the result', status: 'pending' },
+                ],
+            });
+
+            return {
+                handledPersistence: false,
+                response: (async function* streamWithProgress() {
+                    yield {
+                        type: 'response.completed',
+                        response: {
+                            id: 'resp-stream-progress-1',
+                            model: 'gpt-test',
+                            output: [{
+                                type: 'message',
+                                role: 'assistant',
+                                content: [{ type: 'text', text: 'Done' }],
+                            }],
+                            metadata: {
+                                toolEvents: [],
+                            },
+                        },
+                    };
+                }()),
+            };
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use('/api/chat', chatRouter);
+
+        const response = await request(app)
+            .post('/api/chat')
+            .send({
+                sessionId: 'session-1',
+                message: 'Investigate and fix the issue.',
+                stream: true,
+            });
+
+        expect(response.status).toBe(200);
+        expect(response.text).toContain('"type":"progress"');
+        expect(response.text).toContain('"phase":"planning"');
+        expect(response.text).toContain('"summary":"1/3 steps complete"');
+        expect(response.text).toContain('"totalSteps":3');
+        expect(response.text).toContain('"type":"delta","content":"Done"');
+    });
+
     test('streams the completed response text when the runtime emits no deltas', async () => {
         ensureRuntimeToolManager.mockResolvedValue({
             getTool: jest.fn(),

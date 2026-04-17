@@ -147,6 +147,23 @@ function normalizeClientNow(value = '') {
     return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
+function sendWsProgressPayload(ws, sessionId, progress = {}) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        return false;
+    }
+
+    try {
+        ws.send(JSON.stringify({
+            type: 'progress',
+            sessionId,
+            progress,
+        }));
+        return true;
+    } catch (_error) {
+        return false;
+    }
+}
+
 function setupWebSocket(wss, app = null) {
     wss.on('connection', (ws, req) => {
         ws.app = app;
@@ -559,6 +576,9 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
             memoryScope,
             metadata: effectiveRequestMetadata,
             ownerId,
+            onProgress: (progress) => {
+                sendWsProgressPayload(ws, session.id, progress);
+            },
         });
         const response = execution.response;
 

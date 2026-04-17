@@ -258,6 +258,79 @@ describe('SessionStore recent message continuity', () => {
         expect(recent[0]).toEqual(expect.objectContaining({ content: 'message-1' }));
     });
 
+    test('getRecentMessages skips transcript content already covered by session compaction', async () => {
+        const store = new SessionStore();
+        store.initialized = true;
+        store.usePostgres = false;
+        const session = await store.create({ mode: 'chat' });
+
+        const transcript = Array.from({ length: 10 }, (_, index) => ({
+            role: index % 2 === 0 ? 'user' : 'assistant',
+            content: `message-${index + 1}`,
+            timestamp: new Date(Date.UTC(2026, 0, 1, 0, index, 0)).toISOString(),
+        }));
+
+        await store.appendMessages(session.id, transcript);
+        await store.update(session.id, {
+            metadata: {
+                sessionCompaction: {
+                    compactedMessageCount: 6,
+                    summary: 'Compacted through 6 transcript messages in this session.',
+                },
+            },
+        });
+
+        const recent = await store.getRecentMessages(session.id, 10);
+        expect(recent.map((entry) => entry.content)).toEqual([
+            'message-7',
+            'message-8',
+            'message-9',
+            'message-10',
+        ]);
+    });
+
+    test('maybeCompactSession stores a summary and rewrites recent continuity at completion points', async () => {
+        const store = new SessionStore();
+        store.initialized = true;
+        store.usePostgres = false;
+        const session = await store.create({ mode: 'chat' });
+
+        const transcript = Array.from({ length: 12 }, (_, index) => ({
+            role: index % 2 === 0 ? 'user' : 'assistant',
+            content: `message-${index + 1} about the deployment workflow`,
+            timestamp: new Date(Date.UTC(2026, 0, 1, 0, index, 0)).toISOString(),
+        }));
+
+        await store.appendMessages(session.id, transcript);
+        const updated = await store.maybeCompactSession(session.id, {
+            workflow: {
+                status: 'completed',
+                lane: 'deploy',
+                stage: 'verified',
+            },
+            projectMemory: {
+                tasks: [{
+                    summary: 'Waiting on DNS propagation for the ingress hostname.',
+                    status: 'partial',
+                }],
+            },
+        });
+
+        expect(updated.metadata.sessionCompaction).toEqual(expect.objectContaining({
+            compactedMessageCount: 6,
+            trigger: 'workflow-completed',
+        }));
+        expect(updated.metadata.sessionCompaction.summary).toContain('Waiting on DNS propagation');
+        expect(updated.metadata.recentMessages.map((entry) => entry.content)).toEqual([
+            'message-7 about the deployment workflow',
+            'message-8 about the deployment workflow',
+            'message-9 about the deployment workflow',
+            'message-10 about the deployment workflow',
+            'message-11 about the deployment workflow',
+            'message-12 about the deployment workflow',
+        ]);
+    });
+
     test('preserves long html content in transcript persistence while trimming only recent continuity', async () => {
         const store = new SessionStore();
         store.initialized = true;

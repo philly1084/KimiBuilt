@@ -3,6 +3,8 @@ const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { artifactService } = require('../artifacts/artifact-service');
 const { mergeRuntimeArtifacts } = require('../runtime-artifacts');
+const { abortForegroundRequest } = require('../foreground-request-registry');
+const { cancelForegroundTurn, resolveForegroundTurn } = require('../foreground-turn-state');
 const {
     buildScopedSessionMetadata,
     hasSessionScopeHints,
@@ -266,6 +268,60 @@ router.put('/:id/messages/:messageId', async (req, res, next) => {
 
         await sessionStore.update(req.params.id, {});
         res.json({ sessionId: req.params.id, message: savedMessage });
+    } catch (err) {
+        next(err);
+    }
+});
+
+router.post('/:id/foreground/cancel', async (req, res, next) => {
+    try {
+        const ownerId = getRequestOwnerId(req);
+        const session = await sessionStore.getOwned(req.params.id, ownerId);
+        if (!session) {
+            return res.status(404).json({ error: { message: 'Session not found' } });
+        }
+
+        const requestedRequestId = normalizeSessionId(
+            req.body?.requestId
+            || req.body?.foregroundRequestId
+            || req.body?.foreground_request_id,
+        );
+        const persistedTurn = resolveForegroundTurn(
+            session,
+            {},
+            session?.metadata?.clientSurface || session?.metadata?.memoryScope || 'web-chat',
+        );
+        const matchingPersistedTurn = persistedTurn && requestedRequestId
+            && ![persistedTurn.requestId, persistedTurn.assistantMessageId].includes(requestedRequestId)
+            ? null
+            : persistedTurn;
+        const cancelResult = abortForegroundRequest({
+            sessionId: req.params.id,
+            requestId: requestedRequestId || matchingPersistedTurn?.requestId || null,
+            ownerId,
+            reason: 'user_cancelled',
+        });
+
+        let persisted = false;
+        if (!cancelResult.cancelled && matchingPersistedTurn) {
+            await cancelForegroundTurn(sessionStore, req.params.id, matchingPersistedTurn, {
+                cancelledBy: 'user',
+                reason: 'user_cancelled',
+            });
+            persisted = true;
+        }
+
+        res.json({
+            sessionId: req.params.id,
+            requestId: cancelResult.requestId
+                || matchingPersistedTurn?.requestId
+                || requestedRequestId
+                || null,
+            cancelled: cancelResult.cancelled === true || persisted,
+            active: cancelResult.active === true,
+            persisted,
+            reason: cancelResult.reason || (persisted ? 'persisted_pending_turn' : 'not_found'),
+        });
     } catch (err) {
         next(err);
     }

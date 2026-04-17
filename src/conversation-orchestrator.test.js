@@ -331,6 +331,93 @@ describe('ConversationOrchestrator', () => {
         }));
     });
 
+    test('triggers session compaction after persistence with merged workflow and project memory state', async () => {
+        const sessionStore = {
+            getOwned: jest.fn().mockResolvedValue({
+                id: 'session-compact',
+                metadata: {
+                    projectMemory: {
+                        tasks: [{
+                            summary: 'Existing project note.',
+                            status: 'partial',
+                        }],
+                    },
+                },
+                controlState: {
+                    workflow: {
+                        lane: 'deploy',
+                        status: 'active',
+                        stage: 'apply',
+                    },
+                },
+            }),
+            get: jest.fn().mockResolvedValue({
+                id: 'session-compact',
+                metadata: {
+                    projectMemory: {
+                        tasks: [{
+                            summary: 'Existing project note.',
+                            status: 'partial',
+                        }],
+                    },
+                },
+                controlState: {
+                    workflow: {
+                        lane: 'deploy',
+                        status: 'active',
+                        stage: 'apply',
+                    },
+                },
+            }),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            updateControlState: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+            maybeCompactSession: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            rememberResponse: jest.fn(),
+            rememberLearnedSkill: jest.fn(async () => undefined),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn(() => null),
+            },
+            sessionStore,
+            memoryService,
+        });
+
+        await orchestrator.persistConversationState({
+            sessionId: 'session-compact',
+            ownerId: 'user-1',
+            userText: 'Finish the deploy verification.',
+            objective: 'Finish the deploy verification.',
+            assistantText: 'Verified the rollout and stored the result.',
+            responseId: 'resp-compact-1',
+            controlStatePatch: {
+                workflow: {
+                    status: 'completed',
+                    stage: 'verified',
+                },
+            },
+        });
+
+        expect(sessionStore.maybeCompactSession).toHaveBeenCalledWith('session-compact', expect.objectContaining({
+            ownerId: 'user-1',
+            workflow: expect.objectContaining({
+                lane: 'deploy',
+                status: 'completed',
+                stage: 'verified',
+            }),
+            projectMemory: expect.any(Object),
+        }));
+    });
+
     test('expands a truncated follow-up from recent transcript before asking the model for a plain response', async () => {
         const llmClient = {
             createResponse: jest.fn().mockResolvedValue(buildResponse('Recovered answer', 'resp_recovered')),
@@ -494,6 +581,84 @@ describe('ConversationOrchestrator', () => {
                 }),
             }),
         }));
+    });
+
+    test('emits progress snapshots for deterministic multi-step work', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            createResponse: jest.fn(),
+            complete: jest.fn(),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (toolId === 'remote-command' ? { id: toolId } : null)),
+            executeTool: jest.fn()
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'remote-command',
+                    data: {
+                        stdout: 'Hostname: ubuntu-32gb-fsn1-2\nArchitecture: aarch64\nOS: Ubuntu 24.04.4 LTS\n19:29:25 up 9 days',
+                        stderr: '',
+                        host: '10.0.0.5:22',
+                    },
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'remote-command',
+                    data: {
+                        stdout: '/dev/sda1 301G 13G 276G 5% /\nMem: 32000 3300 14000 8 12000 27000',
+                        stderr: '',
+                        host: '10.0.0.5:22',
+                    },
+                }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-health-progress', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+        const onProgress = jest.fn();
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        await orchestrator.executeConversation({
+            input: 'can you remote into the server and get a health report',
+            sessionId: 'session-health-progress',
+            stream: false,
+            onProgress,
+        });
+
+        const progressSnapshots = onProgress.mock.calls.map(([snapshot]) => snapshot).filter(Boolean);
+        expect(progressSnapshots.length).toBeGreaterThan(0);
+        expect(progressSnapshots[0]).toEqual(expect.objectContaining({
+            phase: 'planning',
+            totalSteps: expect.any(Number),
+            steps: expect.arrayContaining([
+                expect.objectContaining({
+                    title: expect.any(String),
+                }),
+            ]),
+        }));
+        expect(progressSnapshots.some((snapshot) => snapshot.phase === 'executing')).toBe(true);
+        expect(progressSnapshots.some((snapshot) => snapshot.completedSteps >= 1)).toBe(true);
     });
 
     test('prefers agent-workload over deterministic remote health when the request is scheduled for later', async () => {
