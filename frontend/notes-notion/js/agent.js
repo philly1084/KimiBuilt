@@ -90,6 +90,26 @@ const Agent = (function() {
             ],
         }),
         Object.freeze({
+            id: 'sales',
+            name: 'Sales Pitch',
+            useWhen: 'Sales narratives, proposals, product pitches, client decks, and value-story pages.',
+            matchers: [/\bsales?\b/, /\bpitch\b/, /\bproposal\b/, /\bclient\b/, /\bcustomer\b/, /\broi\b/, /\bvalue prop\b/, /\bobjections?\b/, /\bdemo\b/],
+            structure: [
+                'heading_1 for the offer, product story, or pitch title',
+                'callout with the value proposition or headline win',
+                'heading_2 for the problem or opportunity',
+                'heading_2 for the solution or offer',
+                'quote, bookmark, database, or bulleted_list for proof, metrics, or testimonials',
+                'heading_2 for objections, pricing, or fit notes',
+                'todo or numbered_list for CTA, next steps, or the ask',
+            ],
+            designRules: [
+                'Lead with the outcome, not with the company bio.',
+                'Use proof blocks so claims feel grounded instead of generic.',
+                'End with a concrete ask, next move, or offer structure.',
+            ],
+        }),
+        Object.freeze({
             id: 'meeting',
             name: 'Meeting Notes',
             useWhen: 'Meetings, workshops, interviews, retros, and collaborative sessions.',
@@ -209,6 +229,16 @@ const Agent = (function() {
             heroPromptSuffix: 'team workspace or planning board',
             heroCaptionPrefix: 'Project visual',
         }),
+        sales: Object.freeze({
+            pageIcon: 'ðŸŽ¯',
+            calloutIcon: 'ðŸ’¼',
+            calloutColor: 'orange',
+            sectionTextColor: 'orange',
+            supportingTextColor: 'gray',
+            sourceHeading: 'Proof and References',
+            heroPromptSuffix: 'confident product presentation or customer success scene',
+            heroCaptionPrefix: 'Pitch visual',
+        }),
         meeting: Object.freeze({
             pageIcon: '🗒️',
             calloutIcon: '👥',
@@ -282,6 +312,16 @@ const Agent = (function() {
             styling: 'Use green accents for status, muted notes for context, and clear section separators so the page feels operational.',
         }),
         Object.freeze({
+            id: 'confidence-deck',
+            name: 'Confidence Deck',
+            appliesTo: ['sales', 'brief'],
+            useWhen: 'Sales pitches, offer pages, proposals, and value-story notes that need persuasion without feeling spammy.',
+            topCluster: 'Use title, a headline value callout, and one proof cue or hero visual immediately near the top.',
+            bodyRhythm: 'Move from problem to solution to proof, then end on fit, objections, or next-step clarity.',
+            supportCluster: 'Keep testimonials, case links, objections, or pricing notes in a distinct support cluster.',
+            styling: 'Use warm accent blocks, compact proof blocks, and clean CTA sections so the page feels confident and readable.',
+        }),
+        Object.freeze({
             id: 'guided-reference',
             name: 'Guided Reference',
             appliesTo: ['documentation'],
@@ -344,6 +384,16 @@ const Agent = (function() {
             editingRule: 'Keep the page operational and avoid turning tracker content into long prose.',
         }),
         Object.freeze({
+            id: 'deal-room',
+            name: 'Deal Room',
+            appliesTo: ['sales'],
+            keywords: ['sales', 'pitch', 'proposal', 'roi', 'client', 'customer', 'offer', 'pricing'],
+            palette: 'Orange focal accents, gray support notes, and a restrained green highlight for proof or wins.',
+            headerTreatment: 'Open with a bold value proposition and keep proof close to the top before deeper objections or pricing detail.',
+            visualDirection: 'Use one hero visual or proof block, then let quotes, metrics, and offer sections carry the page.',
+            editingRule: 'Keep claims tied to proof and avoid drifting into generic brand copy.',
+        }),
+        Object.freeze({
             id: 'calm-session',
             name: 'Calm Session',
             appliesTo: ['meeting', 'journal'],
@@ -352,6 +402,192 @@ const Agent = (function() {
             headerTreatment: 'Use a quiet title area followed by a summary callout before the detailed notes.',
             visualDirection: 'Use minimal visuals; let the page feel calm, legible, and easy to revisit.',
             editingRule: 'Preserve chronology or session structure while separating highlights, decisions, and next moves.',
+        }),
+    ]);
+    const NOTES_BLOCK_DESIGN_PATTERNS = Object.freeze([
+        Object.freeze({
+            id: 'executive-signal-brief',
+            name: 'Executive Signal Brief',
+            shortLabel: 'Executive signal',
+            appliesTo: ['brief', 'research', 'sales', 'project'],
+            keywords: ['executive', 'brief', 'decision', 'takeaways', 'summary', 'leadership'],
+            useWhen: 'The page needs a fast-read structure with a clear lead, supporting signal, and next moves.',
+            blockFlow: [
+                'callout for the headline recommendation or bottom line',
+                'bulleted_list for key signals, takeaways, or implications',
+                'heading_2 plus short text for why it matters',
+                'todo or numbered_list for next steps',
+            ],
+            designMoves: [
+                'Keep the opening answer-first.',
+                'Use one focal block and one scan list before heavier prose.',
+                'Pull risks or tradeoffs into their own section instead of burying them.',
+            ],
+            frontendMoves: [
+                'Use update_page for a crisp title and icon.',
+                'Keep section labels compact and visible.',
+            ],
+        }),
+        Object.freeze({
+            id: 'research-evidence-ladder',
+            name: 'Research Evidence Ladder',
+            shortLabel: 'Evidence ladder',
+            appliesTo: ['research', 'documentation'],
+            keywords: ['research', 'evidence', 'findings', 'analysis', 'sources', 'compare', 'comparison'],
+            useWhen: 'The page should move from summary to themed findings to visible proof and source handling.',
+            blockFlow: [
+                'callout for the research question or synthesis',
+                'database or bulleted_list for key findings',
+                'heading_2 sections for each evidence theme',
+                'bookmark or toggle cluster for source notes and verification',
+            ],
+            designMoves: [
+                'Group evidence by theme, not chronology.',
+                'Keep synthesis separate from raw source detail.',
+                'Use bookmarks or databases for proof instead of prose-only citations.',
+            ],
+            frontendMoves: [
+                'Use a visible source cluster near the end of the page.',
+                'Give findings their own colored section labels.',
+            ],
+        }),
+        Object.freeze({
+            id: 'explainer-hero-facts',
+            name: 'Explainer Hero + Facts',
+            shortLabel: 'Hero + facts',
+            appliesTo: ['explainer', 'research'],
+            keywords: ['explainer', 'facts', 'science', 'animal', 'topic', 'overview', 'learn'],
+            useWhen: 'The page should feel visual and approachable while still giving fast factual orientation.',
+            blockFlow: [
+                'callout for the big idea',
+                'image or ai_image hero near the top',
+                'database or quick-facts list cluster',
+                'heading-led sections for how it works, why it matters, or notable traits',
+            ],
+            designMoves: [
+                'Make the first screenful editorial, not textbook-like.',
+                'Use quick facts to break up long explanation sections.',
+                'Reserve toggles for deeper detail or caveats.',
+            ],
+            frontendMoves: [
+                'Use captions and colored section labels to keep the page lively.',
+                'Avoid starting with a wall of text.',
+            ],
+        }),
+        Object.freeze({
+            id: 'sales-proof-stack',
+            name: 'Sales Proof Stack',
+            shortLabel: 'Sales proof',
+            appliesTo: ['sales', 'brief'],
+            keywords: ['sales', 'pitch', 'proposal', 'client', 'customer', 'roi', 'value', 'pricing', 'objection', 'demo'],
+            useWhen: 'The page needs a persuasive flow from pain to solution to proof to next-step clarity.',
+            blockFlow: [
+                'callout for the value proposition or promised outcome',
+                'heading_2 sections for problem, solution, and fit',
+                'quote, bookmark, or database blocks for proof, metrics, or testimonials',
+                'todo or numbered_list for CTA, next step, or offer structure',
+            ],
+            designMoves: [
+                'Lead with the payoff, not the company introduction.',
+                'Tie every claim to proof, testimonial, metric, or example.',
+                'End with a clear ask or next move.',
+            ],
+            frontendMoves: [
+                'Keep proof visible in its own block type, not hidden in paragraphs.',
+                'Use warm accents for the pitch, then calmer support notes for objections or pricing.',
+            ],
+        }),
+        Object.freeze({
+            id: 'operator-status-board',
+            name: 'Operator Status Board',
+            shortLabel: 'Status board',
+            appliesTo: ['project', 'dashboard'],
+            keywords: ['status', 'tracker', 'owners', 'timeline', 'roadmap', 'launch', 'milestone'],
+            useWhen: 'The page should read like a live operating surface instead of a static memo.',
+            blockFlow: [
+                'callout for current status and headline risk or win',
+                'database for workstreams, owners, or metrics',
+                'heading_2 sections for blockers, highlights, and next moves',
+                'todo blocks for immediate actions',
+            ],
+            designMoves: [
+                'Keep status surfaces near the top.',
+                'Prefer structured data over repeated prose.',
+                'Use short sections for blockers and decisions.',
+            ],
+            frontendMoves: [
+                'Use metadata and green accents to reinforce status.',
+                'Keep operational sections compact and scannable.',
+            ],
+        }),
+        Object.freeze({
+            id: 'meeting-decision-log',
+            name: 'Meeting Decision Log',
+            shortLabel: 'Decision log',
+            appliesTo: ['meeting'],
+            keywords: ['meeting', 'agenda', 'decisions', 'attendees', 'action items', 'workshop'],
+            useWhen: 'Notes need a clear split between discussion, decisions, and follow-up work.',
+            blockFlow: [
+                'callout for the headline outcome or meeting summary',
+                'heading_2 sections for agenda, discussion, and decisions',
+                'bulleted_list for decisions or standout points',
+                'todo blocks for follow-up actions',
+            ],
+            designMoves: [
+                'Separate raw notes from resolved decisions.',
+                'Do not bury action items inside discussion paragraphs.',
+                'Use toggles for optional detail or appendices.',
+            ],
+            frontendMoves: [
+                'Use properties for date or owner when helpful.',
+                'Keep the notes calm and legible, not overly styled.',
+            ],
+        }),
+        Object.freeze({
+            id: 'guided-procedure-ladder',
+            name: 'Guided Procedure Ladder',
+            shortLabel: 'Procedure ladder',
+            appliesTo: ['documentation'],
+            keywords: ['guide', 'setup', 'steps', 'runbook', 'procedure', 'workflow'],
+            useWhen: 'Readers need clear task flow, prerequisites, examples, and troubleshooting depth.',
+            blockFlow: [
+                'callout for scope, audience, or warning',
+                'numbered_list for the main procedure',
+                'code, mermaid, or quote blocks for examples and caveats',
+                'toggle section for FAQ or troubleshooting',
+            ],
+            designMoves: [
+                'Keep sequences procedural, not essay-like.',
+                'Put warnings in callouts instead of inline sentences.',
+                'Use toggles for optional depth so the main flow stays clear.',
+            ],
+            frontendMoves: [
+                'Use blue labels and restrained accents.',
+                'Keep the page task-oriented from the first screenful.',
+            ],
+        }),
+        Object.freeze({
+            id: 'reflection-review-loop',
+            name: 'Reflection Review Loop',
+            shortLabel: 'Reflection loop',
+            appliesTo: ['journal', 'meeting'],
+            keywords: ['reflection', 'retro', 'journal', 'check-in', 'review', 'highlights'],
+            useWhen: 'The page should support reflection, highlights, lessons, and forward planning.',
+            blockFlow: [
+                'callout for mood, theme, or main reflection',
+                'heading_2 sections for highlights and lessons',
+                'text blocks for reflection',
+                'todo blocks for priorities or next moves',
+            ],
+            designMoves: [
+                'Keep the tone lightweight and revisitable.',
+                'Separate highlights from interpretation.',
+                'Close with next moves so the page feels useful, not purely archival.',
+            ],
+            frontendMoves: [
+                'Use soft accents and muted support notes.',
+                'Avoid overloading the page with heavy visuals.',
+            ],
         }),
     ]);
     const NOTES_PAGE_DESIGN_MANUAL = Object.freeze([
@@ -942,6 +1178,10 @@ const Agent = (function() {
             score += 3;
         }
 
+        if (template.id === 'sales' && (/\b(value|roi|offer|proof|pricing|testimonial|customer|client|objection|solution)\b/.test(signalText) || /\b(problem|solution|proof|offer|next steps?)\b/.test(outlineText))) {
+            score += 4;
+        }
+
         if (template.id === 'meeting' && /\b(attendees?|agenda|decisions?|action items?)\b/.test(outlineText)) {
             score += 4;
         }
@@ -976,7 +1216,7 @@ const Agent = (function() {
         }
 
         return NOTES_PAGE_TEMPLATES
-            .filter((template) => ['explainer', 'brief', 'documentation'].includes(template.id))
+            .filter((template) => ['explainer', 'brief', 'sales', 'documentation'].includes(template.id))
             .slice(0, limit)
             .map((template, index) => ({
                 ...template,
@@ -1118,6 +1358,101 @@ const Agent = (function() {
         ].join('\n');
     }
 
+    function scoreNotesBlockDesignPattern(pattern, question = '', pageContext = null, templateMatches = []) {
+        const signalText = buildTemplateSignalText(question, pageContext);
+        const templateIds = new Set((templateMatches || []).map((template) => template.id));
+        let score = 0;
+
+        if (Array.isArray(pattern.appliesTo)) {
+            pattern.appliesTo.forEach((templateId) => {
+                if (templateIds.has(templateId)) {
+                    score += 4;
+                }
+            });
+        }
+
+        if (Array.isArray(pattern.keywords)) {
+            pattern.keywords.forEach((keyword) => {
+                const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                if (new RegExp(escaped, 'i').test(signalText)) {
+                    score += 2;
+                }
+            });
+        }
+
+        return score;
+    }
+
+    function selectNotesBlockDesignPatterns(question = '', pageContext = null, templateMatches = [], options = {}) {
+        const { limit = 4 } = options;
+        const matches = Array.isArray(templateMatches) && templateMatches.length > 0
+            ? templateMatches
+            : selectNotesPageTemplates(question, pageContext, { limit: 2 });
+
+        const ranked = NOTES_BLOCK_DESIGN_PATTERNS
+            .map((pattern) => ({
+                ...pattern,
+                score: scoreNotesBlockDesignPattern(pattern, question, pageContext, matches),
+            }))
+            .sort((left, right) => right.score - left.score);
+
+        const selected = ranked.filter((pattern) => pattern.score > 0).slice(0, limit);
+        if (selected.length > 0) {
+            return selected;
+        }
+
+        return NOTES_BLOCK_DESIGN_PATTERNS.slice(0, limit);
+    }
+
+    function buildBlockDesignPatternGuidance(question = '', pageContext = null, templateMatches = []) {
+        const patterns = selectNotesBlockDesignPatterns(question, pageContext, templateMatches, { limit: 3 });
+        return patterns.map((pattern, index) => [
+            `${index + 1}. ${pattern.name} [${pattern.id}]`,
+            `   Use when: ${pattern.useWhen}`,
+            `   Block flow: ${pattern.blockFlow.join(' -> ')}`,
+            `   Design moves: ${pattern.designMoves.join(' ')}`,
+            `   Frontend moves: ${pattern.frontendMoves.join(' ')}`,
+        ].join('\n')).join('\n\n');
+    }
+
+    function buildBlockDesignPatternChecklist(question = '', pageContext = null, templateMatches = []) {
+        const leadPattern = selectNotesBlockDesignPatterns(question, pageContext, templateMatches, { limit: 1 })[0] || null;
+        if (!leadPattern) {
+            return '- Pick one reusable block pattern for the lead section and one for the supporting sections instead of freehanding every block.';
+        }
+
+        return [
+            `- Lead pattern: ${leadPattern.name}.`,
+            `- Block flow target: ${leadPattern.blockFlow.join(' -> ')}.`,
+            `- Design moves: ${leadPattern.designMoves.join(' ')}`,
+            `- Frontend moves: ${leadPattern.frontendMoves.join(' ')}`,
+        ].join('\n');
+    }
+
+    function buildBlockDesignPatternPrompt(pattern, question = '') {
+        const prefix = String(question || '').trim()
+            ? `${String(question || '').trim()}\n\n`
+            : '';
+
+        return `${prefix}Use the ${pattern.name} block pattern on the current notes page. Build the page with this block flow: ${pattern.blockFlow.join(' -> ')}. ${pattern.designMoves[0]} ${pattern.frontendMoves[0]}`;
+    }
+
+    function getLiveBlockDesignOptions(question = '', pageContext = null, options = {}) {
+        const context = pageContext || getPageContext();
+        const templateMatches = selectNotesPageTemplates(question, context, { limit: 2 });
+        const patterns = selectNotesBlockDesignPatterns(question, context, templateMatches, {
+            limit: options.limit || 4,
+        });
+
+        return patterns.map((pattern) => ({
+            id: pattern.id,
+            label: pattern.shortLabel || pattern.name,
+            title: pattern.name,
+            description: pattern.useWhen,
+            prompt: buildBlockDesignPatternPrompt(pattern, question),
+        }));
+    }
+
     function buildTemplateRequiredPalette(templateId = 'brief') {
         switch (templateId) {
             case 'explainer':
@@ -1126,6 +1461,8 @@ const Agent = (function() {
                 return ['callout', 'hero image/ai_image', 'bookmark source cluster', 'toggle for deep detail'];
             case 'project':
                 return ['callout', 'database or tracker', 'todo next steps', 'styled section headings'];
+            case 'sales':
+                return ['callout', 'proof block or quote', 'bookmark/database for evidence', 'CTA next-step section'];
             case 'meeting':
                 return ['callout or summary block', 'agenda/notes hierarchy', 'todo action items', 'supporting divider or toggle'];
             case 'documentation':
@@ -1159,6 +1496,12 @@ const Agent = (function() {
                         { key: 'Type', value: 'Project' },
                         { key: 'Status', value: 'Active draft' },
                         { key: 'Mode', value: 'Working plan' },
+                    ];
+                case 'sales':
+                    return [
+                        { key: 'Type', value: 'Sales pitch' },
+                        { key: 'Status', value: 'Draft' },
+                        { key: 'Mode', value: 'Value story' },
                     ];
                 case 'meeting':
                     return [
@@ -1224,6 +1567,12 @@ const Agent = (function() {
                     'Use update_page metadata so the page reads like a live working surface.',
                     'Prefer a database over repeated bullet lists for workstreams or owners.',
                     'Keep next actions visible as todo blocks.',
+                ];
+            case 'sales':
+                return [
+                    'Use metadata to frame the page as a pitch, proposal, or value story.',
+                    'Keep proof visible in quote, bookmark, or database blocks rather than hiding it in prose.',
+                    'Make the CTA or next step unmistakable near the end of the page.',
                 ];
             case 'meeting':
                 return [
@@ -1291,6 +1640,13 @@ const Agent = (function() {
         if ((/\b(source|sources|reference|references|links?|citations?|research|article|documentation)\b/.test(signalText) || templateIds.has('research'))
             && !currentTypes.has('bookmark')) {
             opportunities.push('- Use `bookmark` blocks for the most important links or sources instead of mentioning them only inline.');
+        }
+
+        if ((/\b(sales|pitch|proposal|roi|testimonial|pricing|proof|client|customer|offer)\b/.test(signalText) || templateIds.has('sales'))
+            && !currentTypes.has('quote')
+            && !currentTypes.has('bookmark')
+            && !currentTypes.has('database')) {
+            opportunities.push('- Add a proof block such as `quote`, `bookmark`, or `database` so the pitch has evidence instead of only claims.');
         }
 
         if ((/\b(process|workflow|flow|system|architecture|how it works|pipeline|steps?)\b/.test(signalText) || templateIds.has('documentation'))
@@ -2509,6 +2865,8 @@ const Agent = (function() {
         const visualRecipeChecklist = buildVisualRecipeChecklist(question, pageContext, templateMatches);
         const designSchemeGuidance = buildDesignSchemeGuidance(question, pageContext, templateMatches);
         const designSchemeChecklist = buildDesignSchemeChecklist(question, pageContext, templateMatches);
+        const blockPatternGuidance = buildBlockDesignPatternGuidance(question, pageContext, templateMatches);
+        const blockPatternChecklist = buildBlockDesignPatternChecklist(question, pageContext, templateMatches);
         const designCriteria = [
             buildPageDesignCriteria(pageContext),
             ...templateMatches.flatMap((template) => template.designRules.map((rule) => `- Template cue (${template.name}): ${rule}`)),
@@ -2561,6 +2919,9 @@ ${visualRecipeGuidance}
 DESIGN SCHEMES:
 ${designSchemeGuidance}
 
+LIVE BLOCK DESIGN PATTERNS:
+${blockPatternGuidance}
+
 PAGE DESIGN MANUAL:
 ${designManual}
 
@@ -2575,6 +2936,9 @@ ${visualRecipeChecklist}
 
 DESIGN SCHEME CHECKLIST:
 ${designSchemeChecklist}
+
+BLOCK PATTERN CHECKLIST:
+${blockPatternChecklist}
 
 PAGE DESIGN CRITERIA:
 ${designCriteria}
@@ -2657,6 +3021,7 @@ GUIDELINES:
 - Choose a best-fit page template from the template guidance above and adapt it to the user's request instead of inventing the page layout from scratch every time.
 - Also choose a matching visual recipe from the recipe guidance above so the page has a clear opening cluster, body rhythm, and support cluster.
 - Also choose a dominant design scheme from the scheme guidance above so the page has a coherent palette and header treatment.
+- Also choose 1-2 live block design patterns from the pattern guidance above so the lead, proof, notes, and closeout sections each have a reusable structure.
 - When building a full page, prefer a clear structure with headings first and then supporting blocks under each heading instead of one long undifferentiated dump.
 - For non-trivial page builds, returns should usually involve multiple blocks with hierarchy, not a single oversized text block.
 - If a generated text block would carry multiple sections, multiple ideas, or more than a short paragraph, split it into separate blocks before returning notes-actions.
@@ -8855,6 +9220,7 @@ Silently verify the lead cluster, section order, and final polish before returni
         // Page Context
         getPageContext,
         getFullPageContent,
+        getBlockDesignOptions: getLiveBlockDesignOptions,
         getOutline,
         getPageMetadata,
         
@@ -8899,6 +9265,7 @@ Silently verify the lead cluster, section order, and final polish before returni
         _buildSystemPrompt: buildSystemPrompt,
         _selectNotesPageTemplates: selectNotesPageTemplates,
         _selectNotesDesignSchemes: selectNotesDesignSchemes,
+        _selectNotesBlockDesignPatterns: selectNotesBlockDesignPatterns,
         _applyNotesActions: applyNotesActions,
         _extractNotesActionPlan: extractNotesActionPlan,
         _normalizeStructuredPageActions: normalizeStructuredPageActions,

@@ -209,6 +209,8 @@ const AUTO_TOOL_ALLOWLIST = new Set([
 const AUTO_TOOL_MAX_ROUNDS = 6;
 const SYNTHETIC_STREAM_CHUNK_SIZE = 120;
 const TERMINAL_FINISH_REASONS = new Set(['stop', 'length', 'content_filter']);
+const PROVIDER_WARMUP_RETRY_ATTEMPTS = 2;
+const PROVIDER_WARMUP_RETRY_DELAY_MS = 1500;
 
 class ToolOrchestrationError extends Error {
     constructor(message, options = {}) {
@@ -2632,6 +2634,146 @@ function throwIfAborted(signal = null) {
     throw error;
 }
 
+function waitForRetryDelay(ms = 0, signal = null) {
+    const delayMs = Math.max(0, Number(ms) || 0);
+    if (delayMs === 0) {
+        throwIfAborted(signal);
+        return Promise.resolve();
+    }
+
+    return new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+            signal?.removeEventListener?.('abort', handleAbort);
+            resolve();
+        }, delayMs);
+
+        const handleAbort = () => {
+            clearTimeout(timeoutId);
+            signal?.removeEventListener?.('abort', handleAbort);
+            try {
+                throwIfAborted(signal);
+            } catch (error) {
+                reject(error);
+            }
+        };
+
+        signal?.addEventListener?.('abort', handleAbort, { once: true });
+        throwIfAborted(signal);
+    });
+}
+
+function stringifyErrorDetail(value) {
+    if (typeof value === 'string') {
+        return value;
+    }
+
+    if (value == null) {
+        return '';
+    }
+
+    try {
+        return JSON.stringify(value);
+    } catch (_error) {
+        return String(value);
+    }
+}
+
+function extractModelRequestErrorText(error = null) {
+    return [
+        error?.message,
+        error?.error,
+        error?.cause?.message,
+        error?.cause,
+        error?.response?.data,
+        error?.response?.error,
+        error?.body,
+    ]
+        .map((value) => stringifyErrorDetail(value).trim())
+        .filter(Boolean)
+        .join('\n');
+}
+
+function isRetryableProviderWarmupError(error = null) {
+    const text = extractModelRequestErrorText(error).toLowerCase();
+    if (!text) {
+        return false;
+    }
+
+    return /\bdatabase system\b[\s\S]{0,48}\b(?:not yet accepting connections|starting up)\b/.test(text);
+}
+
+function normalizeProviderWarmupError(error = null) {
+    if (!error || !isRetryableProviderWarmupError(error)) {
+        return error;
+    }
+
+    const currentStatus = Number(error?.statusCode || error?.status || 0);
+    if (!Number.isFinite(currentStatus) || currentStatus === 500) {
+        error.status = 503;
+        error.statusCode = 503;
+    }
+
+    if (!String(error?.code || '').trim()) {
+        error.code = 'provider_starting_up';
+    }
+
+    return error;
+}
+
+async function retryProviderWarmupRequest(operation, {
+    model = null,
+    label = 'model request',
+    signal = null,
+    baseURL = config.openai.baseURL,
+    retries = PROVIDER_WARMUP_RETRY_ATTEMPTS,
+    retryDelayMs = PROVIDER_WARMUP_RETRY_DELAY_MS,
+} = {}) {
+    const providerFamily = inferProviderFamily({ baseURL, model });
+    if (providerFamily !== 'generic' || !Number.isFinite(Number(retries)) || Number(retries) <= 0) {
+        return operation();
+    }
+
+    let lastError = null;
+
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+        throwIfAborted(signal);
+
+        try {
+            return await operation();
+        } catch (error) {
+            lastError = normalizeProviderWarmupError(error);
+            if (!isRetryableProviderWarmupError(lastError) || attempt >= retries) {
+                throw lastError;
+            }
+
+            console.warn(`[OpenAI] Retrying ${label} for ${model || 'default-model'} after provider warmup error: ${lastError.message}`);
+            await waitForRetryDelay(retryDelayMs * (attempt + 1), signal);
+        }
+    }
+
+    throw lastError;
+}
+
+async function createResponsesRequest(openai, params, requestOptions = undefined, options = {}) {
+    return retryProviderWarmupRequest(
+        () => openai.responses.create(params, requestOptions),
+        {
+            ...options,
+            label: options.label || 'responses request',
+        },
+    );
+}
+
+async function createChatCompletionsRequest(openai, params, requestOptions = undefined, options = {}) {
+    return retryProviderWarmupRequest(
+        () => openai.chat.completions.create(params, requestOptions),
+        {
+            ...options,
+            label: options.label || 'chat completions request',
+        },
+    );
+}
+
 function normalizeToolCall(toolCall = {}) {
     const rawArguments = toolCall.function?.arguments;
 
@@ -3429,12 +3571,16 @@ async function runAutomaticToolLoopWithResponses(openai, {
 
     if (remainingTools.length === 0) {
         throwIfAborted(toolContext?.signal);
-        finalResponse = await openai.responses.create({
+        finalResponse = await createResponsesRequest(openai, {
             model,
             input: buildResponsesInput(workingMessages),
             tool_choice: 'none',
             ...(normalizedReasoningEffort ? { reasoning: { effort: normalizedReasoningEffort } } : {}),
-        }, requestOptions);
+        }, requestOptions, {
+            model,
+            signal: toolContext?.signal,
+            label: 'automatic responses follow-up',
+        });
         aggregatedUsage = mergeUsageMetadata(aggregatedUsage, extractResponseUsageMetadata(finalResponse));
 
         const recoveredCheckpointResponse = maybeRecoverUserCheckpointResponse({
@@ -3466,7 +3612,7 @@ async function runAutomaticToolLoopWithResponses(openai, {
 
     for (let round = 0; round < AUTO_TOOL_MAX_ROUNDS; round += 1) {
         throwIfAborted(toolContext?.signal);
-        finalResponse = await openai.responses.create({
+        finalResponse = await createResponsesRequest(openai, {
             model,
             input: nextInput,
             previous_response_id: previousResponseId,
@@ -3474,7 +3620,11 @@ async function runAutomaticToolLoopWithResponses(openai, {
             tool_choice: round === 0 ? buildAutomaticToolChoice(remainingTools, 'responses', { model, prompt, toolContext }) : 'auto',
             parallel_tool_calls: false,
             ...(normalizedReasoningEffort ? { reasoning: { effort: normalizedReasoningEffort } } : {}),
-        }, requestOptions);
+        }, requestOptions, {
+            model,
+            signal: toolContext?.signal,
+            label: `automatic responses round ${round + 1}`,
+        });
         aggregatedUsage = mergeUsageMetadata(aggregatedUsage, extractResponseUsageMetadata(finalResponse));
 
         const toolCalls = getResponseFunctionCalls(finalResponse);
@@ -3565,14 +3715,18 @@ async function runAutomaticToolLoopWithResponses(openai, {
     }
 
     throwIfAborted(toolContext?.signal);
-    finalResponse = await openai.responses.create({
+    finalResponse = await createResponsesRequest(openai, {
         model,
         input: nextInput,
         previous_response_id: previousResponseId,
         tools: remainingTools.map((entry) => entry.responseDefinition),
         tool_choice: 'none',
         ...(normalizedReasoningEffort ? { reasoning: { effort: normalizedReasoningEffort } } : {}),
-    }, requestOptions);
+    }, requestOptions, {
+        model,
+        signal: toolContext?.signal,
+        label: 'automatic responses finalization',
+    });
     aggregatedUsage = mergeUsageMetadata(aggregatedUsage, extractResponseUsageMetadata(finalResponse));
 
     const recoveredCheckpointResponse = maybeRecoverUserCheckpointResponse({
@@ -3646,12 +3800,16 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
 
     if (remainingTools.length === 0) {
         throwIfAborted(toolContext?.signal);
-        finalResponse = await openai.chat.completions.create({
+        finalResponse = await createChatCompletionsRequest(openai, {
             model,
             messages: workingMessages,
             stream: false,
             ...chatReasoningParams,
-        }, requestOptions);
+        }, requestOptions, {
+            model,
+            signal: toolContext?.signal,
+            label: 'automatic chat follow-up',
+        });
         aggregatedUsage = mergeUsageMetadata(aggregatedUsage, extractResponseUsageMetadata(finalResponse));
 
         const recoveredCheckpointResponse = maybeRecoverUserCheckpointResponse({
@@ -3681,14 +3839,18 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
 
     for (let round = 0; round < AUTO_TOOL_MAX_ROUNDS; round += 1) {
         throwIfAborted(toolContext?.signal);
-        finalResponse = await openai.chat.completions.create({
+        finalResponse = await createChatCompletionsRequest(openai, {
             model,
             messages: workingMessages,
             tools: remainingTools.map((entry) => entry.chatDefinition),
             tool_choice: round === 0 ? buildAutomaticToolChoice(remainingTools, 'chat', { model, prompt, toolContext }) : 'auto',
             stream: false,
             ...chatReasoningParams,
-        }, requestOptions);
+        }, requestOptions, {
+            model,
+            signal: toolContext?.signal,
+            label: `automatic chat round ${round + 1}`,
+        });
         aggregatedUsage = mergeUsageMetadata(aggregatedUsage, extractResponseUsageMetadata(finalResponse));
 
         const assistantMessage = finalResponse.choices[0]?.message || {};
@@ -3769,12 +3931,16 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
     }
 
     throwIfAborted(toolContext?.signal);
-    finalResponse = await openai.chat.completions.create({
+    finalResponse = await createChatCompletionsRequest(openai, {
         model,
         messages: workingMessages,
         stream: false,
         ...chatReasoningParams,
-    }, requestOptions);
+    }, requestOptions, {
+        model,
+        signal: toolContext?.signal,
+        label: 'automatic chat finalization',
+    });
     aggregatedUsage = mergeUsageMetadata(aggregatedUsage, extractResponseUsageMetadata(finalResponse));
 
     const recoveredCheckpointResponse = maybeRecoverUserCheckpointResponse({
@@ -4255,7 +4421,11 @@ async function createResponse({
 
         if (apiMode === 'responses') {
             throwIfAborted(signal);
-            const response = await openai.responses.create(params, requestOptions);
+            const response = await createResponsesRequest(openai, params, requestOptions, {
+                model: params.model,
+                signal,
+                label: 'direct responses request',
+            });
             attachKimibuiltMetadata(response, kimibuiltMetadata);
             if (stream) {
                 console.log('[OpenAI] Stream mode=native-responses');
@@ -4278,7 +4448,11 @@ async function createResponse({
             chatParams.reasoning_effort = normalizedReasoningEffort;
         }
         throwIfAborted(signal);
-        const response = await openai.chat.completions.create(chatParams, requestOptions);
+        const response = await createChatCompletionsRequest(openai, chatParams, requestOptions, {
+            model: params.model,
+            signal,
+            label: 'direct chat completions request',
+        });
         attachKimibuiltMetadata(response, kimibuiltMetadata);
         if (stream) {
             console.log('[OpenAI] Stream mode=native-chat-completions');
@@ -4432,6 +4606,9 @@ module.exports = {
         shouldSendReasoningEffort,
         shouldAutoUseTool,
         shouldUseResponsesAPI,
+        isRetryableProviderWarmupError,
+        normalizeProviderWarmupError,
+        retryProviderWarmupRequest,
         promptHasExplicitSshIntent,
         hasExplicitPodcastIntent,
         extractExplicitPodcastTopic,

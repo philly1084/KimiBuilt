@@ -557,6 +557,49 @@ describe('openai-client automatic tool orchestration helpers', () => {
         })).toBe('openai');
     });
 
+    test('classifies provider startup database errors as retryable warmup failures', () => {
+        const error = new Error('{"error":"the database system is not yet accepting connections"}');
+        error.status = 500;
+
+        expect(__testUtils.isRetryableProviderWarmupError(error)).toBe(true);
+
+        const normalized = __testUtils.normalizeProviderWarmupError(error);
+        expect(normalized.status).toBe(503);
+        expect(normalized.statusCode).toBe(503);
+        expect(normalized.code).toBe('provider_starting_up');
+    });
+
+    test('retries generic provider warmup errors before succeeding', async () => {
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        const operation = jest.fn()
+            .mockRejectedValueOnce(new Error('the database system is not yet accepting connections'))
+            .mockResolvedValueOnce({ id: 'resp-ok' });
+
+        await expect(__testUtils.retryProviderWarmupRequest(operation, {
+            model: 'openai/gpt-oss-20b',
+            baseURL: 'https://gateway.internal/v1',
+            retries: 1,
+            retryDelayMs: 0,
+        })).resolves.toEqual({ id: 'resp-ok' });
+
+        expect(operation).toHaveBeenCalledTimes(2);
+        warnSpy.mockRestore();
+    });
+
+    test('does not retry provider warmup errors for official OpenAI hosts', async () => {
+        const operation = jest.fn()
+            .mockRejectedValue(new Error('the database system is not yet accepting connections'));
+
+        await expect(__testUtils.retryProviderWarmupRequest(operation, {
+            model: 'gpt-4o',
+            baseURL: 'https://api.openai.com/v1',
+            retries: 1,
+            retryDelayMs: 0,
+        })).rejects.toThrow('the database system is not yet accepting connections');
+
+        expect(operation).toHaveBeenCalledTimes(1);
+    });
+
     test('skips chat reasoning_effort for Gemini and Groq providers', () => {
         expect(__testUtils.shouldSendReasoningEffort({
             baseURL: 'https://api.groq.com/openai/v1',

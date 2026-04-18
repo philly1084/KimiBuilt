@@ -363,17 +363,20 @@ Approved page plan:
         expect(prompt).toContain('BEST-FIT PAGE TEMPLATES:');
         expect(prompt).toContain('VISUAL PAGE RECIPES:');
         expect(prompt).toContain('DESIGN SCHEMES:');
+        expect(prompt).toContain('LIVE BLOCK DESIGN PATTERNS:');
         expect(prompt).toContain('PAGE DESIGN MANUAL:');
         expect(prompt).toContain('BLOCK OPPORTUNITIES FOR THIS REQUEST:');
         expect(prompt).toContain('TEMPLATE EXECUTION CHECKLIST:');
         expect(prompt).toContain('VISUAL DESIGN CHECKLIST:');
         expect(prompt).toContain('DESIGN SCHEME CHECKLIST:');
+        expect(prompt).toContain('BLOCK PATTERN CHECKLIST:');
         expect(prompt).toContain('Top-level flow');
         expect(prompt).toContain('Do not return a single giant text block');
         expect(prompt).toContain('Think in page roles, not just paragraphs');
         expect(prompt).toContain('Treat style as part of the page system');
         expect(prompt).toContain('Editorial Explainer [editorial-explainer]');
         expect(prompt).toContain('Cool Knowledge [cool-knowledge]');
+        expect(prompt).toContain('Research Evidence Ladder [research-evidence-ladder]');
         expect(prompt).toContain('Avoid more than two plain text blocks in a row');
         expect(prompt).toContain('Lead focal blocks');
         expect(prompt).toContain('prefer notes-actions that update the page blocks instead of artifact, file, or export output');
@@ -417,6 +420,39 @@ Approved page plan:
 
         expect(Array.isArray(templates)).toBe(true);
         expect(templates[0].id).toBe('project');
+    });
+
+    test('selects a sales-oriented template for pitch requests', () => {
+        const agent = loadAgent();
+        const templates = agent._selectNotesPageTemplates(
+            'Create a sales pitch for an AI notes agent with ROI, customer proof, objections, and a next-step CTA.',
+            {
+                title: 'AI Notes Pitch',
+                blockCount: 0,
+                blocks: [],
+                outline: [],
+            }
+        );
+
+        expect(Array.isArray(templates)).toBe(true);
+        expect(templates[0].id).toBe('sales');
+    });
+
+    test('selects a sales proof block pattern for pitch requests', () => {
+        const agent = loadAgent();
+        const patterns = agent._selectNotesBlockDesignPatterns(
+            'Create a sales pitch for an AI notes agent with ROI, customer proof, objections, and a next-step CTA.',
+            {
+                title: 'AI Notes Pitch',
+                blockCount: 0,
+                blocks: [],
+                outline: [],
+            },
+            [{ id: 'sales' }]
+        );
+
+        expect(Array.isArray(patterns)).toBe(true);
+        expect(patterns[0].id).toBe('sales-proof-stack');
     });
 
     test('selects an explainer-oriented template for educational topic pages', () => {

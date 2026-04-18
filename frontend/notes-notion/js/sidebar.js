@@ -378,6 +378,31 @@ const Sidebar = (function() {
                     { type: 'todo', content: { text: 'Owner follow-up', checked: false } }
                 ]
             },
+            sales: {
+                id: 'sales',
+                name: 'Sales Pitch',
+                icon: 'ðŸŽ¯',
+                desc: 'Value prop, proof, CTA',
+                title: 'Sales Pitch',
+                pageIcon: 'ðŸŽ¯',
+                properties: [
+                    { key: 'Stage', value: 'Draft' },
+                    { key: 'Audience', value: 'Prospect' }
+                ],
+                blocks: [
+                    { type: 'heading_1', content: 'Sales Pitch' },
+                    { type: 'callout', content: { text: 'Lead with the value proposition and keep the promised outcome obvious.', icon: 'ðŸ’¼' }, options: { color: 'orange' } },
+                    { type: 'heading_2', content: 'Problem', options: { textColor: 'orange' } },
+                    { type: 'text', content: 'Describe the customer pain, missed opportunity, or friction point.' },
+                    { type: 'heading_2', content: 'Solution', options: { textColor: 'orange' } },
+                    { type: 'bulleted_list', content: 'Core offer or differentiator' },
+                    { type: 'bulleted_list', content: 'How the solution changes the outcome' },
+                    { type: 'heading_2', content: 'Proof', options: { textColor: 'green' } },
+                    { type: 'quote', content: 'Use a testimonial, metric, or proof point here.' },
+                    { type: 'heading_2', content: 'Next Step', options: { textColor: 'green' } },
+                    { type: 'todo', content: { text: 'Call to action or proposed next move', checked: false } }
+                ]
+            },
             notes: {
                 id: 'notes',
                 name: 'Meeting Notes',

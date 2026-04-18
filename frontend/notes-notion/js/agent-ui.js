@@ -115,7 +115,12 @@ const AgentUI = (function() {
                 }
             });
 
-            elements.input.addEventListener('input', autoResizeInput);
+            elements.input.addEventListener('input', () => {
+                autoResizeInput();
+                if (!streamState.active && !streamState.error && window.Agent?.getMessages?.().filter((message) => !message.hidden).length === 0) {
+                    renderMessages();
+                }
+            });
         }
 
         document.addEventListener('keydown', (event) => {
@@ -369,6 +374,72 @@ const AgentUI = (function() {
         `).join('');
     }
 
+    function getLiveDesignOptions() {
+        if (!window.Agent?.getBlockDesignOptions) {
+            return [];
+        }
+
+        const draftPrompt = elements.input?.value?.trim() || '';
+        try {
+            return window.Agent.getBlockDesignOptions(draftPrompt, null, { limit: 4 });
+        } catch (error) {
+            console.warn('AgentUI: failed to get live block design options', error);
+            return [];
+        }
+    }
+
+    function renderLiveDesignOptionButtons() {
+        const options = getLiveDesignOptions();
+        if (!options.length) {
+            return '';
+        }
+
+        return `
+            <div class="agent-live-design-options">
+                <p class="agent-empty-hint">Live design options</p>
+                <div class="agent-quick-actions">
+                    ${options.map((option) => `
+                        <button
+                            class="agent-quick-action-btn agent-design-option-btn"
+                            data-prompt="${escapeHtmlAttr(option.prompt || '')}"
+                            title="${escapeHtmlAttr(option.description || option.title || '')}"
+                        >
+                            ${escapeHtml(option.label || option.title || 'Pattern')}
+                        </button>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    function applyDesignOptionPrompt(promptText = '') {
+        if (!elements.input || !promptText) {
+            return;
+        }
+
+        const current = elements.input.value.trim();
+        elements.input.value = current
+            ? `${current}\n\n${promptText}`
+            : promptText;
+        autoResizeInput();
+        elements.input.focus();
+    }
+
+    function bindEmptyStateActions() {
+        elements.messagesContainer.querySelectorAll('.agent-quick-action-btn[data-action]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const action = btn.dataset.action;
+                quickAction(action);
+            });
+        });
+
+        elements.messagesContainer.querySelectorAll('.agent-design-option-btn[data-prompt]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                applyDesignOptionPrompt(btn.dataset.prompt || '');
+            });
+        });
+    }
+
     function renderMessages() {
         if (!elements.messagesContainer || !window.Agent) return;
 
@@ -380,20 +451,15 @@ const AgentUI = (function() {
                 <div class="agent-empty-state">
                     <div class="agent-empty-icon">AI</div>
                     <p>Ask me anything about your notes</p>
-                    <p class="agent-empty-hint">I can plan the page, work section by section, polish the layout, or turn rough notes into a stronger block flow.</p>
+                    <p class="agent-empty-hint">I can plan the page, work section by section, pick live block patterns, polish the layout, or turn rough notes into a stronger block flow.</p>
                     <div class="agent-quick-actions">
                         ${renderStarterButtons()}
                     </div>
+                    ${renderLiveDesignOptionButtons()}
                 </div>
             `;
-            
-            // Add click handlers for quick action buttons
-            elements.messagesContainer.querySelectorAll('.agent-quick-action-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const action = btn.dataset.action;
-                    quickAction(action);
-                });
-            });
+
+            bindEmptyStateActions();
             
             return;
         }
