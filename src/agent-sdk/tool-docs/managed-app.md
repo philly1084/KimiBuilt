@@ -2,6 +2,8 @@
 
 Creates and manages agent-owned applications through the external Gitea control plane and the configured Kubernetes deployment lane.
 
+When the request is about SSH, a remote server, Gitea on the server, or a remote k3s cluster, set `deployTarget: "ssh"` so deployment happens over SSH on the remote host instead of through the backend pod's in-cluster Kubernetes service account.
+
 ## Actions
 
 - `create`: registers or provisions a managed app, creates the external Gitea repository when configured, seeds scaffold files, and records a build run when a commit is created.

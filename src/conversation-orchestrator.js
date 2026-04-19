@@ -3660,6 +3660,57 @@ function hasManagedAppIntentText(text = '') {
     ].some((pattern) => pattern.test(normalized));
 }
 
+function normalizeManagedAppDeployTarget(value = '') {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (['ssh', 'remote', 'remote-ssh', 'remote_ssh'].includes(normalized)) {
+        return 'ssh';
+    }
+    if (['in-cluster', 'in_cluster', 'cluster', 'local-cluster', 'local_cluster'].includes(normalized)) {
+        return 'in-cluster';
+    }
+    return '';
+}
+
+function hasRemoteManagedAppTargetIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        /\bssh\b/,
+        /\bremote build\b/,
+        /\bremote-build\b/,
+        /\b(remote|server|host)\b[\s\S]{0,40}\b(gitea|k3s|k8s|kubernetes|cluster)\b/,
+        /\b(gitea|k3s|k8s|kubernetes|cluster)\b[\s\S]{0,40}\b(remote|server|host|ssh)\b/,
+        /\b(build|deploy|run)\b[\s\S]{0,30}\b(on the server|on server|remotely|via ssh)\b/,
+    ].some((pattern) => pattern.test(normalized));
+}
+
+function applyManagedAppDeploymentTargetDefaults(params = {}, { objective = '', executionProfile = DEFAULT_EXECUTION_PROFILE } = {}) {
+    const normalizedParams = params && typeof params === 'object' ? { ...params } : {};
+    const explicitTarget = normalizeManagedAppDeployTarget(
+        normalizedParams.deployTarget
+        || normalizedParams.deploymentTarget
+        || normalizedParams.target,
+    );
+    if (explicitTarget) {
+        return {
+            ...normalizedParams,
+            deployTarget: explicitTarget,
+        };
+    }
+
+    if (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE || hasRemoteManagedAppTargetIntent(objective)) {
+        return {
+            ...normalizedParams,
+            deployTarget: 'ssh',
+        };
+    }
+
+    return normalizedParams;
+}
+
 function cleanManagedAppReference(candidate = '') {
     let normalized = String(candidate || '')
         .trim()
@@ -3716,8 +3767,9 @@ function inferManagedAppRequestedAction(text = '') {
     return 'build';
 }
 
-function buildManagedAppDirectAction(objective = '') {
+function buildManagedAppDirectAction(objective = '', options = {}) {
     const normalized = String(objective || '').trim();
+    const executionProfile = String(options.executionProfile || '').trim() || DEFAULT_EXECUTION_PROFILE;
     const reference = extractManagedAppReference(normalized);
     const requestedAction = inferManagedAppRequestedAction(normalized);
     const hasCreateIntent = /\b(create|build|make|generate|new)\b/i.test(normalized);
@@ -3753,10 +3805,13 @@ function buildManagedAppDirectAction(objective = '') {
         return {
             tool: 'managed-app',
             reason: 'Managed app deployment requests should use the dedicated control-plane tool.',
-            params: {
+            params: applyManagedAppDeploymentTargetDefaults({
                 action: 'deploy',
                 appRef: reference,
-            },
+            }, {
+                objective: normalized,
+                executionProfile,
+            }),
         };
     }
 
@@ -3764,20 +3819,23 @@ function buildManagedAppDirectAction(objective = '') {
         return {
             tool: 'managed-app',
             reason: 'Managed app update requests should use the dedicated control-plane tool.',
-            params: {
+            params: applyManagedAppDeploymentTargetDefaults({
                 action: 'update',
                 appRef: reference,
                 prompt: normalized,
                 sourcePrompt: normalized,
                 requestedAction,
-            },
+            }, {
+                objective: normalized,
+                executionProfile,
+            }),
         };
     }
 
     return {
         tool: 'managed-app',
         reason: 'Managed app creation and deployment requests should use the dedicated control-plane tool.',
-        params: {
+        params: applyManagedAppDeploymentTargetDefaults({
             action: 'create',
             prompt: normalized,
             sourcePrompt: normalized,
@@ -3787,7 +3845,10 @@ function buildManagedAppDirectAction(objective = '') {
                     ? { slug: reference.toLowerCase() }
                     : { name: reference })
                 : {}),
-        },
+        }, {
+            objective: normalized,
+            executionProfile,
+        }),
     };
 }
 
@@ -7160,7 +7221,9 @@ class ConversationOrchestrator extends EventEmitter {
 
         if (toolPolicy.candidateToolIds.includes('managed-app')
             && hasManagedAppIntentText(objective)) {
-            return finalizeAction(buildManagedAppDirectAction(objective));
+            return finalizeAction(buildManagedAppDirectAction(objective, {
+                executionProfile: toolPolicy.executionProfile,
+            }));
         }
 
         if (toolPolicy.workflow) {
@@ -7302,6 +7365,14 @@ class ConversationOrchestrator extends EventEmitter {
 
         if (normalizedStep.tool === USER_CHECKPOINT_TOOL_ID) {
             normalizedStep.params = normalizeUserCheckpointPlanParams(step);
+            return normalizedStep;
+        }
+
+        if (normalizedStep.tool === 'managed-app') {
+            normalizedStep.params = applyManagedAppDeploymentTargetDefaults(normalizedStep.params, {
+                objective,
+                executionProfile,
+            });
             return normalizedStep;
         }
 
@@ -8443,6 +8514,7 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('Use `managed-app` for agent-owned applications that should be created in external Gitea and deployed to the configured cluster target.');
             parts.push('Prefer `managed-app` over raw `git-safe`, `remote-command`, or `k3s-deploy` when the request is to create, inspect, update, build, publish, or redeploy an app tracked by the managed app catalog.');
             parts.push('For new app requests, let `managed-app create` allocate the repo, image repo, namespace, and host instead of improvising those names in chat.');
+            parts.push('When the request says SSH, remote server, Gitea, or remote k3s deployment, include `deployTarget: "ssh"` in `managed-app` params so the control plane deploys through the remote host instead of the in-cluster Kubernetes API.');
         }
 
         if (allowedToolIds.includes('web-scrape')) {

@@ -558,6 +558,169 @@ describe('ManagedAppService', () => {
         expect(result.message).toContain('via ssh');
     });
 
+    test('deployApp lets remote-build override legacy in-cluster metadata', async () => {
+        const app = {
+            id: 'app-1',
+            ownerId: 'user-1',
+            sessionId: 'session-1',
+            slug: 'demo',
+            appName: 'Demo',
+            imageRepo: 'gitea.demoserver2.buzz/agent-apps/demo',
+            namespace: 'app-demo',
+            publicHost: 'demo.demoserver2.buzz',
+            status: 'built',
+            metadata: {
+                deploymentTarget: 'in-cluster',
+                requestedContainerPort: 80,
+            },
+        };
+        const buildRun = {
+            id: 'run-1',
+            buildStatus: 'success',
+            deployStatus: 'pending',
+            imageTag: 'sha-abcdef123456',
+            metadata: {},
+        };
+        const deployManagedApp = jest.fn(async () => ({
+            namespace: 'app-demo',
+            deployment: 'demo',
+            verification: {
+                rollout: true,
+                tls: false,
+                https: true,
+            },
+            rollout: {
+                ok: true,
+            },
+        }));
+
+        const store = {
+            isAvailable: () => true,
+            listBuildRunsForApp: jest.fn(async () => ([buildRun])),
+            updateApp: jest.fn(async (_id, _ownerId, updates) => ({
+                ...app,
+                ...updates,
+                metadata: updates.metadata,
+            })),
+            updateBuildRun: jest.fn(async (_id, updates) => ({
+                ...buildRun,
+                ...updates,
+            })),
+        };
+
+        const service = new ManagedAppService({
+            store,
+            kubernetesClient: {
+                isConfigured: jest.fn((target) => target === 'ssh'),
+                deployManagedApp,
+            },
+        });
+
+        service.resolveApp = jest.fn(async () => app);
+        service.getEffectiveGiteaConfig = () => ({
+            registryHost: 'gitea.demoserver2.buzz',
+            registryUsername: 'builder',
+            registryPassword: 'secret',
+        });
+        service.getEffectiveManagedAppsConfig = () => ({
+            defaultContainerPort: 80,
+            registryPullSecretName: 'gitea-registry-credentials',
+        });
+        service.recordClusterDeployment = jest.fn();
+        service.broadcastLifecycleEvent = jest.fn();
+
+        const result = await service.deployApp('demo', {}, 'user-1', {
+            executionProfile: 'remote-build',
+            sessionId: 'session-1',
+        });
+
+        expect(deployManagedApp).toHaveBeenCalledWith(expect.objectContaining({
+            deploymentTarget: 'ssh',
+        }));
+        expect(result.message).toContain('via ssh');
+    });
+
+    test('deployApp uses the configured ssh lane for legacy in-cluster managed apps', async () => {
+        const app = {
+            id: 'app-1',
+            ownerId: 'user-1',
+            sessionId: 'session-1',
+            slug: 'demo',
+            appName: 'Demo',
+            imageRepo: 'gitea.demoserver2.buzz/agent-apps/demo',
+            namespace: 'app-demo',
+            publicHost: 'demo.demoserver2.buzz',
+            status: 'built',
+            metadata: {
+                deploymentTarget: 'in-cluster',
+                requestedContainerPort: 80,
+            },
+        };
+        const buildRun = {
+            id: 'run-1',
+            buildStatus: 'success',
+            deployStatus: 'pending',
+            imageTag: 'sha-abcdef123456',
+            metadata: {},
+        };
+        const deployManagedApp = jest.fn(async () => ({
+            namespace: 'app-demo',
+            deployment: 'demo',
+            verification: {
+                rollout: true,
+                tls: false,
+                https: true,
+            },
+            rollout: {
+                ok: true,
+            },
+        }));
+
+        const store = {
+            isAvailable: () => true,
+            listBuildRunsForApp: jest.fn(async () => ([buildRun])),
+            updateApp: jest.fn(async (_id, _ownerId, updates) => ({
+                ...app,
+                ...updates,
+                metadata: updates.metadata,
+            })),
+            updateBuildRun: jest.fn(async (_id, updates) => ({
+                ...buildRun,
+                ...updates,
+            })),
+        };
+
+        const service = new ManagedAppService({
+            store,
+            kubernetesClient: {
+                isConfigured: jest.fn((target) => target === 'ssh'),
+                deployManagedApp,
+            },
+        });
+
+        service.resolveApp = jest.fn(async () => app);
+        service.getEffectiveGiteaConfig = () => ({
+            registryHost: 'gitea.demoserver2.buzz',
+            registryUsername: 'builder',
+            registryPassword: 'secret',
+        });
+        service.getEffectiveManagedAppsConfig = () => ({
+            deployTarget: 'ssh',
+            defaultContainerPort: 80,
+            registryPullSecretName: 'gitea-registry-credentials',
+        });
+        service.recordClusterDeployment = jest.fn();
+        service.broadcastLifecycleEvent = jest.fn();
+
+        await service.deployApp('demo', {}, 'user-1', {
+            sessionId: 'session-1',
+        });
+
+        expect(deployManagedApp).toHaveBeenCalledWith(expect.objectContaining({
+            deploymentTarget: 'ssh',
+        }));
+    });
+
     test('deployApp heals legacy managed app namespaces before deployment', async () => {
         const app = {
             id: 'app-1',

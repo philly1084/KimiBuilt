@@ -257,11 +257,6 @@ class ManagedAppService {
             return explicit;
         }
 
-        const persisted = normalizeDeployTarget(app?.metadata?.deploymentTarget);
-        if (persisted) {
-            return persisted;
-        }
-
         if (normalizeText(context.executionProfile) === 'remote-build') {
             return 'ssh';
         }
@@ -270,6 +265,14 @@ class ManagedAppService {
             this.getEffectiveManagedAppsConfig().deployTarget
             || config.managedApps.deployTarget,
         );
+        const persisted = normalizeDeployTarget(app?.metadata?.deploymentTarget);
+        if (configured === 'ssh' && persisted === 'in-cluster') {
+            return 'ssh';
+        }
+        if (persisted) {
+            return persisted;
+        }
+
         return configured || 'in-cluster';
     }
 
@@ -893,7 +896,7 @@ class ManagedAppService {
                     return 'Managed app catalog: no managed apps exist yet for this user. If they ask to create, build, or deploy a new managed app, create the first one directly instead of asking them to choose an existing app.';
                 }
                 apps.slice(0, Math.max(1, maxApps)).forEach((app) => {
-                    lines.push(`Managed app ${app.slug}: status ${app.status}, repo ${app.repoOwner}/${app.repoName}, host ${app.publicHost}, namespace ${app.namespace}.`);
+                    lines.push(`Managed app ${app.slug}: status ${app.status}, target ${normalizeDeployTarget(app.metadata?.deploymentTarget) || 'unspecified'}, repo ${app.repoOwner}/${app.repoName}, host ${app.publicHost}, namespace ${app.namespace}.`);
                 });
                 return lines.join('\n');
             })

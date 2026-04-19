@@ -4075,11 +4075,84 @@ describe('ConversationOrchestrator', () => {
             reason: 'Managed app creation and deployment requests should use the dedicated control-plane tool.',
             params: expect.objectContaining({
                 action: 'create',
+                deployTarget: 'ssh',
                 slug: 'hello-stack',
                 requestedAction: 'deploy',
                 prompt: objective,
                 sourcePrompt: objective,
             }),
+        });
+    });
+
+    test('pins managed app plans to ssh when the request explicitly targets the remote server', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['managed-app', 'remote-command', 'k3s-deploy']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Deploy the managed app called demo. Use ssh on the remote server with Gitea on the k3s cluster.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            toolPolicy,
+        });
+
+        expect(directAction).toEqual({
+            tool: 'managed-app',
+            reason: 'Managed app deployment requests should use the dedicated control-plane tool.',
+            params: {
+                action: 'deploy',
+                appRef: 'demo',
+                deployTarget: 'ssh',
+            },
+        });
+    });
+
+    test('normalizes planned managed-app deploy steps onto the ssh lane for remote-build runs', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn(() => null),
+            },
+        });
+
+        const step = orchestrator.normalizePlannedStep({
+            tool: 'managed-app',
+            reason: 'Deploy the managed app through the managed control plane.',
+            params: {
+                action: 'deploy',
+                appRef: 'demo',
+            },
+        }, {
+            objective: 'Deploy the managed app demo on the remote server.',
+            executionProfile: 'remote-build',
+        });
+
+        expect(step).toEqual({
+            tool: 'managed-app',
+            reason: 'Deploy the managed app through the managed control plane.',
+            params: {
+                action: 'deploy',
+                appRef: 'demo',
+                deployTarget: 'ssh',
+            },
         });
     });
 
@@ -6769,7 +6842,7 @@ describe('ConversationOrchestrator', () => {
         expect(result.output).toBe('Implemented the requested repository change and summarized the result.');
     });
 
-    test('runs the deploy-only workflow without entering the repo implementation lane', async () => {
+    test('blocks deploy-only workflow requests that do not identify a concrete remote workload', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
             host: '10.0.0.5',
@@ -6839,30 +6912,12 @@ describe('ConversationOrchestrator', () => {
             stream: false,
         });
 
-        expect(toolManager.executeTool.mock.calls.map((call) => call[0])).toEqual([
-            'k3s-deploy',
-            'remote-command',
-        ]);
+        expect(toolManager.executeTool).not.toHaveBeenCalled();
         expect(result.trace.executionTrace.map((entry) => entry.name)).toEqual(expect.arrayContaining([
             'End-to-end builder workflow',
-            'Workflow completed after round 2',
+            'End-to-end builder workflow blocked',
         ]));
-        expect(sessionStore.update).toHaveBeenCalledWith('session-deploy-only', expect.objectContaining({
-            metadata: expect.objectContaining({
-                controlState: expect.objectContaining({
-                    workflow: expect.objectContaining({
-                        lane: 'deploy-only',
-                        stage: 'completed',
-                        status: 'completed',
-                        progress: expect.objectContaining({
-                            deployed: true,
-                            verified: true,
-                        }),
-                    }),
-                }),
-            }),
-        }));
-        expect(result.output).toBe('Deployment completed and the rollout was verified.');
+        expect(result.output).toContain('End-to-end builder blocked');
     });
 
     test('resumes the active deploy workflow on yes-style continuation replies instead of drifting into web search', () => {

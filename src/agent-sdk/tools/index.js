@@ -3125,7 +3125,7 @@ class ToolManager {
         id: 'managed-app',
         name: 'Managed App Control Plane',
         category: 'system',
-        description: 'Create, update, inspect, list, and deploy agent-created apps through the external Gitea control plane and the in-cluster Kubernetes deployment lane.',
+        description: 'Create, update, inspect, list, and deploy agent-created apps through the external Gitea control plane and the configured Kubernetes deployment lane, including remote SSH/k3s targets.',
         backend: {
           handler: async (params = {}, context = {}) => {
             const { service, ownerId, sessionId } = resolveManagedAppService(context);
@@ -3229,6 +3229,9 @@ class ToolManager {
             sourcePrompt: { type: 'string' },
             requestedAction: { type: 'string' },
             deployRequested: { type: 'boolean' },
+            deployTarget: { type: 'string', enum: ['ssh', 'in-cluster'] },
+            deploymentTarget: { type: 'string', enum: ['ssh', 'in-cluster'] },
+            target: { type: 'string', enum: ['ssh', 'in-cluster'] },
             imageTag: { type: 'string' },
             containerPort: { type: 'integer' },
             sessionId: { type: 'string' },
