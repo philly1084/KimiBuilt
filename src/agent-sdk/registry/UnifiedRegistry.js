@@ -233,6 +233,17 @@ class UnifiedRegistry extends EventEmitter {
   }
 
   /**
+   * Get all registered frontend manifests, including tools hidden from end-user surfaces.
+   */
+  getAllManifests() {
+    return Array.from(this.manifests.values())
+      .map((manifest) => ({
+        ...manifest,
+        isAvailable: this.isToolAvailable(manifest.id),
+      }));
+  }
+
+  /**
    * Get frontend tools by category
    */
   getFrontendToolsByCategory(category) {

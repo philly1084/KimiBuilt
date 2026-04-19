@@ -372,7 +372,7 @@ async function buildFrontendToolCatalog({ req, category = null, sessionId = null
   const { executionProfile } = await resolveToolExecutionProfile(req, sessionId);
   const allowedToolIds = getAllowedToolIdsForProfile(executionProfile);
 
-  const manifestTools = registry.getFrontendTools()
+  const manifestTools = (includeAllTools ? registry.getAllManifests() : registry.getFrontendTools())
     .filter((tool) => !HIDDEN_FRONTEND_TOOL_IDS.includes(tool.id))
     .filter((tool) => tool.id !== 'ssh-execute');
 
