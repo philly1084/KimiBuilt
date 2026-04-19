@@ -73,6 +73,7 @@ function buildRuntimeSummary(toolManager, options = {}) {
   const managedApps = typeof settingsController.getEffectiveManagedAppsConfig === 'function'
     ? settingsController.getEffectiveManagedAppsConfig()
     : {};
+  const managedAppDeployTarget = String(managedApps.deployTarget || config.managedApps.deployTarget || 'in-cluster').trim() || 'in-cluster';
   const opencode = typeof settingsController.getEffectiveOpencodeConfig === 'function'
     ? settingsController.getEffectiveOpencodeConfig()
     : {};
@@ -123,7 +124,8 @@ function buildRuntimeSummary(toolManager, options = {}) {
     managedApps: {
       configured: Boolean(gitea.enabled !== false && gitea.baseURL && gitea.token),
       persistenceAvailable: Boolean(options.managedAppService?.isAvailable?.()),
-      kubernetesConfigured: Boolean(options.managedAppService?.kubernetesClient?.isConfigured?.()),
+      kubernetesConfigured: Boolean(options.managedAppService?.kubernetesClient?.isConfigured?.(managedAppDeployTarget)),
+      deployTarget: managedAppDeployTarget,
       appBaseDomain: managedApps.appBaseDomain || '',
       namespacePrefix: managedApps.namespacePrefix || '',
       platformNamespace: managedApps.platformNamespace || '',
@@ -242,16 +244,20 @@ function buildToolRuntime(toolId, options = {}) {
     const managedApps = typeof settingsController.getEffectiveManagedAppsConfig === 'function'
       ? settingsController.getEffectiveManagedAppsConfig()
       : {};
+    const deployTarget = String(managedApps.deployTarget || config.managedApps.deployTarget || 'in-cluster').trim() || 'in-cluster';
     return {
       configured: Boolean(gitea.enabled !== false && gitea.baseURL && gitea.token),
-      provider: 'external-gitea-plus-in-cluster-kubernetes',
+      provider: deployTarget === 'ssh'
+        ? 'external-gitea-plus-remote-k3s-over-ssh'
+        : 'external-gitea-plus-in-cluster-kubernetes',
       giteaBaseURL: gitea.baseURL || '',
       giteaOrg: gitea.org || '',
       registryHost: gitea.registryHost || '',
       appBaseDomain: managedApps.appBaseDomain || '',
       namespacePrefix: managedApps.namespacePrefix || '',
       platformNamespace: managedApps.platformNamespace || '',
-      kubernetesConfigured: Boolean(options.managedAppService?.kubernetesClient?.isConfigured?.()),
+      deployTarget,
+      kubernetesConfigured: Boolean(options.managedAppService?.kubernetesClient?.isConfigured?.(deployTarget)),
       persistenceAvailable: Boolean(options.managedAppService?.isAvailable?.()),
     };
   }

@@ -2545,10 +2545,10 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
     }
 
     if (automaticTools.some((entry) => entry.id === 'managed-app')) {
-        guidance.push('- Use `managed-app` for agent-created applications that should live in the external Gitea control plane and deploy into the cluster.');
+        guidance.push('- Use `managed-app` for agent-created applications that should live in the external Gitea control plane and deploy to the configured cluster target.');
         guidance.push('- Prefer `managed-app` over ad hoc `git-safe` plus `k3s-deploy` when the request is to create, build, publish, inspect, or redeploy an app that the agent owns.');
         guidance.push('- `managed-app create` should allocate the repo, image repo, namespace, and ingress host instead of improvising those names in chat.');
-        guidance.push('- `managed-app deploy` should use the authoritative managed app record and the latest successful image tag instead of guessing the cluster target from scratch.');
+        guidance.push('- `managed-app deploy` should use the authoritative managed app record, the latest successful image tag, and the app\'s configured deployment target instead of guessing the cluster target from scratch.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'code-sandbox')) {

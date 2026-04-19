@@ -20,6 +20,17 @@ const { resolvePreferredWritableFile } = require('../../runtime-state-paths');
 
 const OPENCODE_OPAQUE_ENV_KEYS = ['GITHUB_TOKEN', 'GH_TOKEN'];
 
+function normalizeManagedAppDeployTarget(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (['ssh', 'remote', 'remote-ssh', 'remote_ssh'].includes(normalized)) {
+    return 'ssh';
+  }
+  if (['in-cluster', 'in_cluster', 'cluster', 'local-cluster', 'local_cluster'].includes(normalized)) {
+    return 'in-cluster';
+  }
+  return '';
+}
+
 class SettingsController {
   constructor() {
     this.settings = {
@@ -108,6 +119,7 @@ class SettingsController {
         },
         managedApps: {
           enabled: config.managedApps.enabled !== false,
+          deployTarget: config.managedApps.deployTarget || 'in-cluster',
           appBaseDomain: config.managedApps.appBaseDomain || 'demoserver2.buzz',
           namespacePrefix: config.managedApps.namespacePrefix || 'app-',
           platformNamespace: config.managedApps.platformNamespace || 'agent-platform',
@@ -481,6 +493,7 @@ class SettingsController {
       };
 
       [
+        'deployTarget',
         'appBaseDomain',
         'namespacePrefix',
         'platformNamespace',
@@ -492,6 +505,13 @@ class SettingsController {
           nextManagedApps[key] = String(nextManagedApps[key] || '').trim();
         }
       });
+
+      if (nextManagedApps.deployTarget !== undefined) {
+        nextManagedApps.deployTarget = normalizeManagedAppDeployTarget(nextManagedApps.deployTarget)
+          || normalizeManagedAppDeployTarget(currentManagedApps.deployTarget)
+          || normalizeManagedAppDeployTarget(config.managedApps.deployTarget)
+          || 'in-cluster';
+      }
 
       if (nextManagedApps.enabled !== undefined) {
         nextManagedApps.enabled = Boolean(nextManagedApps.enabled);
@@ -750,6 +770,9 @@ class SettingsController {
 
     return {
       enabled: stored.enabled !== false && config.managedApps.enabled !== false,
+      deployTarget: normalizeManagedAppDeployTarget(stored.deployTarget)
+        || normalizeManagedAppDeployTarget(config.managedApps.deployTarget)
+        || 'in-cluster',
       appBaseDomain: String(stored.appBaseDomain || config.managedApps.appBaseDomain || 'demoserver2.buzz').trim() || 'demoserver2.buzz',
       namespacePrefix: String(stored.namespacePrefix || config.managedApps.namespacePrefix || 'app-').trim() || 'app-',
       platformNamespace: String(stored.platformNamespace || config.managedApps.platformNamespace || 'agent-platform').trim() || 'agent-platform',
@@ -864,6 +887,7 @@ class SettingsController {
         },
         managedApps: {
           enabled: config.managedApps.enabled !== false,
+          deployTarget: config.managedApps.deployTarget || 'in-cluster',
           appBaseDomain: config.managedApps.appBaseDomain || 'demoserver2.buzz',
           namespacePrefix: config.managedApps.namespacePrefix || 'app-',
           platformNamespace: config.managedApps.platformNamespace || 'agent-platform',

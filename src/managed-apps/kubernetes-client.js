@@ -4,6 +4,7 @@ const fs = require('fs');
 const https = require('https');
 const { config } = require('../config');
 const settingsController = require('../routes/admin/settings.controller');
+const { SSHExecuteTool } = require('../agent-sdk/tools/categories/ssh/SSHExecuteTool');
 
 function normalizeText(value = '') {
     return String(value || '').trim();
@@ -36,20 +37,61 @@ function buildDockerConfigJson({ registryHost = '', username = '', password = ''
     });
 }
 
+function normalizeDeployTarget(value = '') {
+    const normalized = normalizeText(value).toLowerCase();
+    if (['ssh', 'remote', 'remote-ssh', 'remote_ssh'].includes(normalized)) {
+        return 'ssh';
+    }
+    if (['in-cluster', 'in_cluster', 'cluster', 'local-cluster', 'local_cluster'].includes(normalized)) {
+        return 'in-cluster';
+    }
+    return '';
+}
+
+function createNoopTracker() {
+    return {
+        recordExecution() {},
+        recordNetworkCall() {},
+    };
+}
+
 class KubernetesClient {
     constructor(options = {}) {
         this.config = options.config || config.kubernetes;
+        this.managedAppsConfig = options.managedAppsConfig || config.managedApps || {};
         this.deployConfig = options.deployConfigProvider || (() => (
             typeof settingsController.getEffectiveDeployConfig === 'function'
                 ? settingsController.getEffectiveDeployConfig()
                 : {}
         ));
+        this.sshTool = options.sshTool || new SSHExecuteTool({
+            id: 'ssh-execute-managed-app-internal',
+            name: 'Managed App SSH Internal',
+            description: 'Internal SSH helper for managed app deployments',
+        });
     }
 
-    isConfigured() {
+    resolveDeployTarget(value = '') {
+        return normalizeDeployTarget(value || this.managedAppsConfig.deployTarget) || 'in-cluster';
+    }
+
+    isInClusterConfigured() {
         return this.config.enabled !== false
             && Boolean(this.config.serviceHost)
             && fs.existsSync(this.config.tokenPath);
+    }
+
+    isSshConfigured() {
+        const ssh = typeof settingsController.getEffectiveSshConfig === 'function'
+            ? settingsController.getEffectiveSshConfig()
+            : {};
+        return Boolean(ssh.enabled && ssh.host && ssh.username && (ssh.password || ssh.privateKeyPath));
+    }
+
+    isConfigured(deploymentTarget = '') {
+        return this.resolveDeployTarget(deploymentTarget) === 'ssh'
+            ? this.isSshConfigured()
+            : this.isInClusterConfigured();
     }
 
     getApiBaseUrl() {
@@ -73,7 +115,7 @@ class KubernetesClient {
     }
 
     async request(method, pathname, body = null, { allowNotFound = false } = {}) {
-        if (!this.isConfigured()) {
+        if (!this.isInClusterConfigured()) {
             throw new Error('Managed app deployment requires an in-cluster Kubernetes service account.');
         }
 
@@ -403,7 +445,22 @@ class KubernetesClient {
         registryHost = '',
         registryUsername = '',
         registryPassword = '',
+        deploymentTarget = '',
     } = {}) {
+        if (this.resolveDeployTarget(deploymentTarget) === 'ssh') {
+            return this.deployManagedAppViaSsh({
+                slug,
+                namespace,
+                publicHost,
+                image,
+                containerPort,
+                registryPullSecretName,
+                registryHost,
+                registryUsername,
+                registryPassword,
+            });
+        }
+
         const deployConfig = this.deployConfig();
         const appName = sanitizeKubernetesName(slug, 'managed-app');
         const appNamespace = sanitizeKubernetesName(namespace || appName, 'managed-apps');
@@ -490,6 +547,178 @@ class KubernetesClient {
                 https: https.ok === true,
             },
             https,
+        };
+    }
+
+    buildNamespaceManifest(namespace = '') {
+        return {
+            apiVersion: 'v1',
+            kind: 'Namespace',
+            metadata: {
+                name: namespace,
+                labels: {
+                    'kimibuilt.io/managed-app': 'true',
+                },
+            },
+        };
+    }
+
+    buildRegistryPullSecretManifest({
+        namespace = '',
+        name = '',
+        registryHost = '',
+        username = '',
+        password = '',
+    } = {}) {
+        if (!normalizeText(registryHost) || !normalizeText(username) || !normalizeText(password)) {
+            return null;
+        }
+
+        const secretName = sanitizeKubernetesName(name || 'gitea-registry-credentials', 'gitea-registry-credentials');
+        return {
+            apiVersion: 'v1',
+            kind: 'Secret',
+            metadata: {
+                name: secretName,
+                namespace,
+                labels: {
+                    'kimibuilt.io/managed-app': 'true',
+                },
+            },
+            type: 'kubernetes.io/dockerconfigjson',
+            data: {
+                '.dockerconfigjson': Buffer.from(buildDockerConfigJson({
+                    registryHost,
+                    username,
+                    password,
+                }), 'utf8').toString('base64'),
+            },
+        };
+    }
+
+    quoteShellArg(value) {
+        return `'${String(value || '').replace(/'/g, `'"'"'`)}'`;
+    }
+
+    buildRemoteManifestApplyCommand(manifests = [], { namespace = '', deploymentName = '', tlsSecretName = '', timeoutSeconds = 120 } = {}) {
+        const applyBlocks = manifests
+            .filter(Boolean)
+            .map((manifest) => [
+                'cat <<\'EOF\' | kubectl_cmd apply -f -',
+                JSON.stringify(manifest, null, 2),
+                'EOF',
+            ].join('\n'))
+            .join('\n');
+
+        return [
+            'set -e',
+            'kubectl_cmd() {',
+            '  if command -v kubectl >/dev/null 2>&1; then kubectl "$@"; return; fi',
+            '  if command -v k3s >/dev/null 2>&1; then k3s kubectl "$@"; return; fi',
+            '  echo "kubectl or k3s is required on the remote host" >&2',
+            '  exit 1',
+            '}',
+            'if [ -f /etc/rancher/k3s/k3s.yaml ] && [ -z "${KUBECONFIG:-}" ]; then export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; fi',
+            applyBlocks,
+            `kubectl_cmd rollout status deployment/${this.quoteShellArg(deploymentName)} -n ${this.quoteShellArg(namespace)} --timeout=${Math.max(30, Number(timeoutSeconds) || 120)}s`,
+            `if kubectl_cmd get secret ${this.quoteShellArg(tlsSecretName)} -n ${this.quoteShellArg(namespace)} >/dev/null 2>&1; then echo "__KIMIBUILT_TLS_SECRET__=true"; else echo "__KIMIBUILT_TLS_SECRET__=false"; fi`,
+        ].filter(Boolean).join('\n');
+    }
+
+    async deployManagedAppViaSsh({
+        slug = '',
+        namespace = '',
+        publicHost = '',
+        image = '',
+        containerPort = 80,
+        registryPullSecretName = '',
+        registryHost = '',
+        registryUsername = '',
+        registryPassword = '',
+    } = {}) {
+        if (!this.isSshConfigured()) {
+            throw new Error('Managed app deployment requires SSH access to the remote deploy host.');
+        }
+
+        const deployConfig = this.deployConfig();
+        const appName = sanitizeKubernetesName(slug, 'managed-app');
+        const appNamespace = sanitizeKubernetesName(namespace || appName, 'managed-apps');
+        const host = normalizeText(publicHost);
+        const appLabels = {
+            'app.kubernetes.io/name': appName,
+            'app.kubernetes.io/managed-by': 'kimibuilt',
+            'kimibuilt.io/managed-app': 'true',
+        };
+        const tlsSecretName = sanitizeKubernetesName(`${appName}-tls`, `${appName}-tls`);
+        const manifests = [
+            this.buildNamespaceManifest(appNamespace),
+            this.buildRegistryPullSecretManifest({
+                namespace: appNamespace,
+                name: registryPullSecretName,
+                registryHost,
+                username: registryUsername,
+                password: registryPassword,
+            }),
+            this.buildDeploymentManifest({
+                namespace: appNamespace,
+                deploymentName: appName,
+                image,
+                containerPort,
+                registryPullSecretName,
+                appLabels,
+            }),
+            this.buildServiceManifest({
+                namespace: appNamespace,
+                serviceName: appName,
+                containerPort,
+                appLabels,
+            }),
+            this.buildIngressManifest({
+                namespace: appNamespace,
+                ingressName: appName,
+                publicHost: host,
+                serviceName: appName,
+                ingressClassName: deployConfig.ingressClassName || '',
+                tlsClusterIssuer: deployConfig.tlsClusterIssuer || '',
+                tlsSecretName,
+                appLabels,
+            }),
+        ];
+
+        const command = this.buildRemoteManifestApplyCommand(manifests, {
+            namespace: appNamespace,
+            deploymentName: appName,
+            tlsSecretName,
+            timeoutSeconds: 120,
+        });
+        const result = await this.sshTool.handler({
+            command,
+            timeout: 180000,
+        }, {}, createNoopTracker());
+        const tls = /__KIMIBUILT_TLS_SECRET__=true/i.test(result.stdout || '');
+        const https = await this.verifyHttps(host, this.managedAppsConfig.httpsVerifyTimeoutMs || 15000);
+
+        return {
+            namespace: appNamespace,
+            deployment: appName,
+            service: appName,
+            ingress: appName,
+            tlsSecretName,
+            rollout: {
+                ok: Number(result.exitCode || 0) === 0,
+                exitCode: result.exitCode,
+                stdout: result.stdout,
+                stderr: result.stderr,
+                host: result.host,
+            },
+            verification: {
+                rollout: Number(result.exitCode || 0) === 0,
+                ingress: true,
+                tls,
+                https: https.ok === true,
+            },
+            https,
+            executionHost: result.host,
         };
     }
 }

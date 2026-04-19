@@ -180,6 +180,17 @@ function parseManagedAppRepoReference(value = '') {
     };
 }
 
+function normalizeDeployTarget(value = '') {
+    const normalized = normalizeText(value).toLowerCase();
+    if (['ssh', 'remote', 'remote-ssh', 'remote_ssh'].includes(normalized)) {
+        return 'ssh';
+    }
+    if (['in-cluster', 'in_cluster', 'cluster', 'local-cluster', 'local_cluster'].includes(normalized)) {
+        return 'in-cluster';
+    }
+    return '';
+}
+
 class ManagedAppService {
     constructor(options = {}) {
         this.store = options.store || managedAppStore;
@@ -207,6 +218,28 @@ class ManagedAppService {
         return typeof settingsController.getEffectiveDeployConfig === 'function'
             ? settingsController.getEffectiveDeployConfig()
             : {};
+    }
+
+    resolveDeploymentTarget(input = {}, context = {}, app = null) {
+        const explicit = normalizeDeployTarget(input.deployTarget || input.deploymentTarget || input.target);
+        if (explicit) {
+            return explicit;
+        }
+
+        const persisted = normalizeDeployTarget(app?.metadata?.deploymentTarget);
+        if (persisted) {
+            return persisted;
+        }
+
+        if (normalizeText(context.executionProfile) === 'remote-build') {
+            return 'ssh';
+        }
+
+        const configured = normalizeDeployTarget(
+            this.getEffectiveManagedAppsConfig().deployTarget
+            || config.managedApps.deployTarget,
+        );
+        return configured || 'in-cluster';
     }
 
     getPublicApiBaseUrl() {
@@ -278,11 +311,12 @@ class ManagedAppService {
         };
     }
 
-    buildAppBlueprint(input = {}, ownerId = null, sessionId = null) {
+    buildAppBlueprint(input = {}, ownerId = null, sessionId = null, context = {}) {
         const giteaConfig = this.getEffectiveGiteaConfig();
         const managedAppsConfig = this.getEffectiveManagedAppsConfig();
         const explicitPromptName = extractExplicitAppName(input.prompt || input.sourcePrompt || '');
         const rawName = deriveRequestedAppName(input) || `app-${Date.now()}`;
+        const deploymentTarget = this.resolveDeploymentTarget(input, context, null);
         const slug = slugify(input.slug || rawName || `app-${Date.now()}`, {
             maxLength: MAX_MANAGED_APP_SLUG_LENGTH,
         });
@@ -322,6 +356,7 @@ class ManagedAppService {
                 ...(input.metadata || {}),
                 managedBy: 'kimibuilt',
                 requestedContainerPort: Number(input.containerPort || managedAppsConfig.defaultContainerPort || 80),
+                deploymentTarget,
             },
         };
     }
@@ -383,7 +418,7 @@ class ManagedAppService {
         const sessionId = normalizeText(context.sessionId || input.sessionId || '') || null;
         const requestedAction = normalizeRequestedAction(input.requestedAction || input.action || 'build');
         const deployRequested = inferDeployRequested(requestedAction, input.deployRequested === true);
-        const blueprint = this.buildAppBlueprint(input, ownerId, sessionId);
+        const blueprint = this.buildAppBlueprint(input, ownerId, sessionId, context);
         const existing = await this.store.getAppBySlug(blueprint.slug, ownerId);
 
         const app = existing
@@ -459,6 +494,9 @@ class ManagedAppService {
             status: commitSha ? 'building' : 'repo_ready',
             metadata: {
                 ...(persistedApp.metadata || {}),
+                deploymentTarget: blueprint.metadata?.deploymentTarget
+                    || persistedApp.metadata?.deploymentTarget
+                    || 'in-cluster',
                 lastSeededPaths: committedPaths,
             },
         });
@@ -531,14 +569,18 @@ class ManagedAppService {
     }
 
     async deployApp(appRef = '', input = {}, ownerId = null, context = {}) {
-        if (!this.kubernetesClient.isConfigured()) {
-            const error = new Error('Managed app deployment requires in-cluster Kubernetes API access.');
-            error.statusCode = 503;
-            throw error;
-        }
         const app = await this.resolveApp(appRef, ownerId);
         if (!app) {
             return null;
+        }
+        const deploymentTarget = this.resolveDeploymentTarget(input, context, app);
+        if (!this.kubernetesClient.isConfigured(deploymentTarget)) {
+            const modeLabel = deploymentTarget === 'ssh'
+                ? 'configured SSH access to the remote deploy host'
+                : 'in-cluster Kubernetes API access';
+            const error = new Error(`Managed app deployment requires ${modeLabel}.`);
+            error.statusCode = 503;
+            throw error;
         }
 
         const latestBuildRun = (await this.store.listBuildRunsForApp(app.id, ownerId, 1))[0] || null;
@@ -557,6 +599,7 @@ class ManagedAppService {
             registryHost: giteaConfig.registryHost,
             registryUsername: giteaConfig.registryUsername,
             registryPassword: giteaConfig.registryPassword,
+            deploymentTarget,
         });
 
         const verificationStatus = deployResult.verification.https
@@ -570,6 +613,7 @@ class ManagedAppService {
             status: appStatus,
             metadata: {
                 ...(app.metadata || {}),
+                deploymentTarget,
                 lastImage: image,
                 lastDeployResult: deployResult,
             },
@@ -603,7 +647,7 @@ class ManagedAppService {
             app: updatedApp,
             buildRun,
             deployment: deployResult,
-            message: `${updatedApp.appName} deployed to ${updatedApp.publicHost}.`,
+            message: `${updatedApp.appName} deployed to ${updatedApp.publicHost} via ${deploymentTarget}.`,
         };
     }
 

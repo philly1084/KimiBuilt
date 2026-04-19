@@ -42,6 +42,7 @@ jest.mock('../../config', () => ({
     },
     managedApps: {
       enabled: true,
+      deployTarget: 'in-cluster',
       appBaseDomain: 'demoserver2.buzz',
       namespacePrefix: 'app-',
       platformNamespace: 'agent-platform',
@@ -267,6 +268,7 @@ describe('settings.controller personality support', () => {
   test('exposes managed app control-plane settings without leaking secrets', () => {
     controller.settings.integrations.gitea.baseURL = 'https://gitea.alt.example';
     controller.settings.integrations.gitea.registryHost = 'registry.alt.example';
+    controller.settings.integrations.managedApps.deployTarget = 'SSH';
     controller.settings.integrations.managedApps.appBaseDomain = 'apps.alt.example';
     controller.settings.integrations.managedApps.namespacePrefix = 'edge-';
 
@@ -282,6 +284,7 @@ describe('settings.controller personality support', () => {
     expect(publicSettings.integrations.gitea.token).toBeUndefined();
     expect(publicSettings.integrations.gitea.webhookSecret).toBeUndefined();
     expect(publicSettings.integrations.managedApps).toEqual(expect.objectContaining({
+      deployTarget: 'ssh',
       appBaseDomain: 'apps.alt.example',
       namespacePrefix: 'edge-',
       platformNamespace: 'agent-platform',

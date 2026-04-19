@@ -221,12 +221,60 @@ class SkillExtractor {
     const words = objective.split(' ').filter(w => w.length > 4);
     
     // Return top keywords + action verbs
-    const actionVerbs = ['generate', 'create', 'build', 'parse', 'analyze', 'transform', 
-                         'convert', 'extract', 'summarize', 'validate', 'format'];
+    const actionVerbs = [
+      'generate',
+      'create',
+      'build',
+      'parse',
+      'analyze',
+      'transform',
+      'convert',
+      'extract',
+      'summarize',
+      'validate',
+      'format',
+      'deploy',
+      'inspect',
+      'verify',
+      'troubleshoot',
+      'diagnose',
+      'triage',
+      'restart',
+      'rollout',
+      'describe',
+      'check',
+      'repair',
+      'recover',
+    ];
     const foundVerbs = actionVerbs.filter(v => objective.includes(v));
+    const domainKeywords = [
+      'ssh',
+      'bash',
+      'shell',
+      'linux',
+      'ubuntu',
+      'server',
+      'remote',
+      'k3s',
+      'k8s',
+      'kubectl',
+      'rancher',
+      'pod',
+      'deployment',
+      'ingress',
+      'traefik',
+      'journalctl',
+      'systemctl',
+      'crashloopbackoff',
+      'rollout',
+      'logs',
+      'tls',
+      'dns',
+    ];
+    const foundKeywords = domainKeywords.filter((keyword) => objective.includes(keyword));
     
     // Remove duplicates and limit total patterns
-    const patterns = [...new Set([...foundVerbs, ...words.slice(0, 5)])];
+    const patterns = [...new Set([...foundVerbs, ...foundKeywords, ...words.slice(0, 5)])];
     return patterns.slice(0, 8);
   }
   

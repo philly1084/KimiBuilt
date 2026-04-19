@@ -206,6 +206,30 @@ describe('AgentOrchestrator', () => {
         expect(llmClient.complete).not.toHaveBeenCalled();
     });
 
+    test('stores skill context in working memory for conversation execution', () => {
+        const llmClient = {
+            complete: jest.fn(),
+        };
+        const embedder = {
+            embed: jest.fn(),
+        };
+
+        const orchestrator = new AgentOrchestrator({
+            llmClient,
+            embedder,
+        });
+
+        const workingMemory = orchestrator.getWorkingMemory('session-skill-context');
+
+        orchestrator.seedConversationExecutionContext(workingMemory, {
+            instructions: 'Be concise.',
+            input: 'Check the cluster.',
+            skillContext: 'Use kubectl describe before kubectl logs for CrashLoopBackOff triage.',
+        });
+
+        expect(workingMemory.get('skillContext')).toBe('Use kubectl describe before kubectl logs for CrashLoopBackOff triage.');
+    });
+
     test('conversation tool selection exposes sandbox unconditionally without requiring regex match', () => {
         jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
             enabled: false,

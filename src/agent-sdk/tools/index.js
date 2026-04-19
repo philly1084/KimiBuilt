@@ -3165,6 +3165,7 @@ class ToolManager {
               }, ownerId, {
                 sessionId: params.sessionId || sessionId,
                 model: context?.model || '',
+                executionProfile: context?.executionProfile || '',
               });
             }
 
@@ -3179,6 +3180,7 @@ class ToolManager {
                 {
                   sessionId: params.sessionId || sessionId,
                   model: context?.model || '',
+                  executionProfile: context?.executionProfile || '',
                 },
               );
               if (!result) {
@@ -3194,6 +3196,7 @@ class ToolManager {
                 ownerId,
                 {
                   sessionId: params.sessionId || sessionId,
+                  executionProfile: context?.executionProfile || '',
                 },
               );
               if (!result) {
@@ -3598,10 +3601,40 @@ class ToolManager {
    */
   getSSHTriggerPatterns(toolId) {
     const patterns = {
-      'ssh-execute': ['ssh', 'remote command', 'execute on server', 'run on host'],
-      'remote-command': ['remote command', 'run remotely', 'execute remotely', 'ssh'],
+      'ssh-execute': [
+        'ssh',
+        'bash',
+        'shell',
+        'remote command',
+        'execute on server',
+        'run on host',
+        'run bash remotely',
+      ],
+      'remote-command': [
+        'remote command',
+        'run remotely',
+        'execute remotely',
+        'ssh',
+        'kubectl',
+        'k3s',
+        'k8s',
+        'rancher',
+        'journalctl',
+        'systemctl',
+        'ingress',
+        'deployment logs',
+      ],
       'docker-exec': ['docker', 'container', 'run in container', 'docker exec'],
-      'k3s-deploy': ['k3s deploy', 'deploy to k3s', 'kubectl apply', 'rollout status', 'set image'],
+      'k3s-deploy': [
+        'k3s deploy',
+        'deploy to k3s',
+        'kubectl apply',
+        'rollout status',
+        'set image',
+        'sync repo to cluster',
+        'apply manifests',
+        'cluster rollout',
+      ],
     };
     return patterns[toolId] || [toolId];
   }

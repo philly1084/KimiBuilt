@@ -100,6 +100,26 @@ describe('ToolManager image tools', () => {
     expect(toolManager.getTool('podcast')).toBeTruthy();
   });
 
+  test('registers remote operation skills with kubectl and k3s trigger coverage', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const remoteSkill = toolManager.registry.getSkill('remote-command');
+    const deploySkill = toolManager.registry.getSkill('k3s-deploy');
+
+    expect(remoteSkill.triggerPatterns).toEqual(expect.arrayContaining([
+      'kubectl',
+      'k3s',
+      'rancher',
+      'journalctl',
+      'systemctl',
+    ]));
+    expect(deploySkill.triggerPatterns).toEqual(expect.arrayContaining([
+      'apply manifests',
+      'cluster rollout',
+    ]));
+  });
+
   test('routes podcast through the injected podcast service', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();

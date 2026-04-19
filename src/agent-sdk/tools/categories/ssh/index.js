@@ -48,7 +48,7 @@ function registerSSHTools() {
 
 function getTriggerPatterns(toolId) {
   const patterns = {
-    'ssh-execute': ['ssh', 'remote command', 'execute on server', 'run on host'],
+    'ssh-execute': ['ssh', 'bash', 'shell', 'remote command', 'execute on server', 'run on host', 'run bash remotely'],
     'docker-exec': ['docker', 'container', 'run in container', 'docker exec']
   };
   return patterns[toolId] || [toolId];

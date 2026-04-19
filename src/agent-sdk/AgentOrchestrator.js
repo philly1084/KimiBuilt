@@ -343,6 +343,7 @@ class AgentOrchestrator {
         const skills = await this.skillRetriever.retrieveForTask(task);
         skillContext = this.skillRetriever.formatForPrompt(skills);
         workingMemory.setIntermediateResult('relevantSkills', skills);
+        workingMemory.setIntermediateResult('skillContext', skillContext);
       } catch (error) {
         console.warn('Failed to retrieve skills:', error.message);
       }
@@ -673,6 +674,7 @@ class AgentOrchestrator {
       contextMessages,
       recentMessages,
       input,
+      skillContext,
     });
 
     const executor = new Executor({
@@ -1216,6 +1218,7 @@ class AgentOrchestrator {
     contextMessages = [],
     recentMessages = [],
     input = null,
+    skillContext = '',
   } = {}) {
     if (!workingMemory) {
       return;
@@ -1231,6 +1234,7 @@ class AgentOrchestrator {
     workingMemory.setIntermediateResult('contextMessagesText', this.formatConversationMessages(contextMessages));
     workingMemory.setIntermediateResult('recentMessagesText', this.formatConversationMessages(recentMessages));
     workingMemory.setIntermediateResult('inputSummary', inputSummary || '');
+    workingMemory.setIntermediateResult('skillContext', skillContext || '');
     workingMemory.setIntermediateResult('results', {});
     workingMemory.setIntermediateResult('stepResults', []);
     workingMemory.setIntermediateResult('resultsJson', JSON.stringify({}, null, 2));

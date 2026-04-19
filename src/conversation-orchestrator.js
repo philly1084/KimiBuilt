@@ -8268,7 +8268,7 @@ class ConversationOrchestrator extends EventEmitter {
         }
 
         if (allowedToolIds.includes('managed-app')) {
-            parts.push('Use `managed-app` for agent-owned applications that should be created in external Gitea and deployed into the cluster.');
+            parts.push('Use `managed-app` for agent-owned applications that should be created in external Gitea and deployed to the configured cluster target.');
             parts.push('Prefer `managed-app` over raw `git-safe`, `remote-command`, or `k3s-deploy` when the request is to create, inspect, update, build, publish, or redeploy an app tracked by the managed app catalog.');
             parts.push('For new app requests, let `managed-app create` allocate the repo, image repo, namespace, and host instead of improvising those names in chat.');
         }
