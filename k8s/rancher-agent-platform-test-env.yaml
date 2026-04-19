@@ -1,6 +1,8 @@
-# Apply this manifest set to the separate k3s cluster that hosts the external
-# Gitea control plane. It is intentionally separate from the KimiBuilt app
-# cluster.
+# Test environment bootstrap for the separate Rancher-managed Gitea cluster.
+# Apply this to the external cluster, not the KimiBuilt app cluster.
+# The act-runner Deployment starts scaled to 0 because Gitea must generate a
+# real runner registration token after bootstrap. Update the secret and scale
+# the runner to 1 once Gitea is online.
 ---
 apiVersion: v1
 kind: Namespace
@@ -15,7 +17,7 @@ metadata:
 type: Opaque
 stringData:
   username: admin
-  password: change-me
+  password: TestOnly-Gitea-Admin-2026!
   email: admin@demoserver2.buzz
 ---
 apiVersion: v1
@@ -25,8 +27,8 @@ metadata:
   namespace: agent-platform
 type: Opaque
 stringData:
-  shared-secret: change-me
-  runner-registration-token: change-me
+  shared-secret: TestOnly-Shared-Secret-2026!
+  runner-registration-token: replace-after-gitea-boot
 ---
 apiVersion: v1
 kind: Secret
@@ -36,10 +38,10 @@ metadata:
 type: Opaque
 stringData:
   gitea-registry-host: gitea.demoserver2.buzz
-  gitea-registry-username: change-me
-  gitea-registry-password: change-me
+  gitea-registry-username: test-builder
+  gitea-registry-password: TestOnly-Registry-Password-2026!
   kimibuilt-build-events-url: https://kimibuilt.demoserver2.buzz/api/integrations/gitea/build-events
-  kimibuilt-build-events-secret: change-me
+  kimibuilt-build-events-secret: TestOnly-Webhook-Secret-2026!
   buildkit-host: tcp://buildkitd.agent-platform.svc.cluster.local:1234
 ---
 apiVersion: v1
@@ -204,6 +206,8 @@ spec:
           ports:
             - containerPort: 3000
               name: http
+            - containerPort: 22
+              name: ssh
           volumeMounts:
             - name: data
               mountPath: /data
@@ -280,7 +284,7 @@ metadata:
   name: act-runner
   namespace: agent-platform
 spec:
-  replicas: 1
+  replicas: 0
   selector:
     matchLabels:
       app: act-runner
