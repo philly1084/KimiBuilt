@@ -23,6 +23,7 @@ const {
     getSessionControlState,
     mergeControlState,
 } = require('./runtime-control-state');
+const { clusterStateRegistry } = require('./cluster-state-registry');
 const {
     buildWebChatSessionMessages,
 } = require('./web-chat-message-state');
@@ -6367,6 +6368,13 @@ class ConversationOrchestrator extends EventEmitter {
         const deployDefaults = typeof settingsController.getEffectiveDeployConfig === 'function'
             ? settingsController.getEffectiveDeployConfig()
             : {};
+        const shouldIncludeClusterRegistry = executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
+            || hasReachableSshTarget
+            || explicitK3sDeployIntent
+            || /\b(ssh|server|host|cluster|k3s|k8s|kubernetes|kubectl|deployment|rollout|ingress|traefik|tls|dns)\b/.test(prompt);
+        const clusterRegistrySummary = shouldIncludeClusterRegistry
+            ? clusterStateRegistry.buildPromptSummary({ maxDeployments: 3, maxRecentActivity: 3 })
+            : '';
         const repositoryPath = String(
             toolContext?.repositoryPath
             || config.deploy.defaultRepositoryPath
@@ -6701,6 +6709,7 @@ class ConversationOrchestrator extends EventEmitter {
             classification,
             workflow: effectiveWorkflowSeed,
             projectPlan: effectiveProjectPlanSeed,
+            clusterRegistrySummary,
             toolDescriptions: Object.fromEntries(
                 allowedToolIds.map((toolId) => [
                     toolId,
@@ -7280,6 +7289,9 @@ class ConversationOrchestrator extends EventEmitter {
             toolPolicy.projectPlan
                 ? formatProjectExecutionContext(toolPolicy.projectPlan)
                 : '(none)',
+            '',
+            'Cluster registry memory:',
+            toolPolicy.clusterRegistrySummary || '(none)',
             '',
             'Supplemental recalled context:',
             Array.isArray(contextMessages) && contextMessages.length > 0 ? contextMessages.join('\n') : '(none)',
@@ -8037,6 +8049,11 @@ class ConversationOrchestrator extends EventEmitter {
             }
         }
 
+        if (toolPolicy?.clusterRegistrySummary) {
+            parts.push(`Cluster registry memory:\n${toolPolicy.clusterRegistrySummary}`);
+            parts.push('Treat the cluster registry as durable context from earlier verified remote tool runs. Use it to avoid starting from scratch, but still re-verify rollout, ingress, TLS, and public reachability before claiming a deployment is live.');
+        }
+
         parts.push('Treat the local CLI environment, workspace state, filesystem contents, and shell behavior as unknown unless explicit user input, the active transcript, or verified tool results establish them.');
         parts.push('Do not comment on local environment health, startup state, writable paths, repository cleanliness, or command availability unless a verified tool result is directly about that.');
 
@@ -8473,6 +8490,19 @@ class ConversationOrchestrator extends EventEmitter {
                     : {}),
             },
         );
+        try {
+            clusterStateRegistry.recordToolEvents({
+                sessionId,
+                objective,
+                toolEvents,
+                controlState: mergeControlState(
+                    getSessionControlState(currentSession),
+                    nextControlState,
+                ),
+            });
+        } catch (error) {
+            console.warn(`[ConversationOrchestrator] Failed to update cluster registry: ${error.message}`);
+        }
         const legacyControlMetadata = buildLegacyControlMetadata(nextControlState);
 
         if (this.sessionStore?.updateControlState && Object.keys(nextControlState).length > 0) {

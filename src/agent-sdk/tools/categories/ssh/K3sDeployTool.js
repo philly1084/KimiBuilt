@@ -31,12 +31,11 @@ class K3sDeployTool extends ToolBase {
       },
       inputSchema: {
         type: 'object',
-        required: ['action'],
         properties: {
           action: {
             type: 'string',
             enum: Array.from(ALLOWED_ACTIONS),
-            description: 'Restricted remote k3s action to run over SSH',
+            description: 'Restricted remote k3s action to run over SSH. If omitted, the tool infers a safe default from the other parameters.',
           },
           repositoryUrl: {
             type: 'string',
@@ -111,7 +110,7 @@ class K3sDeployTool extends ToolBase {
   }
 
   async handler(params, context, tracker) {
-    const action = String(params.action || '').trim();
+    const action = this.inferAction(params);
     if (!ALLOWED_ACTIONS.has(action)) {
       throw new Error(`Unsupported k3s-deploy action '${action}'`);
     }
@@ -139,6 +138,31 @@ class K3sDeployTool extends ToolBase {
       host: result.host,
       duration: result.duration,
     };
+  }
+
+  inferAction(params = {}) {
+    const explicit = String(params.action || '').trim();
+    if (explicit) {
+      return explicit;
+    }
+
+    if (String(params.image || '').trim()) {
+      return 'set-image';
+    }
+
+    if (String(params.repositoryUrl || '').trim() || String(params.ref || '').trim() || String(params.targetDirectory || '').trim()) {
+      return 'sync-and-apply';
+    }
+
+    if (String(params.manifestsPath || '').trim()) {
+      return 'apply-manifests';
+    }
+
+    if (String(params.deployment || '').trim() || String(params.namespace || '').trim()) {
+      return 'rollout-status';
+    }
+
+    return 'sync-and-apply';
   }
 
   buildCommand(action, params = {}) {

@@ -69,6 +69,31 @@ describe('K3sDeployTool', () => {
     }));
   });
 
+  test('infers sync-and-apply when action is omitted for deploy-shaped params', async () => {
+    const tool = new K3sDeployTool();
+    tool.sshTool.handler = jest.fn().mockResolvedValue({
+      stdout: 'deployment "backend" successfully rolled out',
+      stderr: '',
+      exitCode: 0,
+      duration: 18,
+      host: 'server:22',
+    });
+
+    const result = await tool.execute({
+      repositoryUrl: 'https://github.com/example/app.git',
+      ref: 'main',
+      targetDirectory: '/opt/app',
+      manifestsPath: 'k8s',
+      namespace: 'kimibuilt',
+      deployment: 'backend',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data.action).toBe('sync-and-apply');
+    expect(tool.sshTool.handler).toHaveBeenCalledTimes(1);
+    expect(tool.sshTool.handler.mock.calls[0][0].command).toContain("kubectl rollout status deployment/backend -n 'kimibuilt' --timeout=180s");
+  });
+
   test('rejects non-github repository urls for sync', async () => {
     const tool = new K3sDeployTool();
 

@@ -24,6 +24,7 @@ const {
   isSessionIsolationEnabled,
   resolveClientSurface,
 } = require('../session-scope');
+const { clusterStateRegistry } = require('../cluster-state-registry');
 const {
   DEFAULT_EXECUTION_PROFILE,
   NOTES_EXECUTION_PROFILE,
@@ -101,6 +102,7 @@ function buildRuntimeSummary(toolManager, options = {}) {
       ingressClassName: deploy.ingressClassName || '',
       tlsClusterIssuer: deploy.tlsClusterIssuer || '',
     },
+    clusterRegistry: clusterStateRegistry.getRuntimeSummary(),
     opencode: {
       enabled: opencode.enabled !== false,
       binaryPath: opencode.binaryPath || 'opencode',
