@@ -454,8 +454,8 @@ function inferWorkloadPolicy(prompt = '') {
         return normalizePolicy({});
     }
 
-    const hasRemoteTarget = /\b(remote|server|cluster|k3s|k8s|kubernetes|ssh|deployment|deploy|rollout|container|docker|pod|service|ingress|production|environment)\b/.test(normalized);
-    const hasBuildVerb = /\b(build|install|set up|configure|repair|fix|restart|publish|push|update|deploy|rollout)\b/.test(normalized);
+    const hasRemoteTarget = /\b(remote|server|cluster|k3s|k8s|kubernetes|ssh|deployment|deploy|rollout|container|docker|pod|service|ingress|production|environment|gitea|sandbox)\b/.test(normalized);
+    const hasBuildVerb = /\b(build|create|develop|make|install|set up|configure|repair|fix|restart|publish|push|update|deploy|rollout|ship|launch|scaffold)\b/.test(normalized);
     const hasRemoteEnvironmentIntent = hasRemoteTarget && hasBuildVerb;
 
     if (hasRemoteEnvironmentIntent) {

@@ -132,6 +132,15 @@ describe('workload natural language parsing', () => {
         });
     });
 
+    test('infers remote-build policy for remote app creation language', () => {
+        const policy = inferWorkloadPolicy('Use the remote server, Gitea, and this web app environment as the sandbox to create and ship the app.');
+
+        expect(policy).toMatchObject({
+            executionProfile: 'remote-build',
+            allowSideEffects: true,
+        });
+    });
+
     test('translates simple cron expressions into readable labels', () => {
         expect(translateCronExpression('5 23 * * *', 'America/Halifax')).toBe('Every day at 11:05 PM');
         expect(translateCronExpression('0 9 * * 1-5', 'America/Halifax')).toBe('Every weekday at 9:00 AM');

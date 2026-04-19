@@ -42,7 +42,7 @@ jest.mock('../../config', () => ({
     },
     managedApps: {
       enabled: true,
-      deployTarget: 'in-cluster',
+      deployTarget: 'ssh',
       appBaseDomain: 'demoserver2.buzz',
       namespacePrefix: 'app-',
       platformNamespace: 'agent-platform',

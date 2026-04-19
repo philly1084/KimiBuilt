@@ -918,6 +918,29 @@ function hasRemoteWebsiteUpdateIntent(prompt = '') {
     return hasWebsiteTarget && hasRemoteTarget && hasWriteIntent;
 }
 
+function hasRemoteSoftwareCreationIntent(prompt = '') {
+    const normalized = String(prompt || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        /\b(create|develop|build|make|ship|launch|publish|scaffold|prototype)\b[\s\S]{0,60}\b(app|application|website|site|frontend|service|game|software|web app)\b[\s\S]{0,80}\b(server|remote|ssh|gitea|cluster|k3s|kubernetes|environment|sandbox)\b/,
+        /\b(server|remote|ssh|gitea|cluster|k3s|kubernetes|environment|sandbox)\b[\s\S]{0,80}\b(create|develop|build|make|ship|launch|publish|scaffold|prototype)\b[\s\S]{0,60}\b(app|application|website|site|frontend|service|game|software|web app)\b/,
+        /\b(this (?:server|cluster|environment|sandbox))\b[\s\S]{0,60}\b(create|develop|build|make|ship|launch|publish)\b[\s\S]{0,60}\b(app|application|website|site|frontend|service|game|software|web app)\b/,
+    ].some((pattern) => pattern.test(normalized));
+}
+
+function hasExplicitLocalSandboxIntent(prompt = '') {
+    const normalized = String(prompt || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(run|execute|test)\b[\s\S]{0,40}\b(code|script|snippet)\b/.test(normalized)
+        || /\b(code sandbox|sandbox|locally|local code)\b/.test(normalized);
+}
+
 function hasInternalArtifactReference(prompt = '') {
     const source = String(prompt || '').trim();
     if (!source) {
@@ -1998,6 +2021,10 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
         return [];
     }
 
+    const executionProfile = normalizeExecutionProfile(
+        options?.executionProfile
+        || options?.toolContext?.executionProfile,
+    );
     const sessionIsolation = isSessionIsolationEnabled({
         sessionIsolation: options?.toolContext?.sessionIsolation,
     });
@@ -2053,9 +2080,17 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
         : (availableToolIds.has('ssh-execute') ? 'ssh-execute' : null);
     const explicitLocalArtifact = hasExplicitLocalArtifactReference(prompt);
     const remoteWebsiteUpdateIntent = hasRemoteWebsiteUpdateIntent(prompt);
+    const remoteSoftwareCreationIntent = executionProfile === 'remote-build'
+        && hasRemoteSoftwareCreationIntent(prompt);
     const internalArtifactReference = hasInternalArtifactReference(prompt);
-    const shouldPreferRemoteWebsiteSource = Boolean(remoteToolId && remoteWebsiteUpdateIntent && !explicitLocalArtifact);
-    const shouldSuppressWebFetchForRemoteWebsite = shouldPreferRemoteWebsiteSource && internalArtifactReference;
+    const shouldPreferRemoteWorkspaceSource = Boolean(
+        remoteToolId
+        && !explicitLocalArtifact
+        && (remoteWebsiteUpdateIntent || remoteSoftwareCreationIntent),
+    );
+    const shouldSuppressWebFetchForRemoteWebsite = shouldPreferRemoteWorkspaceSource
+        && remoteWebsiteUpdateIntent
+        && internalArtifactReference;
     const checkpointPolicy = options?.userCheckpointPolicy || options?.toolContext?.userCheckpointPolicy || {};
     const isSurveyResponseTurn = Boolean(parseUserCheckpointResponseMessage(prompt));
     const shouldOfferUserCheckpoint = availableToolIds.has(USER_CHECKPOINT_TOOL_ID)
@@ -2132,19 +2167,19 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
         selectedIds.add('asset-search');
     }
 
-    if (!shouldPreferRemoteWebsiteSource && extractRequestedDirectoryPath(prompt)) {
+    if (!shouldPreferRemoteWorkspaceSource && extractRequestedDirectoryPath(prompt)) {
         selectedIds.add('file-mkdir');
     }
 
-    if (!shouldPreferRemoteWebsiteSource && /\b(read|open|show|print|cat)\b[\s\S]{0,40}\bfile\b/i.test(normalizedPrompt)) {
+    if (!shouldPreferRemoteWorkspaceSource && /\b(read|open|show|print|cat)\b[\s\S]{0,40}\bfile\b/i.test(normalizedPrompt)) {
         selectedIds.add('file-read');
     }
 
-    if (!shouldPreferRemoteWebsiteSource && /\b(write|save|create|update|edit)\b[\s\S]{0,40}\bfile\b/i.test(normalizedPrompt)) {
+    if (!shouldPreferRemoteWorkspaceSource && /\b(write|save|create|update|edit)\b[\s\S]{0,40}\bfile\b/i.test(normalizedPrompt)) {
         selectedIds.add('file-write');
     }
 
-    if (!shouldPreferRemoteWebsiteSource && /\b(find|search|locate|list)\b[\s\S]{0,40}\bfiles?\b/i.test(normalizedPrompt)) {
+    if (!shouldPreferRemoteWorkspaceSource && /\b(find|search|locate|list)\b[\s\S]{0,40}\bfiles?\b/i.test(normalizedPrompt)) {
         selectedIds.add('file-search');
     }
 
@@ -2152,7 +2187,7 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
         selectedIds.add('agent-notes-write');
     }
 
-    if (remoteToolId && (promptHasExplicitSshIntent(prompt) || shouldPreferRemoteWebsiteSource)) {
+    if (remoteToolId && (promptHasExplicitSshIntent(prompt) || shouldPreferRemoteWorkspaceSource)) {
         selectedIds.add(remoteToolId);
     }
 
@@ -2172,7 +2207,7 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
         selectedIds.add('docker-exec');
     }
 
-    if (/\b(run|execute|test)\b[\s\S]{0,40}\b(code|script|snippet)\b/i.test(normalizedPrompt) || /\bsandbox\b/i.test(normalizedPrompt)) {
+    if (!shouldPreferRemoteWorkspaceSource && hasExplicitLocalSandboxIntent(normalizedPrompt)) {
         selectedIds.add('code-sandbox');
     }
 
@@ -2357,6 +2392,10 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         return null;
     }
 
+    const executionProfile = normalizeExecutionProfile(
+        options?.executionProfile
+        || options?.toolContext?.executionProfile,
+    );
     const sessionIsolation = isSessionIsolationEnabled({
         sessionIsolation: options?.toolContext?.sessionIsolation,
     });
@@ -2549,10 +2588,16 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Prefer `managed-app` over ad hoc `git-safe` plus `k3s-deploy` when the request is to create, build, publish, inspect, or redeploy an app that the agent owns.');
         guidance.push('- `managed-app create` should allocate the repo, image repo, namespace, and ingress host instead of improvising those names in chat.');
         guidance.push('- `managed-app deploy` should use the authoritative managed app record, the latest successful image tag, and the app\'s configured deployment target instead of guessing the cluster target from scratch.');
+        if (executionProfile === 'remote-build') {
+            guidance.push('- In `remote-build` sessions, treat the configured remote Gitea plus SSH/k3s lane as the active app sandbox and build environment for managed apps.');
+        }
     }
 
     if (automaticTools.some((entry) => entry.id === 'code-sandbox')) {
-        guidance.push('- Use `code-sandbox` to run code in an isolated environment when you need to verify behavior without modifying the main system.');
+        guidance.push('- Use `code-sandbox` only for explicitly local isolated execution when you need to verify behavior without modifying the main system.');
+        if (executionProfile === 'remote-build') {
+            guidance.push('- In `remote-build` sessions, do not treat the remote server or cluster as a request for the local `code-sandbox`; keep server-side build and app work on the remote lane unless the user explicitly asks for local isolated execution.');
+        }
     }
 
     if (automaticTools.some((entry) => entry.id === 'security-scan')) {

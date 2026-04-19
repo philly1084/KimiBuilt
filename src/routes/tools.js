@@ -73,7 +73,7 @@ function buildRuntimeSummary(toolManager, options = {}) {
   const managedApps = typeof settingsController.getEffectiveManagedAppsConfig === 'function'
     ? settingsController.getEffectiveManagedAppsConfig()
     : {};
-  const managedAppDeployTarget = String(managedApps.deployTarget || config.managedApps.deployTarget || 'in-cluster').trim() || 'in-cluster';
+  const managedAppDeployTarget = String(managedApps.deployTarget || config.managedApps.deployTarget || 'ssh').trim() || 'ssh';
   const opencode = typeof settingsController.getEffectiveOpencodeConfig === 'function'
     ? settingsController.getEffectiveOpencodeConfig()
     : {};
@@ -244,12 +244,10 @@ function buildToolRuntime(toolId, options = {}) {
     const managedApps = typeof settingsController.getEffectiveManagedAppsConfig === 'function'
       ? settingsController.getEffectiveManagedAppsConfig()
       : {};
-    const deployTarget = String(managedApps.deployTarget || config.managedApps.deployTarget || 'in-cluster').trim() || 'in-cluster';
+    const deployTarget = String(managedApps.deployTarget || config.managedApps.deployTarget || 'ssh').trim() || 'ssh';
     return {
       configured: Boolean(gitea.enabled !== false && gitea.baseURL && gitea.token),
-      provider: deployTarget === 'ssh'
-        ? 'external-gitea-plus-remote-k3s-over-ssh'
-        : 'external-gitea-plus-in-cluster-kubernetes',
+      provider: 'external-gitea-plus-remote-k3s-over-ssh',
       giteaBaseURL: gitea.baseURL || '',
       giteaOrg: gitea.org || '',
       registryHost: gitea.registryHost || '',

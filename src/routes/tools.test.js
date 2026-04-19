@@ -42,6 +42,7 @@ describe('/api/tools routes', () => {
         expect(response.status).toBe(200);
         expect(response.body.meta.includeAllTools).toBe(true);
         expect(response.body.data.map((tool) => tool.id)).toContain('managed-app');
+        expect(response.body.meta.runtime.managedApps.deployTarget).toBe('ssh');
     });
 
     test('default frontend catalog keeps managed-app hidden from end-user surfaces', async () => {
@@ -91,5 +92,15 @@ describe('/api/tools routes', () => {
                 sessionId: expect.any(String),
             }),
         );
+    });
+
+    test('managed-app tool details report the remote ssh provider', async () => {
+        const app = buildApp();
+
+        const response = await request(app).get('/api/tools/managed-app');
+
+        expect(response.status).toBe(200);
+        expect(response.body.data.runtime.provider).toBe('external-gitea-plus-remote-k3s-over-ssh');
+        expect(response.body.data.runtime.deployTarget).toBe('ssh');
     });
 });

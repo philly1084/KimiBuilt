@@ -311,6 +311,19 @@ function createToolManager() {
                 },
             },
         }],
+        ['code-sandbox', {
+            id: 'code-sandbox',
+            name: 'Code Sandbox',
+            description: 'Run code in an isolated local sandbox',
+            inputSchema: {
+                type: 'object',
+                required: ['code'],
+                properties: {
+                    code: { type: 'string' },
+                    language: { type: 'string' },
+                },
+            },
+        }],
         ['user-checkpoint', {
             id: 'user-checkpoint',
             name: 'User Checkpoint',
@@ -380,6 +393,7 @@ function createToolManager() {
         ['ssh-execute', { enabled: true, triggerPatterns: ['ssh', 'remote command'], requiresConfirmation: true }],
         ['remote-command', { enabled: true, triggerPatterns: ['remote command', 'execute remotely'], requiresConfirmation: true }],
         ['k3s-deploy', { enabled: true, triggerPatterns: ['deploy to k3s', 'kubectl apply', 'rollout status'], requiresConfirmation: true }],
+        ['code-sandbox', { enabled: true, triggerPatterns: ['sandbox', 'run code'], requiresConfirmation: false }],
         ['user-checkpoint', { enabled: true, triggerPatterns: ['ask a checkpoint question'], requiresConfirmation: false }],
         ['document-workflow', { enabled: true, triggerPatterns: ['generate document', 'make slides', 'create brief'], requiresConfirmation: false }],
         ['deep-research-presentation', { enabled: true, triggerPatterns: ['deep research presentation', 'research-backed slide deck'], requiresConfirmation: false }],
@@ -2256,6 +2270,33 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(selectedTools.map((tool) => tool.id)).not.toContain('file-read');
         expect(selectedTools.map((tool) => tool.id)).not.toContain('file-search');
         expect(selectedTools.map((tool) => tool.id)).not.toContain('file-write');
+    });
+
+    test('treats remote server sandbox phrasing as remote-build work instead of local code-sandbox work', () => {
+        jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
+            enabled: true,
+            host: '77.42.44.98',
+            port: 22,
+            username: 'root',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const toolManager = createToolManager();
+        const prompt = 'Use this server as the sandbox and web app environment to create and build the app through Gitea.';
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            prompt,
+            { executionProfile: 'remote-build' },
+        );
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            prompt,
+            { toolContext: { executionProfile: 'remote-build' } },
+        );
+
+        expect(selectedTools.map((tool) => tool.id)).toContain('remote-command');
+        expect(selectedTools.map((tool) => tool.id)).not.toContain('code-sandbox');
     });
 
     test('does not misclassify research html documents about public or live events as remote website work', () => {
