@@ -17,7 +17,7 @@ const TOOL_SUPPORT = {
   'ssh-execute': { status: 'requires_setup', notes: ['Requires SSH target credentials or cluster secret configuration.'] },
   'remote-command': { status: 'requires_setup', notes: ['Requires SSH target credentials or cluster secret configuration.', 'Optimized for Ubuntu/Linux host and k3s cluster operations in this project.'] },
   'k3s-deploy': { status: 'requires_setup', notes: ['Requires SSH target credentials and kubectl/git on the remote host.'] },
-  'managed-app': { status: 'requires_setup', notes: ['Requires Postgres persistence, external Gitea credentials, and either SSH access to the remote k3s host or in-cluster Kubernetes API access for deployment.'] },
+  'managed-app': { status: 'requires_setup', notes: ['Requires Postgres persistence, external Gitea credentials, and SSH access to the remote k3s host for deployment.'] },
   'docker-exec': { status: 'requires_setup', notes: ['Requires Docker CLI/socket access in the backend runtime.'] },
   'code-sandbox': { status: 'requires_setup', notes: ['Requires Docker image pull/run capability in the backend runtime.'] },
   'git-safe': { status: 'requires_setup', notes: ['Requires a git repository in the backend-accessible filesystem and working git credentials for push.'] },

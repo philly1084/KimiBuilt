@@ -291,6 +291,22 @@ describe('settings.controller personality support', () => {
     }));
   });
 
+  test('effective managed app config prefers ssh when remote defaults are configured', () => {
+    controller.settings.integrations.ssh = {
+      enabled: true,
+      host: '10.0.0.5',
+      port: 22,
+      username: 'ubuntu',
+      password: 'secret',
+      privateKeyPath: '',
+    };
+    controller.settings.integrations.managedApps.deployTarget = 'in-cluster';
+
+    const effective = controller.getEffectiveManagedAppsConfig();
+
+    expect(effective.deployTarget).toBe('ssh');
+  });
+
   test('resetting the personality restores default settings and soul file content', async () => {
     controller.settings.personality = {
       enabled: false,

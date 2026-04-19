@@ -58,6 +58,60 @@ describe('ManagedAppService', () => {
         expect(blueprint.publicHost).toBe('hello-stack.demoserver2.buzz');
     });
 
+    test('prefers ssh for new managed app blueprints when the remote deploy lane is available', () => {
+        const service = new ManagedAppService({
+            kubernetesClient: {
+                isSshConfigured: jest.fn(() => true),
+            },
+        });
+
+        service.getEffectiveGiteaConfig = () => ({
+            baseURL: 'https://gitea.demoserver2.buzz',
+            org: 'agent-apps',
+            registryHost: 'gitea.demoserver2.buzz',
+        });
+        service.getEffectiveManagedAppsConfig = () => ({
+            deployTarget: 'in-cluster',
+            appBaseDomain: 'demoserver2.buzz',
+            namespacePrefix: 'app-',
+            defaultBranch: 'main',
+            defaultContainerPort: 80,
+        });
+
+        const blueprint = service.buildAppBlueprint({
+            prompt: 'Create and deploy a managed app called remote-first.',
+        }, 'user-1', 'session-1');
+
+        expect(blueprint.metadata.deploymentTarget).toBe('ssh');
+    });
+
+    test('always uses ssh for new managed app blueprints even when legacy config says in-cluster', () => {
+        const service = new ManagedAppService({
+            kubernetesClient: {
+                isSshConfigured: jest.fn(() => false),
+            },
+        });
+
+        service.getEffectiveGiteaConfig = () => ({
+            baseURL: 'https://gitea.demoserver2.buzz',
+            org: 'agent-apps',
+            registryHost: 'gitea.demoserver2.buzz',
+        });
+        service.getEffectiveManagedAppsConfig = () => ({
+            deployTarget: 'in-cluster',
+            appBaseDomain: 'demoserver2.buzz',
+            namespacePrefix: 'app-',
+            defaultBranch: 'main',
+            defaultContainerPort: 80,
+        });
+
+        const blueprint = service.buildAppBlueprint({
+            prompt: 'Create and deploy a managed app called remote-only.',
+        }, 'user-1', 'session-1');
+
+        expect(blueprint.metadata.deploymentTarget).toBe('ssh');
+    });
+
     test('caps long prompt-derived managed app names before repository creation', () => {
         const service = new ManagedAppService();
 

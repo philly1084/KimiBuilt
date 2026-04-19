@@ -43,7 +43,7 @@ function normalizeDeployTarget(value = '') {
         return 'ssh';
     }
     if (['in-cluster', 'in_cluster', 'cluster', 'local-cluster', 'local_cluster'].includes(normalized)) {
-        return 'in-cluster';
+        return 'ssh';
     }
     return '';
 }
@@ -97,7 +97,7 @@ class KubernetesClient {
     }
 
     resolveDeployTarget(value = '') {
-        return normalizeDeployTarget(value || this.managedAppsConfig.deployTarget) || 'in-cluster';
+        return 'ssh';
     }
 
     isInClusterConfigured() {
@@ -114,9 +114,7 @@ class KubernetesClient {
     }
 
     isConfigured(deploymentTarget = '') {
-        return this.resolveDeployTarget(deploymentTarget) === 'ssh'
-            ? this.isSshConfigured()
-            : this.isInClusterConfigured();
+        return this.isSshConfigured();
     }
 
     getApiBaseUrl() {
@@ -472,111 +470,17 @@ class KubernetesClient {
         registryPassword = '',
         deploymentTarget = '',
     } = {}) {
-        if (this.resolveDeployTarget(deploymentTarget) === 'ssh') {
-            return this.deployManagedAppViaSsh({
-                slug,
-                namespace,
-                publicHost,
-                image,
-                containerPort,
-                registryPullSecretName,
-                registryHost,
-                registryUsername,
-                registryPassword,
-            });
-        }
-
-        const deployConfig = this.deployConfig();
-        const appName = sanitizeKubernetesName(slug, 'managed-app');
-        const appNamespace = normalizeManagedAppNamespace(
-            namespace || appName,
-            appName,
-            this.managedAppsConfig.namespacePrefix || 'app-',
-        );
-        const host = normalizeText(publicHost);
-        const appLabels = {
-            'app.kubernetes.io/name': appName,
-            'app.kubernetes.io/managed-by': 'kimibuilt',
-            'kimibuilt.io/managed-app': 'true',
-        };
-        const tlsSecretName = sanitizeKubernetesName(`${appName}-tls`, `${appName}-tls`);
-
-        await this.ensureNamespace(appNamespace);
-        await this.ensureRegistryPullSecret({
-            namespace: appNamespace,
-            name: registryPullSecretName,
+        return this.deployManagedAppViaSsh({
+            slug,
+            namespace,
+            publicHost,
+            image,
+            containerPort,
+            registryPullSecretName,
             registryHost,
-            username: registryUsername,
-            password: registryPassword,
+            registryUsername,
+            registryPassword,
         });
-
-        await this.upsertNamespacedResource({
-            kind: 'Deployment',
-            apiPath: `/apis/apps/v1/namespaces/${encodeURIComponent(appNamespace)}/deployments`,
-            collectionPath: `/apis/apps/v1/namespaces/${encodeURIComponent(appNamespace)}/deployments`,
-            namespace: appNamespace,
-            name: appName,
-            resource: this.buildDeploymentManifest({
-                namespace: appNamespace,
-                deploymentName: appName,
-                image,
-                containerPort,
-                registryPullSecretName,
-                appLabels,
-            }),
-        });
-
-        await this.upsertNamespacedResource({
-            kind: 'Service',
-            apiPath: `/api/v1/namespaces/${encodeURIComponent(appNamespace)}/services`,
-            collectionPath: `/api/v1/namespaces/${encodeURIComponent(appNamespace)}/services`,
-            namespace: appNamespace,
-            name: appName,
-            resource: this.buildServiceManifest({
-                namespace: appNamespace,
-                serviceName: appName,
-                containerPort,
-                appLabels,
-            }),
-        });
-
-        await this.upsertNamespacedResource({
-            kind: 'Ingress',
-            apiPath: `/apis/networking.k8s.io/v1/namespaces/${encodeURIComponent(appNamespace)}/ingresses`,
-            collectionPath: `/apis/networking.k8s.io/v1/namespaces/${encodeURIComponent(appNamespace)}/ingresses`,
-            namespace: appNamespace,
-            name: appName,
-            resource: this.buildIngressManifest({
-                namespace: appNamespace,
-                ingressName: appName,
-                publicHost: host,
-                serviceName: appName,
-                ingressClassName: deployConfig.ingressClassName || '',
-                tlsClusterIssuer: deployConfig.tlsClusterIssuer || '',
-                tlsSecretName,
-                appLabels,
-            }),
-        });
-
-        const rollout = await this.waitForDeploymentReady(appNamespace, appName, 120000);
-        const tls = await this.secretExists(appNamespace, tlsSecretName);
-        const https = await this.verifyHttps(host, config.managedApps.httpsVerifyTimeoutMs);
-
-        return {
-            namespace: appNamespace,
-            deployment: appName,
-            service: appName,
-            ingress: appName,
-            tlsSecretName,
-            rollout,
-            verification: {
-                rollout: rollout.ok === true,
-                ingress: true,
-                tls,
-                https: https.ok === true,
-            },
-            https,
-        };
     }
 
     buildNamespaceManifest(namespace = '') {

@@ -514,7 +514,7 @@ const config = {
 
     managedApps: {
         enabled: process.env.MANAGED_APPS_ENABLED !== 'false',
-        deployTarget: process.env.MANAGED_APPS_DEPLOY_TARGET || 'in-cluster',
+        deployTarget: 'ssh',
         appBaseDomain: process.env.MANAGED_APPS_BASE_DOMAIN || 'demoserver2.buzz',
         namespacePrefix: process.env.MANAGED_APPS_NAMESPACE_PREFIX || 'app-',
         platformNamespace: process.env.MANAGED_APPS_PLATFORM_NAMESPACE || 'agent-platform',

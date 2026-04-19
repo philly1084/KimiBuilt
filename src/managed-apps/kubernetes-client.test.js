@@ -99,4 +99,43 @@ describe('KubernetesClient', () => {
         }), {}, expect.any(Object));
         expect(result.namespace).toBe('app-demo');
     });
+
+    test('deployManagedApp ignores legacy in-cluster targets and still uses SSH', async () => {
+        const sshTool = {
+            handler: jest.fn(async () => ({
+                stdout: '__KIMIBUILT_TLS_SECRET__=true\n',
+                stderr: '',
+                exitCode: 0,
+                host: 'deploy.example:22',
+            })),
+        };
+        const client = new KubernetesClient({
+            managedAppsConfig: {
+                deployTarget: 'in-cluster',
+                httpsVerifyTimeoutMs: 5000,
+            },
+            sshTool,
+            deployConfigProvider: () => ({
+                ingressClassName: 'traefik',
+                tlsClusterIssuer: 'letsencrypt-prod',
+            }),
+        });
+
+        client.verifyHttps = jest.fn(async () => ({
+            ok: true,
+            status: 200,
+        }));
+        client.isSshConfigured = jest.fn(() => true);
+
+        const result = await client.deployManagedApp({
+            slug: 'demo',
+            namespace: 'app-demo',
+            publicHost: 'demo.demoserver2.buzz',
+            image: 'gitea.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
+            deploymentTarget: 'in-cluster',
+        });
+
+        expect(sshTool.handler).toHaveBeenCalledTimes(1);
+        expect(result.rollout.ok).toBe(true);
+    });
 });

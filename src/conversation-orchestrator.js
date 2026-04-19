@@ -3666,7 +3666,7 @@ function normalizeManagedAppDeployTarget(value = '') {
         return 'ssh';
     }
     if (['in-cluster', 'in_cluster', 'cluster', 'local-cluster', 'local_cluster'].includes(normalized)) {
-        return 'in-cluster';
+        return 'ssh';
     }
     return '';
 }

@@ -186,7 +186,7 @@ function normalizeDeployTarget(value = '') {
         return 'ssh';
     }
     if (['in-cluster', 'in_cluster', 'cluster', 'local-cluster', 'local_cluster'].includes(normalized)) {
-        return 'in-cluster';
+        return 'ssh';
     }
     return '';
 }
@@ -254,26 +254,14 @@ class ManagedAppService {
     resolveDeploymentTarget(input = {}, context = {}, app = null) {
         const explicit = normalizeDeployTarget(input.deployTarget || input.deploymentTarget || input.target);
         if (explicit) {
-            return explicit;
+            return 'ssh';
         }
 
         if (normalizeText(context.executionProfile) === 'remote-build') {
             return 'ssh';
         }
 
-        const configured = normalizeDeployTarget(
-            this.getEffectiveManagedAppsConfig().deployTarget
-            || config.managedApps.deployTarget,
-        );
-        const persisted = normalizeDeployTarget(app?.metadata?.deploymentTarget);
-        if (configured === 'ssh' && persisted === 'in-cluster') {
-            return 'ssh';
-        }
-        if (persisted) {
-            return persisted;
-        }
-
-        return configured || 'in-cluster';
+        return 'ssh';
     }
 
     getPublicApiBaseUrl() {
@@ -534,7 +522,7 @@ class ManagedAppService {
                 ...(persistedApp.metadata || {}),
                 deploymentTarget: blueprint.metadata?.deploymentTarget
                     || persistedApp.metadata?.deploymentTarget
-                    || 'in-cluster',
+                    || 'ssh',
                 lastSeededPaths: committedPaths,
             },
         });
@@ -613,10 +601,7 @@ class ManagedAppService {
         }
         const deploymentTarget = this.resolveDeploymentTarget(input, context, app);
         if (!this.kubernetesClient.isConfigured(deploymentTarget)) {
-            const modeLabel = deploymentTarget === 'ssh'
-                ? 'configured SSH access to the remote deploy host'
-                : 'in-cluster Kubernetes API access';
-            const error = new Error(`Managed app deployment requires ${modeLabel}.`);
+            const error = new Error('Managed app deployment requires configured SSH access to the remote deploy host.');
             error.statusCode = 503;
             throw error;
         }

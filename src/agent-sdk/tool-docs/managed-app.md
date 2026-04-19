@@ -1,14 +1,14 @@
 # managed-app
 
-Creates and manages agent-owned applications through the external Gitea control plane and the configured Kubernetes deployment lane.
+Creates and manages agent-owned applications through the external Gitea control plane and the remote SSH/k3s deployment lane.
 
-When the request is about SSH, a remote server, Gitea on the server, or a remote k3s cluster, set `deployTarget: "ssh"` so deployment happens over SSH on the remote host instead of through the backend pod's in-cluster Kubernetes service account.
+Managed-app deployment is SSH-only. It should deploy through the configured remote host and remote k3s cluster, not through the backend pod's local Kubernetes service account.
 
 ## Actions
 
 - `create`: registers or provisions a managed app, creates the external Gitea repository when configured, seeds scaffold files, and records a build run when a commit is created.
 - `update`: updates an existing managed app by slug or id and can commit new files into the managed repo.
-- `deploy`: deploys an existing managed app into the configured app cluster using either the in-cluster Kubernetes API or the configured remote SSH/k3s target.
+- `deploy`: deploys an existing managed app into the configured remote k3s app cluster over SSH.
 - `inspect`: returns the app record plus recent build runs.
 - `list`: lists the current user's managed apps.
 
@@ -25,7 +25,7 @@ When the request is about SSH, a remote server, Gitea on the server, or a remote
   - `appBaseDomain`
   - `namespacePrefix`
   - `platformNamespace`
-- The KimiBuilt runtime must have either in-cluster Kubernetes API credentials and RBAC for managed app namespaces, or SSH access to the configured remote k3s host.
+- The KimiBuilt runtime must have SSH access to the configured remote k3s host.
 
 ## Notes
 
