@@ -46,15 +46,15 @@ spec:
     resourceRules:
       - apiGroups: ['']
         apiVersions: ['v1']
-        operations: ['CREATE', 'UPDATE', 'PATCH']
+        operations: ['CREATE', 'UPDATE']
         resources: ['namespaces', 'secrets', 'services']
       - apiGroups: ['apps']
         apiVersions: ['v1']
-        operations: ['CREATE', 'UPDATE', 'PATCH']
+        operations: ['CREATE', 'UPDATE']
         resources: ['deployments']
       - apiGroups: ['networking.k8s.io']
         apiVersions: ['v1']
-        operations: ['CREATE', 'UPDATE', 'PATCH']
+        operations: ['CREATE', 'UPDATE']
         resources: ['ingresses']
   matchConditions:
     - name: managedAppServiceAccount
