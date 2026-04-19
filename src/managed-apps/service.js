@@ -292,12 +292,18 @@ class ManagedAppService {
                 lastSeededPaths: committedPaths,
             },
         });
+        const persistedAppId = normalizeText(updatedApp?.id || app?.id);
+        if (commitSha && !persistedAppId) {
+            const error = new Error('Managed app build run creation requires a persisted app id.');
+            error.statusCode = 500;
+            throw error;
+        }
 
         const buildRun = commitSha
             ? await this.store.createBuildRun({
-                appId: app.id,
-                ownerId: updatedApp.ownerId,
-                sessionId: updatedApp.sessionId,
+                appId: persistedAppId,
+                ownerId: updatedApp.ownerId || app.ownerId || ownerId,
+                sessionId: updatedApp.sessionId || app.sessionId || sessionId,
                 source: 'managed-app-service',
                 requestedAction,
                 commitSha,

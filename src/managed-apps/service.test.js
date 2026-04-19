@@ -122,6 +122,11 @@ describe('ManagedAppService', () => {
             repoName: 'hello-stack',
             status: 'building',
         }));
+        expect(store.createBuildRun).toHaveBeenCalledWith(expect.objectContaining({
+            appId: 'app-1',
+            ownerId: 'user-1',
+            sessionId: 'session-1',
+        }));
         expect(result.repository).toEqual(expect.objectContaining({
             owner: 'agent-apps',
             name: 'hello-stack',

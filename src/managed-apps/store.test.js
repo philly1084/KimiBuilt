@@ -180,4 +180,12 @@ describe('ManagedAppStore', () => {
         expect(postgres.query.mock.calls[1][1][4]).toBe('agent-apps');
         expect(postgres.query.mock.calls[1][1][5]).toBe('hello-stack');
     });
+
+    test('rejects build run creation without an app id', async () => {
+        await expect(store.createBuildRun({
+            ownerId: 'phill',
+            requestedAction: 'deploy',
+        })).rejects.toThrow('Managed app build runs require an appId.');
+        expect(postgres.query).not.toHaveBeenCalled();
+    });
 });

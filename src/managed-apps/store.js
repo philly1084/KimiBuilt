@@ -263,6 +263,11 @@ class ManagedAppStore {
 
     async createBuildRun(input = {}) {
         await this.ensureAvailable();
+        if (!String(input.appId || '').trim()) {
+            const error = new Error('Managed app build runs require an appId.');
+            error.statusCode = 500;
+            throw error;
+        }
         const result = await postgres.query(
             `
                 INSERT INTO managed_app_build_runs (
