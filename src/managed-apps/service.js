@@ -191,6 +191,37 @@ function normalizeDeployTarget(value = '') {
     return '';
 }
 
+function normalizeNamespacePrefix(value = 'app-') {
+    const stem = baseSlugify(String(value || '').replace(/-+$/g, ''));
+    return stem ? `${stem}-` : 'app-';
+}
+
+function normalizeManagedAppNamespace(value = '', { slug = '', namespacePrefix = 'app-' } = {}) {
+    const prefix = normalizeNamespacePrefix(namespacePrefix);
+    const normalizedValue = slugify(value || '', {
+        maxLength: MAX_KUBERNETES_NAME_LENGTH,
+    });
+    if (normalizedValue && normalizedValue.startsWith(prefix)) {
+        return normalizedValue;
+    }
+
+    const normalizedSlug = slugify(slug || '', {
+        maxLength: Math.max(1, MAX_KUBERNETES_NAME_LENGTH - prefix.length),
+    });
+    const shouldUseSlug = normalizedSlug && (
+        !normalizedValue
+        || normalizedValue === 'managed-app'
+        || normalizedValue === 'managed-apps'
+        || normalizedValue === 'default'
+    );
+    const base = shouldUseSlug
+        ? normalizedSlug
+        : (normalizedValue || normalizedSlug || 'managed-app');
+    return slugify(`${prefix}${base}`, {
+        maxLength: MAX_KUBERNETES_NAME_LENGTH,
+    });
+}
+
 class ManagedAppService {
     constructor(options = {}) {
         this.store = options.store || managedAppStore;
@@ -330,9 +361,13 @@ class ManagedAppService {
         const repoOwner = normalizeText(input.repoOwner || giteaConfig.org || 'agent-apps');
         const repoName = slug;
         const imageRepo = normalizeText(input.imageRepo || `${giteaConfig.registryHost}/${repoOwner}/${repoName}`);
-        const namespace = slugify(input.namespace || `${managedAppsConfig.namespacePrefix || 'app-'}${slug}`, {
-            maxLength: MAX_KUBERNETES_NAME_LENGTH,
-        });
+        const namespace = normalizeManagedAppNamespace(
+            input.namespace,
+            {
+                slug,
+                namespacePrefix: managedAppsConfig.namespacePrefix || 'app-',
+            },
+        );
         const publicHost = normalizeText(input.publicHost || `${slug}.${managedAppsConfig.appBaseDomain || 'demoserver2.buzz'}`);
         const defaultBranch = normalizeText(input.defaultBranch || managedAppsConfig.defaultBranch || 'main');
 
@@ -585,16 +620,42 @@ class ManagedAppService {
 
         const latestBuildRun = (await this.store.listBuildRunsForApp(app.id, ownerId, 1))[0] || null;
         const imageTag = normalizeText(input.imageTag || latestBuildRun?.imageTag || 'latest');
-        const image = `${app.imageRepo}:${imageTag}`;
         const giteaConfig = this.getEffectiveGiteaConfig();
         const managedAppsConfig = this.getEffectiveManagedAppsConfig();
+        const normalizedNamespace = normalizeManagedAppNamespace(
+            input.namespace || app.namespace,
+            {
+                slug: app.slug,
+                namespacePrefix: managedAppsConfig.namespacePrefix || 'app-',
+            },
+        );
+        let deployableApp = app;
+
+        if (normalizedNamespace !== normalizeText(app.namespace)) {
+            deployableApp = await this.store.updateApp(app.id, app.ownerId, {
+                namespace: normalizedNamespace,
+                metadata: {
+                    ...(app.metadata || {}),
+                    deploymentTarget,
+                },
+            }) || {
+                ...app,
+                namespace: normalizedNamespace,
+                metadata: {
+                    ...(app.metadata || {}),
+                    deploymentTarget,
+                },
+            };
+        }
+
+        const image = `${deployableApp.imageRepo}:${imageTag}`;
 
         const deployResult = await this.kubernetesClient.deployManagedApp({
-            slug: app.slug,
-            namespace: app.namespace,
-            publicHost: app.publicHost,
+            slug: deployableApp.slug,
+            namespace: deployableApp.namespace,
+            publicHost: deployableApp.publicHost,
             image,
-            containerPort: Number(input.containerPort || app.metadata?.requestedContainerPort || managedAppsConfig.defaultContainerPort || 80),
+            containerPort: Number(input.containerPort || deployableApp.metadata?.requestedContainerPort || managedAppsConfig.defaultContainerPort || 80),
             registryPullSecretName: managedAppsConfig.registryPullSecretName,
             registryHost: giteaConfig.registryHost,
             registryUsername: giteaConfig.registryUsername,
@@ -610,9 +671,10 @@ class ManagedAppService {
             : (deployResult.verification.rollout ? 'deployed' : 'deploy_failed');
 
         const updatedApp = await this.store.updateApp(app.id, app.ownerId, {
+            namespace: normalizedNamespace,
             status: appStatus,
             metadata: {
-                ...(app.metadata || {}),
+                ...(deployableApp.metadata || {}),
                 deploymentTarget,
                 lastImage: image,
                 lastDeployResult: deployResult,

@@ -48,6 +48,31 @@ function normalizeDeployTarget(value = '') {
     return '';
 }
 
+function normalizeNamespacePrefix(value = 'app-') {
+    const stem = sanitizeKubernetesName(String(value || '').replace(/-+$/g, ''), 'app');
+    return stem ? `${stem}-` : 'app-';
+}
+
+function normalizeManagedAppNamespace(value = '', slug = '', namespacePrefix = 'app-') {
+    const prefix = normalizeNamespacePrefix(namespacePrefix);
+    const normalizedValue = sanitizeKubernetesName(value, '');
+    if (normalizedValue && normalizedValue.startsWith(prefix)) {
+        return normalizedValue;
+    }
+
+    const normalizedSlug = sanitizeKubernetesName(slug, '');
+    const shouldUseSlug = normalizedSlug && (
+        !normalizedValue
+        || normalizedValue === 'managed-app'
+        || normalizedValue === 'managed-apps'
+        || normalizedValue === 'default'
+    );
+    const base = shouldUseSlug
+        ? normalizedSlug
+        : (normalizedValue || normalizedSlug || 'managed-app');
+    return sanitizeKubernetesName(`${prefix}${base}`, 'managed-apps');
+}
+
 function createNoopTracker() {
     return {
         recordExecution() {},
@@ -463,7 +488,11 @@ class KubernetesClient {
 
         const deployConfig = this.deployConfig();
         const appName = sanitizeKubernetesName(slug, 'managed-app');
-        const appNamespace = sanitizeKubernetesName(namespace || appName, 'managed-apps');
+        const appNamespace = normalizeManagedAppNamespace(
+            namespace || appName,
+            appName,
+            this.managedAppsConfig.namespacePrefix || 'app-',
+        );
         const host = normalizeText(publicHost);
         const appLabels = {
             'app.kubernetes.io/name': appName,
@@ -642,7 +671,11 @@ class KubernetesClient {
 
         const deployConfig = this.deployConfig();
         const appName = sanitizeKubernetesName(slug, 'managed-app');
-        const appNamespace = sanitizeKubernetesName(namespace || appName, 'managed-apps');
+        const appNamespace = normalizeManagedAppNamespace(
+            namespace || appName,
+            appName,
+            this.managedAppsConfig.namespacePrefix || 'app-',
+        );
         const host = normalizeText(publicHost);
         const appLabels = {
             'app.kubernetes.io/name': appName,
