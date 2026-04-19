@@ -156,9 +156,7 @@ describe('PodcastService', () => {
     }), expect.any(Object));
     expect(createResponse).toHaveBeenCalled();
     expect(piperTtsService.synthesize).toHaveBeenCalled();
-    expect(audioProcessingService.composePodcastAudio).toHaveBeenCalledWith(expect.objectContaining({
-      enhanceSpeech: true,
-    }));
+    expect(audioProcessingService.composePodcastAudio).not.toHaveBeenCalled();
     expect(persistGeneratedAudio).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'session-1',
       mimeType: 'audio/wav',
@@ -173,6 +171,7 @@ describe('PodcastService', () => {
     expect(result.script.turns).toHaveLength(8);
     expect(result.hosts).toHaveLength(2);
     expect(result.hosts[0].voiceId).not.toBe(result.hosts[1].voiceId);
+    expect(result.processing.enhanced).toBe(false);
   });
 
   test('uses the configured podcast script model instead of inheriting the active chat model', async () => {
@@ -345,7 +344,7 @@ describe('PodcastService', () => {
     expect(audioProcessingService.composePodcastAudio).toHaveBeenCalledWith(expect.objectContaining({
       includeIntro: true,
       includeMusicBed: true,
-      enhanceSpeech: true,
+      enhanceSpeech: false,
       musicBedPath: 'C:\\audio\\bed.wav',
     }));
     expect(audioProcessingService.transcodeWavToMp3).toHaveBeenCalled();
@@ -359,7 +358,7 @@ describe('PodcastService', () => {
     expect(result.audioVariants).toHaveLength(2);
     expect(result.processing.mp3Exported).toBe(true);
     expect(result.processing.mixed).toBe(true);
-    expect(result.processing.enhanced).toBe(true);
+    expect(result.processing.enhanced).toBe(false);
   });
 
   test('retries transient ffmpeg post-processing failures once for podcast mastering and mp3 export', async () => {
@@ -497,6 +496,7 @@ describe('PodcastService', () => {
         silenceMs: 250,
         chunkMaxChars: 1600,
         ttsTimeoutMs: 180000,
+        allowVoiceFallback: true,
       },
     );
 
@@ -542,6 +542,7 @@ describe('PodcastService', () => {
         silenceMs: 250,
         chunkMaxChars: 1600,
         ttsTimeoutMs: 180000,
+        allowVoiceFallback: true,
       },
     );
 
@@ -584,6 +585,7 @@ describe('PodcastService', () => {
         silenceMs: 250,
         chunkMaxChars: 1600,
         ttsTimeoutMs: 180000,
+        allowVoiceFallback: true,
       },
     );
 
@@ -625,6 +627,7 @@ describe('PodcastService', () => {
         silenceMs: 250,
         chunkMaxChars: 1600,
         ttsTimeoutMs: 180000,
+        allowVoiceFallback: true,
       },
     );
 
@@ -656,6 +659,7 @@ describe('PodcastService', () => {
       {
         silenceMs: 250,
         chunkMaxChars: 1600,
+        cycleHostVoices: true,
       },
     );
 

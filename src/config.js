@@ -251,7 +251,7 @@ const normalizedPodcastTtsConcurrency = Math.max(
     Math.min(
         24,
         parseInt(process.env.PODCAST_TTS_CONCURRENCY, 10)
-            || Math.min(2, Math.max(1, Math.ceil(availableParallelism / 8))),
+            || 1,
     ),
 );
 const normalizedPiperMaxTextChars = Math.max(

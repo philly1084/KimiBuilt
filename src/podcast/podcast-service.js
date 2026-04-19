@@ -56,14 +56,14 @@ const DEFAULT_HOSTS = Object.freeze([
     name: 'Maya',
     role: 'Lead host',
     persona: 'Warm, curious, and good at guiding the listener through the big picture.',
-    preferredVoiceIds: ['amy-expressive', 'hfc-female-rich', 'kathleen-low', 'amy-medium'],
+    preferredVoiceIds: ['hfc-female-rich', 'hfc-female-medium', 'kathleen-low'],
   },
   {
     key: 'hostB',
     name: 'June',
     role: 'Co-host',
     persona: 'Sharper, more analytical, and slightly playful when unpacking details and tradeoffs.',
-    preferredVoiceIds: ['hfc-female-medium', 'amy-medium', 'hfc-female-rich', 'kathleen-low'],
+    preferredVoiceIds: ['amy-expressive', 'amy-medium', 'kathleen-low'],
   },
 ]);
 
@@ -558,7 +558,7 @@ function resolveHostVoiceForTurn(host = {}, turnIndex = 0, cycleHostVoices = tru
 }
 
 function resolveTurnVoicePlan(turns = [], hosts = [], options = {}) {
-  const cycleHostVoices = options?.cycleHostVoices !== false;
+  const cycleHostVoices = options?.cycleHostVoices === true;
   const hostByName = new Map((Array.isArray(hosts) ? hosts : []).map((host) => [host.name, host]));
   const hostTurnCounts = new Map();
   const turnPlans = [];
@@ -985,11 +985,12 @@ class PodcastService {
     if (!normalizedText) {
       return [];
     }
+    const allowVoiceFallback = options.allowVoiceFallback === true;
     const candidateVoices = uniqueOrdered([
       options.voiceId,
       host?.voiceId,
-      ...(Array.isArray(options.voiceIds) ? options.voiceIds : []),
-      ...(Array.isArray(host?.voiceIds) ? host.voiceIds : []),
+      ...(allowVoiceFallback ? (Array.isArray(options.voiceIds) ? options.voiceIds : []) : []),
+      ...(allowVoiceFallback ? (Array.isArray(host?.voiceIds) ? host.voiceIds : []) : []),
     ].filter(Boolean));
     const resolvedHostName = String(host?.name || '').trim() || 'podcast host';
     if (candidateVoices.length === 0) {
@@ -1055,6 +1056,7 @@ class PodcastService {
           ...options,
           voiceAttemptOffset: fallbackOffset,
           voiceIds: candidateVoices,
+          allowVoiceFallback,
           maxTextChars,
           minimumChunkChars,
         },
@@ -1067,7 +1069,7 @@ class PodcastService {
 
   buildSynthesisSegments(turns = [], hosts = [], options = {}) {
     const maxTextChars = Math.max(200, Number(this.ttsService?.getPublicConfig?.().maxTextChars) || 2400);
-    const cycleHostVoices = options?.cycleHostVoices !== false;
+    const cycleHostVoices = options?.cycleHostVoices === true;
     const chunkMaxChars = clampNumber(
       options.chunkMaxChars,
       250,
@@ -1139,6 +1141,7 @@ class PodcastService {
         voiceId: segment.voiceId,
         voiceIds: segment.voiceIds,
         ttsTimeoutMs: options.ttsTimeoutMs,
+        allowVoiceFallback: options.allowVoiceFallback === true,
         maxTextChars: Number(this.ttsService?.getPublicConfig?.().maxTextChars) || 2400,
         minimumChunkChars: segment.minimumChunkChars,
         runSynthesis: (task) => limiter.run(task),
@@ -1232,19 +1235,21 @@ class PodcastService {
       requestTimeoutMs: podcastScriptRequestTimeoutMs,
     });
     const turnVoicePlan = resolveTurnVoicePlan(script.turns, hosts, {
-      cycleHostVoices: params.cycleHostVoices !== false,
+      cycleHostVoices: params.cycleHostVoices === true,
     });
     const transcript = buildTranscript(script.turns);
     const wantsMp3 = prefersMp3(params);
     const wantsMixing = requestedMixing(params);
     const audioProcessingConfig = this.audioProcessingService?.getPublicConfig?.() || null;
-    const wantsEnhancement = params.enhanceSpeech !== false && audioProcessingConfig?.configured === true;
+    const wantsEnhancement = params.enhanceSpeech === true && audioProcessingConfig?.configured === true;
 
     // Validate TTS compatibility before starting the full run.
     script.turns.forEach((turn) => {
       normalizeTextForSpeech(turn.text, Math.max(200, Number(voiceConfig.maxTextChars) || 2400));
     });
 
+    const cycleHostVoices = params.cycleHostVoices === true;
+    const allowVoiceFallback = params.allowVoiceFallback === true;
     const speechWavBuffer = await this.synthesizeTurns(
       turnVoicePlan.plans,
       hosts,
@@ -1253,7 +1258,8 @@ class PodcastService {
         ttsTimeoutMs: podcastTtsTimeoutMs,
         chunkMaxChars: podcastChunkMaxChars,
         ttsConcurrency: podcastTtsConcurrency,
-        cycleHostVoices: params.cycleHostVoices !== false,
+        cycleHostVoices,
+        allowVoiceFallback,
       },
     );
     const finalAudioBuffer = (wantsMixing || wantsEnhancement)

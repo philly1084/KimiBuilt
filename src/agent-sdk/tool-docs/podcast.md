@@ -22,8 +22,8 @@ Useful optional inputs:
 - `hostAName`, `hostBName`
 - `hostAVoiceId`, `hostBVoiceId`
 - `hostAVoiceIds`, `hostBVoiceIds` (ordered lists to cycle voices)
-- `cycleHostVoices` (default: true)
-- `enhanceSpeech` (`true` by default, use `true` when you want ffmpeg mastering)
+- `cycleHostVoices` (default: false)
+- `enhanceSpeech` (`false` by default, set `true` when you explicitly want ffmpeg mastering)
 - `hostAPersona`, `hostBPersona`
 - `sourceUrls`
 - `searchDomains`
@@ -39,9 +39,10 @@ Notes:
 - The tool requires an active session because it persists the final audio artifact.
 - Research quality depends on `web-search` availability and source accessibility.
 - Speech stitching is native PCM WAV concatenation, so the selected Piper voices must emit compatible WAV output.
-- Podcast renders prefer the most natural bundled voices first and default to a light ffmpeg mastering pass for cleaner loudness and tone.
+- Podcast renders prefer the stable two-host voice pair first and only apply ffmpeg mastering when `enhanceSpeech` is explicitly enabled.
 - Long-form episodes use podcast-specific Piper chunking and timeout controls; override them with `ttsChunkMaxChars` or `ttsTimeoutMs` if a machine is unusually slow.
-- Source verification and turn synthesis run with bounded parallelism by default; raise `researchConcurrency` or `ttsConcurrency` if the host has CPU headroom and you need faster throughput.
+- Podcast TTS now defaults to a simpler two-host render path: one stable voice per host, sequential synthesis, and no mastering unless `enhanceSpeech` is explicitly enabled.
+- Source verification still uses bounded parallelism by default. Podcast TTS concurrency is conservative by default; only raise `ttsConcurrency` if you need speed more than render stability.
 - MP3 export and intro/outro/music-bed mixing require ffmpeg audio processing to be configured.
 - Check `/api/tts/voices` for the exact `hostA` / `hostB` voice IDs supported in your current deployment before passing custom `hostAVoiceIds` and `hostBVoiceIds`.
 - Example: `hostAVoiceIds: ["amy-expressive", "amy-medium", "hfc-female-rich"]` and `hostBVoiceIds: ["kathleen-low", "hfc-female-medium", "amy-expressive"]` lets the same host cycle through multiple Piper voices per turn.
