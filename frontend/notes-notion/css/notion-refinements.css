@@ -1394,6 +1394,81 @@ button:focus-visible,
     gap: 6px;
 }
 
+.agent-composer-design-tray[hidden] {
+    display: none !important;
+}
+
+.agent-composer-design-tray {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+}
+
+.agent-composer-design-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 110px;
+}
+
+.agent-composer-design-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+
+.agent-composer-design-hint {
+    font-size: 12px;
+    line-height: 1.35;
+    color: var(--text-tertiary);
+}
+
+.agent-composer-design-options {
+    display: flex;
+    flex: 1;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
+.agent-composer-design-btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--panel-surface) 92%, transparent);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.2;
+    cursor: pointer;
+    transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.agent-composer-design-btn:hover {
+    border-color: color-mix(in srgb, var(--accent-color) 42%, var(--border-color));
+    background: var(--panel-surface);
+    color: var(--text-primary);
+}
+
+.agent-composer-design-btn:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent-color) 36%, transparent);
+    outline-offset: 2px;
+}
+
+.agent-composer-design-btn.is-selected {
+    border-color: color-mix(in srgb, var(--agent-accent-start) 48%, var(--border-color));
+    background: color-mix(in srgb, var(--agent-accent-start) 11%, var(--panel-surface));
+    color: var(--text-primary);
+}
+
 .agent-chat-input-wrapper {
     display: flex;
     gap: 8px;
@@ -1783,6 +1858,21 @@ button:focus-visible,
     font-size: 14px;
     color: var(--text-tertiary);
     margin: 0 0 8px 0;
+}
+
+@media (max-width: 640px) {
+    .agent-composer-design-tray {
+        flex-direction: column;
+    }
+
+    .agent-composer-design-meta,
+    .agent-composer-design-options {
+        width: 100%;
+    }
+
+    .agent-composer-design-options {
+        justify-content: flex-start;
+    }
 }
 
 /* Toast notifications for AI actions */

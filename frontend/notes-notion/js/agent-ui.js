@@ -41,6 +41,16 @@ const AgentUI = (function() {
             `;
         }
 
+        const contextIndicator = document.querySelector('.context-indicator');
+        let composerDesignTray = document.getElementById('agent-chat-design-tray');
+        if (!composerDesignTray && contextIndicator?.parentElement) {
+            composerDesignTray = document.createElement('div');
+            composerDesignTray.id = 'agent-chat-design-tray';
+            composerDesignTray.className = 'agent-composer-design-tray';
+            composerDesignTray.hidden = true;
+            contextIndicator.parentElement.appendChild(composerDesignTray);
+        }
+
         elements = {
             widgetBtn,
             widgetLabel: document.querySelector('#agent-widget-btn .agent-label'),
@@ -56,7 +66,8 @@ const AgentUI = (function() {
             currentModelLabel: document.getElementById('current-model-label'),
             modelList: document.getElementById('model-list'),
             chatModelName: document.getElementById('agent-chat-model-name'),
-            contextIndicator: document.querySelector('.context-indicator'),
+            contextIndicator,
+            composerDesignTray,
             agentStatus: document.querySelector('.agent-status'),
             agentStatusText: document.querySelector('.agent-status-text')
         };
@@ -76,6 +87,7 @@ const AgentUI = (function() {
         updateModelUI();
         updateContextIndicator();
         renderMessages();
+        renderComposerDesignOptions();
         syncProcessingUI();
         initialized = true;
         console.log('AgentUI initialized');
@@ -117,9 +129,19 @@ const AgentUI = (function() {
 
             elements.input.addEventListener('input', () => {
                 autoResizeInput();
-                if (!streamState.active && !streamState.error && window.Agent?.getMessages?.().filter((message) => !message.hidden).length === 0) {
+                renderComposerDesignOptions();
+                if (!streamState.active && !streamState.error && getVisibleMessages().length === 0) {
                     renderMessages();
                 }
+            });
+        }
+
+        if (elements.composerDesignTray) {
+            elements.composerDesignTray.addEventListener('click', (event) => {
+                const button = event.target.closest('.agent-composer-design-btn[data-prompt]');
+                if (!button) return;
+
+                applyDesignOptionPrompt(button.dataset.prompt || '');
             });
         }
 
@@ -186,6 +208,7 @@ const AgentUI = (function() {
 
         updateContextIndicator();
         renderMessages();
+        renderComposerDesignOptions();
 
         if (elements.input) {
             setTimeout(() => elements.input.focus(), 50);
@@ -340,7 +363,10 @@ const AgentUI = (function() {
     }
 
     function scheduleContextRefresh() {
-        window.requestAnimationFrame(updateContextIndicator);
+        window.requestAnimationFrame(() => {
+            updateContextIndicator();
+            renderComposerDesignOptions();
+        });
     }
 
     function updateContextIndicator() {
@@ -374,14 +400,14 @@ const AgentUI = (function() {
         `).join('');
     }
 
-    function getLiveDesignOptions() {
+    function getLiveDesignOptions(limit = 4) {
         if (!window.Agent?.getBlockDesignOptions) {
             return [];
         }
 
         const draftPrompt = elements.input?.value?.trim() || '';
         try {
-            return window.Agent.getBlockDesignOptions(draftPrompt, null, { limit: 4 });
+            return window.Agent.getBlockDesignOptions(draftPrompt, null, { limit });
         } catch (error) {
             console.warn('AgentUI: failed to get live block design options', error);
             return [];
@@ -418,10 +444,22 @@ const AgentUI = (function() {
         }
 
         const current = elements.input.value.trim();
+        if (current.includes(promptText)) {
+            renderComposerDesignOptions();
+            elements.input.focus();
+            return;
+        }
+
         elements.input.value = current
             ? `${current}\n\n${promptText}`
             : promptText;
         autoResizeInput();
+        renderComposerDesignOptions();
+
+        if (!streamState.active && !streamState.error && getVisibleMessages().length === 0) {
+            renderMessages();
+        }
+
         elements.input.focus();
     }
 
@@ -440,10 +478,63 @@ const AgentUI = (function() {
         });
     }
 
+    function getVisibleMessages() {
+        return (window.Agent?.getMessages?.() || []).filter((message) => !message.hidden);
+    }
+
+    function shouldShowComposerDesignOptions(options = []) {
+        if (!window.Agent?.getPageContext?.() || !options.length) {
+            return false;
+        }
+
+        const hasDraft = Boolean(elements.input?.value?.trim());
+        const hasConversation = getVisibleMessages().length > 0 || streamState.active || Boolean(streamState.error);
+        return hasDraft || hasConversation;
+    }
+
+    function renderComposerDesignOptions() {
+        if (!elements.composerDesignTray) return;
+
+        const options = getLiveDesignOptions(3);
+        const shouldShow = shouldShowComposerDesignOptions(options);
+        elements.composerDesignTray.hidden = !shouldShow;
+
+        if (!shouldShow) {
+            elements.composerDesignTray.innerHTML = '';
+            return;
+        }
+
+        const draftPrompt = elements.input?.value?.trim() || '';
+        elements.composerDesignTray.innerHTML = `
+            <div class="agent-composer-design-meta">
+                <span class="agent-composer-design-label">Block patterns</span>
+                <span class="agent-composer-design-hint">Add a reusable layout cue to the draft</span>
+            </div>
+            <div class="agent-composer-design-options">
+                ${options.map((option) => {
+                    const optionPrompt = option.prompt || '';
+                    const isSelected = Boolean(optionPrompt) && draftPrompt.includes(optionPrompt);
+
+                    return `
+                        <button
+                            type="button"
+                            class="agent-composer-design-btn${isSelected ? ' is-selected' : ''}"
+                            data-prompt="${escapeHtmlAttr(optionPrompt)}"
+                            title="${escapeHtmlAttr(option.description || option.title || '')}"
+                            aria-pressed="${isSelected}"
+                        >
+                            ${escapeHtml(option.label || option.title || 'Pattern')}
+                        </button>
+                    `;
+                }).join('')}
+            </div>
+        `;
+    }
+
     function renderMessages() {
         if (!elements.messagesContainer || !window.Agent) return;
 
-        const messages = window.Agent.getMessages().filter((message) => !message.hidden);
+        const messages = getVisibleMessages();
         elements.messagesContainer.innerHTML = '';
 
         if (messages.length === 0 && !streamState.active && !streamState.error) {
@@ -460,7 +551,7 @@ const AgentUI = (function() {
             `;
 
             bindEmptyStateActions();
-            
+            renderComposerDesignOptions();
             return;
         }
 
@@ -482,6 +573,7 @@ const AgentUI = (function() {
         }
 
         scrollToBottom();
+        renderComposerDesignOptions();
     }
 
     function renderStreamingMessage(content) {
@@ -539,6 +631,7 @@ const AgentUI = (function() {
     function handleConversationContextChange() {
         updateContextIndicator();
         renderMessages();
+        renderComposerDesignOptions();
     }
 
     function syncProcessingUI() {
@@ -606,6 +699,7 @@ const AgentUI = (function() {
         setStreamState({ active: false, content: '', error: null });
         window.Agent.clearConversation();
         renderMessages();
+        renderComposerDesignOptions();
         showToast('Chat history cleared', 'success');
     }
 
