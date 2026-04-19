@@ -142,6 +142,24 @@ spec:
       labels:
         app: gitea
     spec:
+      initContainers:
+        - name: seed-app-ini
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              mkdir -p /data/gitea/conf
+              if [ ! -s /data/gitea/conf/app.ini ]; then
+                cp /config/app.ini /data/gitea/conf/app.ini
+              fi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: app-ini-template
+              mountPath: /config/app.ini
+              subPath: app.ini
       containers:
         - name: gitea
           image: gitea/gitea:1.23.4
@@ -178,14 +196,11 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
-            - name: app-ini
-              mountPath: /data/gitea/conf/app.ini
-              subPath: app.ini
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: gitea-data
-        - name: app-ini
+        - name: app-ini-template
           configMap:
             name: gitea-app-ini
 ---
