@@ -68,6 +68,10 @@ function buildImageTagFromCommit(commitSha = '') {
     return normalized ? `sha-${normalized.slice(0, 12)}` : '';
 }
 
+function hasPersistedAppId(app = null) {
+    return Boolean(normalizeText(app?.id));
+}
+
 class ManagedAppService {
     constructor(options = {}) {
         this.store = options.store || managedAppStore;
@@ -292,10 +296,11 @@ class ManagedAppService {
                 lastSeededPaths: committedPaths,
             },
         });
-        const persistedApp = updatedApp
+        const persistedApp = (hasPersistedAppId(updatedApp) ? updatedApp : null)
+            || (hasPersistedAppId(app) ? app : null)
             || await this.store.getAppByRepo(effectiveRepoOwner, effectiveRepoName)
             || await this.store.getAppBySlug(blueprint.slug, ownerId);
-        const persistedAppId = normalizeText(persistedApp?.id || updatedApp?.id || app?.id);
+        const persistedAppId = normalizeText(persistedApp?.id);
         if (commitSha && !persistedAppId) {
             const error = new Error(`Managed app build run creation requires a persisted app id for ${effectiveRepoOwner}/${effectiveRepoName || blueprint.slug}.`);
             error.statusCode = 500;
