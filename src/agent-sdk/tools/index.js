@@ -3276,7 +3276,14 @@ class ToolManager {
         backend: {
           handler: async (params = {}, context = {}) => {
             const service = resolveOpenCodeService(context);
-            return service.runTool(params, {
+            const requestedModel = String(params?.model || context?.model || '').trim();
+            const effectiveParams = requestedModel && !String(params?.model || '').trim()
+              ? {
+                ...params,
+                model: requestedModel,
+              }
+              : params;
+            return service.runTool(effectiveParams, {
               ownerId: context?.ownerId || context?.userId || null,
               userId: context?.userId || context?.ownerId || null,
               sessionId: params.sessionId || context?.sessionId || null,

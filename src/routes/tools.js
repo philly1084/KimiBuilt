@@ -421,7 +421,7 @@ async function buildFrontendToolCatalog({ req, category = null, sessionId = null
   };
 }
 
-function buildToolExecutionContext(toolManager, req, sessionId = null) {
+function buildToolExecutionContext(toolManager, req, sessionId = null, session = null) {
   const body = req.body || {};
   const metadata = body.metadata && typeof body.metadata === 'object' ? body.metadata : {};
   const timezone = String(
@@ -451,6 +451,12 @@ function buildToolExecutionContext(toolManager, req, sessionId = null) {
     route: req.originalUrl || req.path || '/api/tools/invoke',
     transport: 'http',
     executionProfile: body.executionProfile || body.execution_profile || body.clientSurface || body.client_surface || 'tool-invoke',
+    model: String(
+      body.model
+      || metadata.requestedModel
+      || session?.metadata?.model
+      || ''
+    ).trim() || null,
     timezone,
     now,
     toolManager,
@@ -460,6 +466,34 @@ function buildToolExecutionContext(toolManager, req, sessionId = null) {
       get: (toolId) => toolManager.getTool(toolId),
     },
   };
+}
+
+async function resolveToolSession(sessionId = null, ownerId = null) {
+  const normalizedSessionId = String(sessionId || '').trim();
+  if (!normalizedSessionId) {
+    return null;
+  }
+
+  return ownerId
+    ? sessionStore.getOwned(normalizedSessionId, ownerId)
+    : sessionStore.get(normalizedSessionId);
+}
+
+async function persistToolSessionModel(sessionId = null, ownerId = null, model = null) {
+  const normalizedModel = String(model || '').trim();
+  const session = await resolveToolSession(sessionId, ownerId);
+
+  if (!session || !normalizedModel || session?.metadata?.model === normalizedModel) {
+    return session;
+  }
+
+  const updated = await sessionStore.update(sessionId, {
+    metadata: {
+      model: normalizedModel,
+    },
+  });
+
+  return updated || session;
 }
 
 function looksLikeNotesSurface(value = '') {
@@ -778,18 +812,24 @@ router.get('/:id', async (req, res) => {
 router.post('/invoke', async (req, res) => {
   try {
     const { tool: toolId, params = {}, sessionId } = req.body;
+    const ownerId = getRequestOwnerId(req);
     
     if (!toolId) {
       return res.status(400).json({ success: false, error: 'Tool ID is required' });
     }
     
     const toolManager = await ensureToolManagerInitialized();
-    const resolvedSessionId = await resolveToolSessionId(sessionId, getRequestOwnerId(req), req.body || {});
+    const resolvedSessionId = await resolveToolSessionId(sessionId, ownerId, req.body || {});
+    const resolvedSession = await persistToolSessionModel(
+      resolvedSessionId,
+      ownerId,
+      req.body?.model || req.body?.metadata?.requestedModel || null,
+    );
     
     const result = await toolManager.executeTool(
       toolId,
       params,
-      buildToolExecutionContext(toolManager, req, resolvedSessionId),
+      buildToolExecutionContext(toolManager, req, resolvedSessionId, resolvedSession),
     );
     await updateSessionToolMetadata(resolvedSessionId, toolId, params);
     
@@ -808,14 +848,20 @@ router.post('/invoke/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const params = req.body;
+    const ownerId = getRequestOwnerId(req);
     
     const toolManager = await ensureToolManagerInitialized();
-    const resolvedSessionId = await resolveToolSessionId(req.body.sessionId, getRequestOwnerId(req), req.body || {});
+    const resolvedSessionId = await resolveToolSessionId(req.body.sessionId, ownerId, req.body || {});
+    const resolvedSession = await persistToolSessionModel(
+      resolvedSessionId,
+      ownerId,
+      req.body?.model || req.body?.metadata?.requestedModel || null,
+    );
     
     const result = await toolManager.executeTool(
       id,
       params,
-      buildToolExecutionContext(toolManager, req, resolvedSessionId),
+      buildToolExecutionContext(toolManager, req, resolvedSessionId, resolvedSession),
     );
     await updateSessionToolMetadata(resolvedSessionId, id, params);
     

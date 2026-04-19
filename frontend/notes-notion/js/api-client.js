@@ -1059,6 +1059,7 @@ class NotesAPIClient {
                     tool: toolId,
                     params,
                     sessionId: this.currentSessionId,
+                    model: window.Agent?.getSelectedModel?.() || null,
                     taskType: NOTES_TASK_TYPE,
                     clientSurface: NOTES_CLIENT_SURFACE,
                 }),

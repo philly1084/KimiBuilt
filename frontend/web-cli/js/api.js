@@ -587,6 +587,7 @@ class WebCLIAPI {
                     tool: toolId,
                     params,
                     sessionId: this.sessionId,
+                    model: this.currentModel || null,
                     taskType: WEB_CLI_TASK_TYPE,
                     clientSurface: WEB_CLI_CLIENT_SURFACE,
                 }),

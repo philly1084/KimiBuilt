@@ -1866,6 +1866,7 @@ class OpenAIAPIClient extends EventTarget {
                 tool: toolId,
                 params,
                 sessionId: this.currentSessionId,
+                model: this.currentModel || null,
                 taskType: WEB_CHAT_API_TASK_TYPE,
                 clientSurface: WEB_CHAT_API_CLIENT_SURFACE,
                 metadata: {
