@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const EventEmitter = require('events');
 const { createResponse } = require('./openai-client');
 const { config } = require('./config');
@@ -99,6 +101,8 @@ const MAX_STEP_SIGNATURE_REPEATS = 3;
 const DOCUMENT_WORKFLOW_TOOL_ID = 'document-workflow';
 const DEEP_RESEARCH_PRESENTATION_TOOL_ID = 'deep-research-presentation';
 const AUTONOMY_CONTINUATION_CHECKPOINT_ID_PREFIX = 'checkpoint-autonomy-continue';
+const REMOTE_COMMAND_DOC_PATH = path.join(__dirname, 'agent-sdk', 'tool-docs', 'remote-command.md');
+const K3S_PLAYBOOK_DOC_PATH = path.join(__dirname, '..', 'k8s', 'K3S_RANCHER_PLAYBOOK.md');
 const REMOTE_BLOCKING_ERROR_PATTERNS = [
     /no ssh host configured/i,
     /no ssh username configured/i,
@@ -115,6 +119,148 @@ const REMOTE_BLOCKING_ERROR_PATTERNS = [
     /operation timed out/i,
     /connection closed by remote host/i,
 ];
+
+function readLocalGuidanceFile(filePath = '') {
+    try {
+        return fs.readFileSync(filePath, 'utf8');
+    } catch (_error) {
+        return '';
+    }
+}
+
+function getMarkdownHeadingLevel(line = '') {
+    const match = String(line || '').match(/^(#{2,6})\s+/);
+    return match ? match[1].length : 0;
+}
+
+function normalizeMarkdownHeading(line = '') {
+    return String(line || '').replace(/^#{2,6}\s+/, '').trim().toLowerCase();
+}
+
+function extractMarkdownSection(content = '', heading = '') {
+    const normalizedHeading = String(heading || '').trim().toLowerCase();
+    if (!content || !normalizedHeading) {
+        return '';
+    }
+
+    const lines = String(content || '').split(/\r?\n/);
+    const startIndex = lines.findIndex((line) => normalizeMarkdownHeading(line) === normalizedHeading);
+    if (startIndex < 0) {
+        return '';
+    }
+
+    const level = getMarkdownHeadingLevel(lines[startIndex]);
+    if (!level) {
+        return '';
+    }
+
+    const sectionLines = [lines[startIndex]];
+    for (let index = startIndex + 1; index < lines.length; index += 1) {
+        const nextLevel = getMarkdownHeadingLevel(lines[index]);
+        if (nextLevel && nextLevel <= level) {
+            break;
+        }
+        sectionLines.push(lines[index]);
+    }
+
+    return sectionLines.join('\n').trim();
+}
+
+function buildHydratedRemoteOpsGuidanceText() {
+    const remoteCommandDoc = readLocalGuidanceFile(REMOTE_COMMAND_DOC_PATH);
+    const playbookDoc = readLocalGuidanceFile(K3S_PLAYBOOK_DOC_PATH);
+
+    const remoteCommandSections = [
+        'Baseline',
+        'K3s and kubectl access',
+        '1. Cluster survey',
+        '2. Workload drill-down',
+        '3. Logs',
+        '4. Rollout and restart',
+        '5. Service and ingress checks',
+        '7. TLS, cert-manager, and DNS checks',
+        '8. k3s service health',
+        '10. Host files, repo, and search',
+        '11. Networking and ports',
+        '12. Package install on Ubuntu',
+        'Preferred structure for a remote-command call',
+    ]
+        .map((heading) => extractMarkdownSection(remoteCommandDoc, heading))
+        .filter(Boolean)
+        .join('\n\n');
+
+    const playbookSections = [
+        'Default assumptions',
+        'Baseline remote commands',
+        'Standard deployment lanes',
+        'Common kubectl checks',
+        'DNS and HTTPS verification',
+        'Rancher UI map',
+        'Containerization rule',
+    ]
+        .map((heading) => extractMarkdownSection(playbookDoc, heading))
+        .filter(Boolean)
+        .join('\n\n');
+
+    return [
+        remoteCommandSections
+            ? [
+                '[Hydrated from src/agent-sdk/tool-docs/remote-command.md]',
+                remoteCommandSections,
+            ].join('\n')
+            : '',
+        playbookSections
+            ? [
+                '[Hydrated from k8s/K3S_RANCHER_PLAYBOOK.md]',
+                playbookSections,
+            ].join('\n')
+            : '',
+    ].filter(Boolean).join('\n\n').trim();
+}
+
+const HYDRATED_REMOTE_OPS_GUIDANCE_TEXT = buildHydratedRemoteOpsGuidanceText();
+
+function shouldHydrateRemoteOpsGuidance({
+    objective = '',
+    instructions = '',
+    executionProfile = DEFAULT_EXECUTION_PROFILE,
+    allowedToolIds = [],
+    toolPolicy = {},
+} = {}) {
+    if (!HYDRATED_REMOTE_OPS_GUIDANCE_TEXT) {
+        return false;
+    }
+
+    if (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE) {
+        return true;
+    }
+
+    const prompt = `${objective || ''}\n${instructions || ''}`.toLowerCase();
+    if (!prompt.trim()) {
+        return false;
+    }
+
+    if (/\b(kubectl|kubernetes|k8s|k3s|rancher)\b/.test(prompt)) {
+        return true;
+    }
+
+    const remoteToolId = getPreferredRemoteToolId(toolPolicy);
+    const hasRemoteCapability = Boolean(
+        remoteToolId
+        || (Array.isArray(allowedToolIds) && (
+            allowedToolIds.includes('remote-command')
+            || allowedToolIds.includes('k3s-deploy')
+            || allowedToolIds.includes('ssh-execute')
+        ))
+    );
+    if (!hasRemoteCapability) {
+        return false;
+    }
+
+    return false
+        || /\b(remote cluster debugging|remote cluster debug|cluster debugging|cluster troubleshooting|cluster triage)\b/.test(prompt)
+        || /\b(crashloopbackoff|ingress|rollout|deployment|pod|traefik|cert-manager|journalctl|systemctl|tls|dns)\b/.test(prompt);
+}
 
 function isPlainObject(value) {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -7450,6 +7596,19 @@ class ConversationOrchestrator extends EventEmitter {
             '',
             'Runtime instructions:',
             instructions || '(none)',
+            ...(shouldHydrateRemoteOpsGuidance({
+                objective,
+                instructions,
+                executionProfile,
+                allowedToolIds: toolPolicy.allowedToolIds,
+                toolPolicy,
+            })
+                ? [
+                    '',
+                    'Hydrated remote ops guidance from local project docs:',
+                    HYDRATED_REMOTE_OPS_GUIDANCE_TEXT,
+                ]
+                : []),
             '',
             'Active project plan:',
             toolPolicy.projectPlan
@@ -7833,6 +7992,7 @@ class ConversationOrchestrator extends EventEmitter {
     }) {
         const runtimeInstructions = this.buildRuntimeInstructions({
             baseInstructions: instructions,
+            objective,
             executionProfile,
             allowedToolIds: toolPolicy.allowedToolIds,
             toolEvents,
@@ -7946,6 +8106,7 @@ class ConversationOrchestrator extends EventEmitter {
     }) {
         const runtimeInstructions = this.buildRuntimeInstructions({
             baseInstructions: instructions,
+            objective,
             executionProfile,
             allowedToolIds: toolPolicy.allowedToolIds,
             toolEvents,
@@ -8122,6 +8283,7 @@ class ConversationOrchestrator extends EventEmitter {
 
     buildRuntimeInstructions({
         baseInstructions = '',
+        objective = '',
         executionProfile = DEFAULT_EXECUTION_PROFILE,
         allowedToolIds = [],
         toolEvents = [],
@@ -8223,6 +8385,16 @@ class ConversationOrchestrator extends EventEmitter {
         if (toolPolicy?.managedAppsSummary) {
             parts.push(`Managed app catalog:\n${toolPolicy.managedAppsSummary}`);
             parts.push('Treat the managed app catalog as the authoritative record for agent-owned repos, image repos, namespaces, and public hosts.');
+        }
+
+        if (shouldHydrateRemoteOpsGuidance({
+            objective,
+            instructions: baseInstructions,
+            executionProfile,
+            allowedToolIds,
+            toolPolicy,
+        })) {
+            parts.push(`Hydrated remote ops guidance from local project docs:\n${HYDRATED_REMOTE_OPS_GUIDANCE_TEXT}`);
         }
 
         parts.push('Treat the local CLI environment, workspace state, filesystem contents, and shell behavior as unknown unless explicit user input, the active transcript, or verified tool results establish them.');

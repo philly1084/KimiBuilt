@@ -7553,9 +7553,57 @@ describe('ConversationOrchestrator', () => {
         expect(runtimeInstructions).toContain('verify architecture with `uname -m`');
         expect(runtimeInstructions).toContain('`find`/`grep -R` for `rg`');
         expect(runtimeInstructions).toContain('`docker compose` for `docker-compose`');
+        expect(runtimeInstructions).toContain('Hydrated remote ops guidance from local project docs:');
+        expect(runtimeInstructions).toContain('K3s ships an embedded `kubectl`.');
+        expect(runtimeInstructions).toContain('Lane 1: repo-managed manifests with k3s-deploy');
         expect(plannerPrompt).toContain('find/grep instead of rg');
         expect(plannerPrompt).toContain('do not repeat the same command back-to-back');
         expect(plannerPrompt).toContain('non-empty `params.command` string');
+        expect(plannerPrompt).toContain('Hydrated remote ops guidance from local project docs:');
+        expect(plannerPrompt).toContain('K3s ships an embedded `kubectl`.');
+        expect(plannerPrompt).toContain('Lane 1: repo-managed manifests with k3s-deploy');
+    });
+
+    test('hydrates local remote ops docs for explicit kubectl and Rancher prompts outside remote-build', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['remote-command', 'k3s-deploy'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Debug kubectl ingress routing in Rancher and inspect k3s pod failures.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+        const runtimeInstructions = orchestrator.buildRuntimeInstructions({
+            objective,
+            executionProfile: 'default',
+            allowedToolIds: toolPolicy.allowedToolIds,
+            toolPolicy,
+        });
+
+        expect(runtimeInstructions).toContain('Hydrated remote ops guidance from local project docs:');
+        expect(runtimeInstructions).toContain('K3s ships an embedded `kubectl`.');
+        expect(runtimeInstructions).toContain('Rancher UI map');
     });
 
     test('treats image generation, unsplash, and direct image URLs as first-class tool intents', () => {
