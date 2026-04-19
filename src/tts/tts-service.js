@@ -81,7 +81,7 @@ class TtsService {
         };
     }
 
-    async synthesize({ text = '', voiceId = '' } = {}) {
+    async synthesize({ text = '', voiceId = '', timeoutMs } = {}) {
         const provider = this.getProvider();
         if (!provider?.synthesize) {
             const error = new Error('No TTS providers are configured.');
@@ -90,10 +90,16 @@ class TtsService {
             throw error;
         }
 
-        return provider.synthesize({
+        const params = {
             text,
             voiceId,
-        });
+        };
+
+        if (Number.isFinite(Number(timeoutMs)) && Number(timeoutMs) > 0) {
+            params.timeoutMs = Number(timeoutMs);
+        }
+
+        return provider.synthesize(params);
     }
 }
 

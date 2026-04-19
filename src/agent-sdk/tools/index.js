@@ -2538,6 +2538,8 @@ class ToolManager {
             scriptTimeoutMs: { type: 'integer', minimum: 30000, maximum: 900000 },
             ttsTimeoutMs: { type: 'integer', minimum: 1000, maximum: 900000 },
             ttsChunkMaxChars: { type: 'integer', minimum: 250, maximum: 2400 },
+            ttsConcurrency: { type: 'integer', minimum: 1, maximum: 24 },
+            researchConcurrency: { type: 'integer', minimum: 1, maximum: 12 },
           },
           additionalProperties: false,
         },

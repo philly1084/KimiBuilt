@@ -32,6 +32,7 @@ Useful optional inputs:
 - `introPath`, `outroPath`, `musicBedPath`
 - `exportMp3`, `outputFormat`, `mp3BitrateKbps`
 - `ttsTimeoutMs`, `ttsChunkMaxChars`
+- `ttsConcurrency`, `researchConcurrency`
 
 Notes:
 
@@ -40,6 +41,7 @@ Notes:
 - Speech stitching is native PCM WAV concatenation, so the selected Piper voices must emit compatible WAV output.
 - Podcast renders prefer the most natural bundled voices first and default to a light ffmpeg mastering pass for cleaner loudness and tone.
 - Long-form episodes use podcast-specific Piper chunking and timeout controls; override them with `ttsChunkMaxChars` or `ttsTimeoutMs` if a machine is unusually slow.
+- Source verification and turn synthesis run with bounded parallelism by default; raise `researchConcurrency` or `ttsConcurrency` if the host has CPU headroom and you need faster throughput.
 - MP3 export and intro/outro/music-bed mixing require ffmpeg audio processing to be configured.
 - Check `/api/tts/voices` for the exact `hostA` / `hostB` voice IDs supported in your current deployment before passing custom `hostAVoiceIds` and `hostBVoiceIds`.
 - Example: `hostAVoiceIds: ["amy-expressive", "amy-medium", "hfc-female-rich"]` and `hostBVoiceIds: ["kathleen-low", "hfc-female-medium", "amy-expressive"]` lets the same host cycle through multiple Piper voices per turn.

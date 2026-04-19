@@ -413,6 +413,67 @@ describe('PodcastService', () => {
     }));
   });
 
+  test('synthesizes turn audio with bounded parallelism and keeps the final episode order stable', async () => {
+    const service = new PodcastService();
+    const firstText = 'This is the first Maya line.';
+    const secondText = 'This is the second Maya line.';
+    const thirdText = 'This is the third Maya line.';
+    const audioByText = new Map([
+      [firstText, createTestWav([1, 2, 3, 4])],
+      [secondText, createTestWav([5, 6, 7, 8])],
+      [thirdText, createTestWav([9, 10, 11, 12])],
+    ]);
+    let active = 0;
+    let maxActive = 0;
+
+    piperTtsService.synthesize.mockImplementation(async ({ text }) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+
+      const delayMs = text === firstText
+        ? 50
+        : text === secondText
+          ? 10
+          : 25;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      active -= 1;
+
+      return {
+        audioBuffer: audioByText.get(text),
+        voice: { provider: 'piper' },
+        contentType: 'audio/wav',
+        text,
+      };
+    });
+
+    const result = await service.synthesizeTurns(
+      [
+        { speaker: 'Maya', text: firstText },
+        { speaker: 'Maya', text: secondText },
+        { speaker: 'Maya', text: thirdText },
+      ],
+      [{
+        name: 'Maya',
+        voiceId: 'hfc-female-rich',
+      }],
+      {
+        silenceMs: 100,
+        chunkMaxChars: 1600,
+        ttsConcurrency: 2,
+      },
+    );
+
+    const parsedEpisode = parseWavBuffer(result);
+    const firstSegmentIndex = parsedEpisode.data.indexOf(parseWavBuffer(audioByText.get(firstText)).data);
+    const secondSegmentIndex = parsedEpisode.data.indexOf(parseWavBuffer(audioByText.get(secondText)).data);
+    const thirdSegmentIndex = parsedEpisode.data.indexOf(parseWavBuffer(audioByText.get(thirdText)).data);
+
+    expect(maxActive).toBe(2);
+    expect(firstSegmentIndex).toBeGreaterThanOrEqual(0);
+    expect(secondSegmentIndex).toBeGreaterThan(firstSegmentIndex);
+    expect(thirdSegmentIndex).toBeGreaterThan(secondSegmentIndex);
+  });
+
   test('passes podcast-specific Piper timeout settings into synthesis and retries timed out chunks with smaller splits', async () => {
     const timeoutError = new Error('Piper TTS timed out before audio generation completed.');
     timeoutError.statusCode = 504;

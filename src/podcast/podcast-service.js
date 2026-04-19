@@ -31,6 +31,16 @@ const DEFAULT_PODCAST_SCRIPT_RETRY_ATTEMPTS = Math.max(
 const DEFAULT_TRANSIENT_RETRY_ATTEMPTS = 2;
 const DEFAULT_TRANSIENT_RETRY_DELAY_MS = 1200;
 const DEFAULT_AUDIO_PROCESSING_RETRY_ATTEMPTS = 1;
+const DEFAULT_PODCAST_RESEARCH_CONCURRENCY = Math.max(
+  1,
+  Math.min(12, Number(config?.podcast?.researchConcurrency) || 3),
+);
+const DEFAULT_PODCAST_TTS_CONCURRENCY = Math.max(
+  1,
+  Math.min(24, Number(config?.podcast?.ttsConcurrency) || 4),
+);
+const MAX_PODCAST_RESEARCH_CONCURRENCY = 12;
+const MAX_PODCAST_TTS_CONCURRENCY = 24;
 const PODCAST_HIGH_QUALITY_VOICE_IDS = Object.freeze([
   'amy-expressive',
   'amy-medium',
@@ -226,6 +236,68 @@ function normalizeVariantFilename(filename = '', extension = 'wav') {
 
 function wait(ms = 0) {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+function createConcurrencyLimiter(maxConcurrency = 1) {
+  const limit = Math.max(1, Number(maxConcurrency) || 1);
+  const queue = [];
+  let active = 0;
+
+  async function acquire() {
+    if (active < limit) {
+      active += 1;
+      return;
+    }
+
+    await new Promise((resolve) => queue.push(resolve));
+  }
+
+  function release() {
+    if (queue.length > 0) {
+      const next = queue.shift();
+      next();
+      return;
+    }
+
+    active = Math.max(0, active - 1);
+  }
+
+  return {
+    async run(task) {
+      await acquire();
+      try {
+        return await task();
+      } finally {
+        release();
+      }
+    },
+  };
+}
+
+async function mapWithConcurrency(items = [], maxConcurrency = 1, mapper = async (value) => value) {
+  const list = Array.isArray(items) ? items : [];
+  if (list.length === 0) {
+    return [];
+  }
+
+  const concurrency = Math.max(1, Math.min(list.length, Number(maxConcurrency) || 1));
+  const results = new Array(list.length);
+  let nextIndex = 0;
+
+  const worker = async () => {
+    while (true) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      if (currentIndex >= list.length) {
+        return;
+      }
+
+      results[currentIndex] = await mapper(list[currentIndex], currentIndex);
+    }
+  };
+
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
+  return results;
 }
 
 function prefersMp3(params = {}) {
@@ -544,6 +616,24 @@ function resolvePodcastScriptRequestTimeoutMs(params = {}) {
   );
 }
 
+function resolvePodcastResearchConcurrency(params = {}) {
+  return clampNumber(
+    params.researchConcurrency,
+    1,
+    MAX_PODCAST_RESEARCH_CONCURRENCY,
+    DEFAULT_PODCAST_RESEARCH_CONCURRENCY,
+  );
+}
+
+function resolvePodcastTtsConcurrency(params = {}) {
+  return clampNumber(
+    params.ttsConcurrency,
+    1,
+    MAX_PODCAST_TTS_CONCURRENCY,
+    DEFAULT_PODCAST_TTS_CONCURRENCY,
+  );
+}
+
 function buildResearchPrompt({
   topic,
   audience,
@@ -658,7 +748,13 @@ class PodcastService {
     });
   }
 
-  async researchTopic({ topic, searchDomains = [], sourceUrls = [], maxSources = DEFAULT_MAX_SOURCES }, context = {}) {
+  async researchTopic({
+    topic,
+    searchDomains = [],
+    sourceUrls = [],
+    maxSources = DEFAULT_MAX_SOURCES,
+    concurrency = DEFAULT_PODCAST_RESEARCH_CONCURRENCY,
+  }, context = {}) {
     if (typeof context?.executeTool !== 'function') {
       throw new Error('Podcast research requires tool execution support.');
     }
@@ -704,11 +800,10 @@ class PodcastService {
       throw searchError || new Error('Podcast research did not return any usable sources.');
     }
 
-    const verifiedSources = [];
-    for (const candidate of candidates) {
+    const verifiedSources = (await mapWithConcurrency(candidates, concurrency, async (candidate) => {
       const url = String(candidate?.url || '').trim();
       if (!url) {
-        continue;
+        return null;
       }
 
       try {
@@ -718,21 +813,21 @@ class PodcastService {
           cache: true,
         }, context.toolContext);
 
-        verifiedSources.push({
+        return {
           title: String(candidate?.title || url).trim() || url,
           url,
           snippet: String(candidate?.snippet || '').trim(),
           content: extractFetchedText(fetched),
-        });
+        };
       } catch (_error) {
-        verifiedSources.push({
+        return {
           title: String(candidate?.title || url).trim() || url,
           url,
           snippet: String(candidate?.snippet || '').trim(),
           content: '',
-        });
+        };
       }
-    }
+    })).filter(Boolean);
 
     if (verifiedSources.length === 0) {
       if (searchError) {
@@ -814,6 +909,9 @@ class PodcastService {
   async synthesizeChunkBuffer(text = '', host = {}, options = {}, splitDepth = 0) {
     const timeoutMs = Math.max(1000, Number(options.ttsTimeoutMs) || 45000);
     const minimumChunkChars = Math.max(250, Number(options.minimumChunkChars) || 350);
+    const runSynthesis = typeof options.runSynthesis === 'function'
+      ? options.runSynthesis
+      : async (task) => task();
     const candidateVoices = uniqueOrdered([
       options.voiceId,
       host?.voiceId,
@@ -835,11 +933,11 @@ class PodcastService {
     for (let attempt = 0; attempt < maxVoiceAttempts; attempt += 1) {
       const voiceId = candidateVoices[(preferredVoiceOffset + attempt) % candidateVoices.length];
       try {
-        const synthesis = await this.ttsService.synthesize({
+        const synthesis = await runSynthesis(() => this.ttsService.synthesize({
           text,
           voiceId,
           timeoutMs,
-        });
+        }));
         return [synthesis];
       } catch (error) {
         if (error?.code !== 'tts_timeout') {
@@ -864,10 +962,11 @@ class PodcastService {
       throw lastTimeoutError;
     }
 
-    const syntheses = [];
     const fallbackOffset = (preferredVoiceOffset + 1) % candidateVoices.length;
-    for (const retryChunk of retryChunks) {
-      const nestedSyntheses = await this.synthesizeChunkBuffer(
+    const nestedSyntheses = await mapWithConcurrency(
+      retryChunks,
+      retryChunks.length,
+      async (retryChunk) => this.synthesizeChunkBuffer(
         retryChunk,
         host,
         {
@@ -877,16 +976,14 @@ class PodcastService {
           minimumChunkChars,
         },
         splitDepth + 1,
-      );
-      syntheses.push(...nestedSyntheses);
-    }
+      ),
+    );
 
-    return syntheses;
+    return nestedSyntheses.flat();
   }
 
-  async synthesizeTurns(turns = [], hosts = [], options = {}) {
+  buildSynthesisSegments(turns = [], hosts = [], options = {}) {
     const maxTextChars = Math.max(200, Number(this.ttsService?.getPublicConfig?.().maxTextChars) || 2400);
-    const silenceMs = clampNumber(options.silenceMs, 100, 1200, DEFAULT_SILENCE_MS);
     const cycleHostVoices = options?.cycleHostVoices !== false;
     const chunkMaxChars = clampNumber(
       options.chunkMaxChars,
@@ -902,8 +999,7 @@ class PodcastService {
     );
     const hostByName = new Map(hosts.map((host) => [host.name, host]));
     const hostTurnCounts = new Map();
-    let outputFormat = null;
-    const wavBuffers = [];
+    const segments = [];
 
     for (const turn of turns) {
       const host = hostByName.get(turn.speaker);
@@ -929,26 +1025,61 @@ class PodcastService {
         if (!sanitizedChunk) {
           continue;
         }
-        const syntheses = await this.synthesizeChunkBuffer(sanitizedChunk, hostForTurn, {
+        segments.push({
+          speaker: turn.speaker,
+          text: sanitizedChunk,
+          host: hostForTurn,
           voiceId: resolvedVoiceId,
           voiceIds: Array.isArray(hostForTurn.voiceIds) ? hostForTurn.voiceIds : [],
-          ttsTimeoutMs: options.ttsTimeoutMs,
           minimumChunkChars,
         });
-        for (const synthesis of syntheses) {
-          const parsedSynthesisBuffer = parseWavBuffer(synthesis.audioBuffer);
-          if (!outputFormat) {
-            outputFormat = parsedSynthesisBuffer;
-          }
-
-          const normalizedAudioBuffer = wavFormatsMatch(parsedSynthesisBuffer, outputFormat)
-            ? synthesis.audioBuffer
-            : normalizeWavBufferFormat(synthesis.audioBuffer, outputFormat);
-
-          wavBuffers.push(normalizedAudioBuffer);
-          wavBuffers.push(createSilenceWavBuffer(outputFormat, silenceMs));
-        }
       }
+    }
+
+    return segments;
+  }
+
+  async synthesizeTurns(turns = [], hosts = [], options = {}) {
+    const silenceMs = clampNumber(options.silenceMs, 100, 1200, DEFAULT_SILENCE_MS);
+    const ttsConcurrency = clampNumber(
+      options.ttsConcurrency,
+      1,
+      MAX_PODCAST_TTS_CONCURRENCY,
+      DEFAULT_PODCAST_TTS_CONCURRENCY,
+    );
+    const synthesisSegments = this.buildSynthesisSegments(turns, hosts, options);
+    const limiter = createConcurrencyLimiter(ttsConcurrency);
+    const synthesizedSegments = await mapWithConcurrency(
+      synthesisSegments,
+      ttsConcurrency,
+      async (segment) => this.synthesizeChunkBuffer(segment.text, segment.host, {
+        voiceId: segment.voiceId,
+        voiceIds: segment.voiceIds,
+        ttsTimeoutMs: options.ttsTimeoutMs,
+        minimumChunkChars: segment.minimumChunkChars,
+        runSynthesis: (task) => limiter.run(task),
+      }),
+    );
+
+    const orderedSyntheses = synthesizedSegments.flat();
+    if (orderedSyntheses.length === 0) {
+      throw new Error('Podcast script did not produce any speakable audio.');
+    }
+
+    let outputFormat = null;
+    const wavBuffers = [];
+    for (const synthesis of orderedSyntheses) {
+      const parsedSynthesisBuffer = parseWavBuffer(synthesis.audioBuffer);
+      if (!outputFormat) {
+        outputFormat = parsedSynthesisBuffer;
+      }
+
+      const normalizedAudioBuffer = wavFormatsMatch(parsedSynthesisBuffer, outputFormat)
+        ? synthesis.audioBuffer
+        : normalizeWavBufferFormat(synthesis.audioBuffer, outputFormat);
+
+      wavBuffers.push(normalizedAudioBuffer);
+      wavBuffers.push(createSilenceWavBuffer(outputFormat, silenceMs));
     }
 
     while (wavBuffers.length > 0) {
@@ -989,6 +1120,8 @@ class PodcastService {
     const podcastTtsTimeoutMs = resolvePodcastTtsTimeoutMs(params, voiceConfig);
     const podcastChunkMaxChars = resolvePodcastChunkMaxChars(params, voiceConfig);
     const podcastScriptRequestTimeoutMs = resolvePodcastScriptRequestTimeoutMs(params);
+    const podcastResearchConcurrency = resolvePodcastResearchConcurrency(params);
+    const podcastTtsConcurrency = resolvePodcastTtsConcurrency(params);
     const executeTool = typeof context?.toolManager?.executeTool === 'function'
       ? context.toolManager.executeTool.bind(context.toolManager)
       : null;
@@ -997,6 +1130,7 @@ class PodcastService {
       searchDomains: params.searchDomains || params.domains || [],
       sourceUrls: params.sourceUrls || params.urls || [],
       maxSources,
+      concurrency: podcastResearchConcurrency,
     }, {
       executeTool,
       toolContext: context,
@@ -1034,6 +1168,7 @@ class PodcastService {
         silenceMs: clampNumber(params.pauseMs, 100, 1200, DEFAULT_SILENCE_MS),
         ttsTimeoutMs: podcastTtsTimeoutMs,
         chunkMaxChars: podcastChunkMaxChars,
+        ttsConcurrency: podcastTtsConcurrency,
         cycleHostVoices: params.cycleHostVoices !== false,
       },
     );
@@ -1101,6 +1236,8 @@ class PodcastService {
           enhanced: wantsEnhancement,
           mp3Exported: wantsMp3,
           scriptRequestTimeoutMs: podcastScriptRequestTimeoutMs,
+          researchConcurrency: podcastResearchConcurrency,
+          ttsConcurrency: podcastTtsConcurrency,
           ttsTimeoutMs: podcastTtsTimeoutMs,
           ttsChunkMaxChars: podcastChunkMaxChars,
         },
@@ -1165,6 +1302,8 @@ class PodcastService {
             mixed: wantsMixing,
             enhanced: wantsEnhancement,
             mp3Exported: true,
+            researchConcurrency: podcastResearchConcurrency,
+            ttsConcurrency: podcastTtsConcurrency,
             ttsTimeoutMs: podcastTtsTimeoutMs,
             ttsChunkMaxChars: podcastChunkMaxChars,
           },
@@ -1204,6 +1343,8 @@ class PodcastService {
         mixed: wantsMixing,
         enhanced: wantsEnhancement,
         mp3Exported: wantsMp3,
+        researchConcurrency: podcastResearchConcurrency,
+        ttsConcurrency: podcastTtsConcurrency,
         ttsTimeoutMs: podcastTtsTimeoutMs,
         ttsChunkMaxChars: podcastChunkMaxChars,
         audioProcessing: audioProcessingConfig,

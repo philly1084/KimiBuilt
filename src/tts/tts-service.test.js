@@ -41,6 +41,25 @@ describe('TtsService', () => {
         expect(result.provider).toBe('piper');
     });
 
+    test('forwards timeout overrides to the active provider when supplied', async () => {
+        const piper = createProvider('ready');
+        const service = new TtsService({}, {
+            piper,
+        });
+
+        await service.synthesize({
+            text: 'Hello there.',
+            voiceId: 'hfc-female-rich',
+            timeoutMs: 180000,
+        });
+
+        expect(piper.synthesize).toHaveBeenCalledWith({
+            text: 'Hello there.',
+            voiceId: 'hfc-female-rich',
+            timeoutMs: 180000,
+        });
+    });
+
     test('returns the Piper public config plus a single-provider catalog', () => {
         const piper = createProvider('ready', undefined, {
             maxTextChars: 2400,

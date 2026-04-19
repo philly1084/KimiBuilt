@@ -1,5 +1,6 @@
 require('dotenv').config();
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { getStateDirectory } = require('./runtime-state-paths');
 const { resolveDefaultRepositoryPath } = require('./repository-paths');
@@ -51,6 +52,23 @@ function parseOptionalStringList(value) {
         .split(',')
         .map((entry) => entry.trim())
         .filter(Boolean);
+}
+
+function resolveAvailableParallelism() {
+    try {
+        if (typeof os.availableParallelism === 'function') {
+            return Math.max(1, Number(os.availableParallelism()) || 1);
+        }
+    } catch (_error) {
+        // Fall through to the CPU-count fallback.
+    }
+
+    try {
+        const cpuCount = Array.isArray(os.cpus()) ? os.cpus().length : 0;
+        return Math.max(1, cpuCount || 1);
+    } catch (_error) {
+        return 2;
+    }
 }
 
 function buildAudioProviderCandidates() {
@@ -219,6 +237,23 @@ const piperVoiceDefaults = {
 };
 const configuredPiperVoices = loadConfiguredPiperVoices(piperVoiceDefaults);
 const configuredAudioProviders = buildAudioProviderCandidates();
+const availableParallelism = resolveAvailableParallelism();
+const normalizedPodcastResearchConcurrency = Math.max(
+    1,
+    Math.min(
+        12,
+        parseInt(process.env.PODCAST_RESEARCH_CONCURRENCY, 10)
+            || Math.min(4, Math.max(1, Math.ceil(availableParallelism / 3))),
+    ),
+);
+const normalizedPodcastTtsConcurrency = Math.max(
+    1,
+    Math.min(
+        24,
+        parseInt(process.env.PODCAST_TTS_CONCURRENCY, 10)
+            || Math.min(8, Math.max(2, Math.ceil(availableParallelism / 2))),
+    ),
+);
 const normalizedPiperMaxTextChars = Math.max(
     200,
     parseInt(process.env.PIPER_TTS_MAX_TEXT_CHARS, 10) || 2400,
@@ -367,6 +402,8 @@ const config = {
             0,
             parseInt(process.env.PODCAST_SCRIPT_RETRY_ATTEMPTS, 10) || 1,
         ),
+        researchConcurrency: normalizedPodcastResearchConcurrency,
+        ttsConcurrency: normalizedPodcastTtsConcurrency,
     },
 
     auth: {
