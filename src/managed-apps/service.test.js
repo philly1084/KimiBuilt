@@ -528,6 +528,84 @@ describe('ManagedAppService', () => {
         expect(getAppByRepo).toHaveBeenCalledWith('agent-apps', 'demo');
     });
 
+    test('doctorPlatform summarizes the remote Gitea runner stack through the SSH kubernetes client', async () => {
+        const inspectManagedAppPlatform = jest.fn(async () => ({
+            deploymentTarget: 'ssh',
+            platformNamespace: 'agent-platform',
+            namespaceExists: true,
+            executionHost: 'deploy.example:22',
+            deployments: {
+                gitea: {
+                    name: 'gitea',
+                    present: true,
+                    desiredReplicas: 1,
+                    readyReplicas: 1,
+                    availableReplicas: 1,
+                    updatedReplicas: 1,
+                    ready: true,
+                },
+                buildkitd: {
+                    name: 'buildkitd',
+                    present: true,
+                    desiredReplicas: 1,
+                    readyReplicas: 1,
+                    availableReplicas: 1,
+                    updatedReplicas: 1,
+                    ready: true,
+                },
+                'act-runner': {
+                    name: 'act-runner',
+                    present: true,
+                    desiredReplicas: 0,
+                    readyReplicas: 0,
+                    availableReplicas: 0,
+                    updatedReplicas: 0,
+                    ready: false,
+                },
+            },
+            runnerTokenState: 'placeholder',
+            runnerLabels: 'ubuntu-latest:host',
+            giteaInstanceUrl: 'https://gitea.demoserver2.buzz',
+            runnerLogExcerpt: ['registration token invalid'],
+            raw: {
+                stdout: '',
+                stderr: '',
+                exitCode: 0,
+            },
+        }));
+        const service = new ManagedAppService({
+            kubernetesClient: {
+                isConfigured: jest.fn((target) => target === 'ssh'),
+                inspectManagedAppPlatform,
+            },
+        });
+
+        service.getEffectiveGiteaConfig = () => ({
+            baseURL: 'https://gitea.demoserver2.buzz',
+            registryHost: 'gitea.demoserver2.buzz',
+        });
+        service.getEffectiveManagedAppsConfig = () => ({
+            platformNamespace: 'agent-platform',
+        });
+
+        const result = await service.doctorPlatform({}, 'user-1', {
+            executionProfile: 'remote-build',
+        });
+
+        expect(inspectManagedAppPlatform).toHaveBeenCalledWith({
+            platformNamespace: 'agent-platform',
+            deploymentTarget: 'ssh',
+        });
+        expect(result.healthy).toBe(false);
+        expect(result.platform.expected.giteaBaseURL).toBe('https://gitea.demoserver2.buzz');
+        expect(result.suggestions).toEqual(expect.arrayContaining([
+            expect.stringContaining('`act-runner` is scaled to `0`'),
+            expect.stringContaining('placeholder value'),
+        ]));
+        expect(result.message).toContain('deploy.example:22');
+        expect(result.message).toContain('platform needs attention');
+    });
+
     test('deployApp routes managed apps with ssh deployment targets through the remote kubernetes client', async () => {
         const app = {
             id: 'app-1',

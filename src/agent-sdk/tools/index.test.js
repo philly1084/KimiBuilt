@@ -1188,6 +1188,43 @@ describe('ToolManager image tools', () => {
     expect(result.data.app.status).toBe('live');
   });
 
+  test('routes managed app doctor requests through the managed app service', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const doctorPlatform = jest.fn(async () => ({
+      platform: {
+        platformNamespace: 'agent-platform',
+        executionHost: 'deploy.example:22',
+      },
+      healthy: false,
+      suggestions: ['`act-runner` is scaled to `0`.'],
+      message: 'Managed app platform on deploy.example:22 needs attention.',
+    }));
+
+    const result = await toolManager.executeTool('managed-app', {
+      action: 'doctor',
+    }, {
+      ownerId: 'user-1',
+      sessionId: 'session-1',
+      executionProfile: 'remote-build',
+      managedAppService: {
+        isAvailable: () => true,
+        doctorPlatform,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(doctorPlatform).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'doctor',
+    }), 'user-1', expect.objectContaining({
+      sessionId: 'session-1',
+      executionProfile: 'remote-build',
+    }));
+    expect(result.data.healthy).toBe(false);
+    expect(result.data.platform.platformNamespace).toBe('agent-platform');
+  });
+
   test('normalizes managed app name fallbacks for deploy actions', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();

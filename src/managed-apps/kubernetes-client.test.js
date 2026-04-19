@@ -138,4 +138,54 @@ describe('KubernetesClient', () => {
         expect(sshTool.handler).toHaveBeenCalledTimes(1);
         expect(result.rollout.ok).toBe(true);
     });
+
+    test('inspectManagedAppPlatform reads remote Gitea runner health from the SSH target', async () => {
+        const sshTool = {
+            handler: jest.fn(async () => ({
+                stdout: [
+                    '__KIMIBUILT_PLATFORM_NAMESPACE__=agent-platform',
+                    '__KIMIBUILT_PLATFORM_NAMESPACE_EXISTS__=true',
+                    '__KIMIBUILT_DEPLOYMENT__=gitea|present|1|1|1|1',
+                    '__KIMIBUILT_DEPLOYMENT__=buildkitd|present|1|1|1|1',
+                    '__KIMIBUILT_DEPLOYMENT__=act-runner|present|1|0|0|0',
+                    '__KIMIBUILT_SECRET__=gitea-actions|present',
+                    '__KIMIBUILT_RUNNER_TOKEN__=placeholder',
+                    '__KIMIBUILT_RUNNER_LABELS__=ubuntu-latest:host',
+                    '__KIMIBUILT_GITEA_INSTANCE_URL__=https://gitea.demoserver2.buzz',
+                    '__KIMIBUILT_GITEA_INGRESS_HOST__=gitea.demoserver2.buzz',
+                    '__KIMIBUILT_RUNNER_LOG__=registration token invalid',
+                ].join('\n'),
+                stderr: '',
+                exitCode: 0,
+                host: 'deploy.example:22',
+            })),
+        };
+        const client = new KubernetesClient({
+            managedAppsConfig: {
+                platformNamespace: 'agent-platform',
+            },
+            sshTool,
+        });
+
+        client.isSshConfigured = jest.fn(() => true);
+
+        const result = await client.inspectManagedAppPlatform({
+            platformNamespace: 'agent-platform',
+            deploymentTarget: 'ssh',
+        });
+
+        expect(sshTool.handler).toHaveBeenCalledWith(expect.objectContaining({
+            command: expect.stringContaining('deployment_status act-runner'),
+            timeout: 120000,
+        }), {}, expect.any(Object));
+        expect(result.platformNamespace).toBe('agent-platform');
+        expect(result.namespaceExists).toBe(true);
+        expect(result.deployments.gitea.ready).toBe(true);
+        expect(result.deployments['act-runner'].ready).toBe(false);
+        expect(result.runnerTokenState).toBe('placeholder');
+        expect(result.runnerLabels).toBe('ubuntu-latest:host');
+        expect(result.giteaInstanceUrl).toBe('https://gitea.demoserver2.buzz');
+        expect(result.runnerLogExcerpt).toContain('registration token invalid');
+        expect(result.executionHost).toBe('deploy.example:22');
+    });
 });

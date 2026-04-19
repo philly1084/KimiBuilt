@@ -73,6 +73,30 @@ function normalizeManagedAppNamespace(value = '', slug = '', namespacePrefix = '
     return sanitizeKubernetesName(`${prefix}${base}`, 'managed-apps');
 }
 
+function parseInteger(value, fallback = 0) {
+    const parsed = Number.parseInt(String(value || '').trim(), 10);
+    return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function escapeRegExp(value = '') {
+    return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function readMarkerValue(text = '', marker = '') {
+    const match = String(text || '').match(new RegExp(`^${escapeRegExp(marker)}=(.*)$`, 'm'));
+    return match?.[1] ? String(match[1]).trim() : '';
+}
+
+function readMarkerValues(text = '', marker = '') {
+    const prefix = `${String(marker || '').trim()}=`;
+    return String(text || '')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.startsWith(prefix))
+        .map((line) => line.slice(prefix.length).trim())
+        .filter(Boolean);
+}
+
 function createNoopTracker() {
     return {
         recordExecution() {},
@@ -531,6 +555,145 @@ class KubernetesClient {
 
     quoteShellArg(value) {
         return `'${String(value || '').replace(/'/g, `'"'"'`)}'`;
+    }
+
+    buildRemotePlatformDoctorCommand({ platformNamespace = '' } = {}) {
+        const namespace = sanitizeKubernetesName(
+            platformNamespace || this.managedAppsConfig.platformNamespace || 'agent-platform',
+            'agent-platform',
+        );
+
+        return [
+            'set -e',
+            'kubectl_cmd() {',
+            '  if command -v kubectl >/dev/null 2>&1; then kubectl "$@"; return; fi',
+            '  if command -v k3s >/dev/null 2>&1; then k3s kubectl "$@"; return; fi',
+            '  echo "kubectl or k3s is required on the remote host" >&2',
+            '  exit 1',
+            '}',
+            'if [ -f /etc/rancher/k3s/k3s.yaml ] && [ -z "${KUBECONFIG:-}" ]; then export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; fi',
+            `platform_namespace=${this.quoteShellArg(namespace)}`,
+            'echo "__KIMIBUILT_PLATFORM_NAMESPACE__=${platform_namespace}"',
+            'if kubectl_cmd get namespace "$platform_namespace" >/dev/null 2>&1; then',
+            '  echo "__KIMIBUILT_PLATFORM_NAMESPACE_EXISTS__=true"',
+            'else',
+            '  echo "__KIMIBUILT_PLATFORM_NAMESPACE_EXISTS__=false"',
+            '  exit 0',
+            'fi',
+            'deployment_status() {',
+            '  name="$1"',
+            '  if kubectl_cmd get deployment "$name" -n "$platform_namespace" >/dev/null 2>&1; then',
+            "    desired=$(kubectl_cmd get deployment \"$name\" -n \"$platform_namespace\" -o jsonpath='{.spec.replicas}' 2>/dev/null || true)",
+            "    ready=$(kubectl_cmd get deployment \"$name\" -n \"$platform_namespace\" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)",
+            "    available=$(kubectl_cmd get deployment \"$name\" -n \"$platform_namespace\" -o jsonpath='{.status.availableReplicas}' 2>/dev/null || true)",
+            "    updated=$(kubectl_cmd get deployment \"$name\" -n \"$platform_namespace\" -o jsonpath='{.status.updatedReplicas}' 2>/dev/null || true)",
+            '    echo "__KIMIBUILT_DEPLOYMENT__=${name}|present|${desired:-0}|${ready:-0}|${available:-0}|${updated:-0}"',
+            '  else',
+            '    echo "__KIMIBUILT_DEPLOYMENT__=${name}|missing|0|0|0|0"',
+            '  fi',
+            '}',
+            'deployment_status gitea',
+            'deployment_status buildkitd',
+            'deployment_status act-runner',
+            'if kubectl_cmd get secret gitea-actions -n "$platform_namespace" >/dev/null 2>&1; then',
+            '  echo "__KIMIBUILT_SECRET__=gitea-actions|present"',
+            "  runner_token_b64=$(kubectl_cmd get secret gitea-actions -n \"$platform_namespace\" -o jsonpath='{.data.runner-registration-token}' 2>/dev/null || true)",
+            '  if [ -z "${runner_token_b64:-}" ]; then',
+            '    echo "__KIMIBUILT_RUNNER_TOKEN__=missing"',
+            '  else',
+            '    runner_token=$(printf "%s" "$runner_token_b64" | base64 -d 2>/dev/null || true)',
+            '    case "$runner_token" in',
+            '      "" ) echo "__KIMIBUILT_RUNNER_TOKEN__=missing" ;;',
+            '      "change-me"|"replace-me"|"replace-after-gitea-boot" ) echo "__KIMIBUILT_RUNNER_TOKEN__=placeholder" ;;',
+            '      * ) echo "__KIMIBUILT_RUNNER_TOKEN__=present" ;;',
+            '    esac',
+            '  fi',
+            'else',
+            '  echo "__KIMIBUILT_SECRET__=gitea-actions|missing"',
+            '  echo "__KIMIBUILT_RUNNER_TOKEN__=missing-secret"',
+            'fi',
+            "runner_env=$(kubectl_cmd get deployment act-runner -n \"$platform_namespace\" -o jsonpath='{range .spec.template.spec.containers[*].env[*]}{.name}={.value}{\"\\n\"}{end}' 2>/dev/null || true)",
+            'if [ -n "${runner_env:-}" ]; then',
+            '  runner_labels=$(printf "%s\\n" "$runner_env" | grep "^GITEA_RUNNER_LABELS=" | head -n 1 | cut -d= -f2-)',
+            '  gitea_instance_url=$(printf "%s\\n" "$runner_env" | grep "^GITEA_INSTANCE_URL=" | head -n 1 | cut -d= -f2-)',
+            '  if [ -n "${runner_labels:-}" ]; then echo "__KIMIBUILT_RUNNER_LABELS__=${runner_labels}"; fi',
+            '  if [ -n "${gitea_instance_url:-}" ]; then echo "__KIMIBUILT_GITEA_INSTANCE_URL__=${gitea_instance_url}"; fi',
+            'fi',
+            "gitea_ingress_host=$(kubectl_cmd get ingress gitea -n \"$platform_namespace\" -o jsonpath='{.spec.rules[0].host}' 2>/dev/null || true)",
+            'if [ -n "${gitea_ingress_host:-}" ]; then echo "__KIMIBUILT_GITEA_INGRESS_HOST__=${gitea_ingress_host}"; fi',
+            'if kubectl_cmd get deployment act-runner -n "$platform_namespace" >/dev/null 2>&1; then',
+            '  kubectl_cmd logs deployment/act-runner -n "$platform_namespace" --tail=40 2>/dev/null | sed \'s/^/__KIMIBUILT_RUNNER_LOG__=/\' || true',
+            'fi',
+        ].join('\n');
+    }
+
+    async inspectManagedAppPlatform({
+        platformNamespace = '',
+        deploymentTarget = '',
+    } = {}) {
+        if (!this.isSshConfigured()) {
+            throw new Error('Managed app platform inspection requires SSH access to the remote deploy host.');
+        }
+
+        const target = this.resolveDeployTarget(deploymentTarget);
+        const command = this.buildRemotePlatformDoctorCommand({ platformNamespace });
+        const result = await this.sshTool.handler({
+            command,
+            timeout: 120000,
+        }, {}, createNoopTracker());
+        const stdout = String(result.stdout || '');
+        const deployments = {};
+
+        readMarkerValues(stdout, '__KIMIBUILT_DEPLOYMENT__').forEach((entry) => {
+            const [name, status, desired, ready, available, updated] = String(entry || '').split('|');
+            if (!name) {
+                return;
+            }
+
+            deployments[name] = {
+                name,
+                present: status === 'present',
+                desiredReplicas: parseInteger(desired, 0),
+                readyReplicas: parseInteger(ready, 0),
+                availableReplicas: parseInteger(available, 0),
+                updatedReplicas: parseInteger(updated, 0),
+            };
+        });
+
+        Object.values(deployments).forEach((deployment) => {
+            deployment.ready = deployment.present && deployment.readyReplicas >= Math.max(1, deployment.desiredReplicas || 0);
+        });
+
+        const namespace = readMarkerValue(stdout, '__KIMIBUILT_PLATFORM_NAMESPACE__')
+            || sanitizeKubernetesName(platformNamespace || this.managedAppsConfig.platformNamespace || 'agent-platform', 'agent-platform');
+        const namespaceExists = /^true$/i.test(readMarkerValue(stdout, '__KIMIBUILT_PLATFORM_NAMESPACE_EXISTS__'));
+        const secretStateLine = readMarkerValue(stdout, '__KIMIBUILT_SECRET__');
+        const [secretName, secretStatus] = secretStateLine.split('|');
+        const runnerLogs = readMarkerValues(stdout, '__KIMIBUILT_RUNNER_LOG__');
+
+        return {
+            deploymentTarget: target || 'ssh',
+            platformNamespace: namespace,
+            namespaceExists,
+            executionHost: result.host,
+            deployments,
+            secrets: {
+                [secretName || 'gitea-actions']: {
+                    name: secretName || 'gitea-actions',
+                    present: secretStatus === 'present',
+                },
+            },
+            runnerTokenState: readMarkerValue(stdout, '__KIMIBUILT_RUNNER_TOKEN__') || 'unknown',
+            runnerLabels: readMarkerValue(stdout, '__KIMIBUILT_RUNNER_LABELS__'),
+            giteaInstanceUrl: readMarkerValue(stdout, '__KIMIBUILT_GITEA_INSTANCE_URL__'),
+            giteaIngressHost: readMarkerValue(stdout, '__KIMIBUILT_GITEA_INGRESS_HOST__'),
+            runnerLogExcerpt: runnerLogs.slice(-20),
+            raw: {
+                stdout,
+                stderr: String(result.stderr || ''),
+                exitCode: Number(result.exitCode || 0),
+            },
+        };
     }
 
     buildRemoteManifestApplyCommand(manifests = [], { namespace = '', deploymentName = '', tlsSecretName = '', timeoutSeconds = 120 } = {}) {

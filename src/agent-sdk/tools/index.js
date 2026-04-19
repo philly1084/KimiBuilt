@@ -3125,7 +3125,7 @@ class ToolManager {
         id: 'managed-app',
         name: 'Managed App Control Plane',
         category: 'system',
-        description: 'Create, update, inspect, list, and deploy agent-created apps through the external Gitea control plane and the remote SSH/k3s deployment lane.',
+        description: 'Create, update, inspect, diagnose, list, and deploy agent-created apps through the external Gitea control plane and the remote SSH/k3s deployment lane.',
         backend: {
           handler: async (params = {}, context = {}) => {
             const { service, ownerId, sessionId } = resolveManagedAppService(context);
@@ -3151,6 +3151,22 @@ class ToolManager {
               if (!result) {
                 throw new Error('Managed app not found.');
               }
+
+              return {
+                action,
+                ...result,
+              };
+            }
+
+            if (action === 'doctor') {
+              const result = await service.doctorPlatform(
+                params,
+                ownerId,
+                {
+                  sessionId: params.sessionId || sessionId,
+                  executionProfile: context?.executionProfile || '',
+                },
+              );
 
               return {
                 action,
@@ -3216,7 +3232,7 @@ class ToolManager {
           properties: {
             action: {
               type: 'string',
-              enum: ['create', 'update', 'deploy', 'inspect', 'list'],
+              enum: ['create', 'update', 'deploy', 'inspect', 'doctor', 'list'],
             },
             appRef: { type: 'string' },
             app: { type: 'string' },
@@ -3236,6 +3252,7 @@ class ToolManager {
             containerPort: { type: 'integer' },
             sessionId: { type: 'string' },
             limit: { type: 'integer' },
+            platformNamespace: { type: 'string' },
             metadata: { type: 'object' },
             files: {
               type: 'array',
@@ -3260,6 +3277,11 @@ class ToolManager {
             'deploy generated app',
             'publish this app to the cluster',
             'list managed apps',
+            'managed app doctor',
+            'gitea actions waiting',
+            'gitea runner',
+            'buildkit',
+            'why are actions waiting',
           ],
           requiresConfirmation: false,
         },

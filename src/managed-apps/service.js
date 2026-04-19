@@ -280,6 +280,114 @@ function normalizeManagedAppNamespace(value = '', { slug = '', namespacePrefix =
     });
 }
 
+function getDeploymentStatus(report = {}, name = '') {
+    const deployment = report?.deployments?.[name];
+    if (deployment && typeof deployment === 'object') {
+        return deployment;
+    }
+
+    return {
+        name,
+        present: false,
+        desiredReplicas: 0,
+        readyReplicas: 0,
+        availableReplicas: 0,
+        updatedReplicas: 0,
+        ready: false,
+    };
+}
+
+function isDeploymentReady(deployment = {}) {
+    return Boolean(
+        deployment.present
+        && Number(deployment.readyReplicas || 0) >= Math.max(1, Number(deployment.desiredReplicas || 0)),
+    );
+}
+
+function formatDeploymentSummary(deployment = {}, fallbackName = '') {
+    const name = normalizeText(deployment.name || fallbackName || 'deployment');
+    if (!deployment.present) {
+        return `${name} missing`;
+    }
+
+    return `${name} ${Number(deployment.readyReplicas || 0)}/${Number(deployment.desiredReplicas || 0)} ready`;
+}
+
+function buildPlatformDoctorSuggestions(report = {}) {
+    const suggestions = [];
+    const platformNamespace = normalizeText(report.platformNamespace || 'agent-platform');
+    const gitea = getDeploymentStatus(report, 'gitea');
+    const buildkitd = getDeploymentStatus(report, 'buildkitd');
+    const actRunner = getDeploymentStatus(report, 'act-runner');
+    const runnerTokenState = normalizeText(report.runnerTokenState || 'unknown').toLowerCase();
+    const runnerLabels = normalizeText(report.runnerLabels);
+    const runnerLogText = (Array.isArray(report.runnerLogExcerpt) ? report.runnerLogExcerpt : []).join('\n').toLowerCase();
+
+    if (!report.namespaceExists) {
+        suggestions.push(`Remote platform namespace \`${platformNamespace}\` is missing on the SSH target. Apply the agent-platform manifest there or correct the managed-app platform namespace setting.`);
+        return suggestions;
+    }
+
+    if (!isDeploymentReady(gitea)) {
+        suggestions.push(`Gitea is not ready in \`${platformNamespace}\` (${formatDeploymentSummary(gitea, 'gitea')}).`);
+    }
+
+    if (!isDeploymentReady(buildkitd)) {
+        suggestions.push(`BuildKit is not ready in \`${platformNamespace}\` (${formatDeploymentSummary(buildkitd, 'buildkitd')}).`);
+    }
+
+    if (!actRunner.present) {
+        suggestions.push(`The \`act-runner\` deployment is missing from \`${platformNamespace}\`. The remote Gitea runner stack is incomplete, so Actions will stay waiting.`);
+    } else if (Number(actRunner.desiredReplicas || 0) === 0) {
+        suggestions.push('`act-runner` is scaled to `0`. Replace the real runner registration token in `gitea-actions`, then scale `act-runner` to `1`.');
+    } else if (!isDeploymentReady(actRunner)) {
+        suggestions.push(`\`act-runner\` exists but is not ready (${formatDeploymentSummary(actRunner, 'act-runner')}). Check the runner pod logs on the remote cluster.`);
+    }
+
+    if (runnerTokenState === 'missing-secret') {
+        suggestions.push(`Secret \`gitea-actions\` is missing from \`${platformNamespace}\`. The runner cannot register without \`runner-registration-token\`.`);
+    } else if (runnerTokenState === 'missing') {
+        suggestions.push('Secret `gitea-actions` exists, but `runner-registration-token` is empty or unreadable.');
+    } else if (runnerTokenState === 'placeholder') {
+        suggestions.push('`runner-registration-token` still has a placeholder value. Replace it with a real runner registration token from this Gitea instance.');
+    }
+
+    if (actRunner.present && isDeploymentReady(actRunner) && runnerLabels) {
+        suggestions.push(`If workflows are still waiting, confirm the runner is attached in Gitea and advertises the label \`${runnerLabels}\`.`);
+    }
+
+    if (/\bunauthorized\b|\bforbidden\b|\binvalid\b|\btoken\b/.test(runnerLogText)) {
+        suggestions.push('The runner log excerpt points at a registration or token problem. Reissue the runner registration token from Gitea and update `gitea-actions`.');
+    }
+
+    if (runnerLabels && !/\bubuntu-latest\b/i.test(runnerLabels)) {
+        suggestions.push(`The runner labels are currently \`${runnerLabels}\`. The managed-app workflow expects an \`ubuntu-latest\` compatible label.`);
+    }
+
+    return Array.from(new Set(suggestions.filter(Boolean)));
+}
+
+function buildPlatformDoctorMessage(report = {}, healthy = false) {
+    const host = normalizeText(report.executionHost || 'remote ssh target');
+    const platformNamespace = normalizeText(report.platformNamespace || 'agent-platform');
+    const gitea = getDeploymentStatus(report, 'gitea');
+    const buildkitd = getDeploymentStatus(report, 'buildkitd');
+    const actRunner = getDeploymentStatus(report, 'act-runner');
+    const runnerTokenState = normalizeText(report.runnerTokenState || 'unknown');
+    const labels = normalizeText(report.runnerLabels);
+
+    return [
+        `Managed app platform on ${host}:`,
+        `namespace ${platformNamespace} ${report.namespaceExists ? 'present' : 'missing'}`,
+        formatDeploymentSummary(gitea, 'gitea'),
+        formatDeploymentSummary(buildkitd, 'buildkitd'),
+        formatDeploymentSummary(actRunner, 'act-runner'),
+        `runner token ${runnerTokenState || 'unknown'}`,
+        labels ? `runner labels ${labels}` : '',
+        healthy ? 'platform healthy' : 'platform needs attention',
+    ].filter(Boolean).join('; ');
+}
+
 class ManagedAppService {
     constructor(options = {}) {
         this.store = options.store || managedAppStore;
@@ -388,6 +496,43 @@ class ManagedAppService {
         return {
             app,
             buildRuns,
+        };
+    }
+
+    async doctorPlatform(input = {}, ownerId = null, context = {}) {
+        const deploymentTarget = this.resolveDeploymentTarget(input, context, null);
+        if (!this.kubernetesClient.isConfigured(deploymentTarget)) {
+            const error = new Error('Managed app platform inspection requires configured SSH access to the remote deploy host.');
+            error.statusCode = 503;
+            throw error;
+        }
+
+        const giteaConfig = this.getEffectiveGiteaConfig();
+        const managedAppsConfig = this.getEffectiveManagedAppsConfig();
+        const platform = await this.kubernetesClient.inspectManagedAppPlatform({
+            platformNamespace: input.platformNamespace || managedAppsConfig.platformNamespace,
+            deploymentTarget,
+        });
+        const healthy = platform.namespaceExists
+            && isDeploymentReady(getDeploymentStatus(platform, 'gitea'))
+            && isDeploymentReady(getDeploymentStatus(platform, 'buildkitd'))
+            && isDeploymentReady(getDeploymentStatus(platform, 'act-runner'))
+            && normalizeText(platform.runnerTokenState).toLowerCase() === 'present';
+        const suggestions = buildPlatformDoctorSuggestions(platform);
+
+        return {
+            platform: {
+                ...platform,
+                expected: {
+                    deploymentTarget,
+                    platformNamespace: managedAppsConfig.platformNamespace,
+                    giteaBaseURL: giteaConfig.baseURL,
+                    registryHost: giteaConfig.registryHost,
+                },
+            },
+            healthy,
+            suggestions,
+            message: buildPlatformDoctorMessage(platform, healthy),
         };
     }
 
