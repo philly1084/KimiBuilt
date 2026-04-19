@@ -3500,6 +3500,151 @@ function inferOpencodeTarget(objective = '', session = null) {
     return 'local';
 }
 
+function hasManagedAppIntentText(text = '') {
+    const normalized = String(text || '').trim();
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        /\bmanaged app\b/i,
+        /\b(create|build|deploy|publish|launch|ship|update|redeploy|inspect|list)\b[\s\S]{0,40}\b(app|website|site|frontend|service|game)\b/i,
+        /\b(app|website|site|frontend|service|game)\b[\s\S]{0,40}\b(create|build|deploy|publish|launch|ship|update|redeploy|inspect|list)\b/i,
+        /\b(gitea|container registry|image repo|namespace|ingress host)\b/i,
+    ].some((pattern) => pattern.test(normalized));
+}
+
+function cleanManagedAppReference(candidate = '') {
+    let normalized = String(candidate || '')
+        .trim()
+        .replace(/^["'`]+|["'`]+$/g, '')
+        .replace(/[.,!?;:]+$/g, '')
+        .trim();
+
+    if (!normalized) {
+        return '';
+    }
+
+    normalized = normalized.split(/\b(?:make|that|which|with|using|and)\b/i)[0].trim();
+    if (!normalized) {
+        return '';
+    }
+
+    const wordCount = normalized.split(/\s+/).filter(Boolean).length;
+    if (wordCount > 5) {
+        return '';
+    }
+
+    return normalized;
+}
+
+function extractManagedAppReference(text = '') {
+    const normalized = String(text || '').trim();
+    if (!normalized) {
+        return '';
+    }
+
+    const patterns = [
+        /\b(?:managed app|app|website|site|frontend|service|game)\s+(?:called|named)\s+["'`]?([^"',.\n]+?)["'`]?(?=$|[,.!?]|\s+(?:make|that|which|with|using)\b)/i,
+        /\b(?:called|named)\s+["'`]?([^"',.\n]+?)["'`]?(?=$|[,.!?]|\s+(?:make|that|which|with|using)\b)/i,
+        /\b(?:managed app|app|website|site|frontend|service|game)\s+["'`]([^"'`\n]{1,64})["'`]/i,
+    ];
+
+    for (const pattern of patterns) {
+        const match = normalized.match(pattern);
+        const candidate = cleanManagedAppReference(match?.[1] || '');
+        if (candidate) {
+            return candidate;
+        }
+    }
+
+    return '';
+}
+
+function inferManagedAppRequestedAction(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (/\b(deploy|redeploy|publish|launch|ship|go live|live)\b/.test(normalized)) {
+        return 'deploy';
+    }
+
+    return 'build';
+}
+
+function buildManagedAppDirectAction(objective = '') {
+    const normalized = String(objective || '').trim();
+    const reference = extractManagedAppReference(normalized);
+    const requestedAction = inferManagedAppRequestedAction(normalized);
+    const hasCreateIntent = /\b(create|build|make|generate|new)\b/i.test(normalized);
+    const hasUpdateIntent = /\b(update|modify|change|edit|refresh|rebuild)\b/i.test(normalized);
+    const hasInspectIntent = /\b(inspect|show|status|details?)\b/i.test(normalized);
+    const hasListIntent = /\blist\b/i.test(normalized);
+    const hasDeployIntent = /\b(deploy|redeploy|publish|launch|ship|go live|live)\b/i.test(normalized);
+    const isSlugLikeReference = /^[a-z0-9]+(?:-[a-z0-9]+)*$/i.test(reference);
+
+    if (hasListIntent && !hasCreateIntent && !hasUpdateIntent && !hasDeployIntent) {
+        return {
+            tool: 'managed-app',
+            reason: 'Managed app catalog requests should use the dedicated control-plane tool.',
+            params: {
+                action: 'list',
+                limit: 20,
+            },
+        };
+    }
+
+    if (hasInspectIntent && reference) {
+        return {
+            tool: 'managed-app',
+            reason: 'Managed app inspection requests should use the dedicated control-plane tool.',
+            params: {
+                action: 'inspect',
+                appRef: reference,
+            },
+        };
+    }
+
+    if (hasDeployIntent && !hasCreateIntent && !hasUpdateIntent && reference) {
+        return {
+            tool: 'managed-app',
+            reason: 'Managed app deployment requests should use the dedicated control-plane tool.',
+            params: {
+                action: 'deploy',
+                appRef: reference,
+            },
+        };
+    }
+
+    if (hasUpdateIntent && reference) {
+        return {
+            tool: 'managed-app',
+            reason: 'Managed app update requests should use the dedicated control-plane tool.',
+            params: {
+                action: 'update',
+                appRef: reference,
+                prompt: normalized,
+                sourcePrompt: normalized,
+                requestedAction,
+            },
+        };
+    }
+
+    return {
+        tool: 'managed-app',
+        reason: 'Managed app creation and deployment requests should use the dedicated control-plane tool.',
+        params: {
+            action: 'create',
+            prompt: normalized,
+            sourcePrompt: normalized,
+            requestedAction,
+            ...(reference
+                ? (isSlugLikeReference
+                    ? { slug: reference.toLowerCase() }
+                    : { name: reference })
+                : {}),
+        },
+    };
+}
+
 function resolvePreferredOpencodeWorkspacePath({ session = null, toolContext = {}, target = 'local' } = {}) {
     const opencodeConfig = typeof settingsController.getEffectiveOpencodeConfig === 'function'
         ? settingsController.getEffectiveOpencodeConfig()
@@ -6341,10 +6486,7 @@ class ConversationOrchestrator extends EventEmitter {
         const hasSubAgentIntent = hasExplicitSubAgentIntentText(prompt);
         const hasOpencodeUsageIntent = hasOpencodeToolUsageIntent(prompt);
         const hasOpencodeIntent = hasOpencodeRepoWorkIntent(prompt);
-        const hasManagedAppIntent = /\bmanaged app\b/.test(prompt)
-            || (/\b(create|build|deploy|publish|launch|ship|update|redeploy|inspect|list)\b/.test(prompt)
-                && /\b(app|website|site|frontend|service|game)\b/.test(prompt))
-            || /\b(gitea|container registry|image repo|namespace|ingress host)\b/.test(prompt);
+        const hasManagedAppIntent = hasManagedAppIntentText(prompt);
         const explicitGitIntent = /\b(git|github)\b[\s\S]{0,80}\b(status|diff|branch|stage|add|commit|push|save and push|save-and-push)\b/.test(prompt);
         const explicitK3sDeployIntent = /\b(deploy|rollout|apply|set image|update image|sync)\b[\s\S]{0,60}\b(k3s|k8s|kubernetes|kubectl|manifest|deployment|helm)\b/.test(prompt)
             || /\b(add|install|put)\b[\s\S]{0,40}\b(to|on|into|in)\b[\s\S]{0,20}\b(k3s|k8s|kubernetes|cluster)\b/.test(prompt);
@@ -6389,7 +6531,9 @@ class ConversationOrchestrator extends EventEmitter {
             || config.deploy.defaultRepositoryPath
             || '',
         ).trim();
+        const shouldBypassEndToEndWorkflow = hasManagedAppIntent && allowedToolIds.includes('managed-app');
         const workflowSeed = executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
+            && !shouldBypassEndToEndWorkflow
             ? inferEndToEndBuilderWorkflow({
                 objective,
                 session,
@@ -6866,6 +7010,11 @@ class ConversationOrchestrator extends EventEmitter {
                     ...(podcastDurationMinutes ? { durationMinutes: podcastDurationMinutes } : {}),
                 },
             });
+        }
+
+        if (toolPolicy.candidateToolIds.includes('managed-app')
+            && hasManagedAppIntentText(objective)) {
+            return finalizeAction(buildManagedAppDirectAction(objective));
         }
 
         if (toolPolicy.workflow) {

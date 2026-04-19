@@ -4039,6 +4039,50 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
+    test('routes managed app create-and-deploy prompts directly to the managed-app tool', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['managed-app', 'opencode-run', 'git-safe', 'k3s-deploy', 'remote-command']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Create and deploy a managed app called hello-stack. Make it a simple one-page site that says the managed app pipeline is working.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            toolPolicy,
+        });
+
+        expect(toolPolicy.candidateToolIds).toEqual(expect.arrayContaining([
+            'managed-app',
+        ]));
+        expect(toolPolicy.workflow).toBeNull();
+        expect(directAction).toEqual({
+            tool: 'managed-app',
+            reason: 'Managed app creation and deployment requests should use the dedicated control-plane tool.',
+            params: expect.objectContaining({
+                action: 'create',
+                slug: 'hello-stack',
+                requestedAction: 'deploy',
+                prompt: objective,
+                sourcePrompt: objective,
+            }),
+        });
+    });
+
     test('treats plural podcast workflow prompts as explicit podcast tool requests', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {
@@ -6413,6 +6457,54 @@ describe('ConversationOrchestrator', () => {
             stage: 'implementing',
             status: 'active',
         }));
+    });
+
+    test('does not seed the repo workflow for managed app requests in the remote-build profile', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+        settingsController.getEffectiveOpencodeConfig.mockReturnValue({
+            enabled: true,
+            binaryPath: 'opencode',
+            defaultAgent: 'build',
+            defaultModel: 'gpt-4o',
+            allowedWorkspaceRoots: ['C:/Users/phill/KimiBuilt'],
+            remoteDefaultWorkspace: '/srv/apps/kimibuilt',
+            providerEnvAllowlist: ['OPENAI_API_KEY', 'OPENAI_BASE_URL'],
+            remoteAutoInstall: false,
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['managed-app', 'remote-command', 'opencode-run', 'git-safe', 'k3s-deploy', 'web-search', 'tool-doc-read']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Create and deploy a managed app called hello-stack. Make it a simple one-page site that says the managed app pipeline is working.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+        });
+
+        expect(toolPolicy.candidateToolIds).toEqual(expect.arrayContaining([
+            'managed-app',
+        ]));
+        expect(toolPolicy.workflow).toBeNull();
     });
 
     test('keeps deploy-only workflow verification pinned to the configured ssh target when the prompt includes a registration email', () => {
