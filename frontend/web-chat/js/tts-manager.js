@@ -2,6 +2,10 @@ const DEFAULT_TTS_CACHE_LIMIT = 24;
 const DEFAULT_BROWSER_VOICE_ID = 'browser:default';
 const DEFAULT_PIPER_CHUNK_TARGET_CHARS = 520;
 const DEFAULT_TTS_MAX_TEXT_CHARS = 2400;
+const DEFAULT_PIPER_FIRST_CHUNK_SENTENCES = 1;
+const DEFAULT_PIPER_MAX_SENTENCES_PER_CHUNK = 6;
+const DEFAULT_PIPER_SYNTHESIS_LOOKAHEAD = 2;
+const DEFAULT_TTS_PLAYBACK_SCHEDULE_LEAD_SECONDS = 0.03;
 
 function normalizeSpeechSentence(line = '') {
     const trimmed = String(line || '').trim();
@@ -145,6 +149,110 @@ function splitSpeechChunkByClauses(text = '', maxChars = DEFAULT_TTS_MAX_TEXT_CH
     return chunks.filter(Boolean);
 }
 
+function splitPreparedSpeechChunk(text = '', options = {}) {
+    const normalizedText = String(text || '').trim();
+    if (!normalizedText) {
+        return [];
+    }
+
+    const absoluteMaxChars = Math.max(120, Number(options.absoluteMaxChars) || DEFAULT_TTS_MAX_TEXT_CHARS);
+    const targetChunkChars = Math.max(
+        120,
+        Math.min(
+            absoluteMaxChars,
+            Number(options.targetChunkChars) || DEFAULT_PIPER_CHUNK_TARGET_CHARS,
+        ),
+    );
+
+    return splitSpeechChunkByClauses(normalizedText, targetChunkChars)
+        .flatMap((chunk) => splitWordsIntoSpeechChunks(chunk, absoluteMaxChars))
+        .filter(Boolean);
+}
+
+function groupSpeechSentencesIntoChunks(sentences = [], options = {}) {
+    const normalizedSentences = Array.isArray(sentences)
+        ? sentences.map((sentence) => String(sentence || '').trim()).filter(Boolean)
+        : [];
+
+    if (normalizedSentences.length === 0) {
+        return [];
+    }
+
+    const targetChunkChars = Math.max(
+        120,
+        Math.min(
+            Math.max(120, Number(options.absoluteMaxChars) || DEFAULT_TTS_MAX_TEXT_CHARS),
+            Number(options.targetChunkChars) || DEFAULT_PIPER_CHUNK_TARGET_CHARS,
+        ),
+    );
+    const firstChunkMaxSentences = Math.max(
+        1,
+        Math.min(
+            6,
+            Number(options.firstChunkMaxSentences) || DEFAULT_PIPER_FIRST_CHUNK_SENTENCES,
+        ),
+    );
+    const maxSentencesPerChunk = Math.max(
+        firstChunkMaxSentences,
+        Math.min(
+            8,
+            Number(options.maxSentencesPerChunk) || DEFAULT_PIPER_MAX_SENTENCES_PER_CHUNK,
+        ),
+    );
+
+    const groupedChunks = [];
+    let currentSentences = [];
+    let currentLength = 0;
+
+    const flushCurrentChunk = () => {
+        if (currentSentences.length === 0) {
+            return;
+        }
+        groupedChunks.push(currentSentences.join(' '));
+        currentSentences = [];
+        currentLength = 0;
+    };
+
+    normalizedSentences.forEach((sentence) => {
+        const currentChunkIsFirst = groupedChunks.length === 0;
+        const currentChunkSentenceLimit = currentChunkIsFirst
+            ? firstChunkMaxSentences
+            : maxSentencesPerChunk;
+        const nextLength = currentSentences.length === 0
+            ? sentence.length
+            : currentLength + 1 + sentence.length;
+
+        if (
+            currentSentences.length > 0
+            && (
+                currentSentences.length >= currentChunkSentenceLimit
+                || nextLength > targetChunkChars
+            )
+        ) {
+            flushCurrentChunk();
+        }
+
+        currentSentences.push(sentence);
+        currentLength = currentSentences.length === 1
+            ? sentence.length
+            : currentLength + 1 + sentence.length;
+
+        const updatedChunkIsFirst = groupedChunks.length === 0;
+        const updatedChunkSentenceLimit = updatedChunkIsFirst
+            ? firstChunkMaxSentences
+            : maxSentencesPerChunk;
+        if (
+            currentSentences.length >= updatedChunkSentenceLimit
+            || currentLength >= targetChunkChars
+        ) {
+            flushCurrentChunk();
+        }
+    });
+
+    flushCurrentChunk();
+    return groupedChunks;
+}
+
 function splitTextIntoSpeechChunks(input = '', options = {}) {
     const normalizedText = normalizeTextForSpeech(input);
     if (!normalizedText) {
@@ -164,9 +272,16 @@ function splitTextIntoSpeechChunks(input = '', options = {}) {
         .map((sentence) => String(sentence || '').trim())
         .filter(Boolean);
 
-    return sentences.flatMap((sentence) => (
-        splitSpeechChunkByClauses(sentence, targetChunkChars)
-            .flatMap((chunk) => splitWordsIntoSpeechChunks(chunk, absoluteMaxChars))
+    return groupSpeechSentencesIntoChunks(sentences, {
+        absoluteMaxChars,
+        targetChunkChars,
+        firstChunkMaxSentences: Number(options.firstChunkMaxSentences) || DEFAULT_PIPER_FIRST_CHUNK_SENTENCES,
+        maxSentencesPerChunk: Number(options.maxSentencesPerChunk) || DEFAULT_PIPER_MAX_SENTENCES_PER_CHUNK,
+    }).flatMap((chunk) => (
+        splitPreparedSpeechChunk(chunk, {
+            absoluteMaxChars,
+            targetChunkChars,
+        })
     )).filter(Boolean);
 }
 
@@ -196,6 +311,7 @@ class WebChatTtsManager extends EventTarget {
         this.currentUtterance = null;
         this.currentPlaybackWaiter = null;
         this.cachedAudioBlobs = new Map();
+        this.activePlaybackNodes = new Set();
         this.audioContext = null;
         this.pendingConfigPromise = null;
         this.maxTextChars = DEFAULT_TTS_MAX_TEXT_CHARS;
@@ -615,6 +731,30 @@ class WebChatTtsManager extends EventTarget {
             }
         }
 
+        Array.from(this.activePlaybackNodes).forEach((playbackNode) => {
+            try {
+                playbackNode.sourceNode.onended = null;
+            } catch (_error) {
+                // Ignore handler cleanup failures during reset.
+            }
+            try {
+                playbackNode.sourceNode.stop();
+            } catch (_error) {
+                // Ignore Web Audio cleanup errors.
+            }
+            try {
+                playbackNode.sourceNode.disconnect();
+            } catch (_error) {
+                // Ignore disconnect failures during cleanup.
+            }
+            try {
+                playbackNode.gainNode.disconnect();
+            } catch (_error) {
+                // Ignore disconnect failures during cleanup.
+            }
+        });
+        this.activePlaybackNodes.clear();
+
         if (this.currentAudio) {
             try {
                 this.currentAudio.pause();
@@ -664,6 +804,20 @@ class WebChatTtsManager extends EventTarget {
         this.playbackToken += 1;
         this.resetPlaybackState();
         return this.playbackToken;
+    }
+
+    resolvePlaybackWaiter(result = true) {
+        const activeWaiter = this.currentPlaybackWaiter;
+        this.currentPlaybackWaiter = null;
+        if (!activeWaiter?.resolve) {
+            return;
+        }
+
+        try {
+            activeWaiter.resolve(result);
+        } catch (_error) {
+            // Ignore promise settlement failures during cleanup.
+        }
     }
 
     isPlaybackRequestActive(token) {
@@ -986,7 +1140,82 @@ class WebChatTtsManager extends EventTarget {
         return splitTextIntoSpeechChunks(text, {
             absoluteMaxChars: this.maxTextChars,
             targetChunkChars: Math.min(this.maxTextChars, DEFAULT_PIPER_CHUNK_TARGET_CHARS),
+            firstChunkMaxSentences: DEFAULT_PIPER_FIRST_CHUNK_SENTENCES,
+            maxSentencesPerChunk: DEFAULT_PIPER_MAX_SENTENCES_PER_CHUNK,
         });
+    }
+
+    scheduleDecodedAudioBuffer(decodedBuffer, messageId = '', options = {}) {
+        if (!decodedBuffer || typeof decodedBuffer.duration !== 'number') {
+            throw new Error('No audio was returned for playback.');
+        }
+
+        const context = options.playbackContext;
+        if (!context) {
+            throw new Error('Audio playback is unavailable in this browser.');
+        }
+
+        const sourceNode = context.createBufferSource();
+        const gainNode = context.createGain();
+        gainNode.gain.value = 1;
+        sourceNode.buffer = decodedBuffer;
+        sourceNode.connect(gainNode);
+        gainNode.connect(context.destination);
+
+        const scheduledStartTime = Math.max(
+            context.currentTime + DEFAULT_TTS_PLAYBACK_SCHEDULE_LEAD_SECONDS,
+            Number(options.scheduledStartTime) || 0,
+        );
+        const playbackNode = {
+            sourceNode,
+            gainNode,
+        };
+        this.activePlaybackNodes.add(playbackNode);
+        this.currentSourceNode = sourceNode;
+        this.currentGainNode = gainNode;
+        this.currentMessageId = String(messageId || '').trim();
+        this.loadingMessageId = '';
+        this.emitStateChange();
+
+        sourceNode.onended = () => {
+            this.activePlaybackNodes.delete(playbackNode);
+            try {
+                sourceNode.disconnect();
+            } catch (_error) {
+                // Ignore disconnect failures during cleanup.
+            }
+            try {
+                gainNode.disconnect();
+            } catch (_error) {
+                // Ignore disconnect failures during cleanup.
+            }
+
+            if (this.currentSourceNode === sourceNode) {
+                this.currentSourceNode = null;
+            }
+            if (this.currentGainNode === gainNode) {
+                this.currentGainNode = null;
+            }
+
+            if (!this.isPlaybackRequestActive(options.playbackToken)) {
+                return;
+            }
+
+            if (options.isFinalChunk === true) {
+                this.loadingMessageId = '';
+                this.currentMessageId = '';
+                this.emitStateChange();
+                this.resolvePlaybackWaiter(true);
+            }
+        };
+
+        sourceNode.start(scheduledStartTime);
+
+        return {
+            playbackContext: context,
+            startTime: scheduledStartTime,
+            endTime: scheduledStartTime + decodedBuffer.duration,
+        };
     }
 
     async speakPiperChunks({ messageId = '', text = '', playbackToken = 0, playbackContext = null } = {}) {
@@ -996,54 +1225,60 @@ class WebChatTtsManager extends EventTarget {
             throw new Error('No text is available to read aloud.');
         }
 
-        if (chunks.length === 1) {
-            const result = await this.synthesizeAndPrepareMessageAudio(chunks[0], normalizedMessageId, {
-                showLoading: true,
-                resetCurrentMessage: true,
-                playbackContext,
-            });
-            if (!this.isPlaybackRequestActive(playbackToken)) {
-                return false;
+        const preparedChunkPromises = new Map();
+        let activePlaybackContext = playbackContext;
+        let nextChunkToPrepare = 0;
+        let scheduledEndTime = 0;
+        const synthesisLookahead = Math.max(1, DEFAULT_PIPER_SYNTHESIS_LOOKAHEAD);
+
+        const prepareChunk = (index) => {
+            if (index < 0 || index >= chunks.length || preparedChunkPromises.has(index)) {
+                return;
             }
 
-            return this.playDecodedAudioBuffer(result.decodedBuffer, normalizedMessageId, {
-                playbackContext: result.playbackContext || playbackContext,
-            });
-        }
+            preparedChunkPromises.set(index, this.synthesizeAndPrepareMessageAudio(chunks[index], normalizedMessageId, {
+                showLoading: index === 0,
+                resetCurrentMessage: index === 0,
+                playbackContext: activePlaybackContext,
+            }));
+        };
 
-        let nextChunkPromise = this.synthesizeAndPrepareMessageAudio(chunks[0], normalizedMessageId, {
-            showLoading: true,
-            resetCurrentMessage: true,
-            playbackContext,
+        const fillPreparedWindow = (currentIndex) => {
+            while (nextChunkToPrepare < chunks.length && nextChunkToPrepare <= (currentIndex + synthesisLookahead)) {
+                prepareChunk(nextChunkToPrepare);
+                nextChunkToPrepare += 1;
+            }
+        };
+
+        prepareChunk(0);
+        nextChunkToPrepare = 1;
+        fillPreparedWindow(0);
+
+        const playbackCompleted = new Promise((resolve) => {
+            this.currentPlaybackWaiter = { resolve };
         });
 
         for (let index = 0; index < chunks.length; index += 1) {
-            const chunkResult = await nextChunkPromise;
+            const chunkPromise = preparedChunkPromises.get(index);
+            preparedChunkPromises.delete(index);
+            const chunkResult = await chunkPromise;
             if (!this.isPlaybackRequestActive(playbackToken)) {
                 return false;
             }
 
-            const hasNextChunk = index < (chunks.length - 1);
-            if (hasNextChunk) {
-                // Decode the next chunk while the current one is still playing.
-                nextChunkPromise = this.synthesizeAndPrepareMessageAudio(chunks[index + 1], normalizedMessageId, {
-                    showLoading: false,
-                    playbackContext: chunkResult.playbackContext || playbackContext,
-                });
-            }
+            activePlaybackContext = chunkResult.playbackContext || activePlaybackContext || playbackContext;
+            fillPreparedWindow(index + 1);
 
-            const didFinishPlayback = await this.playDecodedAudioBuffer(chunkResult.decodedBuffer, normalizedMessageId, {
-                awaitEnd: true,
-                keepMessageActiveOnEnd: hasNextChunk,
-                playbackContext: chunkResult.playbackContext || playbackContext,
+            const scheduledChunk = this.scheduleDecodedAudioBuffer(chunkResult.decodedBuffer, normalizedMessageId, {
+                playbackContext: activePlaybackContext,
+                scheduledStartTime: scheduledEndTime,
+                playbackToken,
+                isFinalChunk: index === (chunks.length - 1),
             });
-
-            if (didFinishPlayback === false || !this.isPlaybackRequestActive(playbackToken)) {
-                return false;
-            }
+            scheduledEndTime = scheduledChunk.endTime;
         }
 
-        return true;
+        return playbackCompleted;
     }
 
     async speakMessage({ messageId = '', text = '' } = {}) {
@@ -1077,9 +1312,7 @@ class WebChatTtsManager extends EventTarget {
             });
         } catch (error) {
             if (this.isPlaybackRequestActive(playbackToken)) {
-                this.loadingMessageId = '';
-                this.currentMessageId = '';
-                this.emitStateChange();
+                this.stop();
             }
             throw error;
         }
@@ -1103,4 +1336,20 @@ class WebChatTtsManager extends EventTarget {
     }
 }
 
-window.WebChatTtsManager = WebChatTtsManager;
+if (typeof window !== 'undefined') {
+    window.WebChatTtsManager = WebChatTtsManager;
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        DEFAULT_PIPER_FIRST_CHUNK_SENTENCES,
+        DEFAULT_PIPER_MAX_SENTENCES_PER_CHUNK,
+        WebChatTtsManager,
+        groupSpeechSentencesIntoChunks,
+        normalizeTextForSpeech,
+        splitPreparedSpeechChunk,
+        splitSpeechChunkByClauses,
+        splitTextIntoSpeechChunks,
+        splitWordsIntoSpeechChunks,
+    };
+}
