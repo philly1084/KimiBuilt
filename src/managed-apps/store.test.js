@@ -123,4 +123,61 @@ describe('ManagedAppStore', () => {
         }));
         expect(postgres.query.mock.calls[0][0]).toContain('INSERT INTO managed_app_build_runs');
     });
+
+    test('updates repo owner and repo name for an existing app', async () => {
+        postgres.query
+            .mockResolvedValueOnce({
+                rows: [{
+                    id: 'app-1',
+                    owner_id: 'phill',
+                    session_id: 'session-1',
+                    slug: 'hello-stack',
+                    app_name: 'Hello Stack',
+                    repo_owner: '',
+                    repo_name: '',
+                    repo_url: 'https://gitea.example/agent-apps/hello-stack.git',
+                    repo_clone_url: 'https://gitea.example/agent-apps/hello-stack.git',
+                    repo_ssh_url: '',
+                    default_branch: 'main',
+                    image_repo: 'gitea.example/agent-apps/hello-stack',
+                    namespace: 'app-hello-stack',
+                    public_host: 'hello-stack.demoserver2.buzz',
+                    status: 'draft',
+                    source_prompt: '',
+                    metadata: {},
+                }],
+            })
+            .mockResolvedValueOnce({
+                rows: [{
+                    id: 'app-1',
+                    owner_id: 'phill',
+                    session_id: 'session-1',
+                    slug: 'hello-stack',
+                    app_name: 'Hello Stack',
+                    repo_owner: 'agent-apps',
+                    repo_name: 'hello-stack',
+                    repo_url: 'https://gitea.example/agent-apps/hello-stack.git',
+                    repo_clone_url: 'https://gitea.example/agent-apps/hello-stack.git',
+                    repo_ssh_url: '',
+                    default_branch: 'main',
+                    image_repo: 'gitea.example/agent-apps/hello-stack',
+                    namespace: 'app-hello-stack',
+                    public_host: 'hello-stack.demoserver2.buzz',
+                    status: 'provisioning',
+                    source_prompt: '',
+                    metadata: {},
+                }],
+            });
+
+        const app = await store.updateApp('app-1', 'phill', {
+            repoOwner: 'agent-apps',
+            repoName: 'hello-stack',
+            status: 'provisioning',
+        });
+
+        expect(app.repoOwner).toBe('agent-apps');
+        expect(app.repoName).toBe('hello-stack');
+        expect(postgres.query.mock.calls[1][1][4]).toBe('agent-apps');
+        expect(postgres.query.mock.calls[1][1][5]).toBe('hello-stack');
+    });
 });

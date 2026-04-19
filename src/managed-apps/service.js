@@ -223,6 +223,8 @@ class ManagedAppService {
         const app = existing
             ? await this.store.updateApp(existing.id, ownerId, {
                 appName: blueprint.appName,
+                repoOwner: blueprint.repoOwner,
+                repoName: blueprint.repoName,
                 repoUrl: blueprint.repoUrl,
                 repoCloneUrl: blueprint.repoCloneUrl,
                 repoSshUrl: blueprint.repoSshUrl,
@@ -250,24 +252,26 @@ class ManagedAppService {
         };
         let commitSha = '';
         let committedPaths = [];
+        const effectiveRepoOwner = normalizeText(app.repoOwner || blueprint.repoOwner);
+        const effectiveRepoName = normalizeText(app.repoName || blueprint.repoName);
 
         if (this.giteaClient.isConfigured()) {
             await this.giteaClient.ensureOrganization({
-                name: app.repoOwner,
+                name: effectiveRepoOwner,
                 fullName: 'KimiBuilt Managed Apps',
                 description: 'Application repositories provisioned by KimiBuilt.',
             });
             const ensuredRepo = await this.giteaClient.ensureRepository({
-                owner: app.repoOwner,
-                name: app.repoName,
+                owner: effectiveRepoOwner,
+                name: effectiveRepoName,
                 description: `Managed app for ${app.appName}`,
                 defaultBranch: app.defaultBranch,
             });
             repository = ensuredRepo.repository || repository;
 
             const seedResult = await this.giteaClient.upsertFiles({
-                owner: app.repoOwner,
-                repo: app.repoName,
+                owner: effectiveRepoOwner,
+                repo: effectiveRepoName,
                 branch: app.defaultBranch,
                 files: this.buildRepositoryFiles(app, input),
                 commitMessagePrefix: existing ? 'Update managed app' : 'Seed managed app',
@@ -277,6 +281,8 @@ class ManagedAppService {
         }
 
         const updatedApp = await this.store.updateApp(app.id, ownerId, {
+            repoOwner: effectiveRepoOwner,
+            repoName: effectiveRepoName,
             repoUrl: normalizeText(repository.clone_url || repository.html_url || app.repoUrl),
             repoCloneUrl: normalizeText(repository.clone_url || app.repoCloneUrl),
             repoSshUrl: normalizeText(repository.ssh_url || app.repoSshUrl),
