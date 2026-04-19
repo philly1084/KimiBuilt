@@ -292,9 +292,12 @@ class ManagedAppService {
                 lastSeededPaths: committedPaths,
             },
         });
-        const persistedAppId = normalizeText(updatedApp?.id || app?.id);
+        const persistedApp = updatedApp
+            || await this.store.getAppByRepo(effectiveRepoOwner, effectiveRepoName)
+            || await this.store.getAppBySlug(blueprint.slug, ownerId);
+        const persistedAppId = normalizeText(persistedApp?.id || updatedApp?.id || app?.id);
         if (commitSha && !persistedAppId) {
-            const error = new Error('Managed app build run creation requires a persisted app id.');
+            const error = new Error(`Managed app build run creation requires a persisted app id for ${effectiveRepoOwner}/${effectiveRepoName || blueprint.slug}.`);
             error.statusCode = 500;
             throw error;
         }
@@ -302,8 +305,8 @@ class ManagedAppService {
         const buildRun = commitSha
             ? await this.store.createBuildRun({
                 appId: persistedAppId,
-                ownerId: updatedApp.ownerId || app.ownerId || ownerId,
-                sessionId: updatedApp.sessionId || app.sessionId || sessionId,
+                ownerId: persistedApp?.ownerId || updatedApp?.ownerId || app.ownerId || ownerId,
+                sessionId: persistedApp?.sessionId || updatedApp?.sessionId || app.sessionId || sessionId,
                 source: 'managed-app-service',
                 requestedAction,
                 commitSha,
@@ -319,22 +322,23 @@ class ManagedAppService {
             })
             : null;
 
-        this.broadcastLifecycleEvent(updatedApp, buildRun, existing ? 'updated' : 'created');
+        const finalApp = persistedApp || updatedApp || app;
+        this.broadcastLifecycleEvent(finalApp, buildRun, existing ? 'updated' : 'created');
 
         return {
-            app: updatedApp,
+            app: finalApp,
             buildRun,
             repository: {
-                owner: app.repoOwner,
-                name: app.repoName,
-                url: updatedApp.repoUrl,
-                cloneUrl: updatedApp.repoCloneUrl,
-                sshUrl: updatedApp.repoSshUrl,
+                owner: finalApp.repoOwner,
+                name: finalApp.repoName,
+                url: finalApp.repoUrl,
+                cloneUrl: finalApp.repoCloneUrl,
+                sshUrl: finalApp.repoSshUrl,
             },
             committedPaths,
             message: commitSha
-                ? `${updatedApp.appName} is queued for image build from ${updatedApp.repoOwner}/${updatedApp.repoName}.`
-                : `${updatedApp.appName} was registered without repository changes.`,
+                ? `${finalApp.appName} is queued for image build from ${finalApp.repoOwner}/${finalApp.repoName}.`
+                : `${finalApp.appName} was registered without repository changes.`,
         };
     }
 

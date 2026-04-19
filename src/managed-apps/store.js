@@ -140,47 +140,70 @@ class ManagedAppStore {
             return null;
         }
 
-        const result = await postgres.query(
-            `
-                UPDATE managed_apps
-                SET session_id = $3,
-                    app_name = $4,
-                    repo_owner = $5,
-                    repo_name = $6,
-                    repo_url = $7,
-                    repo_clone_url = $8,
-                    repo_ssh_url = $9,
-                    default_branch = $10,
-                    image_repo = $11,
-                    namespace = $12,
-                    public_host = $13,
-                    status = $14,
-                    source_prompt = $15,
-                    metadata = $16::jsonb,
-                    updated_at = NOW()
-                WHERE id = $1
-                  AND owner_id = $2
-                RETURNING *
-            `,
-            [
-                id,
-                ownerId,
-                Object.prototype.hasOwnProperty.call(updates, 'sessionId') ? updates.sessionId : current.sessionId,
-                updates.appName ?? current.appName,
-                updates.repoOwner ?? current.repoOwner,
-                updates.repoName ?? current.repoName,
-                updates.repoUrl ?? current.repoUrl,
-                updates.repoCloneUrl ?? current.repoCloneUrl,
-                updates.repoSshUrl ?? current.repoSshUrl,
-                updates.defaultBranch ?? current.defaultBranch,
-                updates.imageRepo ?? current.imageRepo,
-                updates.namespace ?? current.namespace,
-                updates.publicHost ?? current.publicHost,
-                updates.status ?? current.status,
-                updates.sourcePrompt ?? current.sourcePrompt,
-                JSON.stringify(updates.metadata ?? current.metadata ?? {}),
-            ],
-        );
+        const values = [
+            Object.prototype.hasOwnProperty.call(updates, 'sessionId') ? updates.sessionId : current.sessionId,
+            updates.appName ?? current.appName,
+            updates.repoOwner ?? current.repoOwner,
+            updates.repoName ?? current.repoName,
+            updates.repoUrl ?? current.repoUrl,
+            updates.repoCloneUrl ?? current.repoCloneUrl,
+            updates.repoSshUrl ?? current.repoSshUrl,
+            updates.defaultBranch ?? current.defaultBranch,
+            updates.imageRepo ?? current.imageRepo,
+            updates.namespace ?? current.namespace,
+            updates.publicHost ?? current.publicHost,
+            updates.status ?? current.status,
+            updates.sourcePrompt ?? current.sourcePrompt,
+            JSON.stringify(updates.metadata ?? current.metadata ?? {}),
+        ];
+        const result = ownerId
+            ? await postgres.query(
+                `
+                    UPDATE managed_apps
+                    SET session_id = $3,
+                        app_name = $4,
+                        repo_owner = $5,
+                        repo_name = $6,
+                        repo_url = $7,
+                        repo_clone_url = $8,
+                        repo_ssh_url = $9,
+                        default_branch = $10,
+                        image_repo = $11,
+                        namespace = $12,
+                        public_host = $13,
+                        status = $14,
+                        source_prompt = $15,
+                        metadata = $16::jsonb,
+                        updated_at = NOW()
+                    WHERE id = $1
+                      AND owner_id = $2
+                    RETURNING *
+                `,
+                [id, ownerId, ...values],
+            )
+            : await postgres.query(
+                `
+                    UPDATE managed_apps
+                    SET session_id = $2,
+                        app_name = $3,
+                        repo_owner = $4,
+                        repo_name = $5,
+                        repo_url = $6,
+                        repo_clone_url = $7,
+                        repo_ssh_url = $8,
+                        default_branch = $9,
+                        image_repo = $10,
+                        namespace = $11,
+                        public_host = $12,
+                        status = $13,
+                        source_prompt = $14,
+                        metadata = $15::jsonb,
+                        updated_at = NOW()
+                    WHERE id = $1
+                    RETURNING *
+                `,
+                [id, ...values],
+            );
 
         return this.mapApp(result.rows[0]);
     }

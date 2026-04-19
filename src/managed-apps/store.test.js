@@ -181,6 +181,61 @@ describe('ManagedAppStore', () => {
         expect(postgres.query.mock.calls[1][1][5]).toBe('hello-stack');
     });
 
+    test('updates an app without an owner scope when the caller passes null', async () => {
+        postgres.query
+            .mockResolvedValueOnce({
+                rows: [{
+                    id: 'app-1',
+                    owner_id: 'phill',
+                    session_id: 'session-1',
+                    slug: 'hello-stack',
+                    app_name: 'Hello Stack',
+                    repo_owner: 'agent-apps',
+                    repo_name: 'hello-stack',
+                    repo_url: 'https://gitea.example/agent-apps/hello-stack.git',
+                    repo_clone_url: 'https://gitea.example/agent-apps/hello-stack.git',
+                    repo_ssh_url: '',
+                    default_branch: 'main',
+                    image_repo: 'gitea.example/agent-apps/hello-stack',
+                    namespace: 'app-hello-stack',
+                    public_host: 'hello-stack.demoserver2.buzz',
+                    status: 'draft',
+                    source_prompt: '',
+                    metadata: {},
+                }],
+            })
+            .mockResolvedValueOnce({
+                rows: [{
+                    id: 'app-1',
+                    owner_id: 'phill',
+                    session_id: 'session-1',
+                    slug: 'hello-stack',
+                    app_name: 'Hello Stack',
+                    repo_owner: 'agent-apps',
+                    repo_name: 'hello-stack',
+                    repo_url: 'https://gitea.example/agent-apps/hello-stack.git',
+                    repo_clone_url: 'https://gitea.example/agent-apps/hello-stack.git',
+                    repo_ssh_url: '',
+                    default_branch: 'main',
+                    image_repo: 'gitea.example/agent-apps/hello-stack',
+                    namespace: 'app-hello-stack',
+                    public_host: 'hello-stack.demoserver2.buzz',
+                    status: 'provisioning',
+                    source_prompt: '',
+                    metadata: {},
+                }],
+            });
+
+        const app = await store.updateApp('app-1', null, {
+            status: 'provisioning',
+        });
+
+        expect(app.id).toBe('app-1');
+        expect(postgres.query.mock.calls[1][0]).not.toContain('owner_id = $2');
+        expect(postgres.query.mock.calls[1][1][0]).toBe('app-1');
+        expect(postgres.query.mock.calls[1][1][12]).toBe('provisioning');
+    });
+
     test('rejects build run creation without an app id', async () => {
         await expect(store.createBuildRun({
             ownerId: 'phill',
