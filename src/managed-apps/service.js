@@ -159,6 +159,64 @@ function buildImageTagFromCommit(commitSha = '') {
     return normalized ? `sha-${normalized.slice(0, 12)}` : '';
 }
 
+function extractHostFromUrl(value = '') {
+    const normalized = normalizeText(value);
+    if (!normalized) {
+        return '';
+    }
+
+    try {
+        return normalizeText(new URL(normalized).host);
+    } catch (_error) {
+        return '';
+    }
+}
+
+function normalizeImageRepo(value = '') {
+    return normalizeText(value)
+        .replace(/^https?:\/\//i, '')
+        .replace(/\/+$/, '');
+}
+
+function isUsableImageRepo(value = '') {
+    const normalized = normalizeImageRepo(value);
+    if (!normalized) {
+        return false;
+    }
+
+    const segments = normalized.split('/').filter(Boolean);
+    if (segments.length < 3) {
+        return false;
+    }
+
+    return segments.every((segment) => normalizeText(segment).toLowerCase() !== 'undefined');
+}
+
+function resolveManagedAppRegistryHost(giteaConfig = {}, app = {}) {
+    return normalizeText(giteaConfig.registryHost)
+        || extractHostFromUrl(giteaConfig.baseURL)
+        || extractHostFromUrl(app.repoUrl)
+        || extractHostFromUrl(app.repoCloneUrl)
+        || '';
+}
+
+function resolveManagedAppImageRepo(input = {}, giteaConfig = {}) {
+    const explicit = normalizeImageRepo(input.imageRepo);
+    if (isUsableImageRepo(explicit)) {
+        return explicit;
+    }
+
+    const repoOwner = normalizeText(input.repoOwner || giteaConfig.org);
+    const repoName = normalizeText(input.repoName || input.slug);
+    const registryHost = resolveManagedAppRegistryHost(giteaConfig, input);
+    if (!registryHost || !repoOwner || !repoName) {
+        return '';
+    }
+
+    const derived = normalizeImageRepo(`${registryHost}/${repoOwner}/${repoName}`);
+    return isUsableImageRepo(derived) ? derived : '';
+}
+
 function hasPersistedAppId(app = null) {
     return Boolean(normalizeText(app?.id));
 }
@@ -351,7 +409,17 @@ class ManagedAppService {
         );
         const repoOwner = normalizeText(input.repoOwner || giteaConfig.org || 'agent-apps');
         const repoName = slug;
-        const imageRepo = normalizeText(input.imageRepo || `${giteaConfig.registryHost}/${repoOwner}/${repoName}`);
+        const imageRepo = resolveManagedAppImageRepo({
+            ...input,
+            slug,
+            repoOwner,
+            repoName,
+        }, giteaConfig);
+        if (!imageRepo) {
+            const error = new Error('Managed app image publishing requires a configured Gitea registry host or a derivable Gitea base URL host.');
+            error.statusCode = 503;
+            throw error;
+        }
         const namespace = normalizeManagedAppNamespace(
             input.namespace,
             {
@@ -636,7 +704,31 @@ class ManagedAppService {
             };
         }
 
-        const image = `${deployableApp.imageRepo}:${imageTag}`;
+        const resolvedImageRepo = resolveManagedAppImageRepo(deployableApp, giteaConfig);
+        if (!resolvedImageRepo) {
+            const error = new Error('Managed app deployment requires a valid image repository from the configured Gitea registry host.');
+            error.statusCode = 503;
+            throw error;
+        }
+
+        if (resolvedImageRepo !== normalizeText(deployableApp.imageRepo)) {
+            deployableApp = await this.store.updateApp(app.id, app.ownerId, {
+                imageRepo: resolvedImageRepo,
+                metadata: {
+                    ...(deployableApp.metadata || {}),
+                    deploymentTarget,
+                },
+            }) || {
+                ...deployableApp,
+                imageRepo: resolvedImageRepo,
+                metadata: {
+                    ...(deployableApp.metadata || {}),
+                    deploymentTarget,
+                },
+            };
+        }
+
+        const image = `${resolvedImageRepo}:${imageTag}`;
 
         const deployResult = await this.kubernetesClient.deployManagedApp({
             slug: deployableApp.slug,
@@ -709,6 +801,7 @@ class ManagedAppService {
         const commitSha = normalizeText(payload.commitSha || payload.sha);
         const imageTag = normalizeText(payload.imageTag || buildImageTagFromCommit(commitSha));
         const buildStatus = normalizeBuildStatus(payload.buildStatus || payload.status);
+        const giteaConfig = this.getEffectiveGiteaConfig();
         const app = repoOwner && repoName
             ? await this.store.getAppByRepo(repoOwner, repoName)
             : await this.store.getAppBySlug(slug);
@@ -717,6 +810,13 @@ class ManagedAppService {
             error.statusCode = 404;
             throw error;
         }
+        const imageRepo = resolveManagedAppImageRepo({
+            ...app,
+            imageRepo: payload.imageRepo || app.imageRepo,
+            repoOwner: repoOwner || app.repoOwner,
+            repoName: repoName || app.repoName,
+            slug: slug || app.slug,
+        }, giteaConfig);
 
         let buildRun = normalizeText(payload.runId)
             ? await this.store.getBuildRunByExternalRunId(normalizeText(payload.runId))
@@ -777,12 +877,15 @@ class ManagedAppService {
         }
 
         const updatedApp = await this.store.updateApp(app.id, app.ownerId, {
+            ...(imageRepo ? { imageRepo } : {}),
             status: buildRun.deployRequested ? 'deploying' : 'built',
             metadata: {
                 ...(app.metadata || {}),
                 lastSuccessfulBuild: {
                     commitSha,
                     imageTag,
+                    ...(imageRepo ? { imageRepo } : {}),
+                    ...(normalizeText(payload.platforms) ? { platforms: normalizeText(payload.platforms) } : {}),
                 },
             },
         });

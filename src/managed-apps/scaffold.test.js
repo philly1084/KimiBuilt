@@ -20,8 +20,15 @@ describe('managed app scaffold', () => {
 
         expect(workflow).toBeTruthy();
         expect(workflow.content).toContain('BUILDKIT_HOST');
+        expect(workflow.content).toContain('TARGET_PLATFORMS');
+        expect(workflow.content).toContain('linux/amd64,linux/arm64');
         expect(workflow.content).toContain('buildctl --addr "$BUILDKIT_HOST" build');
+        expect(workflow.content).toContain('--opt platform="$TARGET_PLATFORMS"');
+        expect(workflow.content).toContain('--import-cache "type=registry,ref=$IMAGE_REPO:latest"');
         expect(workflow.content).toContain('KIMIBUILT_BUILD_EVENTS_SECRET');
+        expect(workflow.content).toContain('PAYLOAD="$(cat <<EOF');
+        expect(workflow.content).toContain('"imageRepo":"$IMAGE_REPO"');
+        expect(workflow.content).toContain('"platforms":"$TARGET_PLATFORMS"');
         expect(workflow.content).not.toContain('secrets.GITEA_REGISTRY_USERNAME');
     });
 });

@@ -612,6 +612,199 @@ describe('ManagedAppService', () => {
         expect(result.message).toContain('via ssh');
     });
 
+    test('deployApp heals a missing image repo from current Gitea settings before deployment', async () => {
+        const app = {
+            id: 'app-1',
+            ownerId: 'user-1',
+            sessionId: 'session-1',
+            slug: 'demo',
+            appName: 'Demo',
+            imageRepo: '',
+            repoOwner: 'agent-apps',
+            repoName: 'demo',
+            namespace: 'app-demo',
+            publicHost: 'demo.demoserver2.buzz',
+            status: 'built',
+            metadata: {
+                deploymentTarget: 'ssh',
+                requestedContainerPort: 80,
+            },
+        };
+        const buildRun = {
+            id: 'run-1',
+            buildStatus: 'success',
+            deployStatus: 'pending',
+            imageTag: 'sha-abcdef123456',
+            metadata: {},
+        };
+        const healedApp = {
+            ...app,
+            imageRepo: 'gitea.demoserver2.buzz/agent-apps/demo',
+        };
+        const deployManagedApp = jest.fn(async () => ({
+            namespace: 'app-demo',
+            deployment: 'demo',
+            verification: {
+                rollout: true,
+                tls: false,
+                https: true,
+            },
+            rollout: {
+                ok: true,
+            },
+        }));
+
+        const store = {
+            isAvailable: () => true,
+            listBuildRunsForApp: jest.fn(async () => ([buildRun])),
+            updateApp: jest.fn()
+                .mockResolvedValueOnce({
+                    ...healedApp,
+                    metadata: {
+                        ...healedApp.metadata,
+                        deploymentTarget: 'ssh',
+                    },
+                })
+                .mockResolvedValueOnce({
+                    ...healedApp,
+                    status: 'live',
+                    metadata: {
+                        ...healedApp.metadata,
+                        deploymentTarget: 'ssh',
+                        lastImage: 'gitea.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
+                    },
+                }),
+            updateBuildRun: jest.fn(async (_id, updates) => ({
+                ...buildRun,
+                ...updates,
+            })),
+        };
+
+        const service = new ManagedAppService({
+            store,
+            kubernetesClient: {
+                isConfigured: jest.fn((target) => target === 'ssh'),
+                deployManagedApp,
+            },
+        });
+
+        service.resolveApp = jest.fn(async () => app);
+        service.getEffectiveGiteaConfig = () => ({
+            baseURL: 'https://gitea.demoserver2.buzz',
+            registryHost: 'gitea.demoserver2.buzz',
+            registryUsername: 'builder',
+            registryPassword: 'secret',
+        });
+        service.getEffectiveManagedAppsConfig = () => ({
+            defaultContainerPort: 80,
+            registryPullSecretName: 'gitea-registry-credentials',
+        });
+        service.recordClusterDeployment = jest.fn();
+        service.broadcastLifecycleEvent = jest.fn();
+
+        const result = await service.deployApp('demo', {}, 'user-1', {
+            executionProfile: 'remote-build',
+            sessionId: 'session-1',
+        });
+
+        expect(store.updateApp).toHaveBeenNthCalledWith(1, 'app-1', 'user-1', expect.objectContaining({
+            imageRepo: 'gitea.demoserver2.buzz/agent-apps/demo',
+        }));
+        expect(deployManagedApp).toHaveBeenCalledWith(expect.objectContaining({
+            image: 'gitea.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
+        }));
+        expect(result.app.imageRepo).toBe('gitea.demoserver2.buzz/agent-apps/demo');
+    });
+
+    test('handleBuildEvent stores the resolved image repo from the webhook payload', async () => {
+        const app = {
+            id: 'app-1',
+            ownerId: 'user-1',
+            sessionId: 'session-1',
+            slug: 'demo',
+            appName: 'Demo',
+            imageRepo: '',
+            repoOwner: 'agent-apps',
+            repoName: 'demo',
+            namespace: 'app-demo',
+            publicHost: 'demo.demoserver2.buzz',
+            status: 'building',
+            metadata: {
+                deploymentTarget: 'ssh',
+            },
+        };
+        const buildRun = {
+            id: 'run-1',
+            appId: 'app-1',
+            buildStatus: 'queued',
+            deployRequested: false,
+            deployStatus: 'not_requested',
+            verificationStatus: 'pending',
+            metadata: {},
+        };
+        const updatedApp = {
+            ...app,
+            imageRepo: 'gitea.demoserver2.buzz/agent-apps/demo',
+            status: 'built',
+            metadata: {
+                deploymentTarget: 'ssh',
+                lastSuccessfulBuild: {
+                    commitSha: 'abcdef1234567890',
+                    imageTag: 'sha-abcdef123456',
+                    imageRepo: 'gitea.demoserver2.buzz/agent-apps/demo',
+                    platforms: 'linux/amd64,linux/arm64',
+                },
+            },
+        };
+
+        const store = {
+            ensureAvailable: jest.fn(async () => {}),
+            getAppByRepo: jest.fn(async () => app),
+            getAppBySlug: jest.fn(async () => app),
+            getBuildRunByExternalRunId: jest.fn(async () => buildRun),
+            getBuildRunByCommitSha: jest.fn(async () => buildRun),
+            updateBuildRun: jest.fn(async (_id, updates) => ({
+                ...buildRun,
+                ...updates,
+            })),
+            updateApp: jest.fn(async () => updatedApp),
+        };
+
+        const service = new ManagedAppService({
+            store,
+        });
+
+        service.getEffectiveGiteaConfig = () => ({
+            baseURL: 'https://gitea.demoserver2.buzz',
+            org: 'agent-apps',
+            registryHost: 'gitea.demoserver2.buzz',
+        });
+        service.broadcastLifecycleEvent = jest.fn();
+
+        const result = await service.handleBuildEvent({
+            repoOwner: 'agent-apps',
+            repoName: 'demo',
+            slug: 'demo',
+            imageRepo: 'gitea.demoserver2.buzz/agent-apps/demo',
+            platforms: 'linux/amd64,linux/arm64',
+            commitSha: 'abcdef1234567890',
+            imageTag: 'sha-abcdef123456',
+            buildStatus: 'success',
+            runId: 'run-1',
+        });
+
+        expect(store.updateApp).toHaveBeenCalledWith('app-1', 'user-1', expect.objectContaining({
+            imageRepo: 'gitea.demoserver2.buzz/agent-apps/demo',
+            metadata: expect.objectContaining({
+                lastSuccessfulBuild: expect.objectContaining({
+                    imageRepo: 'gitea.demoserver2.buzz/agent-apps/demo',
+                    platforms: 'linux/amd64,linux/arm64',
+                }),
+            }),
+        }));
+        expect(result.app.imageRepo).toBe('gitea.demoserver2.buzz/agent-apps/demo');
+    });
+
     test('deployApp lets remote-build override legacy in-cluster metadata', async () => {
         const app = {
             id: 'app-1',

@@ -39,6 +39,7 @@ jobs:
       REGISTRY_HOST: ${registryHost}
       DEFAULT_BUILD_EVENTS_URL: ${buildEventsUrl || 'https://kimibuilt.example.com/api/integrations/gitea/build-events'}
       BUILDKIT_HOST: \${BUILDKIT_HOST:-tcp://buildkitd.agent-platform.svc.cluster.local:1234}
+      TARGET_PLATFORMS: \${TARGET_PLATFORMS:-linux/amd64,linux/arm64}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -82,6 +83,26 @@ jobs:
           {"auths":{"$TARGET_REGISTRY_HOST":{"username":"$GITEA_REGISTRY_USERNAME","password":"$GITEA_REGISTRY_PASSWORD","auth":"$AUTH"}}}
           EOF
 
+      - name: Validate build settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$IMAGE_REPO"
+          test -n "$TARGET_PLATFORMS"
+          case "$IMAGE_REPO" in
+            */*/*) ;;
+            *)
+              echo "IMAGE_REPO must look like <registry>/<owner>/<repo>; got $IMAGE_REPO" >&2
+              exit 1
+              ;;
+          esac
+          case "/$IMAGE_REPO/" in
+            *"/undefined/"*)
+              echo "Invalid IMAGE_REPO=$IMAGE_REPO" >&2
+              exit 1
+              ;;
+          esac
+
       - name: Build and push image
         shell: bash
         run: |
@@ -90,8 +111,10 @@ jobs:
             --frontend dockerfile.v0 \\
             --local context=. \\
             --local dockerfile=. \\
-            --opt platform=linux/arm64 \\
-            --output "type=image,name=$IMAGE_REPO:$IMAGE_TAG,$IMAGE_REPO:latest,push=true"
+            --opt platform="$TARGET_PLATFORMS" \\
+            --output "type=image,name=$IMAGE_REPO:$IMAGE_TAG,$IMAGE_REPO:latest,push=true" \\
+            --export-cache type=inline \\
+            --import-cache "type=registry,ref=$IMAGE_REPO:latest"
 
       - name: Notify KimiBuilt on success
         if: success()
@@ -100,10 +123,14 @@ jobs:
           set -euo pipefail
           test -n "\${KIMIBUILT_BUILD_EVENTS_SECRET:-}"
           TARGET_BUILD_EVENTS_URL="\${KIMIBUILT_BUILD_EVENTS_URL:-$DEFAULT_BUILD_EVENTS_URL}"
+          PAYLOAD="$(cat <<EOF
+          {"repoOwner":"${giteaOrg}","repoName":"${slug}","slug":"${slug}","imageRepo":"$IMAGE_REPO","platforms":"$TARGET_PLATFORMS","commitSha":"$GITHUB_SHA","imageTag":"$IMAGE_TAG","buildStatus":"success","runId":"\${{ gitea.run_id }}","runUrl":"\${{ gitea.server_url }}/${giteaOrg}/${slug}/actions/runs/\${{ gitea.run_id }}"}
+          EOF
+          )"
           curl -fsSL -X POST "$TARGET_BUILD_EVENTS_URL" \\
             -H "Content-Type: application/json" \\
             -H "X-KimiBuilt-Webhook-Secret: $KIMIBUILT_BUILD_EVENTS_SECRET" \\
-            -d "{\"repoOwner\":\"${giteaOrg}\",\"repoName\":\"${slug}\",\"slug\":\"${slug}\",\"commitSha\":\"$GITHUB_SHA\",\"imageTag\":\"$IMAGE_TAG\",\"buildStatus\":\"success\",\"runId\":\"\${{ gitea.run_id }}\",\"runUrl\":\"\${{ gitea.server_url }}/${giteaOrg}/${slug}/actions/runs/\${{ gitea.run_id }}\"}"
+            -d "$PAYLOAD"
 
       - name: Notify KimiBuilt on failure
         if: failure()
@@ -112,10 +139,14 @@ jobs:
           set -euo pipefail
           test -n "\${KIMIBUILT_BUILD_EVENTS_SECRET:-}"
           TARGET_BUILD_EVENTS_URL="\${KIMIBUILT_BUILD_EVENTS_URL:-$DEFAULT_BUILD_EVENTS_URL}"
+          PAYLOAD="$(cat <<EOF
+          {"repoOwner":"${giteaOrg}","repoName":"${slug}","slug":"${slug}","imageRepo":"$IMAGE_REPO","platforms":"$TARGET_PLATFORMS","commitSha":"$GITHUB_SHA","imageTag":"$IMAGE_TAG","buildStatus":"failed","runId":"\${{ gitea.run_id }}","runUrl":"\${{ gitea.server_url }}/${giteaOrg}/${slug}/actions/runs/\${{ gitea.run_id }}"}
+          EOF
+          )"
           curl -fsSL -X POST "$TARGET_BUILD_EVENTS_URL" \\
             -H "Content-Type: application/json" \\
             -H "X-KimiBuilt-Webhook-Secret: $KIMIBUILT_BUILD_EVENTS_SECRET" \\
-            -d "{\"repoOwner\":\"${giteaOrg}\",\"repoName\":\"${slug}\",\"slug\":\"${slug}\",\"commitSha\":\"$GITHUB_SHA\",\"imageTag\":\"$IMAGE_TAG\",\"buildStatus\":\"failed\",\"runId\":\"\${{ gitea.run_id }}\",\"runUrl\":\"\${{ gitea.server_url }}/${giteaOrg}/${slug}/actions/runs/\${{ gitea.run_id }}\"}"
+            -d "$PAYLOAD"
 `;
 }
 
