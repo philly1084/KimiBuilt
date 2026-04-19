@@ -49,6 +49,7 @@ const PODCAST_HIGH_QUALITY_VOICE_IDS = Object.freeze([
   'kathleen-low',
 ]);
 const DEFAULT_MAX_VOICE_FALLBACK_ATTEMPTS = 2;
+const MAX_PODCAST_TTS_SPLIT_DEPTH = 3;
 const DEFAULT_HOSTS = Object.freeze([
   {
     key: 'hostA',
@@ -134,6 +135,22 @@ function sanitizePodcastTextForSpeech(value = '') {
     .replace(/[^\x20-\x7E\n\r\t]+/gu, ' ')
     .replace(/\s{2,}/g, ' ')
     .trim();
+}
+
+function normalizePodcastTextChunkForSpeech(value = '', maxTextChars = 2400) {
+  const sanitized = sanitizePodcastTextForSpeech(value);
+  if (!sanitized) {
+    return '';
+  }
+
+  try {
+    return normalizeTextForSpeech(sanitized, maxTextChars);
+  } catch (error) {
+    if (error?.code === 'empty_text') {
+      return '';
+    }
+    throw error;
+  }
 }
 
 function normalizeStringList(value = []) {
@@ -413,6 +430,52 @@ function isRetryablePodcastAudioError(error = {}) {
     'broken pipe',
     'could not be started',
   ].some((pattern) => message.includes(pattern) || code.includes(pattern));
+}
+
+function isRetryablePodcastTtsError(error = {}) {
+  const message = String(error?.message || '').trim().toLowerCase();
+  const code = String(error?.code || '').trim().toLowerCase();
+  const statusCode = Number(error?.statusCode || error?.status || 0);
+
+  if (['empty_text', 'tts_unavailable', 'tts_binary_missing'].includes(code)) {
+    return false;
+  }
+
+  if (statusCode >= 400 && statusCode < 500 && ![408, 429].includes(statusCode)) {
+    return false;
+  }
+
+  if (['tts_timeout', 'tts_failed', 'tts_empty_audio'].includes(code)) {
+    return true;
+  }
+
+  if (statusCode >= 500 || statusCode === 408 || statusCode === 429) {
+    return true;
+  }
+
+  return [
+    'timed out',
+    'timeout',
+    'terminated unexpectedly',
+    'failed to generate audio',
+    'returned an empty audio file',
+    'resource temporarily unavailable',
+    'temporarily unavailable',
+    'device or resource busy',
+    'connection reset',
+    'broken pipe',
+    'could not be started',
+  ].some((pattern) => message.includes(pattern) || code.includes(pattern));
+}
+
+function canRetryPodcastTtsWithAnotherVoice(error = {}) {
+  const code = String(error?.code || '').trim().toLowerCase();
+
+  if (['empty_text', 'tts_unavailable', 'tts_binary_missing'].includes(code)) {
+    return false;
+  }
+
+  return true;
 }
 
 function getResponseText(response = {}) {
@@ -909,9 +972,19 @@ class PodcastService {
   async synthesizeChunkBuffer(text = '', host = {}, options = {}, splitDepth = 0) {
     const timeoutMs = Math.max(1000, Number(options.ttsTimeoutMs) || 45000);
     const minimumChunkChars = Math.max(250, Number(options.minimumChunkChars) || 350);
+    const maxTextChars = Math.max(
+      200,
+      Number(options.maxTextChars)
+        || Number(this.ttsService?.getPublicConfig?.().maxTextChars)
+        || 2400,
+    );
     const runSynthesis = typeof options.runSynthesis === 'function'
       ? options.runSynthesis
       : async (task) => task();
+    const normalizedText = normalizePodcastTextChunkForSpeech(text, maxTextChars);
+    if (!normalizedText) {
+      return [];
+    }
     const candidateVoices = uniqueOrdered([
       options.voiceId,
       host?.voiceId,
@@ -928,38 +1001,47 @@ class PodcastService {
       Math.min(candidateVoices.length, DEFAULT_MAX_VOICE_FALLBACK_ATTEMPTS),
     );
     const preferredVoiceOffset = Math.max(0, Number(options.voiceAttemptOffset) || 0);
-    let lastTimeoutError = null;
+    let lastError = null;
 
     for (let attempt = 0; attempt < maxVoiceAttempts; attempt += 1) {
       const voiceId = candidateVoices[(preferredVoiceOffset + attempt) % candidateVoices.length];
       try {
         const synthesis = await runSynthesis(() => this.ttsService.synthesize({
-          text,
+          text: normalizedText,
           voiceId,
           timeoutMs,
         }));
         return [synthesis];
       } catch (error) {
-        if (error?.code !== 'tts_timeout') {
-          throw error;
+        lastError = error;
+        const hasMoreVoiceFallbacks = attempt < (maxVoiceAttempts - 1);
+        if (hasMoreVoiceFallbacks && canRetryPodcastTtsWithAnotherVoice(error)) {
+          continue;
         }
-
-        lastTimeoutError = error;
+        break;
       }
     }
 
-    if (!lastTimeoutError || splitDepth >= 2 || text.length <= minimumChunkChars) {
-      throw lastTimeoutError;
+    if (!lastError) {
+      throw new Error('Podcast TTS failed before audio generation could start.');
     }
 
-    const nextChunkSize = Math.max(minimumChunkChars, Math.floor(text.length / 2));
-    if (nextChunkSize >= text.length) {
-      throw lastTimeoutError;
+    if (!isRetryablePodcastTtsError(lastError)
+      || splitDepth >= MAX_PODCAST_TTS_SPLIT_DEPTH
+      || normalizedText.length <= minimumChunkChars) {
+      throw lastError;
     }
 
-    const retryChunks = chunkText(text, nextChunkSize);
+    const nextChunkSize = Math.max(minimumChunkChars, Math.floor(normalizedText.length / 2));
+    if (nextChunkSize >= normalizedText.length) {
+      throw lastError;
+    }
+
+    const retryChunks = chunkText(normalizedText, nextChunkSize)
+      .map((retryChunk) => normalizePodcastTextChunkForSpeech(retryChunk, maxTextChars))
+      .filter(Boolean);
     if (retryChunks.length <= 1) {
-      throw lastTimeoutError;
+      throw lastError;
     }
 
     const fallbackOffset = (preferredVoiceOffset + 1) % candidateVoices.length;
@@ -973,6 +1055,7 @@ class PodcastService {
           ...options,
           voiceAttemptOffset: fallbackOffset,
           voiceIds: candidateVoices,
+          maxTextChars,
           minimumChunkChars,
         },
         splitDepth + 1,
@@ -1021,13 +1104,13 @@ class PodcastService {
       };
       const chunks = chunkText(turn.text, chunkMaxChars);
       for (const chunk of chunks) {
-        const sanitizedChunk = sanitizePodcastTextForSpeech(chunk);
-        if (!sanitizedChunk) {
+        const normalizedChunk = normalizePodcastTextChunkForSpeech(chunk, maxTextChars);
+        if (!normalizedChunk) {
           continue;
         }
         segments.push({
           speaker: turn.speaker,
-          text: sanitizedChunk,
+          text: normalizedChunk,
           host: hostForTurn,
           voiceId: resolvedVoiceId,
           voiceIds: Array.isArray(hostForTurn.voiceIds) ? hostForTurn.voiceIds : [],
@@ -1056,6 +1139,7 @@ class PodcastService {
         voiceId: segment.voiceId,
         voiceIds: segment.voiceIds,
         ttsTimeoutMs: options.ttsTimeoutMs,
+        maxTextChars: Number(this.ttsService?.getPublicConfig?.().maxTextChars) || 2400,
         minimumChunkChars: segment.minimumChunkChars,
         runSynthesis: (task) => limiter.run(task),
       }),

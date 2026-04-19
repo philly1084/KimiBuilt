@@ -519,6 +519,45 @@ describe('PodcastService', () => {
     expect(piperTtsService.synthesize.mock.calls[2][0].text.length).toBeLessThan(longTurn.length);
   });
 
+  test('retries unexpected Piper failures by splitting podcast chunks into smaller renders', async () => {
+    const failedError = new Error('Piper TTS failed to generate audio.');
+    failedError.statusCode = 502;
+    failedError.code = 'tts_failed';
+
+    piperTtsService.synthesize
+      .mockRejectedValueOnce(failedError)
+      .mockResolvedValue({
+        audioBuffer: createTestWav([1, 2, 3, 4]),
+        voice: { provider: 'piper' },
+        contentType: 'audio/wav',
+        text: 'segment',
+      });
+
+    const service = new PodcastService();
+    const longTurn = 'Battery storage helps the grid absorb extra power and deliver it later. '.repeat(30).trim();
+    const result = await service.synthesizeTurns(
+      [{ speaker: 'Maya', text: longTurn }],
+      [{ name: 'Maya', voiceId: 'hfc-female-rich' }],
+      {
+        silenceMs: 250,
+        chunkMaxChars: 1600,
+        ttsTimeoutMs: 180000,
+      },
+    );
+
+    expect(Buffer.isBuffer(result)).toBe(true);
+    const [initialAttempt] = piperTtsService.synthesize.mock.calls[0];
+    expect(piperTtsService.synthesize.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      voiceId: 'hfc-female-rich',
+      timeoutMs: 180000,
+    }));
+    expect(initialAttempt.text.length).toBeLessThanOrEqual(1600);
+    piperTtsService.synthesize.mock.calls.slice(1).forEach(([call]) => {
+      expect(call.text.length).toBeLessThan(initialAttempt.text.length);
+    });
+  });
+
   test('falls back to the next configured host voice before splitting podcast chunks on timeout', async () => {
     const timeoutError = new Error('Piper TTS timed out before audio generation completed.');
     timeoutError.statusCode = 504;
@@ -526,6 +565,47 @@ describe('PodcastService', () => {
 
     piperTtsService.synthesize
       .mockRejectedValueOnce(timeoutError)
+      .mockResolvedValueOnce({
+        audioBuffer: createTestWav([1, 2, 3, 4]),
+        voice: { provider: 'piper' },
+        contentType: 'audio/wav',
+        text: 'segment',
+      });
+
+    const service = new PodcastService();
+    const result = await service.synthesizeTurns(
+      [{ speaker: 'Maya', text: 'Battery storage helps the grid absorb extra power without wasting generation.' }],
+      [{
+        name: 'Maya',
+        voiceId: 'hfc-female-rich',
+        voiceIds: ['hfc-female-rich', 'amy-expressive'],
+      }],
+      {
+        silenceMs: 250,
+        chunkMaxChars: 1600,
+        ttsTimeoutMs: 180000,
+      },
+    );
+
+    expect(Buffer.isBuffer(result)).toBe(true);
+    expect(piperTtsService.synthesize).toHaveBeenCalledTimes(2);
+    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      voiceId: 'hfc-female-rich',
+      timeoutMs: 180000,
+    }));
+    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      voiceId: 'amy-expressive',
+      timeoutMs: 180000,
+    }));
+  });
+
+  test('falls back to the next configured host voice after non-timeout Piper failures', async () => {
+    const failedError = new Error('Piper TTS failed to generate audio.');
+    failedError.statusCode = 502;
+    failedError.code = 'tts_failed';
+
+    piperTtsService.synthesize
+      .mockRejectedValueOnce(failedError)
       .mockResolvedValueOnce({
         audioBuffer: createTestWav([1, 2, 3, 4]),
         voice: { provider: 'piper' },

@@ -1,5 +1,6 @@
 'use strict';
 
+const { createHash } = require('crypto');
 const { config } = require('../config');
 const settingsController = require('../routes/admin/settings.controller');
 const { clusterStateRegistry } = require('../cluster-state-registry');
@@ -13,13 +14,103 @@ function normalizeText(value = '') {
     return String(value || '').trim();
 }
 
-function slugify(value = '') {
+const MAX_MANAGED_APP_SLUG_LENGTH = 63;
+const MAX_KUBERNETES_NAME_LENGTH = 63;
+
+function baseSlugify(value = '') {
     return String(value || '')
         .trim()
         .toLowerCase()
         .replace(/[^a-z0-9-]+/g, '-')
         .replace(/^-+|-+$/g, '')
         .replace(/-{2,}/g, '-');
+}
+
+function truncateSlug(value = '', maxLength = 0) {
+    const normalized = baseSlugify(value);
+    if (!normalized || !Number.isFinite(Number(maxLength)) || Number(maxLength) <= 0 || normalized.length <= Number(maxLength)) {
+        return normalized;
+    }
+
+    const limit = Number(maxLength);
+    if (limit <= 8) {
+        return normalized.slice(0, limit).replace(/-+$/g, '');
+    }
+
+    const suffix = createHash('sha1').update(normalized).digest('hex').slice(0, 6);
+    const prefixLimit = Math.max(1, limit - suffix.length - 1);
+    const prefix = normalized.slice(0, prefixLimit).replace(/-+$/g, '') || normalized.slice(0, prefixLimit);
+    return `${prefix}-${suffix}`.replace(/^-+|-+$/g, '');
+}
+
+function slugify(value = '', options = {}) {
+    const maxLength = Number(options.maxLength) || 0;
+    return maxLength > 0
+        ? truncateSlug(value, maxLength)
+        : baseSlugify(value);
+}
+
+function extractExplicitAppName(value = '') {
+    const normalized = normalizeText(value);
+    if (!normalized) {
+        return '';
+    }
+
+    const patterns = [
+        /\b(?:managed\s+app|application|app|site|website|project|game|repo(?:sitory)?)\s+(?:called|named)\s+["'`]?([^"'`\n.,!?;:]+)["'`]?/i,
+        /\b(?:called|named)\s+["'`]?([^"'`\n.,!?;:]+)["'`]?/i,
+    ];
+
+    for (const pattern of patterns) {
+        const match = normalized.match(pattern);
+        if (!match?.[1]) {
+            continue;
+        }
+
+        const candidate = normalizeText(match[1])
+            .replace(/\s+(?:that|which|with|for)\b.*$/i, '')
+            .replace(/["'`]+$/g, '');
+        if (candidate) {
+            return candidate;
+        }
+    }
+
+    return '';
+}
+
+function summarizePromptName(value = '') {
+    const normalized = normalizeText(value);
+    if (!normalized) {
+        return '';
+    }
+
+    const tokens = normalized
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter(Boolean);
+    if (tokens.length === 0) {
+        return '';
+    }
+
+    const stopwords = new Set([
+        'a', 'an', 'and', 'app', 'application', 'build', 'called', 'create', 'deploy', 'for', 'generate',
+        'it', 'make', 'managed', 'named', 'page', 'please', 'simple', 'site', 'the', 'this', 'to', 'website',
+    ]);
+    const meaningful = tokens.filter((token) => !stopwords.has(token));
+    const selected = (meaningful.length > 0 ? meaningful : tokens).slice(0, 6);
+    return selected.join(' ');
+}
+
+function deriveRequestedAppName(input = {}) {
+    return normalizeText(
+        input.appName
+        || input.name
+        || input.title
+        || input.slug
+        || input.repoName
+        || extractExplicitAppName(input.prompt || input.sourcePrompt || '')
+        || summarizePromptName(input.prompt || input.sourcePrompt || ''),
+    );
 }
 
 function titleizeSlug(value = '') {
@@ -158,13 +249,24 @@ class ManagedAppService {
     buildAppBlueprint(input = {}, ownerId = null, sessionId = null) {
         const giteaConfig = this.getEffectiveGiteaConfig();
         const managedAppsConfig = this.getEffectiveManagedAppsConfig();
-        const rawName = normalizeText(input.appName || input.name || input.title || input.slug || input.repoName || input.prompt || input.sourcePrompt);
-        const slug = slugify(input.slug || rawName || `app-${Date.now()}`);
-        const appName = normalizeText(input.appName || input.name || input.title || titleizeSlug(slug));
+        const explicitPromptName = extractExplicitAppName(input.prompt || input.sourcePrompt || '');
+        const rawName = deriveRequestedAppName(input) || `app-${Date.now()}`;
+        const slug = slugify(input.slug || rawName || `app-${Date.now()}`, {
+            maxLength: MAX_MANAGED_APP_SLUG_LENGTH,
+        });
+        const appName = normalizeText(
+            input.appName
+            || input.name
+            || input.title
+            || (explicitPromptName ? titleizeSlug(slugify(explicitPromptName)) : '')
+            || titleizeSlug(slug),
+        );
         const repoOwner = normalizeText(input.repoOwner || giteaConfig.org || 'agent-apps');
         const repoName = slug;
         const imageRepo = normalizeText(input.imageRepo || `${giteaConfig.registryHost}/${repoOwner}/${repoName}`);
-        const namespace = slugify(input.namespace || `${managedAppsConfig.namespacePrefix || 'app-'}${slug}`);
+        const namespace = slugify(input.namespace || `${managedAppsConfig.namespacePrefix || 'app-'}${slug}`, {
+            maxLength: MAX_KUBERNETES_NAME_LENGTH,
+        });
         const publicHost = normalizeText(input.publicHost || `${slug}.${managedAppsConfig.appBaseDomain || 'demoserver2.buzz'}`);
         const defaultBranch = normalizeText(input.defaultBranch || managedAppsConfig.defaultBranch || 'main');
 

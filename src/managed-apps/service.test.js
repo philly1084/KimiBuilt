@@ -8,6 +8,57 @@ jest.mock('../realtime-hub', () => ({
 const { ManagedAppService } = require('./service');
 
 describe('ManagedAppService', () => {
+    test('builds a managed app blueprint from the explicit app name in the prompt', () => {
+        const service = new ManagedAppService();
+
+        service.getEffectiveGiteaConfig = () => ({
+            baseURL: 'https://gitea.demoserver2.buzz',
+            org: 'agent-apps',
+            registryHost: 'gitea.demoserver2.buzz',
+        });
+        service.getEffectiveManagedAppsConfig = () => ({
+            appBaseDomain: 'demoserver2.buzz',
+            namespacePrefix: 'app-',
+            defaultBranch: 'main',
+            defaultContainerPort: 80,
+        });
+
+        const blueprint = service.buildAppBlueprint({
+            prompt: 'Create and deploy a managed app called hello-stack. Make it a simple one-page site that says the pipeline is working.',
+        }, 'user-1', 'session-1');
+
+        expect(blueprint.slug).toBe('hello-stack');
+        expect(blueprint.appName).toBe('Hello Stack');
+        expect(blueprint.repoName).toBe('hello-stack');
+        expect(blueprint.namespace).toBe('app-hello-stack');
+        expect(blueprint.publicHost).toBe('hello-stack.demoserver2.buzz');
+    });
+
+    test('caps long prompt-derived managed app names before repository creation', () => {
+        const service = new ManagedAppService();
+
+        service.getEffectiveGiteaConfig = () => ({
+            baseURL: 'https://gitea.demoserver2.buzz',
+            org: 'agent-apps',
+            registryHost: 'gitea.demoserver2.buzz',
+        });
+        service.getEffectiveManagedAppsConfig = () => ({
+            appBaseDomain: 'demoserver2.buzz',
+            namespacePrefix: 'app-',
+            defaultBranch: 'main',
+            defaultContainerPort: 80,
+        });
+
+        const blueprint = service.buildAppBlueprint({
+            prompt: 'Create and deploy a managed app called this is a very long managed application name that should be shortened before repository creation because Gitea rejects overly long repository names and Kubernetes resource names also need to stay bounded.',
+        }, 'user-1', 'session-1');
+
+        expect(blueprint.slug.length).toBeLessThanOrEqual(63);
+        expect(blueprint.repoName).toBe(blueprint.slug);
+        expect(blueprint.namespace.length).toBeLessThanOrEqual(63);
+        expect(blueprint.publicHost).toBe(`${blueprint.slug}.demoserver2.buzz`);
+    });
+
     test('heals missing repo coordinates on existing apps before creating the repository', async () => {
         const existingApp = {
             id: 'app-1',
