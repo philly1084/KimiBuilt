@@ -270,6 +270,8 @@ async function executeConversationRuntime(app, params = {}) {
         model: params?.toolContext?.model || params.model || null,
         documentService: params?.toolContext?.documentService || app?.locals?.documentService || null,
         opencodeService: params?.toolContext?.opencodeService || app?.locals?.opencodeService || null,
+        workloadService: params?.toolContext?.workloadService || app?.locals?.agentWorkloadService || null,
+        managedAppService: params?.toolContext?.managedAppService || app?.locals?.managedAppService || null,
     };
     const clientSurface = String(
         params.clientSurface

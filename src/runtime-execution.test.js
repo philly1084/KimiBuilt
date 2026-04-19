@@ -39,10 +39,14 @@ describe('runtime-execution', () => {
             response: { id: 'resp_executor' },
         });
         const documentService = { id: 'documents' };
+        const managedAppService = { id: 'managed-apps' };
+        const workloadService = { id: 'workloads' };
 
         const result = await executeConversationRuntime({
             locals: {
                 documentService,
+                managedAppService,
+                agentWorkloadService: workloadService,
                 conversationOrchestrator: {
                     executeConversation,
                 },
@@ -59,6 +63,8 @@ describe('runtime-execution', () => {
             executionProfile: 'default',
             toolContext: expect.objectContaining({
                 documentService,
+                managedAppService,
+                workloadService,
             }),
         }));
         expect(createResponse).not.toHaveBeenCalled();
