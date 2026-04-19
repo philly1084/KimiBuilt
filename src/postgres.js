@@ -269,6 +269,64 @@ class PostgresManager {
         `);
         await this.query('CREATE INDEX IF NOT EXISTS idx_opencode_run_events_run_id_id ON opencode_run_events(run_id, id ASC)');
 
+        await this.query(`
+            CREATE TABLE IF NOT EXISTS managed_apps (
+                id TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL,
+                session_id TEXT NULL REFERENCES sessions(id) ON DELETE SET NULL,
+                slug TEXT NOT NULL,
+                app_name TEXT NOT NULL,
+                repo_owner TEXT NOT NULL,
+                repo_name TEXT NOT NULL,
+                repo_url TEXT NOT NULL,
+                repo_clone_url TEXT NOT NULL DEFAULT '',
+                repo_ssh_url TEXT NOT NULL DEFAULT '',
+                default_branch TEXT NOT NULL DEFAULT 'main',
+                image_repo TEXT NOT NULL,
+                namespace TEXT NOT NULL,
+                public_host TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'draft',
+                source_prompt TEXT NOT NULL DEFAULT '',
+                metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        `);
+
+        await this.query(`
+            CREATE TABLE IF NOT EXISTS managed_app_build_runs (
+                id TEXT PRIMARY KEY,
+                app_id TEXT NOT NULL REFERENCES managed_apps(id) ON DELETE CASCADE,
+                owner_id TEXT NOT NULL,
+                session_id TEXT NULL REFERENCES sessions(id) ON DELETE SET NULL,
+                source TEXT NOT NULL DEFAULT 'manual',
+                requested_action TEXT NOT NULL DEFAULT 'build',
+                commit_sha TEXT NOT NULL DEFAULT '',
+                image_tag TEXT NOT NULL DEFAULT '',
+                image_digest TEXT NOT NULL DEFAULT '',
+                build_status TEXT NOT NULL DEFAULT 'queued',
+                deploy_requested BOOLEAN NOT NULL DEFAULT FALSE,
+                deploy_status TEXT NOT NULL DEFAULT 'not_requested',
+                verification_status TEXT NOT NULL DEFAULT 'pending',
+                external_run_id TEXT NULL,
+                external_run_url TEXT NOT NULL DEFAULT '',
+                error JSONB NOT NULL DEFAULT '{}'::jsonb,
+                metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+                started_at TIMESTAMPTZ NULL,
+                finished_at TIMESTAMPTZ NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        `);
+        await this.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_managed_apps_slug_owner ON managed_apps(owner_id, slug)');
+        await this.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_managed_apps_repo_owner_name ON managed_apps(repo_owner, repo_name)');
+        await this.query('CREATE INDEX IF NOT EXISTS idx_managed_apps_owner_updated_at ON managed_apps(owner_id, updated_at DESC)');
+        await this.query('CREATE INDEX IF NOT EXISTS idx_managed_apps_session_id ON managed_apps(session_id)');
+        await this.query('CREATE INDEX IF NOT EXISTS idx_managed_app_build_runs_app_created_at ON managed_app_build_runs(app_id, created_at DESC)');
+        await this.query('CREATE INDEX IF NOT EXISTS idx_managed_app_build_runs_owner_created_at ON managed_app_build_runs(owner_id, created_at DESC)');
+        await this.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_managed_app_build_runs_external_run_id ON managed_app_build_runs(external_run_id) WHERE external_run_id IS NOT NULL');
+        await this.query('CREATE INDEX IF NOT EXISTS idx_managed_app_build_runs_commit_sha ON managed_app_build_runs(app_id, commit_sha)');
+
         return true;
     }
 

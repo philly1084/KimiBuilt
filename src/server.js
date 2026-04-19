@@ -35,7 +35,9 @@ const adminRouter = require('./routes/admin');
 const authRouter = require('./routes/auth');
 const toolsRouter = require('./routes/tools');
 const workloadsRouter = require('./routes/workloads');
+const managedAppsRouter = require('./routes/managed-apps');
 const opencodeRouter = require('./routes/opencode');
+const giteaIntegrationsRouter = require('./routes/integrations-gitea');
 const providerSessionsRouter = require('./routes/provider-sessions');
 const DashboardController = require('./routes/admin/dashboard.controller');
 const { getToolManager } = require('./agent-sdk/tools');
@@ -46,6 +48,7 @@ const { ConversationRunService } = require('./conversation-run-service');
 const { AgentWorkloadService } = require('./workloads/service');
 const { AgentWorkloadRunner } = require('./workloads/runner');
 const { OpenCodeService } = require('./opencode/service');
+const { ManagedAppService } = require('./managed-apps/service');
 const { ProviderSessionService } = require('./provider-session-service');
 const { TemplateStore } = require('./template-store');
 const { podcastService } = require('./podcast/podcast-service');
@@ -146,6 +149,7 @@ app.get('/login', (req, res) => {
 });
 
 app.use('/api/auth', authRouter);
+app.use('/api/integrations/gitea', giteaIntegrationsRouter);
 app.use(requireAuth);
 
 // Serve only the 4 active frontends
@@ -248,6 +252,7 @@ app.use('/api/admin', providerSessionsRouter);
 app.use('/admin', providerSessionsRouter);
 app.use('/api/tools', toolsRouter);
 app.use('/api', workloadsRouter);
+app.use('/api', managedAppsRouter);
 app.use('/api', opencodeRouter);
 
 app.use(express.static(path.join(__dirname, '../frontend'), buildFrontendStaticOptions()));
@@ -368,6 +373,7 @@ async function start() {
             sessionStore,
             conversationRunService: app.locals.conversationRunService,
         });
+        app.locals.managedAppService = new ManagedAppService();
         app.locals.agentWorkloadRunner = new AgentWorkloadRunner({
             workloadService: app.locals.agentWorkloadService,
         });

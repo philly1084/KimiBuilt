@@ -836,7 +836,7 @@ function isSuspiciousSshTargetHost(host = '') {
         return true;
     }
 
-    return /^(?:web-fetch|web-search|web-scrape|file-read|file-search|file-write|remote-command|ssh-execute|docker-exec|tool-doc-read|code-sandbox)(?:\.[a-z0-9_-]+)+$/i.test(normalized)
+    return /^(?:web-fetch|web-search|web-scrape|file-read|file-search|file-write|remote-command|ssh-execute|docker-exec|tool-doc-read|code-sandbox|managed-app)(?:\.[a-z0-9_-]+)+$/i.test(normalized)
         || /^(?:result|results|data|response|output|tool)(?:\.[a-z0-9_-]+)+$/i.test(normalized);
 }
 

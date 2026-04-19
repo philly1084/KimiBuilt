@@ -355,6 +355,12 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             userCheckpointPolicy: buildUserCheckpointPolicyMetadata(userCheckpointPolicy),
             ...(sessionIsolation ? { sessionIsolation: true } : {}),
         };
+        const managedAppsSummary = req.app.locals.managedAppService?.buildPromptSummary
+            ? await req.app.locals.managedAppService.buildPromptSummary({
+                ownerId,
+                maxApps: 4,
+            })
+            : '';
         let effectiveOutputFormat = outputFormat
             || inferRequestedOutputFormat(artifactIntentText)
             || inferOutputFormatFromSession(artifactIntentText, session);
@@ -475,7 +481,9 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     memoryKeywords,
                     timezone: requestTimezone,
                     now: requestNow,
+                    managedAppsSummary,
                     workloadService: req.app.locals.agentWorkloadService,
+                    managedAppService: req.app.locals.managedAppService || null,
                 },
                 executionProfile,
             });
@@ -616,7 +624,9 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     memoryKeywords,
                     timezone: requestTimezone,
                     now: requestNow,
+                    managedAppsSummary,
                     workloadService: req.app.locals.agentWorkloadService,
+                    managedAppService: req.app.locals.managedAppService || null,
                     userCheckpointPolicy,
                 },
                 executionProfile,
@@ -799,7 +809,9 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 memoryKeywords,
                 timezone: requestTimezone,
                 now: requestNow,
+                managedAppsSummary,
                 workloadService: req.app.locals.agentWorkloadService,
+                managedAppService: req.app.locals.managedAppService || null,
                 userCheckpointPolicy,
             },
             executionProfile,

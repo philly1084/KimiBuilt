@@ -965,6 +965,12 @@ function shouldAutoUseTool(toolId, prompt = '', skill = null, options = {}) {
             && (executionProfile === 'remote-build' || /\b(k3s|kubernetes|kubectl|deployment|rollout|manifest|helm)\b/i.test(prompt));
     }
 
+    if (toolId === 'managed-app') {
+        const managedAppService = options?.managedAppService || options?.toolContext?.managedAppService;
+        return Boolean(managedAppService?.isAvailable?.())
+            && hasManagedAppIntent(prompt);
+    }
+
     if (toolId === 'agent-workload') {
         const canonicalWorkload = buildCanonicalWorkloadAction({
             request: prompt,
@@ -1035,6 +1041,20 @@ function hasExplicitK3sDeployIntent(prompt = '') {
 
     return /\b(deploy|rollout|apply|set image|update image|sync)\b[\s\S]{0,60}\b(k3s|k8s|kubernetes|kubectl|manifest|deployment|helm)\b/i.test(text)
         || /\b(k3s|k8s|kubernetes|kubectl)\b[\s\S]{0,60}\b(deploy|rollout|apply|set image|manifest|deployment|sync)\b/i.test(text);
+}
+
+function hasManagedAppIntent(prompt = '') {
+    const text = String(prompt || '').trim();
+    if (!text) {
+        return false;
+    }
+
+    return [
+        /\bmanaged app\b/i,
+        /\b(create|build|deploy|publish|launch|ship|update|redeploy|inspect|list)\b[\s\S]{0,40}\b(app|website|site|frontend|service|game)\b/i,
+        /\b(app|website|site|frontend|service|game)\b[\s\S]{0,40}\b(create|build|deploy|publish|launch|ship|update|redeploy|inspect|list)\b/i,
+        /\b(gitea|container registry|image repo|ingress host|namespace)\b/i,
+    ].some((pattern) => pattern.test(text));
 }
 
 function hasExplicitWebResearchIntent(prompt = '') {
@@ -2136,6 +2156,10 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
         selectedIds.add(remoteToolId);
     }
 
+    if (hasManagedAppIntent(prompt) && availableToolIds.has('managed-app')) {
+        selectedIds.add('managed-app');
+    }
+
     if (hasExplicitK3sDeployIntent(prompt)) {
         selectedIds.add('k3s-deploy');
     }
@@ -2248,6 +2272,10 @@ function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = [], o
             || canonicalWorkload?.trigger?.type === 'once'
         )) {
         return 'agent-workload';
+    }
+
+    if (availableToolIds.has('managed-app') && hasManagedAppIntent(prompt)) {
+        return 'managed-app';
     }
 
     if (explicitK3sDeployIntent && availableToolIds.has('k3s-deploy')) {
@@ -2513,6 +2541,13 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Keep `remote-command` available for one-off server configuration and troubleshooting, but use `git-safe` plus `k3s-deploy` when the user wants code pushed to GitHub and then deployed.');
         guidance.push('- Prefer immutable deploys: push code, let CI build artifacts or images, then deploy those results into k3s instead of hand-editing the live server.');
         guidance.push('- Never initialize a new Git repository on the remote host or adopt an arbitrary web root as the canonical project unless the user explicitly asked for that server-local workflow.');
+    }
+
+    if (automaticTools.some((entry) => entry.id === 'managed-app')) {
+        guidance.push('- Use `managed-app` for agent-created applications that should live in the external Gitea control plane and deploy into the cluster.');
+        guidance.push('- Prefer `managed-app` over ad hoc `git-safe` plus `k3s-deploy` when the request is to create, build, publish, inspect, or redeploy an app that the agent owns.');
+        guidance.push('- `managed-app create` should allocate the repo, image repo, namespace, and ingress host instead of improvising those names in chat.');
+        guidance.push('- `managed-app deploy` should use the authoritative managed app record and the latest successful image tag instead of guessing the cluster target from scratch.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'code-sandbox')) {

@@ -464,6 +464,45 @@ const config = {
         defaultTlsClusterIssuer: process.env.KIMIBUILT_DEPLOY_TLS_CLUSTER_ISSUER || 'letsencrypt-prod',
     },
 
+    gitea: {
+        enabled: process.env.GITEA_ENABLED !== 'false',
+        baseURL: process.env.GITEA_BASE_URL || '',
+        token: process.env.GITEA_TOKEN || '',
+        webhookSecret: process.env.GITEA_WEBHOOK_SECRET || '',
+        org: process.env.GITEA_ORG || 'agent-apps',
+        registryHost: process.env.GITEA_REGISTRY_HOST || 'gitea.demoserver2.buzz',
+        registryUsername: process.env.GITEA_REGISTRY_USERNAME || '',
+        registryPassword: process.env.GITEA_REGISTRY_PASSWORD || process.env.GITEA_TOKEN || '',
+    },
+
+    managedApps: {
+        enabled: process.env.MANAGED_APPS_ENABLED !== 'false',
+        appBaseDomain: process.env.MANAGED_APPS_BASE_DOMAIN || 'demoserver2.buzz',
+        namespacePrefix: process.env.MANAGED_APPS_NAMESPACE_PREFIX || 'app-',
+        platformNamespace: process.env.MANAGED_APPS_PLATFORM_NAMESPACE || 'agent-platform',
+        defaultBranch: process.env.MANAGED_APPS_DEFAULT_BRANCH || 'main',
+        defaultContainerPort: Math.max(
+            1,
+            parseInt(process.env.MANAGED_APPS_DEFAULT_CONTAINER_PORT, 10) || 80,
+        ),
+        registryPullSecretName: process.env.MANAGED_APPS_REGISTRY_PULL_SECRET || 'gitea-registry-credentials',
+        webhookEndpointPath: process.env.MANAGED_APPS_BUILD_EVENTS_PATH || '/api/integrations/gitea/build-events',
+        httpsVerifyTimeoutMs: Math.max(
+            1000,
+            parseInt(process.env.MANAGED_APPS_HTTPS_VERIFY_TIMEOUT_MS, 10) || 15000,
+        ),
+    },
+
+    kubernetes: {
+        enabled: process.env.KUBERNETES_IN_CLUSTER_ENABLED !== 'false',
+        serviceHost: process.env.KUBERNETES_SERVICE_HOST || 'kubernetes.default.svc',
+        servicePort: parseInt(process.env.KUBERNETES_SERVICE_PORT_HTTPS || process.env.KUBERNETES_SERVICE_PORT || '443', 10) || 443,
+        tokenPath: resolveConfigPath(process.env.KUBERNETES_SERVICE_ACCOUNT_TOKEN_PATH || '/var/run/secrets/kubernetes.io/serviceaccount/token'),
+        caPath: resolveConfigPath(process.env.KUBERNETES_SERVICE_ACCOUNT_CA_PATH || '/var/run/secrets/kubernetes.io/serviceaccount/ca.crt'),
+        namespacePath: resolveConfigPath(process.env.KUBERNETES_SERVICE_ACCOUNT_NAMESPACE_PATH || '/var/run/secrets/kubernetes.io/serviceaccount/namespace'),
+        verifyTls: process.env.KUBERNETES_VERIFY_TLS !== 'false',
+    },
+
     opencode: {
         enabled: process.env.OPENCODE_ENABLED !== 'false',
         binaryPath: process.env.OPENCODE_BINARY_PATH || 'opencode',

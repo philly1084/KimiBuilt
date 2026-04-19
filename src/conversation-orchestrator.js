@@ -873,6 +873,7 @@ function buildScoredCandidateToolMap({
     hasSubAgentIntent = false,
     hasOpencodeUsageIntent = false,
     hasOpencodeIntent = false,
+    hasManagedAppIntent = false,
     explicitGitIntent = false,
     explicitK3sDeployIntent = false,
     hasWorkloadSetupIntent = false,
@@ -998,6 +999,9 @@ function buildScoredCandidateToolMap({
     }
     if ((hasOpencodeIntent || workflowNeedsRepoLane) && opencodeTargetReady) {
         adjustCandidateToolScore(scoreMap, 'opencode-run', 0.95, 'Repository work is relevant and the code runtime is ready.');
+    }
+    if (hasManagedAppIntent) {
+        adjustCandidateToolScore(scoreMap, 'managed-app', 1.05, 'Managed app creation or deployment intent should use the dedicated control plane.');
     }
     if (explicitGitIntent || workflowNeedsDeployLane) {
         adjustCandidateToolScore(scoreMap, 'git-safe', 0.75, 'Git state or save flow is relevant.');
@@ -6337,6 +6341,10 @@ class ConversationOrchestrator extends EventEmitter {
         const hasSubAgentIntent = hasExplicitSubAgentIntentText(prompt);
         const hasOpencodeUsageIntent = hasOpencodeToolUsageIntent(prompt);
         const hasOpencodeIntent = hasOpencodeRepoWorkIntent(prompt);
+        const hasManagedAppIntent = /\bmanaged app\b/.test(prompt)
+            || (/\b(create|build|deploy|publish|launch|ship|update|redeploy|inspect|list)\b/.test(prompt)
+                && /\b(app|website|site|frontend|service|game)\b/.test(prompt))
+            || /\b(gitea|container registry|image repo|namespace|ingress host)\b/.test(prompt);
         const explicitGitIntent = /\b(git|github)\b[\s\S]{0,80}\b(status|diff|branch|stage|add|commit|push|save and push|save-and-push)\b/.test(prompt);
         const explicitK3sDeployIntent = /\b(deploy|rollout|apply|set image|update image|sync)\b[\s\S]{0,60}\b(k3s|k8s|kubernetes|kubectl|manifest|deployment|helm)\b/.test(prompt)
             || /\b(add|install|put)\b[\s\S]{0,40}\b(to|on|into|in)\b[\s\S]{0,20}\b(k3s|k8s|kubernetes|cluster)\b/.test(prompt);
@@ -6375,6 +6383,7 @@ class ConversationOrchestrator extends EventEmitter {
         const clusterRegistrySummary = shouldIncludeClusterRegistry
             ? clusterStateRegistry.buildPromptSummary({ maxDeployments: 3, maxRecentActivity: 3 })
             : '';
+        const managedAppsSummary = normalizeInlineText(toolContext?.managedAppsSummary || '');
         const repositoryPath = String(
             toolContext?.repositoryPath
             || config.deploy.defaultRepositoryPath
@@ -6443,10 +6452,11 @@ class ConversationOrchestrator extends EventEmitter {
                 hasAssetCatalogIntent,
                 hasPodcastIntent,
                 hasDocumentWorkflowIntent,
-                hasSubAgentIntent,
-                hasOpencodeUsageIntent,
-                hasOpencodeIntent,
-                explicitGitIntent,
+            hasSubAgentIntent,
+            hasOpencodeUsageIntent,
+            hasOpencodeIntent,
+            hasManagedAppIntent,
+            explicitGitIntent,
                 explicitK3sDeployIntent,
                 hasWorkloadSetupIntent,
                 isDeferredWorkloadRun,
@@ -6499,6 +6509,9 @@ class ConversationOrchestrator extends EventEmitter {
             }
             if ((explicitGitIntent || workflowNeedsDeployLane) && allowedToolIds.includes('git-safe')) {
                 candidates.add('git-safe');
+            }
+            if (hasManagedAppIntent && allowedToolIds.includes('managed-app')) {
+                candidates.add('managed-app');
             }
             if ((explicitK3sDeployIntent || workflowNeedsDeployLane) && allowedToolIds.includes('k3s-deploy')) {
                 candidates.add('k3s-deploy');
@@ -6626,6 +6639,9 @@ class ConversationOrchestrator extends EventEmitter {
             if ((hasOpencodeIntent || workflowNeedsRepoLane) && opencodeTargetReady && allowedToolIds.includes('opencode-run')) {
                 candidates.add('opencode-run');
             }
+            if (hasManagedAppIntent && allowedToolIds.includes('managed-app')) {
+                candidates.add('managed-app');
+            }
             if (/\b(git|github)\b[\s\S]{0,80}\b(status|diff|branch|stage|add|commit|push|save and push|save-and-push)\b/.test(prompt)
                 && allowedToolIds.includes('git-safe')) {
                 candidates.add('git-safe');
@@ -6710,6 +6726,7 @@ class ConversationOrchestrator extends EventEmitter {
             workflow: effectiveWorkflowSeed,
             projectPlan: effectiveProjectPlanSeed,
             clusterRegistrySummary,
+            managedAppsSummary,
             toolDescriptions: Object.fromEntries(
                 allowedToolIds.map((toolId) => [
                     toolId,
@@ -8054,6 +8071,11 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('Treat the cluster registry as durable context from earlier verified remote tool runs. Use it to avoid starting from scratch, but still re-verify rollout, ingress, TLS, and public reachability before claiming a deployment is live.');
         }
 
+        if (toolPolicy?.managedAppsSummary) {
+            parts.push(`Managed app catalog:\n${toolPolicy.managedAppsSummary}`);
+            parts.push('Treat the managed app catalog as the authoritative record for agent-owned repos, image repos, namespaces, and public hosts.');
+        }
+
         parts.push('Treat the local CLI environment, workspace state, filesystem contents, and shell behavior as unknown unless explicit user input, the active transcript, or verified tool results establish them.');
         parts.push('Do not comment on local environment health, startup state, writable paths, repository cleanliness, or command availability unless a verified tool result is directly about that.');
 
@@ -8094,6 +8116,12 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('Point `opencode-run` at the local workspace by default, or use `target: "remote-default"` when the request is clearly about the remote repository workspace.');
             parts.push('Do not treat that default local workspace target as evidence about the local workspace state or CLI health unless `opencode-run`, `file-read`, `file-search`, or another verified tool result established it.');
             parts.push('Keep `remote-command` for infrastructure work such as kubectl, logs, restarts, service inspection, package installs, and deployment operations.');
+        }
+
+        if (allowedToolIds.includes('managed-app')) {
+            parts.push('Use `managed-app` for agent-owned applications that should be created in external Gitea and deployed into the cluster.');
+            parts.push('Prefer `managed-app` over raw `git-safe`, `remote-command`, or `k3s-deploy` when the request is to create, inspect, update, build, publish, or redeploy an app tracked by the managed app catalog.');
+            parts.push('For new app requests, let `managed-app create` allocate the repo, image repo, namespace, and host instead of improvising those names in chat.');
         }
 
         if (allowedToolIds.includes('web-scrape')) {

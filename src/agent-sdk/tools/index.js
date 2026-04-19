@@ -393,6 +393,24 @@ function resolveSessionWorkloadService(context = {}) {
   };
 }
 
+function resolveManagedAppService(context = {}) {
+  const service = context?.managedAppService || null;
+  if (!service?.isAvailable?.()) {
+    throw new Error('Managed apps are unavailable. This feature requires an active Postgres-backed session store.');
+  }
+
+  const ownerId = String(context?.ownerId || context?.userId || '').trim();
+  if (!ownerId) {
+    throw new Error('Managed apps require an authenticated owner context.');
+  }
+
+  return {
+    service,
+    ownerId,
+    sessionId: String(context?.sessionId || '').trim() || null,
+  };
+}
+
 function hasExplicitManualWorkloadIntent(text = '') {
   const normalized = String(text || '').trim().toLowerCase();
   if (!normalized) {
@@ -3081,6 +3099,146 @@ class ToolManager {
         frontend: {
           exposeToFrontend: false,
           icon: 'clock',
+        },
+      },
+      {
+        id: 'managed-app',
+        name: 'Managed App Control Plane',
+        category: 'system',
+        description: 'Create, update, inspect, list, and deploy agent-created apps through the external Gitea control plane and the in-cluster Kubernetes deployment lane.',
+        backend: {
+          handler: async (params = {}, context = {}) => {
+            const { service, ownerId, sessionId } = resolveManagedAppService(context);
+            const action = String(params.action || '').trim().toLowerCase() || 'inspect';
+
+            if (action === 'list') {
+              const apps = await service.listApps(
+                ownerId,
+                Number.isFinite(Number(params.limit)) ? Number(params.limit) : 50,
+              );
+              return {
+                action,
+                count: apps.length,
+                apps,
+              };
+            }
+
+            if (action === 'inspect') {
+              const result = await service.inspectApp(
+                params.appRef || params.slug || params.id || '',
+                ownerId,
+              );
+              if (!result) {
+                throw new Error('Managed app not found.');
+              }
+
+              return {
+                action,
+                ...result,
+              };
+            }
+
+            if (action === 'create') {
+              return service.createApp({
+                ...params,
+                sessionId: params.sessionId || sessionId,
+              }, ownerId, {
+                sessionId: params.sessionId || sessionId,
+                model: context?.model || '',
+              });
+            }
+
+            if (action === 'update') {
+              const result = await service.updateApp(
+                params.appRef || params.slug || params.id || '',
+                {
+                  ...params,
+                  sessionId: params.sessionId || sessionId,
+                },
+                ownerId,
+                {
+                  sessionId: params.sessionId || sessionId,
+                  model: context?.model || '',
+                },
+              );
+              if (!result) {
+                throw new Error('Managed app not found.');
+              }
+              return result;
+            }
+
+            if (action === 'deploy') {
+              const result = await service.deployApp(
+                params.appRef || params.slug || params.id || '',
+                params,
+                ownerId,
+                {
+                  sessionId: params.sessionId || sessionId,
+                },
+              );
+              if (!result) {
+                throw new Error('Managed app not found.');
+              }
+              return result;
+            }
+
+            throw new Error(`Unsupported managed-app action: ${action}`);
+          },
+          sideEffects: ['write', 'network'],
+          timeout: 45000,
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['action'],
+          properties: {
+            action: {
+              type: 'string',
+              enum: ['create', 'update', 'deploy', 'inspect', 'list'],
+            },
+            appRef: { type: 'string' },
+            id: { type: 'string' },
+            slug: { type: 'string' },
+            appName: { type: 'string' },
+            name: { type: 'string' },
+            title: { type: 'string' },
+            prompt: { type: 'string' },
+            sourcePrompt: { type: 'string' },
+            requestedAction: { type: 'string' },
+            deployRequested: { type: 'boolean' },
+            imageTag: { type: 'string' },
+            containerPort: { type: 'integer' },
+            sessionId: { type: 'string' },
+            limit: { type: 'integer' },
+            metadata: { type: 'object' },
+            files: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  path: { type: 'string' },
+                  content: { type: 'string' },
+                },
+                required: ['path', 'content'],
+                additionalProperties: false,
+              },
+            },
+          },
+          additionalProperties: false,
+        },
+        skill: {
+          triggerPatterns: [
+            'managed app',
+            'create and deploy app',
+            'build and deploy website',
+            'deploy generated app',
+            'publish this app to the cluster',
+            'list managed apps',
+          ],
+          requiresConfirmation: false,
+        },
+        frontend: {
+          exposeToFrontend: false,
+          icon: 'rocket',
         },
       },
     ];

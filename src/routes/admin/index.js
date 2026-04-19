@@ -169,6 +169,41 @@ router.delete('/workloads/:id', async (req, res, next) => {
   }
 });
 
+router.get('/managed-apps', async (req, res, next) => {
+  try {
+    const service = req.app.locals.managedAppService;
+    if (!service?.isAvailable()) {
+      return res.status(503).json({ success: false, error: 'Managed apps require Postgres persistence' });
+    }
+
+    const apps = await service.listApps(
+      String(req.user?.username || '').trim() || null,
+      Number.isFinite(Number(req.query.limit)) ? Math.max(1, Math.min(Number(req.query.limit), 200)) : 100,
+    );
+    res.json({ success: true, data: apps });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/managed-apps/:id', async (req, res, next) => {
+  try {
+    const service = req.app.locals.managedAppService;
+    if (!service?.isAvailable()) {
+      return res.status(503).json({ success: false, error: 'Managed apps require Postgres persistence' });
+    }
+
+    const result = await service.inspectApp(req.params.id, String(req.user?.username || '').trim() || null);
+    if (!result) {
+      return res.status(404).json({ success: false, error: 'Managed app not found' });
+    }
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/runs', async (req, res, next) => {
   try {
     const service = req.app.locals.agentWorkloadService;

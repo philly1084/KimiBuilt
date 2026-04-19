@@ -153,6 +153,12 @@ class ConversationRunService {
 
         const runtimeToolManager = await ensureRuntimeToolManager(this.app);
         const sessionIsolation = isSessionIsolationEnabled(metadata, resolvedSession);
+        const managedAppsSummary = this.app?.locals?.managedAppService?.buildPromptSummary
+            ? await this.app.locals.managedAppService.buildPromptSummary({
+                ownerId,
+                maxApps: 4,
+            })
+            : '';
         const instructions = await buildInstructionsWithArtifacts(
             resolvedSession,
             buildContinuityInstructions(),
@@ -176,7 +182,9 @@ class ConversationRunService {
                 transport: 'worker',
                 memoryService: this.memoryService,
                 ownerId,
+                managedAppsSummary,
                 workloadService: this.app?.locals?.agentWorkloadService,
+                managedAppService: this.app?.locals?.managedAppService || null,
                 opencodeService: this.app?.locals?.opencodeService || null,
                 sessionIsolation,
                 subAgentDepth: Number(metadata?.subAgentDepth || 0),
@@ -377,6 +385,7 @@ class ConversationRunService {
             ownerId,
             sessionIsolation,
             workloadService: this.app?.locals?.agentWorkloadService,
+            managedAppService: this.app?.locals?.managedAppService || null,
             opencodeService: this.app?.locals?.opencodeService || null,
             executionProfile: metadata.executionProfile || null,
             subAgentDepth: Number(metadata?.subAgentDepth || 0),

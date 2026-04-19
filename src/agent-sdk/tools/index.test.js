@@ -1054,6 +1054,78 @@ describe('ToolManager image tools', () => {
     expect(result.data.message).toContain('Every day at 11:05 PM');
   });
 
+  test('routes managed app creation through the managed app service', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const createApp = jest.fn(async () => ({
+      app: {
+        id: 'app-1',
+        slug: 'arcade-demo',
+        publicHost: 'arcade-demo.demoserver2.buzz',
+      },
+      buildRun: {
+        id: 'run-1',
+        buildStatus: 'queued',
+      },
+    }));
+
+    const result = await toolManager.executeTool('managed-app', {
+      action: 'create',
+      appName: 'Arcade Demo',
+      prompt: 'Build and deploy an arcade demo.',
+    }, {
+      ownerId: 'user-1',
+      sessionId: 'session-1',
+      managedAppService: {
+        isAvailable: () => true,
+        createApp,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(createApp).toHaveBeenCalledWith(expect.objectContaining({
+      appName: 'Arcade Demo',
+      prompt: 'Build and deploy an arcade demo.',
+      sessionId: 'session-1',
+    }), 'user-1', expect.objectContaining({
+      sessionId: 'session-1',
+    }));
+    expect(result.data.app.slug).toBe('arcade-demo');
+  });
+
+  test('returns managed app inspection results', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const inspectApp = jest.fn(async () => ({
+      app: {
+        id: 'app-1',
+        slug: 'arcade-demo',
+        status: 'live',
+      },
+      buildRuns: [{
+        id: 'run-1',
+        buildStatus: 'success',
+      }],
+    }));
+
+    const result = await toolManager.executeTool('managed-app', {
+      action: 'inspect',
+      appRef: 'arcade-demo',
+    }, {
+      ownerId: 'user-1',
+      managedAppService: {
+        isAvailable: () => true,
+        inspectApp,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(inspectApp).toHaveBeenCalledWith('arcade-demo', 'user-1');
+    expect(result.data.app.status).toBe('live');
+  });
+
   test('routes sub-agent spawning through the workload service with the caller model', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();

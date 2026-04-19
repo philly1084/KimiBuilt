@@ -30,6 +30,26 @@ jest.mock('../../config', () => ({
       defaultIngressClassName: 'traefik',
       defaultTlsClusterIssuer: 'letsencrypt-prod',
     },
+    gitea: {
+      enabled: true,
+      baseURL: 'https://gitea.demoserver2.buzz',
+      token: 'gitea-token',
+      webhookSecret: 'webhook-secret',
+      org: 'agent-apps',
+      registryHost: 'gitea.demoserver2.buzz',
+      registryUsername: 'builder',
+      registryPassword: 'registry-password',
+    },
+    managedApps: {
+      enabled: true,
+      appBaseDomain: 'demoserver2.buzz',
+      namespacePrefix: 'app-',
+      platformNamespace: 'agent-platform',
+      defaultBranch: 'main',
+      defaultContainerPort: 80,
+      registryPullSecretName: 'gitea-registry-credentials',
+      webhookEndpointPath: '/api/integrations/gitea/build-events',
+    },
     opencode: {
       enabled: true,
       binaryPath: 'opencode',
@@ -241,6 +261,30 @@ describe('settings.controller personality support', () => {
       publicDomain: 'apps.demoserver2.buzz',
       namespace: 'web',
       deployment: 'site',
+    }));
+  });
+
+  test('exposes managed app control-plane settings without leaking secrets', () => {
+    controller.settings.integrations.gitea.baseURL = 'https://gitea.alt.example';
+    controller.settings.integrations.gitea.registryHost = 'registry.alt.example';
+    controller.settings.integrations.managedApps.appBaseDomain = 'apps.alt.example';
+    controller.settings.integrations.managedApps.namespacePrefix = 'edge-';
+
+    const publicSettings = controller.getPublicSettings();
+
+    expect(publicSettings.integrations.gitea).toEqual(expect.objectContaining({
+      configured: true,
+      baseURL: 'https://gitea.alt.example',
+      registryHost: 'registry.alt.example',
+      hasToken: true,
+      hasWebhookSecret: true,
+    }));
+    expect(publicSettings.integrations.gitea.token).toBeUndefined();
+    expect(publicSettings.integrations.gitea.webhookSecret).toBeUndefined();
+    expect(publicSettings.integrations.managedApps).toEqual(expect.objectContaining({
+      appBaseDomain: 'apps.alt.example',
+      namespacePrefix: 'edge-',
+      platformNamespace: 'agent-platform',
     }));
   });
 

@@ -67,6 +67,12 @@ function buildRuntimeSummary(toolManager, options = {}) {
   const deploy = typeof settingsController.getEffectiveDeployConfig === 'function'
     ? settingsController.getEffectiveDeployConfig()
     : {};
+  const gitea = typeof settingsController.getEffectiveGiteaConfig === 'function'
+    ? settingsController.getEffectiveGiteaConfig()
+    : {};
+  const managedApps = typeof settingsController.getEffectiveManagedAppsConfig === 'function'
+    ? settingsController.getEffectiveManagedAppsConfig()
+    : {};
   const opencode = typeof settingsController.getEffectiveOpencodeConfig === 'function'
     ? settingsController.getEffectiveOpencodeConfig()
     : {};
@@ -102,7 +108,27 @@ function buildRuntimeSummary(toolManager, options = {}) {
       ingressClassName: deploy.ingressClassName || '',
       tlsClusterIssuer: deploy.tlsClusterIssuer || '',
     },
+    gitea: {
+      enabled: gitea.enabled !== false,
+      configured: Boolean(gitea.enabled !== false && gitea.baseURL && gitea.token),
+      baseURL: gitea.baseURL || '',
+      org: gitea.org || '',
+      registryHost: gitea.registryHost || '',
+      hasWebhookSecret: Boolean(gitea.webhookSecret),
+      appBaseDomain: managedApps.appBaseDomain || '',
+      namespacePrefix: managedApps.namespacePrefix || '',
+      platformNamespace: managedApps.platformNamespace || '',
+    },
     clusterRegistry: clusterStateRegistry.getRuntimeSummary(),
+    managedApps: {
+      configured: Boolean(gitea.enabled !== false && gitea.baseURL && gitea.token),
+      persistenceAvailable: Boolean(options.managedAppService?.isAvailable?.()),
+      kubernetesConfigured: Boolean(options.managedAppService?.kubernetesClient?.isConfigured?.()),
+      appBaseDomain: managedApps.appBaseDomain || '',
+      namespacePrefix: managedApps.namespacePrefix || '',
+      platformNamespace: managedApps.platformNamespace || '',
+      defaultBranch: managedApps.defaultBranch || '',
+    },
     opencode: {
       enabled: opencode.enabled !== false,
       binaryPath: opencode.binaryPath || 'opencode',
@@ -209,6 +235,27 @@ function buildToolRuntime(toolId, options = {}) {
     };
   }
 
+  if (toolId === 'managed-app') {
+    const gitea = typeof settingsController.getEffectiveGiteaConfig === 'function'
+      ? settingsController.getEffectiveGiteaConfig()
+      : {};
+    const managedApps = typeof settingsController.getEffectiveManagedAppsConfig === 'function'
+      ? settingsController.getEffectiveManagedAppsConfig()
+      : {};
+    return {
+      configured: Boolean(gitea.enabled !== false && gitea.baseURL && gitea.token),
+      provider: 'external-gitea-plus-in-cluster-kubernetes',
+      giteaBaseURL: gitea.baseURL || '',
+      giteaOrg: gitea.org || '',
+      registryHost: gitea.registryHost || '',
+      appBaseDomain: managedApps.appBaseDomain || '',
+      namespacePrefix: managedApps.namespacePrefix || '',
+      platformNamespace: managedApps.platformNamespace || '',
+      kubernetesConfigured: Boolean(options.managedAppService?.kubernetesClient?.isConfigured?.()),
+      persistenceAvailable: Boolean(options.managedAppService?.isAvailable?.()),
+    };
+  }
+
   if (toolId === 'web-search') {
     return {
       configured: Boolean(process.env.PERPLEXITY_API_KEY),
@@ -261,6 +308,7 @@ function buildToolRuntime(toolId, options = {}) {
     'file-mkdir',
     'git-safe',
     'tool-doc-read',
+    'managed-app',
     'security-scan',
     'architecture-design',
     'uml-generate',
@@ -320,6 +368,7 @@ function isToolVisibleByRuntime(toolId, runtime = null, support = null) {
 async function buildFrontendToolCatalog({ req, category = null, sessionId = null, includeAllTools = false }) {
   const toolManager = await ensureToolManagerInitialized();
   const opencodeService = req.app?.locals?.opencodeService || null;
+  const managedAppService = req.app?.locals?.managedAppService || null;
   const { executionProfile } = await resolveToolExecutionProfile(req, sessionId);
   const allowedToolIds = getAllowedToolIdsForProfile(executionProfile);
 
@@ -331,7 +380,7 @@ async function buildFrontendToolCatalog({ req, category = null, sessionId = null
     const docMetadata = await getToolDocMetadata(tool.id);
     const runtime = reconcileRuntimeWithSupport(
       tool.id,
-      buildToolRuntime(tool.id, { opencodeService }),
+      buildToolRuntime(tool.id, { opencodeService, managedAppService }),
       docMetadata.support,
     );
     const availableInExecutionProfile = allowedToolIds.includes(tool.id);
@@ -399,6 +448,7 @@ function buildToolExecutionContext(toolManager, req, sessionId = null) {
     timezone,
     now,
     toolManager,
+    managedAppService: req.app?.locals?.managedAppService || null,
     opencodeService: req.app?.locals?.opencodeService || null,
     tools: {
       get: (toolId) => toolManager.getTool(toolId),
@@ -552,7 +602,11 @@ router.get('/available', async (req, res) => {
         categories: [...new Set(tools.map(t => t.category))],
         executionProfile,
         includeAllTools,
-        runtime: buildRuntimeSummary(toolManager, { opencodeService: req.app?.locals?.opencodeService || null }),
+        runtime: buildRuntimeSummary(toolManager, {
+          opencodeService: req.app?.locals?.opencodeService || null,
+          managedAppService: req.app?.locals?.managedAppService || null,
+          ownerId: getRequestOwnerId(req),
+        }),
       }
     });
   } catch (error) {
@@ -671,7 +725,10 @@ router.get('/:id', async (req, res) => {
     const docMetadata = await getToolDocMetadata(id);
     const runtime = reconcileRuntimeWithSupport(
       id,
-      buildToolRuntime(id, { opencodeService: req.app?.locals?.opencodeService || null }),
+      buildToolRuntime(id, {
+        opencodeService: req.app?.locals?.opencodeService || null,
+        managedAppService: req.app?.locals?.managedAppService || null,
+      }),
       docMetadata.support,
     );
 
@@ -695,7 +752,11 @@ router.get('/:id', async (req, res) => {
         ...docMetadata,
       },
       meta: {
-        runtime: buildRuntimeSummary(toolManager, { opencodeService: req.app?.locals?.opencodeService || null }),
+        runtime: buildRuntimeSummary(toolManager, {
+          opencodeService: req.app?.locals?.opencodeService || null,
+          managedAppService: req.app?.locals?.managedAppService || null,
+          ownerId: getRequestOwnerId(req),
+        }),
       },
     });
   } catch (error) {

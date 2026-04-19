@@ -171,6 +171,12 @@ async function getRuntimeSnapshot() {
 
 async function getRuntimeSupport(toolId) {
     const snapshot = await getRuntimeSnapshot();
+    const giteaConfig = typeof settingsController.getEffectiveGiteaConfig === 'function'
+        ? settingsController.getEffectiveGiteaConfig()
+        : {};
+    const managedAppsConfig = typeof settingsController.getEffectiveManagedAppsConfig === 'function'
+        ? settingsController.getEffectiveManagedAppsConfig()
+        : {};
 
     if (toolId === 'ssh-execute' || toolId === 'remote-command') {
         return {
@@ -201,6 +207,34 @@ async function getRuntimeSupport(toolId) {
             status: snapshot.docker.ready ? 'stable' : 'requires_setup',
             notes: snapshot.docker.notes,
             runtime: snapshot.docker,
+        };
+    }
+
+    if (toolId === 'managed-app') {
+        const ready = Boolean(
+            giteaConfig.enabled !== false
+            && giteaConfig.baseURL
+            && giteaConfig.token
+            && managedAppsConfig.enabled !== false,
+        );
+
+        return {
+            status: ready ? 'stable' : 'requires_setup',
+            notes: ready
+                ? [
+                    `External Gitea configured at ${giteaConfig.baseURL}.`,
+                    `Managed app base domain is ${managedAppsConfig.appBaseDomain || 'demoserver2.buzz'}.`,
+                ]
+                : [
+                    'Managed app control plane needs integrations.gitea baseURL and token.',
+                    'Managed app control plane also needs integrations.managedApps defaults.',
+                ],
+            runtime: {
+                ready,
+                baseURL: giteaConfig.baseURL || '',
+                org: giteaConfig.org || '',
+                appBaseDomain: managedAppsConfig.appBaseDomain || '',
+            },
         };
     }
 

@@ -96,6 +96,26 @@ class SettingsController {
           ingressClassName: config.deploy.defaultIngressClassName || 'traefik',
           tlsClusterIssuer: config.deploy.defaultTlsClusterIssuer || 'letsencrypt-prod',
         },
+        gitea: {
+          enabled: config.gitea.enabled !== false,
+          baseURL: config.gitea.baseURL || '',
+          token: config.gitea.token || '',
+          webhookSecret: config.gitea.webhookSecret || '',
+          org: config.gitea.org || 'agent-apps',
+          registryHost: config.gitea.registryHost || 'gitea.demoserver2.buzz',
+          registryUsername: config.gitea.registryUsername || '',
+          registryPassword: config.gitea.registryPassword || '',
+        },
+        managedApps: {
+          enabled: config.managedApps.enabled !== false,
+          appBaseDomain: config.managedApps.appBaseDomain || 'demoserver2.buzz',
+          namespacePrefix: config.managedApps.namespacePrefix || 'app-',
+          platformNamespace: config.managedApps.platformNamespace || 'agent-platform',
+          defaultBranch: config.managedApps.defaultBranch || 'main',
+          defaultContainerPort: config.managedApps.defaultContainerPort || 80,
+          registryPullSecretName: config.managedApps.registryPullSecretName || 'gitea-registry-credentials',
+          webhookEndpointPath: config.managedApps.webhookEndpointPath || '/api/integrations/gitea/build-events',
+        },
         opencode: {
           enabled: config.opencode.enabled !== false,
           binaryPath: config.opencode.binaryPath || 'opencode',
@@ -385,8 +405,10 @@ class SettingsController {
       };
     }
 
-    const opencodeUpdate = normalized.integrations?.opencode;
     const deployUpdate = normalized.integrations?.deploy;
+    const giteaUpdate = normalized.integrations?.gitea;
+    const managedAppsUpdate = normalized.integrations?.managedApps;
+    const opencodeUpdate = normalized.integrations?.opencode;
     if (deployUpdate) {
       const currentDeploy = this.settings?.integrations?.deploy || {};
       const nextDeploy = {
@@ -415,6 +437,77 @@ class SettingsController {
         deploy: {
           ...currentDeploy,
           ...nextDeploy,
+        },
+      };
+    }
+
+    if (giteaUpdate) {
+      const currentGitea = this.settings?.integrations?.gitea || {};
+      const nextGitea = {
+        ...giteaUpdate,
+      };
+
+      [
+        'baseURL',
+        'token',
+        'webhookSecret',
+        'org',
+        'registryHost',
+        'registryUsername',
+        'registryPassword',
+      ].forEach((key) => {
+        if (nextGitea[key] !== undefined) {
+          nextGitea[key] = String(nextGitea[key] || '').trim();
+        }
+      });
+
+      if (nextGitea.enabled !== undefined) {
+        nextGitea.enabled = Boolean(nextGitea.enabled);
+      }
+
+      normalized.integrations = {
+        ...(normalized.integrations || {}),
+        gitea: {
+          ...currentGitea,
+          ...nextGitea,
+        },
+      };
+    }
+
+    if (managedAppsUpdate) {
+      const currentManagedApps = this.settings?.integrations?.managedApps || {};
+      const nextManagedApps = {
+        ...managedAppsUpdate,
+      };
+
+      [
+        'appBaseDomain',
+        'namespacePrefix',
+        'platformNamespace',
+        'defaultBranch',
+        'registryPullSecretName',
+        'webhookEndpointPath',
+      ].forEach((key) => {
+        if (nextManagedApps[key] !== undefined) {
+          nextManagedApps[key] = String(nextManagedApps[key] || '').trim();
+        }
+      });
+
+      if (nextManagedApps.enabled !== undefined) {
+        nextManagedApps.enabled = Boolean(nextManagedApps.enabled);
+      }
+      if (nextManagedApps.defaultContainerPort !== undefined) {
+        const parsedPort = parseInt(nextManagedApps.defaultContainerPort, 10);
+        nextManagedApps.defaultContainerPort = Number.isFinite(parsedPort) && parsedPort > 0
+          ? parsedPort
+          : (currentManagedApps.defaultContainerPort || 80);
+      }
+
+      normalized.integrations = {
+        ...(normalized.integrations || {}),
+        managedApps: {
+          ...currentManagedApps,
+          ...nextManagedApps,
         },
       };
     }
@@ -491,6 +584,14 @@ class SettingsController {
 
     if (publicSettings.integrations?.deploy) {
       publicSettings.integrations.deploy = this.getEffectiveDeployConfig();
+    }
+
+    if (publicSettings.integrations?.gitea) {
+      publicSettings.integrations.gitea = this.getPublicGiteaConfig();
+    }
+
+    if (publicSettings.integrations?.managedApps) {
+      publicSettings.integrations.managedApps = this.getEffectiveManagedAppsConfig();
     }
 
     if (publicSettings.security) {
@@ -614,6 +715,53 @@ class SettingsController {
     };
   }
 
+  getEffectiveGiteaConfig() {
+    const stored = this.settings?.integrations?.gitea || {};
+
+    return {
+      enabled: stored.enabled !== false && config.gitea.enabled !== false,
+      baseURL: String(stored.baseURL || config.gitea.baseURL || '').trim(),
+      token: String(stored.token || config.gitea.token || '').trim(),
+      webhookSecret: String(stored.webhookSecret || config.gitea.webhookSecret || '').trim(),
+      org: String(stored.org || config.gitea.org || 'agent-apps').trim() || 'agent-apps',
+      registryHost: String(stored.registryHost || config.gitea.registryHost || 'gitea.demoserver2.buzz').trim() || 'gitea.demoserver2.buzz',
+      registryUsername: String(stored.registryUsername || config.gitea.registryUsername || '').trim(),
+      registryPassword: String(stored.registryPassword || config.gitea.registryPassword || config.gitea.token || '').trim(),
+    };
+  }
+
+  getPublicGiteaConfig() {
+    const effective = this.getEffectiveGiteaConfig();
+    return {
+      enabled: effective.enabled,
+      configured: Boolean(effective.enabled && effective.baseURL && effective.token),
+      hasToken: Boolean(effective.token),
+      hasWebhookSecret: Boolean(effective.webhookSecret),
+      hasRegistryPassword: Boolean(effective.registryPassword),
+      baseURL: effective.baseURL,
+      org: effective.org,
+      registryHost: effective.registryHost,
+      registryUsername: effective.registryUsername,
+    };
+  }
+
+  getEffectiveManagedAppsConfig() {
+    const stored = this.settings?.integrations?.managedApps || {};
+
+    return {
+      enabled: stored.enabled !== false && config.managedApps.enabled !== false,
+      appBaseDomain: String(stored.appBaseDomain || config.managedApps.appBaseDomain || 'demoserver2.buzz').trim() || 'demoserver2.buzz',
+      namespacePrefix: String(stored.namespacePrefix || config.managedApps.namespacePrefix || 'app-').trim() || 'app-',
+      platformNamespace: String(stored.platformNamespace || config.managedApps.platformNamespace || 'agent-platform').trim() || 'agent-platform',
+      defaultBranch: String(stored.defaultBranch || config.managedApps.defaultBranch || 'main').trim() || 'main',
+      defaultContainerPort: Number.isFinite(Number(stored.defaultContainerPort))
+        ? Math.max(1, Number(stored.defaultContainerPort))
+        : Math.max(1, Number(config.managedApps.defaultContainerPort || 80)),
+      registryPullSecretName: String(stored.registryPullSecretName || config.managedApps.registryPullSecretName || 'gitea-registry-credentials').trim() || 'gitea-registry-credentials',
+      webhookEndpointPath: String(stored.webhookEndpointPath || config.managedApps.webhookEndpointPath || '/api/integrations/gitea/build-events').trim() || '/api/integrations/gitea/build-events',
+    };
+  }
+
   normalizeStringArray(value, fallback = []) {
     const source = Array.isArray(value)
       ? value
@@ -703,6 +851,26 @@ class SettingsController {
           publicDomain: config.deploy.defaultPublicDomain || 'demoserver2.buzz',
           ingressClassName: config.deploy.defaultIngressClassName || 'traefik',
           tlsClusterIssuer: config.deploy.defaultTlsClusterIssuer || 'letsencrypt-prod',
+        },
+        gitea: {
+          enabled: config.gitea.enabled !== false,
+          baseURL: config.gitea.baseURL || '',
+          token: config.gitea.token || '',
+          webhookSecret: config.gitea.webhookSecret || '',
+          org: config.gitea.org || 'agent-apps',
+          registryHost: config.gitea.registryHost || 'gitea.demoserver2.buzz',
+          registryUsername: config.gitea.registryUsername || '',
+          registryPassword: config.gitea.registryPassword || '',
+        },
+        managedApps: {
+          enabled: config.managedApps.enabled !== false,
+          appBaseDomain: config.managedApps.appBaseDomain || 'demoserver2.buzz',
+          namespacePrefix: config.managedApps.namespacePrefix || 'app-',
+          platformNamespace: config.managedApps.platformNamespace || 'agent-platform',
+          defaultBranch: config.managedApps.defaultBranch || 'main',
+          defaultContainerPort: config.managedApps.defaultContainerPort || 80,
+          registryPullSecretName: config.managedApps.registryPullSecretName || 'gitea-registry-credentials',
+          webhookEndpointPath: config.managedApps.webhookEndpointPath || '/api/integrations/gitea/build-events',
         },
         opencode: {
           enabled: config.opencode.enabled !== false,
