@@ -163,6 +163,23 @@ function hasPersistedAppId(app = null) {
     return Boolean(normalizeText(app?.id));
 }
 
+function parseManagedAppRepoReference(value = '') {
+    const normalized = normalizeText(value);
+    if (!normalized || !normalized.includes('/')) {
+        return null;
+    }
+
+    const [repoOwner, repoName, ...rest] = normalized.split('/').map((entry) => normalizeText(entry));
+    if (rest.length > 0 || !repoOwner || !repoName) {
+        return null;
+    }
+
+    return {
+        repoOwner,
+        repoName,
+    };
+}
+
 class ManagedAppService {
     constructor(options = {}) {
         this.store = options.store || managedAppStore;
@@ -212,12 +229,27 @@ class ManagedAppService {
             return null;
         }
 
+        const repoReference = parseManagedAppRepoReference(reference);
+        if (repoReference) {
+            const byRepo = await this.store.getAppByRepo(repoReference.repoOwner, repoReference.repoName);
+            if (byRepo) {
+                return byRepo;
+            }
+        }
+
         const byId = await this.store.getAppById(reference, ownerId);
         if (byId) {
             return byId;
         }
 
-        return this.store.getAppBySlug(reference, ownerId);
+        const bySlug = await this.store.getAppBySlug(reference, ownerId);
+        if (bySlug) {
+            return bySlug;
+        }
+
+        return repoReference
+            ? this.store.getAppBySlug(repoReference.repoName, ownerId)
+            : null;
     }
 
     async listApps(ownerId, limit = 50) {

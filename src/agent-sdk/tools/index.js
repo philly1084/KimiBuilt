@@ -421,7 +421,7 @@ function normalizeManagedAppRef(value = '') {
 }
 
 function resolveManagedAppReference(params = {}) {
-  const explicitRef = String(params.appRef || params.slug || params.id || '').trim();
+  const explicitRef = String(params.appRef || params.slug || params.id || params.app || '').trim();
   if (explicitRef) {
     return explicitRef;
   }
@@ -3216,6 +3216,7 @@ class ToolManager {
               enum: ['create', 'update', 'deploy', 'inspect', 'list'],
             },
             appRef: { type: 'string' },
+            app: { type: 'string' },
             id: { type: 'string' },
             slug: { type: 'string' },
             appName: { type: 'string' },

@@ -426,4 +426,27 @@ describe('ManagedAppService', () => {
             maxApps: 4,
         })).resolves.toContain('create the first one directly');
     });
+
+    test('resolveApp accepts owner and repo references', async () => {
+        const getAppByRepo = jest.fn(async () => ({
+            id: 'app-1',
+            slug: 'demo',
+            repoOwner: 'agent-apps',
+            repoName: 'demo',
+        }));
+        const service = new ManagedAppService({
+            store: {
+                isAvailable: () => true,
+                getAppByRepo,
+                getAppById: jest.fn(async () => null),
+                getAppBySlug: jest.fn(async () => null),
+            },
+        });
+
+        await expect(service.resolveApp('agent-apps/demo', 'user-1')).resolves.toEqual(expect.objectContaining({
+            id: 'app-1',
+            slug: 'demo',
+        }));
+        expect(getAppByRepo).toHaveBeenCalledWith('agent-apps', 'demo');
+    });
 });

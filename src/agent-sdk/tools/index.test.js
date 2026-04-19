@@ -1163,6 +1163,35 @@ describe('ToolManager image tools', () => {
     expect(result.data.app.slug).toBe('first-demo');
   });
 
+  test('passes through managed app `app` references for inspect actions', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const inspectApp = jest.fn(async () => ({
+      app: {
+        id: 'app-1',
+        slug: 'demo',
+        status: 'draft',
+      },
+      buildRuns: [],
+    }));
+
+    const result = await toolManager.executeTool('managed-app', {
+      action: 'inspect',
+      app: 'agent-apps/demo',
+    }, {
+      ownerId: 'user-1',
+      managedAppService: {
+        isAvailable: () => true,
+        inspectApp,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(inspectApp).toHaveBeenCalledWith('agent-apps/demo', 'user-1');
+    expect(result.data.app.slug).toBe('demo');
+  });
+
   test('routes sub-agent spawning through the workload service with the caller model', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();
