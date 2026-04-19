@@ -313,6 +313,34 @@ class ManagedAppService {
         });
     }
 
+    async ensurePersistedApp(app = null, blueprint = {}, ownerId = null) {
+        if (hasPersistedAppId(app)) {
+            return app;
+        }
+
+        let persisted = await this.store.getAppBySlug(blueprint.slug, ownerId)
+            || await this.store.getAppByRepo(blueprint.repoOwner, blueprint.repoName);
+        if (hasPersistedAppId(persisted)) {
+            return persisted;
+        }
+
+        try {
+            persisted = await this.store.createApp({
+                ...blueprint,
+                status: blueprint.status || 'provisioning',
+            });
+        } catch (error) {
+            const recovered = await this.store.getAppBySlug(blueprint.slug, ownerId)
+                || await this.store.getAppByRepo(blueprint.repoOwner, blueprint.repoName);
+            if (hasPersistedAppId(recovered)) {
+                return recovered;
+            }
+            throw error;
+        }
+
+        return persisted;
+    }
+
     async createApp(input = {}, ownerId = null, context = {}) {
         await this.store.ensureAvailable();
         if (!this.giteaClient.isConfigured()) {
@@ -350,16 +378,20 @@ class ManagedAppService {
                 ...blueprint,
                 status: 'provisioning',
             });
+        const persistedApp = await this.ensurePersistedApp(app, {
+            ...blueprint,
+            status: 'provisioning',
+        }, ownerId);
 
         let repository = {
-            html_url: app.repoUrl,
-            clone_url: app.repoCloneUrl,
-            ssh_url: app.repoSshUrl,
+            html_url: persistedApp.repoUrl,
+            clone_url: persistedApp.repoCloneUrl,
+            ssh_url: persistedApp.repoSshUrl,
         };
         let commitSha = '';
         let committedPaths = [];
-        const effectiveRepoOwner = normalizeText(app.repoOwner || blueprint.repoOwner);
-        const effectiveRepoName = normalizeText(app.repoName || blueprint.repoName);
+        const effectiveRepoOwner = normalizeText(persistedApp.repoOwner || blueprint.repoOwner);
+        const effectiveRepoName = normalizeText(persistedApp.repoName || blueprint.repoName);
 
         if (this.giteaClient.isConfigured()) {
             await this.giteaClient.ensureOrganization({
@@ -370,39 +402,39 @@ class ManagedAppService {
             const ensuredRepo = await this.giteaClient.ensureRepository({
                 owner: effectiveRepoOwner,
                 name: effectiveRepoName,
-                description: `Managed app for ${app.appName}`,
-                defaultBranch: app.defaultBranch,
+                description: `Managed app for ${persistedApp.appName}`,
+                defaultBranch: persistedApp.defaultBranch,
             });
             repository = ensuredRepo.repository || repository;
 
             const seedResult = await this.giteaClient.upsertFiles({
                 owner: effectiveRepoOwner,
                 repo: effectiveRepoName,
-                branch: app.defaultBranch,
-                files: this.buildRepositoryFiles(app, input),
+                branch: persistedApp.defaultBranch,
+                files: this.buildRepositoryFiles(persistedApp, input),
                 commitMessagePrefix: existing ? 'Update managed app' : 'Seed managed app',
             });
             commitSha = seedResult.commitSha;
             committedPaths = seedResult.committedPaths;
         }
 
-        const updatedApp = await this.store.updateApp(app.id, ownerId, {
+        const updatedApp = await this.store.updateApp(persistedApp.id, ownerId, {
             repoOwner: effectiveRepoOwner,
             repoName: effectiveRepoName,
-            repoUrl: normalizeText(repository.clone_url || repository.html_url || app.repoUrl),
-            repoCloneUrl: normalizeText(repository.clone_url || app.repoCloneUrl),
-            repoSshUrl: normalizeText(repository.ssh_url || app.repoSshUrl),
+            repoUrl: normalizeText(repository.clone_url || repository.html_url || persistedApp.repoUrl),
+            repoCloneUrl: normalizeText(repository.clone_url || persistedApp.repoCloneUrl),
+            repoSshUrl: normalizeText(repository.ssh_url || persistedApp.repoSshUrl),
             status: commitSha ? 'building' : 'repo_ready',
             metadata: {
-                ...(app.metadata || {}),
+                ...(persistedApp.metadata || {}),
                 lastSeededPaths: committedPaths,
             },
         });
-        const persistedApp = (hasPersistedAppId(updatedApp) ? updatedApp : null)
-            || (hasPersistedAppId(app) ? app : null)
+        const finalPersistedApp = (hasPersistedAppId(updatedApp) ? updatedApp : null)
+            || (hasPersistedAppId(persistedApp) ? persistedApp : null)
             || await this.store.getAppByRepo(effectiveRepoOwner, effectiveRepoName)
             || await this.store.getAppBySlug(blueprint.slug, ownerId);
-        const persistedAppId = normalizeText(persistedApp?.id);
+        const persistedAppId = normalizeText(finalPersistedApp?.id);
         if (commitSha && !persistedAppId) {
             const error = new Error(`Managed app build run creation requires a persisted app id for ${effectiveRepoOwner}/${effectiveRepoName || blueprint.slug}.`);
             error.statusCode = 500;
@@ -412,8 +444,8 @@ class ManagedAppService {
         const buildRun = commitSha
             ? await this.store.createBuildRun({
                 appId: persistedAppId,
-                ownerId: persistedApp?.ownerId || updatedApp?.ownerId || app.ownerId || ownerId,
-                sessionId: persistedApp?.sessionId || updatedApp?.sessionId || app.sessionId || sessionId,
+                ownerId: finalPersistedApp?.ownerId || updatedApp?.ownerId || persistedApp.ownerId || ownerId,
+                sessionId: finalPersistedApp?.sessionId || updatedApp?.sessionId || persistedApp.sessionId || sessionId,
                 source: 'managed-app-service',
                 requestedAction,
                 commitSha,
@@ -429,7 +461,7 @@ class ManagedAppService {
             })
             : null;
 
-        const finalApp = persistedApp || updatedApp || app;
+        const finalApp = finalPersistedApp || updatedApp || persistedApp;
         this.broadcastLifecycleEvent(finalApp, buildRun, existing ? 'updated' : 'created');
 
         return {
@@ -720,7 +752,7 @@ class ManagedAppService {
         return Promise.resolve(this.store.listApps(ownerId, maxApps))
             .then((apps) => {
                 if (!Array.isArray(apps) || apps.length === 0) {
-                    return '';
+                    return 'Managed app catalog: no managed apps exist yet for this user. If they ask to create, build, or deploy a new managed app, create the first one directly instead of asking them to choose an existing app.';
                 }
                 apps.slice(0, Math.max(1, maxApps)).forEach((app) => {
                     lines.push(`Managed app ${app.slug}: status ${app.status}, repo ${app.repoOwner}/${app.repoName}, host ${app.publicHost}, namespace ${app.namespace}.`);

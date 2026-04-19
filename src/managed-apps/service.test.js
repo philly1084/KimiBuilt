@@ -302,4 +302,128 @@ describe('ManagedAppService', () => {
         }));
         expect(result.app.id).toBe('app-1');
     });
+
+    test('recreates the app record before repository seeding when the first persistence attempt returns no id', async () => {
+        const firstCreate = {
+            appName: 'First Demo',
+            slug: 'first-demo',
+            repoOwner: 'agent-apps',
+            repoName: 'first-demo',
+            repoUrl: 'https://gitea.demoserver2.buzz/agent-apps/first-demo.git',
+            repoCloneUrl: 'https://gitea.demoserver2.buzz/agent-apps/first-demo.git',
+            repoSshUrl: '',
+            defaultBranch: 'main',
+            imageRepo: 'gitea.demoserver2.buzz/agent-apps/first-demo',
+            namespace: 'app-first-demo',
+            publicHost: 'first-demo.demoserver2.buzz',
+            ownerId: 'user-1',
+            sessionId: 'session-1',
+            metadata: {},
+        };
+        const recoveredApp = {
+            ...firstCreate,
+            id: 'app-1',
+            status: 'provisioning',
+        };
+        const finalApp = {
+            ...recoveredApp,
+            status: 'building',
+            metadata: {
+                lastSeededPaths: ['index.html'],
+            },
+        };
+
+        const store = {
+            ensureAvailable: jest.fn(async () => {}),
+            isAvailable: jest.fn(() => true),
+            getAppBySlug: jest.fn()
+                .mockResolvedValueOnce(null)
+                .mockResolvedValueOnce(null)
+                .mockResolvedValueOnce(null),
+            getAppByRepo: jest.fn()
+                .mockResolvedValueOnce(null)
+                .mockResolvedValueOnce(null),
+            createApp: jest.fn()
+                .mockResolvedValueOnce(firstCreate)
+                .mockResolvedValueOnce(recoveredApp),
+            updateApp: jest.fn(async () => finalApp),
+            createBuildRun: jest.fn(async () => ({
+                id: 'run-1',
+                appId: 'app-1',
+                buildStatus: 'queued',
+            })),
+        };
+
+        const giteaClient = {
+            isConfigured: jest.fn(() => true),
+            ensureOrganization: jest.fn(async () => ({ created: false })),
+            ensureRepository: jest.fn(async () => ({
+                repository: {
+                    html_url: 'https://gitea.demoserver2.buzz/agent-apps/first-demo',
+                    clone_url: 'https://gitea.demoserver2.buzz/agent-apps/first-demo.git',
+                    ssh_url: '',
+                },
+            })),
+            upsertFiles: jest.fn(async () => ({
+                commitSha: 'abcdef1234567890',
+                committedPaths: ['index.html'],
+            })),
+        };
+
+        const service = new ManagedAppService({
+            store,
+            giteaClient,
+            kubernetesClient: {
+                isConfigured: () => true,
+            },
+        });
+
+        service.getEffectiveGiteaConfig = () => ({
+            baseURL: 'https://gitea.demoserver2.buzz',
+            org: 'agent-apps',
+            registryHost: 'gitea.demoserver2.buzz',
+        });
+        service.getEffectiveManagedAppsConfig = () => ({
+            appBaseDomain: 'demoserver2.buzz',
+            namespacePrefix: 'app-',
+            defaultBranch: 'main',
+            defaultContainerPort: 80,
+        });
+        service.buildBuildEventsUrl = () => 'https://kimibuilt.demoserver2.buzz/api/integrations/gitea/build-events';
+
+        const result = await service.createApp({
+            slug: 'first-demo',
+            requestedAction: 'deploy',
+            prompt: 'Create and deploy a managed app called first-demo.',
+        }, 'user-1', {
+            sessionId: 'session-1',
+        });
+
+        expect(store.createApp).toHaveBeenCalledTimes(2);
+        expect(store.updateApp).toHaveBeenCalledWith('app-1', 'user-1', expect.objectContaining({
+            repoOwner: 'agent-apps',
+            repoName: 'first-demo',
+            status: 'building',
+        }));
+        expect(store.createBuildRun).toHaveBeenCalledWith(expect.objectContaining({
+            appId: 'app-1',
+            ownerId: 'user-1',
+            sessionId: 'session-1',
+        }));
+        expect(result.app.id).toBe('app-1');
+    });
+
+    test('buildPromptSummary nudges the runtime to create the first managed app when the catalog is empty', async () => {
+        const service = new ManagedAppService({
+            store: {
+                isAvailable: () => true,
+                listApps: jest.fn(async () => ([])),
+            },
+        });
+
+        await expect(service.buildPromptSummary({
+            ownerId: 'user-1',
+            maxApps: 4,
+        })).resolves.toContain('create the first one directly');
+    });
 });
