@@ -356,10 +356,10 @@ function resolvePodcastScriptModelCandidates(params = {}, context = {}) {
 
   return uniqueOrdered([
     requestedModel,
+    contextModel,
     defaultModel,
     configuredModel,
     fallbackModel,
-    contextModel,
   ]);
 }
 

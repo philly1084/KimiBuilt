@@ -174,7 +174,7 @@ describe('PodcastService', () => {
     expect(result.processing.enhanced).toBe(false);
   });
 
-  test('uses the configured podcast script model instead of inheriting the active chat model', async () => {
+  test('uses the active chat model for podcast script generation when no podcast-specific model is provided', async () => {
     const service = new PodcastService();
     const executeTool = jest.fn(async (toolId) => {
       if (toolId === 'web-search') {
@@ -211,7 +211,51 @@ describe('PodcastService', () => {
     });
 
     expect(createResponse).toHaveBeenCalledWith(expect.objectContaining({
-      model: 'gpt-4o',
+      model: 'gemini-3.1-pro-preview',
+      requestTimeoutMs: 300000,
+      requestMaxRetries: 0,
+    }));
+  });
+
+  test('lets an explicit podcast model override the active chat model', async () => {
+    const service = new PodcastService();
+    const executeTool = jest.fn(async (toolId) => {
+      if (toolId === 'web-search') {
+        return {
+          success: true,
+          data: {
+            results: [
+              { title: 'Grid battery guide', url: 'https://example.com/batteries', snippet: 'Battery storage helps balance power systems.' },
+            ],
+          },
+        };
+      }
+
+      if (toolId === 'web-fetch') {
+        return {
+          success: true,
+          data: {
+            headers: { 'content-type': 'text/html' },
+            body: '<article><p>Battery systems absorb excess power and discharge it later.</p></article>',
+          },
+        };
+      }
+
+      throw new Error(`Unexpected tool: ${toolId}`);
+    });
+
+    await service.createPodcast({
+      topic: 'How grid batteries work',
+      model: 'gpt-5.4',
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+      model: 'gemini-3.1-pro-preview',
+      toolManager: { executeTool },
+    });
+
+    expect(createResponse).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'gpt-5.4',
       requestTimeoutMs: 300000,
       requestMaxRetries: 0,
     }));
@@ -899,6 +943,8 @@ describe('PodcastService', () => {
     createResponse
       .mockRejectedValueOnce(transientError)
       .mockRejectedValueOnce(transientError)
+      .mockRejectedValueOnce(transientError)
+      .mockRejectedValueOnce(transientError)
       .mockResolvedValueOnce({
         output_text: JSON.stringify({
           title: 'Battery Backstop',
@@ -948,12 +994,18 @@ describe('PodcastService', () => {
     });
 
     expect(createResponse).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      model: 'gpt-4o',
+      model: 'gemini-3.1-pro-preview',
     }));
     expect(createResponse).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      model: 'gpt-4o',
+      model: 'gemini-3.1-pro-preview',
     }));
     expect(createResponse).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      model: 'gpt-4o',
+    }));
+    expect(createResponse).toHaveBeenNthCalledWith(4, expect.objectContaining({
+      model: 'gpt-4o',
+    }));
+    expect(createResponse).toHaveBeenNthCalledWith(5, expect.objectContaining({
       model: 'gpt-4o-mini',
     }));
     expect(result.script.summary).toBe('Fallback-model generation succeeded.');
