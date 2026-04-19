@@ -8339,6 +8339,7 @@ class ConversationOrchestrator extends EventEmitter {
         if (allowedToolIds.includes('k3s-deploy')) {
             parts.push('Use `k3s-deploy` for standard remote deployment flows over SSH: sync a GitHub repo on the server, apply manifests, set deployment images, and check rollout status.');
             parts.push('Do not treat a missing project checkout on the remote host as a blocker for deployment work. `sync-repo` or `sync-and-apply` can clone the configured GitHub repo into the target directory.');
+            parts.push('Treat the configured deploy defaults as the KimiBuilt backend self-deploy lane only. Do not assume `kimibuilt/backend` for an unrelated app unless the user explicitly targets that repo, domain, or workload.');
             parts.push('Keep raw SSH available for one-off server configuration and troubleshooting, but use `git-safe` plus `k3s-deploy` when the user wants code pushed to GitHub and then deployed.');
             parts.push('Prefer immutable delivery: local authoring and Git push, then CI or GitHub Actions, then k3s rollout. Avoid treating the live server as the place where software is created unless the user explicitly asks for that workflow.');
             parts.push('Never initialize a new Git repository on the remote host or adopt an arbitrary web root as the canonical project unless the user explicitly asked for that server-local workflow.');

@@ -889,7 +889,7 @@ class ClusterStateRegistry {
         }
 
         if (deployDefaults.repositoryUrl || deployDefaults.targetDirectory || deployDefaults.deployment) {
-            lines.push(`Cluster registry default deploy lane: repo ${deployDefaults.repositoryUrl || '(unset)'}, dir ${deployDefaults.targetDirectory || '(unset)'}, manifests ${deployDefaults.manifestsPath || '(unset)'}, namespace ${deployDefaults.namespace || 'kimibuilt'}, deployment ${deployDefaults.deployment || 'backend'}, domain ${deployDefaults.publicDomain || 'demoserver2.buzz'}.`);
+            lines.push(`Cluster registry configured KimiBuilt self-deploy lane (do not assume it applies to unrelated apps): repo ${deployDefaults.repositoryUrl || '(unset)'}, dir ${deployDefaults.targetDirectory || '(unset)'}, manifests ${deployDefaults.manifestsPath || '(unset)'}, namespace ${deployDefaults.namespace || 'kimibuilt'}, deployment ${deployDefaults.deployment || 'backend'}, domain ${deployDefaults.publicDomain || 'demoserver2.buzz'}.`);
         }
 
         deployments.forEach((entry) => {

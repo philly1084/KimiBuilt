@@ -179,7 +179,7 @@ class K3sDeployTool extends ToolBase {
         return [
           this.buildSyncRepoCommand(params),
           this.buildApplyManifestsCommand(params),
-          this.buildRolloutStatusCommand(params, { allowDefaultDeployment: true }),
+          this.buildRolloutStatusCommand(params),
         ].filter(Boolean).join('\n');
       default:
         throw new Error(`Unsupported k3s-deploy action '${action}'`);

@@ -336,10 +336,97 @@ describe('end-to-end builder workflow', () => {
                     port: 22,
                     timeout: 240000,
                     workflowAction: 'verify-deployment',
-                    command: expect.stringContaining("kubectl get svc,ingress -n 'kimibuilt'"),
+                    command: expect.stringContaining('kubectl get svc,ingress -A -o wide'),
                 }),
             }),
         ]);
+    });
+
+    test('does not seed generic deploy-only workflows with the configured KimiBuilt backend lane', () => {
+        const workflow = inferEndToEndBuilderWorkflow({
+            objective: 'Sync and apply the manifests for the game to the k3s cluster.',
+            remoteTarget: {
+                host: '10.0.0.5',
+                username: 'ubuntu',
+                port: 22,
+            },
+            deployDefaults: {
+                repositoryUrl: 'https://github.com/philly1084/kimibuilt.git',
+                targetDirectory: '/opt/kimibuilt',
+                manifestsPath: 'k8s',
+                namespace: 'kimibuilt',
+                deployment: 'backend',
+                publicDomain: 'kimibuilt.demoserver2.buzz',
+            },
+        });
+
+        expect(workflow).toEqual(expect.objectContaining({
+            lane: 'deploy-only',
+            deploy: expect.objectContaining({
+                repositoryUrl: null,
+                targetDirectory: null,
+                manifestsPath: null,
+                namespace: null,
+                deployment: null,
+                publicDomain: null,
+                targetSource: 'unspecified',
+            }),
+        }));
+
+        const blockedWorkflow = evaluateEndToEndBuilderWorkflow({
+            workflow,
+            toolPolicy: {
+                candidateToolIds: ['k3s-deploy', 'remote-command'],
+                preferredRemoteToolId: 'remote-command',
+            },
+            remoteToolId: 'remote-command',
+            deployDefaults: {
+                repositoryUrl: 'https://github.com/philly1084/kimibuilt.git',
+                targetDirectory: '/opt/kimibuilt',
+                manifestsPath: 'k8s',
+                namespace: 'kimibuilt',
+                deployment: 'backend',
+                publicDomain: 'kimibuilt.demoserver2.buzz',
+            },
+        });
+
+        expect(blockedWorkflow).toEqual(expect.objectContaining({
+            stage: 'blocked',
+            status: 'blocked',
+            lastError: expect.stringContaining('Refusing to assume `kimibuilt/backend`'),
+        }));
+    });
+
+    test('reuses the configured deploy lane only when the objective explicitly targets it', () => {
+        const workflow = inferEndToEndBuilderWorkflow({
+            objective: 'Redeploy the kimibuilt GitHub repo for kimibuilt.demoserver2.buzz on the cluster and verify it comes back.',
+            remoteTarget: {
+                host: '10.0.0.5',
+                username: 'ubuntu',
+                port: 22,
+            },
+            deployDefaults: {
+                repositoryUrl: 'https://github.com/philly1084/kimibuilt.git',
+                targetDirectory: '/opt/kimibuilt',
+                manifestsPath: 'k8s',
+                namespace: 'kimibuilt',
+                deployment: 'backend',
+                publicDomain: 'kimibuilt.demoserver2.buzz',
+            },
+        });
+
+        expect(workflow).toEqual(expect.objectContaining({
+            lane: 'deploy-only',
+            deploy: expect.objectContaining({
+                repositoryUrl: 'https://github.com/philly1084/kimibuilt.git',
+                targetDirectory: '/opt/kimibuilt',
+                manifestsPath: 'k8s',
+                namespace: 'kimibuilt',
+                deployment: 'backend',
+                publicDomain: 'kimibuilt.demoserver2.buzz',
+                targetSource: 'configured-default',
+            }),
+        }));
     });
 
     test('does not mark deployment verification complete for generic remote-command success without a verification workflow action', () => {
@@ -441,6 +528,7 @@ describe('end-to-end builder workflow', () => {
                 }),
             }),
         ]);
+        expect(verificationPlan[0].params.command).toContain('kubectl get ingress -A');
         expect(verificationPlan[0].params.command).toContain('curl -fsSIL --max-time 20 "https://$host"');
     });
 

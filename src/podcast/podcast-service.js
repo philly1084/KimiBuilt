@@ -33,11 +33,11 @@ const DEFAULT_TRANSIENT_RETRY_DELAY_MS = 1200;
 const DEFAULT_AUDIO_PROCESSING_RETRY_ATTEMPTS = 1;
 const DEFAULT_PODCAST_RESEARCH_CONCURRENCY = Math.max(
   1,
-  Math.min(12, Number(config?.podcast?.researchConcurrency) || 3),
+  Math.min(12, Number(config?.podcast?.researchConcurrency) || 2),
 );
 const DEFAULT_PODCAST_TTS_CONCURRENCY = Math.max(
   1,
-  Math.min(24, Number(config?.podcast?.ttsConcurrency) || 4),
+  Math.min(24, Number(config?.podcast?.ttsConcurrency) || 2),
 );
 const MAX_PODCAST_RESEARCH_CONCURRENCY = 12;
 const MAX_PODCAST_TTS_CONCURRENCY = 24;

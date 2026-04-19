@@ -2538,6 +2538,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Use `k3s-deploy` for restricted deployment work over SSH: sync a GitHub repo on the server, apply manifests, set deployment images, and check rollout status.');
         guidance.push('- Prefer `k3s-deploy` over raw SSH when the task is a standard k3s deploy/update flow.');
         guidance.push('- Do not treat a missing project checkout on the remote host as a blocker for deployment work. `sync-repo` or `sync-and-apply` can clone the configured GitHub repo into the target directory.');
+        guidance.push('- The configured deploy defaults describe the KimiBuilt backend self-deploy lane. Do not assume `kimibuilt/backend` for an unrelated app unless the user explicitly targets that repo, domain, or workload.');
         guidance.push('- Keep `remote-command` available for one-off server configuration and troubleshooting, but use `git-safe` plus `k3s-deploy` when the user wants code pushed to GitHub and then deployed.');
         guidance.push('- Prefer immutable deploys: push code, let CI build artifacts or images, then deploy those results into k3s instead of hand-editing the live server.');
         guidance.push('- Never initialize a new Git repository on the remote host or adopt an arbitrary web root as the canonical project unless the user explicitly asked for that server-local workflow.');

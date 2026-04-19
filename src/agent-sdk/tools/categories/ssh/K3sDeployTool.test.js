@@ -31,7 +31,7 @@ describe('K3sDeployTool', () => {
     jest.clearAllMocks();
   });
 
-  test('builds sync-and-apply command with repo sync and kubectl apply', async () => {
+  test('builds sync-and-apply command with repo sync and kubectl apply without an implicit rollout target', async () => {
     const tool = new K3sDeployTool();
     tool.sshTool.handler = jest.fn().mockResolvedValue({
       stdout: 'applied',
@@ -48,7 +48,6 @@ describe('K3sDeployTool', () => {
       targetDirectory: '/opt/app',
       manifestsPath: 'k8s',
       namespace: 'kimibuilt',
-      deployment: 'backend',
     });
 
     expect(result.success).toBe(true);
@@ -62,7 +61,7 @@ describe('K3sDeployTool', () => {
     expect(command).toContain('namespace.yaml|cluster-issuer.yaml|secret.yaml|rancher-simple.yaml|rancher-stack-update.yaml');
     expect(command).toContain('ingress-https.yaml)');
     expect(command).toContain('if [ -f "$manifest_dir/ingress.yaml" ]; then continue; fi');
-    expect(command).toContain("kubectl rollout status deployment/backend -n 'kimibuilt' --timeout=180s");
+    expect(command).not.toContain('kubectl rollout status deployment/');
     expect(request.environment).toEqual(expect.objectContaining({
       GITHUB_TOKEN: 'ghp_test_token',
       KIMIBUILT_GIT_PASSWORD: 'ghp_test_token',
@@ -85,12 +84,35 @@ describe('K3sDeployTool', () => {
       targetDirectory: '/opt/app',
       manifestsPath: 'k8s',
       namespace: 'kimibuilt',
-      deployment: 'backend',
     });
 
     expect(result.success).toBe(true);
     expect(result.data.action).toBe('sync-and-apply');
     expect(tool.sshTool.handler).toHaveBeenCalledTimes(1);
+    expect(tool.sshTool.handler.mock.calls[0][0].command).not.toContain('kubectl rollout status deployment/');
+  });
+
+  test('includes rollout status in sync-and-apply only when deployment is explicitly provided', async () => {
+    const tool = new K3sDeployTool();
+    tool.sshTool.handler = jest.fn().mockResolvedValue({
+      stdout: 'deployment "backend" successfully rolled out',
+      stderr: '',
+      exitCode: 0,
+      duration: 18,
+      host: 'server:22',
+    });
+
+    const result = await tool.execute({
+      action: 'sync-and-apply',
+      repositoryUrl: 'https://github.com/example/app.git',
+      ref: 'main',
+      targetDirectory: '/opt/app',
+      manifestsPath: 'k8s',
+      namespace: 'kimibuilt',
+      deployment: 'backend',
+    });
+
+    expect(result.success).toBe(true);
     expect(tool.sshTool.handler.mock.calls[0][0].command).toContain("kubectl rollout status deployment/backend -n 'kimibuilt' --timeout=180s");
   });
 

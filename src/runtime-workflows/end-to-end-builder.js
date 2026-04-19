@@ -38,6 +38,10 @@ function normalizeText(value = '') {
     return String(value || '').trim();
 }
 
+function normalizeLowerText(value = '') {
+    return normalizeText(value).toLowerCase();
+}
+
 function truncateText(value = '', limit = 96) {
     const normalized = normalizeText(value);
     if (!normalized || normalized.length <= limit) {
@@ -45,6 +49,16 @@ function truncateText(value = '', limit = 96) {
     }
 
     return `${normalized.slice(0, limit - 1).trim()}…`;
+}
+
+function extractRepositoryNameFromUrl(url = '') {
+    const normalized = normalizeText(url);
+    if (!normalized) {
+        return '';
+    }
+
+    const match = normalized.match(/[:/]([^/\s:]+)\/([^/\s]+?)(?:\.git)?$/i);
+    return match?.[2] ? normalizeLowerText(match[2]) : '';
 }
 
 function isEndToEndBuilderWorkflow(value = null) {
@@ -416,20 +430,117 @@ function resolveDeployDefaults(defaults = null) {
     };
 }
 
-function buildDeployState(seed = {}, defaults = null) {
+function objectiveMentionsConfiguredDeployLane(objective = '', defaults = null) {
+    const normalizedObjective = normalizeLowerText(objective);
+    if (!normalizedObjective) {
+        return false;
+    }
+
     const deployDefaults = resolveDeployDefaults(defaults);
+    const repoName = extractRepositoryNameFromUrl(deployDefaults.repositoryUrl);
+    const publicDomain = normalizeLowerText(deployDefaults.publicDomain);
+    const requestedHost = extractRequestedHost(objective);
+
+    if (repoName && new RegExp(`\\b${repoName.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\b`, 'i').test(normalizedObjective)) {
+        return true;
+    }
+
+    if (publicDomain && requestedHost && requestedHost === publicDomain) {
+        return true;
+    }
+
+    return false;
+}
+
+function extractRequestedNamespace(text = '') {
+    const normalized = normalizeText(text);
+    if (!normalized) {
+        return '';
+    }
+
+    const patterns = [
+        /\bnamespace\s+([a-z0-9]([-.a-z0-9]*[a-z0-9])?)\b/i,
+        /\bin\s+the\s+([a-z0-9]([-.a-z0-9]*[a-z0-9])?)\s+namespace\b/i,
+    ];
+
+    for (const pattern of patterns) {
+        const match = normalized.match(pattern);
+        if (match?.[1]) {
+            return normalizeLowerText(match[1]);
+        }
+    }
+
+    return '';
+}
+
+function buildDeployState(seed = {}, defaults = null, options = {}) {
+    const deployDefaults = resolveDeployDefaults(defaults);
+    const seedTargetSource = normalizeLowerText(seed.targetSource);
+    const seedUsesConfiguredDefaults = seedTargetSource === 'configured-default';
+    const seedRepositoryUrl = normalizeText(seed.repositoryUrl);
+    const seedRef = normalizeText(seed.ref);
+    const seedTargetDirectory = normalizeText(seed.targetDirectory);
+    const seedManifestsPath = normalizeText(seed.manifestsPath);
+    const seedDeployment = normalizeText(seed.deployment);
+    const seedContainer = normalizeText(seed.container);
+    const explicitPublicDomain = normalizeText(seed.publicDomain || extractRequestedHost(options.objective || ''));
+    const explicitNamespace = normalizeText(seed.namespace || extractRequestedNamespace(options.objective || ''));
+    const hasExplicitDeployCoordinates = seedUsesConfiguredDefaults
+        ? [
+            seedRepositoryUrl && seedRepositoryUrl !== normalizeText(deployDefaults.repositoryUrl),
+            seedTargetDirectory && seedTargetDirectory !== normalizeText(deployDefaults.targetDirectory),
+            seedManifestsPath && seedManifestsPath !== normalizeText(deployDefaults.manifestsPath),
+            explicitNamespace && explicitNamespace !== normalizeText(deployDefaults.namespace),
+            seedDeployment && seedDeployment !== normalizeText(deployDefaults.deployment),
+            seedContainer && seedContainer !== normalizeText(deployDefaults.container),
+        ].some(Boolean)
+        : [
+            seedRepositoryUrl,
+            seedTargetDirectory,
+            seedManifestsPath,
+            explicitNamespace,
+            seedDeployment,
+            seedContainer,
+        ].some(Boolean);
+    const hasSoftExplicitSeed = seedUsesConfiguredDefaults
+        ? [
+            seedRef && seedRef !== normalizeText(deployDefaults.ref),
+            explicitPublicDomain && explicitPublicDomain !== normalizeText(deployDefaults.publicDomain),
+        ].some(Boolean)
+        : [
+            seedRef,
+            explicitPublicDomain,
+        ].some(Boolean);
+    const useConfiguredDefaults = options.assumeConfiguredDefaults === true && !hasExplicitDeployCoordinates;
+    const targetSource = hasExplicitDeployCoordinates || (hasSoftExplicitSeed && !useConfiguredDefaults)
+        ? 'explicit'
+        : (useConfiguredDefaults ? 'configured-default' : 'unspecified');
+
     return {
-        repositoryUrl: normalizeText(seed.repositoryUrl || deployDefaults.repositoryUrl) || null,
-        ref: normalizeText(seed.ref || deployDefaults.ref) || null,
-        targetDirectory: normalizeText(seed.targetDirectory || deployDefaults.targetDirectory) || null,
-        manifestsPath: normalizeText(seed.manifestsPath || deployDefaults.manifestsPath) || null,
-        namespace: normalizeText(seed.namespace || deployDefaults.namespace) || 'kimibuilt',
-        deployment: normalizeText(seed.deployment || deployDefaults.deployment) || null,
-        container: normalizeText(seed.container || deployDefaults.container) || null,
-        publicDomain: normalizeText(seed.publicDomain || deployDefaults.publicDomain) || null,
+        repositoryUrl: seedRepositoryUrl || normalizeText(useConfiguredDefaults ? deployDefaults.repositoryUrl : '') || null,
+        ref: seedRef || normalizeText(useConfiguredDefaults ? deployDefaults.ref : '') || null,
+        targetDirectory: seedTargetDirectory || normalizeText(useConfiguredDefaults ? deployDefaults.targetDirectory : '') || null,
+        manifestsPath: seedManifestsPath || normalizeText(useConfiguredDefaults ? deployDefaults.manifestsPath : '') || null,
+        namespace: explicitNamespace || normalizeText(useConfiguredDefaults ? deployDefaults.namespace : '') || null,
+        deployment: seedDeployment || normalizeText(useConfiguredDefaults ? deployDefaults.deployment : '') || null,
+        container: seedContainer || normalizeText(useConfiguredDefaults ? deployDefaults.container : '') || null,
+        publicDomain: explicitPublicDomain || normalizeText(useConfiguredDefaults ? deployDefaults.publicDomain : '') || null,
         ingressClassName: normalizeText(seed.ingressClassName || deployDefaults.ingressClassName) || null,
         tlsClusterIssuer: normalizeText(seed.tlsClusterIssuer || deployDefaults.tlsClusterIssuer) || null,
+        targetSource,
     };
+}
+
+function hasResolvedDeployTarget(workflow = null) {
+    const deploy = workflow?.deploy || {};
+    return Boolean(
+        normalizeText(deploy.repositoryUrl)
+        || normalizeText(deploy.targetDirectory)
+        || normalizeText(deploy.manifestsPath)
+        || normalizeText(deploy.deployment)
+        || normalizeText(deploy.publicDomain)
+        || normalizeText(deploy.namespace),
+    ) && normalizeText(deploy.targetSource) !== 'unspecified';
 }
 
 function buildInitialStage(lane = '') {
@@ -538,7 +649,11 @@ function normalizeWorkflowState(workflow = null, options = {}) {
     const status = [ACTIVE_WORKFLOW_STATUS, COMPLETED_WORKFLOW_STATUS, BLOCKED_WORKFLOW_STATUS].includes(String(workflow.status || '').trim())
         ? String(workflow.status).trim()
         : ACTIVE_WORKFLOW_STATUS;
-    const deploy = buildDeployState(workflow.deploy || {}, options.deployDefaults);
+    const deploy = buildDeployState(workflow.deploy || {}, options.deployDefaults, {
+        objective: workflow.objective,
+        assumeConfiguredDefaults: workflow?.deploy?.targetSource === 'configured-default'
+            || objectiveMentionsConfiguredDeployLane(workflow.objective, options.deployDefaults),
+    });
     const progress = normalizeProgress(workflow.progress);
     const deliveryMode = VALID_DELIVERY_MODES.has(String(workflow.deliveryMode || '').trim())
         ? String(workflow.deliveryMode).trim()
@@ -639,7 +754,10 @@ function inferEndToEndBuilderWorkflow({
         repositoryPath: normalizeText(repositoryPath) || null,
         opencodeTarget: normalizeText(opencodeTarget) || 'local',
         remoteTarget,
-        deploy: buildDeployState({}, deployDefaults),
+        deploy: buildDeployState({}, deployDefaults, {
+            objective,
+            assumeConfiguredDefaults: objectiveMentionsConfiguredDeployLane(objective, deployDefaults),
+        }),
         progress: normalizeProgress(),
         requiresVerification: resolveWorkflowRequiresVerification({
             lane,
@@ -737,42 +855,85 @@ function resolveRequestedPublicHost(workflow = null, deployDefaults = null) {
 
 function buildVerificationCommand(workflow = null, deployDefaults = null) {
     const deploy = workflow?.deploy || {};
-    const namespace = normalizeText(deploy.namespace) || 'kimibuilt';
-    const deployment = normalizeText(deploy.deployment) || 'backend';
+    const namespace = normalizeText(deploy.namespace);
+    const deployment = normalizeText(deploy.deployment);
     const expectedHost = resolveRequestedPublicHost(workflow, deployDefaults);
 
-    const command = [
-        'set -e',
-        `kubectl rollout status deployment/${deployment} -n '${namespace}' --timeout=180s`,
-        `kubectl get deployment/${deployment} -n '${namespace}' -o wide`,
-        `kubectl get pods -n '${namespace}' -o wide`,
-        `kubectl get svc,ingress -n '${namespace}'`,
-    ];
+    const command = ['set -e'];
+    if (deployment && namespace) {
+        command.push(
+            `kubectl rollout status deployment/${deployment} -n '${namespace}' --timeout=180s`,
+            `kubectl get deployment/${deployment} -n '${namespace}' -o wide`,
+        );
+    } else if (namespace) {
+        command.push(`kubectl get deploy -n '${namespace}' -o wide`);
+    } else {
+        command.push('kubectl get deploy -A -o wide');
+    }
+
+    command.push(
+        namespace
+            ? `kubectl get pods -n '${namespace}' -o wide`
+            : 'kubectl get pods -A -o wide',
+        namespace
+            ? `kubectl get svc,ingress -n '${namespace}'`
+            : 'kubectl get svc,ingress -A -o wide',
+    );
 
     if (!requiresPublicDeploymentVerification(workflow)) {
         return command.join('\n');
     }
 
+    if (namespace) {
+        return command.concat([
+            `expected_host=${quoteShellArg(expectedHost)}`,
+            `ingress_hosts=$(kubectl get ingress -n '${namespace}' -o jsonpath='{range .items[*].spec.rules[*]}{.host}{"\\n"}{end}' | grep -v '^$' || true)`,
+            'if [ -n "$ingress_hosts" ]; then echo "--- ingress hosts ---"; printf "%s\\n" "$ingress_hosts"; fi',
+            'if [ -n "$expected_host" ] && ! printf "%s\\n" "$ingress_hosts" | grep -Fx "$expected_host" >/dev/null; then',
+            '  echo "Expected ingress host not found: $expected_host" >&2',
+            '  exit 1',
+            'fi',
+            'host="$expected_host"',
+            'if [ -z "$host" ]; then host=$(printf "%s\\n" "$ingress_hosts" | head -n 1 || true); fi',
+            'if [ -z "$host" ]; then',
+            `  echo "No ingress host found in namespace ${namespace}" >&2`,
+            '  exit 1',
+            'fi',
+            `tls_secret=$(kubectl get ingress -n '${namespace}' -o jsonpath='{range .items[*].spec.tls[*]}{.secretName}{"\\n"}{end}' | grep -v '^$' | head -n 1 || true)`,
+            'if [ -z "$tls_secret" ]; then',
+            `  echo "No TLS secret configured on ingress in namespace ${namespace}" >&2`,
+            '  exit 1',
+            'fi',
+            `kubectl get secret "$tls_secret" -n '${namespace}' >/dev/null`,
+            'echo "--- https headers ---"',
+            'curl -fsSIL --max-time 20 "https://$host"',
+            'echo "--- https body preview ---"',
+            'curl -fsS --max-time 20 "https://$host" | sed -n "1,20p"',
+        ]).join('\n');
+    }
+
     return command.concat([
         `expected_host=${quoteShellArg(expectedHost)}`,
-        `ingress_hosts=$(kubectl get ingress -n '${namespace}' -o jsonpath='{range .items[*].spec.rules[*]}{.host}{"\\n"}{end}' | grep -v '^$' || true)`,
-        'if [ -n "$ingress_hosts" ]; then echo "--- ingress hosts ---"; printf "%s\\n" "$ingress_hosts"; fi',
-        'if [ -n "$expected_host" ] && ! printf "%s\\n" "$ingress_hosts" | grep -Fx "$expected_host" >/dev/null; then',
+        'ingress_pairs=$(kubectl get ingress -A -o jsonpath=\'{range .items[*]}{.metadata.namespace}{"\\t"}{range .spec.rules[*]}{.host}{"\\n"}{end}{end}\' | grep -v \'^$\' || true)',
+        'if [ -n "$ingress_pairs" ]; then echo "--- ingress hosts ---"; printf "%s\\n" "$ingress_pairs"; fi',
+        'if [ -n "$expected_host" ] && ! printf "%s\\n" "$ingress_pairs" | awk -v expected="$expected_host" \'$2 == expected { found=1 } END { exit(found ? 0 : 1) }\'; then',
         '  echo "Expected ingress host not found: $expected_host" >&2',
         '  exit 1',
         'fi',
+        'host_namespace=$(printf "%s\\n" "$ingress_pairs" | awk -v expected="$expected_host" \'$2 == expected { print $1; exit }\')',
         'host="$expected_host"',
-        'if [ -z "$host" ]; then host=$(printf "%s\\n" "$ingress_hosts" | head -n 1 || true); fi',
-        'if [ -z "$host" ]; then',
-        `  echo "No ingress host found in namespace ${namespace}" >&2`,
+        'if [ -z "$host" ]; then host=$(printf "%s\\n" "$ingress_pairs" | awk \'NF >= 2 { print $2; exit }\'); fi',
+        'if [ -z "$host_namespace" ]; then host_namespace=$(printf "%s\\n" "$ingress_pairs" | awk -v host="$host" \'$2 == host { print $1; exit }\'); fi',
+        'if [ -z "$host" ] || [ -z "$host_namespace" ]; then',
+        '  echo "No ingress host found in any namespace" >&2',
         '  exit 1',
         'fi',
-        `tls_secret=$(kubectl get ingress -n '${namespace}' -o jsonpath='{range .items[*].spec.tls[*]}{.secretName}{"\\n"}{end}' | grep -v '^$' | head -n 1 || true)`,
+        'tls_secret=$(kubectl get ingress -n "$host_namespace" -o jsonpath=\'{range .items[*].spec.tls[*]}{.secretName}{"\\n"}{end}\' | grep -v \'^$\' | head -n 1 || true)',
         'if [ -z "$tls_secret" ]; then',
-        `  echo "No TLS secret configured on ingress in namespace ${namespace}" >&2`,
+        '  echo "No TLS secret configured on ingress in namespace $host_namespace" >&2',
         '  exit 1',
         'fi',
-        `kubectl get secret "$tls_secret" -n '${namespace}' >/dev/null`,
+        'kubectl get secret "$tls_secret" -n "$host_namespace" >/dev/null',
         'echo "--- https headers ---"',
         'curl -fsSIL --max-time 20 "https://$host"',
         'echo "--- https body preview ---"',
@@ -782,14 +943,22 @@ function buildVerificationCommand(workflow = null, deployDefaults = null) {
 
 function buildInspectCommand(workflow = null) {
     const deploy = workflow?.deploy || {};
-    const namespace = normalizeText(deploy.namespace) || 'kimibuilt';
-    const deployment = normalizeText(deploy.deployment) || 'backend';
+    const namespace = normalizeText(deploy.namespace);
+    const deployment = normalizeText(deploy.deployment);
 
     return [
         'set -e',
-        `kubectl get deployment/${deployment} -n '${namespace}' -o wide`,
-        `kubectl get pods -n '${namespace}' -o wide`,
-        `kubectl get svc,ingress -n '${namespace}'`,
+        deployment && namespace
+            ? `kubectl get deployment/${deployment} -n '${namespace}' -o wide`
+            : (namespace
+                ? `kubectl get deploy -n '${namespace}' -o wide`
+                : 'kubectl get deploy -A -o wide'),
+        namespace
+            ? `kubectl get pods -n '${namespace}' -o wide`
+            : 'kubectl get pods -A -o wide',
+        namespace
+            ? `kubectl get svc,ingress -n '${namespace}'`
+            : 'kubectl get svc,ingress -A -o wide',
     ].join('\n');
 }
 
@@ -818,8 +987,8 @@ function resolveRemoteWorkspaceManifestsPath(workflow = null) {
 function buildRemoteWorkspaceDeployCommand(workflow = null) {
     const workspacePath = normalizeText(workflow?.workspacePath);
     const manifestsPath = resolveRemoteWorkspaceManifestsPath(workflow);
-    const namespace = normalizeText(workflow?.deploy?.namespace) || 'kimibuilt';
-    const deployment = normalizeText(workflow?.deploy?.deployment) || 'backend';
+    const namespace = normalizeText(workflow?.deploy?.namespace);
+    const deployment = normalizeText(workflow?.deploy?.deployment);
     const manifestTarget = manifestsPath || workspacePath;
 
     return [
@@ -869,10 +1038,12 @@ function buildRemoteWorkspaceDeployCommand(workflow = null) {
         'else',
         '  kubectl apply -f "$manifest_target"',
         'fi',
-        deployment
+        deployment && namespace
             ? `kubectl rollout status deployment/${deployment} -n ${quoteShellArg(namespace)} --timeout=180s`
-            : `kubectl get all -n ${quoteShellArg(namespace)}`,
-        deployment
+            : (namespace
+                ? `kubectl get deploy,svc,ingress -n ${quoteShellArg(namespace)} -o wide`
+                : 'kubectl get deploy,svc,ingress -A -o wide'),
+        deployment && namespace
             ? `kubectl get deployment/${deployment} -n ${quoteShellArg(namespace)} -o wide`
             : '',
     ].filter(Boolean).join('\n');
@@ -941,6 +1112,15 @@ function evaluateEndToEndBuilderWorkflow({
         return buildBlockedWorkflowState(
             currentWorkflow,
             'The workflow needs `k3s-deploy` to perform the requested deployment step.',
+        );
+    }
+
+    if (currentWorkflow.lane === 'deploy-only'
+        && !currentWorkflow.progress.deployed
+        && !hasResolvedDeployTarget(currentWorkflow)) {
+        return buildBlockedWorkflowState(
+            currentWorkflow,
+            'This deploy request does not identify a specific remote workload or the configured KimiBuilt deploy lane. Refusing to assume `kimibuilt/backend` for an unrelated app.',
         );
     }
 
