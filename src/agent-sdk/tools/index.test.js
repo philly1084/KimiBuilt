@@ -1126,6 +1126,43 @@ describe('ToolManager image tools', () => {
     expect(result.data.app.status).toBe('live');
   });
 
+  test('normalizes managed app name fallbacks for deploy actions', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const deployApp = jest.fn(async () => ({
+      app: {
+        id: 'app-1',
+        slug: 'first-demo',
+        status: 'deployed',
+      },
+      deployment: {
+        namespace: 'app-first-demo',
+      },
+    }));
+
+    const result = await toolManager.executeTool('managed-app', {
+      action: 'deploy',
+      name: 'First Demo',
+    }, {
+      ownerId: 'user-1',
+      sessionId: 'session-1',
+      managedAppService: {
+        isAvailable: () => true,
+        deployApp,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(deployApp).toHaveBeenCalledWith(
+      'first-demo',
+      expect.objectContaining({ name: 'First Demo' }),
+      'user-1',
+      expect.objectContaining({ sessionId: 'session-1' }),
+    );
+    expect(result.data.app.slug).toBe('first-demo');
+  });
+
   test('routes sub-agent spawning through the workload service with the caller model', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();

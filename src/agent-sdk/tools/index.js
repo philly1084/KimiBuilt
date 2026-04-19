@@ -411,6 +411,24 @@ function resolveManagedAppService(context = {}) {
   };
 }
 
+function normalizeManagedAppRef(value = '') {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-');
+}
+
+function resolveManagedAppReference(params = {}) {
+  const explicitRef = String(params.appRef || params.slug || params.id || '').trim();
+  if (explicitRef) {
+    return explicitRef;
+  }
+
+  return normalizeManagedAppRef(params.name || params.appName || params.title || '');
+}
+
 function hasExplicitManualWorkloadIntent(text = '') {
   const normalized = String(text || '').trim().toLowerCase();
   if (!normalized) {
@@ -3127,7 +3145,7 @@ class ToolManager {
 
             if (action === 'inspect') {
               const result = await service.inspectApp(
-                params.appRef || params.slug || params.id || '',
+                resolveManagedAppReference(params),
                 ownerId,
               );
               if (!result) {
@@ -3152,7 +3170,7 @@ class ToolManager {
 
             if (action === 'update') {
               const result = await service.updateApp(
-                params.appRef || params.slug || params.id || '',
+                resolveManagedAppReference(params),
                 {
                   ...params,
                   sessionId: params.sessionId || sessionId,
@@ -3171,7 +3189,7 @@ class ToolManager {
 
             if (action === 'deploy') {
               const result = await service.deployApp(
-                params.appRef || params.slug || params.id || '',
+                resolveManagedAppReference(params),
                 params,
                 ownerId,
                 {
