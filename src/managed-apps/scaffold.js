@@ -13,6 +13,12 @@ function escapeHtml(value = '') {
         .replace(/'/g, '&#39;');
 }
 
+const DEFAULT_SOURCE_FILE_PATHS = Object.freeze([
+    'public/index.html',
+    'public/styles.css',
+    'public/app.js',
+]);
+
 function buildWorkflowYaml({
     appName = '',
     slug = '',
@@ -231,6 +237,37 @@ function buildDefaultScaffoldFiles({
     registryHost = '',
     buildEventsUrl = '',
 } = {}) {
+    return [
+        ...buildManagedAppInfrastructureFiles({
+            appName,
+            slug,
+            publicHost,
+            namespace,
+            sourcePrompt,
+            giteaOrg,
+            imageRepo,
+            registryHost,
+            buildEventsUrl,
+        }),
+        ...buildDefaultManagedAppSourceFiles({
+            appName,
+            slug,
+            sourcePrompt,
+        }),
+    ];
+}
+
+function buildManagedAppInfrastructureFiles({
+    appName = '',
+    slug = '',
+    publicHost = '',
+    namespace = '',
+    sourcePrompt = '',
+    giteaOrg = '',
+    imageRepo = '',
+    registryHost = '',
+    buildEventsUrl = '',
+} = {}) {
     const safePrompt = escapeHtml(sourcePrompt || 'Describe the application you want here.');
 
     return [
@@ -267,6 +304,38 @@ README.md
             path: 'Dockerfile',
             content: buildDockerfile(),
         },
+        {
+            path: 'deploy/k8s/reference.yaml',
+            content: buildKubernetesReference({
+                slug,
+                namespace,
+                publicHost,
+                imageRepo,
+                imageTag: 'latest',
+            }),
+        },
+        {
+            path: '.gitea/workflows/build-and-publish.yml',
+            content: buildWorkflowYaml({
+                appName,
+                slug,
+                giteaOrg,
+                imageRepo,
+                registryHost,
+                buildEventsUrl,
+            }),
+        },
+    ];
+}
+
+function buildDefaultManagedAppSourceFiles({
+    appName = '',
+    slug = '',
+    sourcePrompt = '',
+} = {}) {
+    const safePrompt = escapeHtml(sourcePrompt || 'Describe the application you want here.');
+
+    return [
         {
             path: 'public/index.html',
             content: `<!DOCTYPE html>
@@ -362,30 +431,52 @@ code {
             path: 'public/app.js',
             content: `console.log('KimiBuilt managed app scaffold ready for ${slug}.');\n`,
         },
-        {
-            path: 'deploy/k8s/reference.yaml',
-            content: buildKubernetesReference({
-                slug,
-                namespace,
-                publicHost,
-                imageRepo,
-                imageTag: 'latest',
-            }),
-        },
-        {
-            path: '.gitea/workflows/build-and-publish.yml',
-            content: buildWorkflowYaml({
-                appName,
-                slug,
-                giteaOrg,
-                imageRepo,
-                registryHost,
-                buildEventsUrl,
-            }),
-        },
     ];
+}
+
+function buildManagedAppAuthoringPrompt({
+    appName = '',
+    slug = '',
+    publicHost = '',
+    namespace = '',
+    sourcePrompt = '',
+} = {}) {
+    return [
+        'Generate a compact production-ready static web app for a managed deployment repository.',
+        'Return only JSON with this shape: {"files":[{"path":"public/index.html","content":"..."},{"path":"public/styles.css","content":"..."},{"path":"public/app.js","content":"..."}]}.',
+        'Rules:',
+        '- Only include the three public/* files listed above.',
+        '- No markdown fences, no explanations, no extra keys.',
+        '- Use plain HTML, CSS, and browser JavaScript only.',
+        '- Do not use frameworks, build tools, npm dependencies, images, or remote assets.',
+        '- Make it responsive and visually intentional.',
+        '- The page should feel complete, not like a placeholder.',
+        '- Keep JavaScript small and focused on progressive enhancement.',
+        `App name: ${appName}`,
+        `App slug: ${slug}`,
+        `Public host: ${publicHost}`,
+        `Kubernetes namespace: ${namespace}`,
+        `User request: ${sourcePrompt || 'Create a polished web app.'}`,
+    ].join('\n');
+}
+
+function normalizeGeneratedManagedAppSourceFiles(files = []) {
+    const entries = Array.isArray(files) ? files : [];
+    const allowedPaths = new Set(DEFAULT_SOURCE_FILE_PATHS);
+
+    return entries
+        .filter((entry) => entry && typeof entry === 'object')
+        .map((entry) => ({
+            path: normalizeText(entry.path),
+            content: String(entry.content || ''),
+        }))
+        .filter((entry) => allowedPaths.has(entry.path) && entry.content.trim());
 }
 
 module.exports = {
     buildDefaultScaffoldFiles,
+    buildDefaultManagedAppSourceFiles,
+    buildManagedAppAuthoringPrompt,
+    buildManagedAppInfrastructureFiles,
+    normalizeGeneratedManagedAppSourceFiles,
 };

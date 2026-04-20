@@ -18,8 +18,6 @@ const {
 } = require('../../agent-notes');
 const { resolvePreferredWritableFile } = require('../../runtime-state-paths');
 
-const OPENCODE_OPAQUE_ENV_KEYS = ['GITHUB_TOKEN', 'GH_TOKEN'];
-
 function normalizeManagedAppDeployTarget(value = '') {
   const normalized = String(value || '').trim().toLowerCase();
   if (['ssh', 'remote', 'remote-ssh', 'remote_ssh'].includes(normalized)) {
@@ -140,16 +138,6 @@ class SettingsController {
           defaultContainerPort: config.managedApps.defaultContainerPort || 80,
           registryPullSecretName: config.managedApps.registryPullSecretName || 'gitea-registry-credentials',
           webhookEndpointPath: config.managedApps.webhookEndpointPath || '/api/integrations/gitea/build-events',
-        },
-        opencode: {
-          enabled: config.opencode.enabled !== false,
-          binaryPath: config.opencode.binaryPath || 'opencode',
-          defaultAgent: config.opencode.defaultAgent || 'build',
-          defaultModel: config.opencode.defaultModel || '',
-          allowedWorkspaceRoots: [...(config.opencode.allowedWorkspaceRoots || [])],
-          remoteDefaultWorkspace: config.opencode.remoteDefaultWorkspace || '',
-          providerEnvAllowlist: [...(config.opencode.providerEnvAllowlist || [])],
-          remoteAutoInstall: config.opencode.remoteAutoInstall === true,
         }
       }
     };
@@ -186,6 +174,9 @@ class SettingsController {
 
       // Deep merge settings
       this.settings = this.deepMerge(this.settings, normalizedUpdates);
+      if (this.settings?.integrations?.opencode) {
+        delete this.settings.integrations.opencode;
+      }
 
       // Save to file (optional persistence)
       await this.saveSettings();
@@ -307,6 +298,9 @@ class SettingsController {
       const settingsPath = this.getSettingsPath();
       const data = await fs.readFile(settingsPath, 'utf8');
       this.settings = this.deepMerge(this.getDefaultSettings(), JSON.parse(data));
+      if (this.settings?.integrations?.opencode) {
+        delete this.settings.integrations.opencode;
+      }
     } catch (error) {
       // Use defaults if file doesn't exist
       if (process.env.NODE_ENV !== 'test') {
@@ -317,6 +311,9 @@ class SettingsController {
 
   normalizeIncomingSettings(updates = {}) {
     const normalized = JSON.parse(JSON.stringify(updates || {}));
+    if (normalized.integrations?.opencode) {
+      delete normalized.integrations.opencode;
+    }
     const personalityUpdate = normalized.personality;
 
     if (personalityUpdate && typeof personalityUpdate === 'object') {
@@ -433,7 +430,6 @@ class SettingsController {
     const deployUpdate = normalized.integrations?.deploy;
     const giteaUpdate = normalized.integrations?.gitea;
     const managedAppsUpdate = normalized.integrations?.managedApps;
-    const opencodeUpdate = normalized.integrations?.opencode;
     if (deployUpdate) {
       const currentDeploy = this.settings?.integrations?.deploy || {};
       const nextDeploy = {
@@ -542,49 +538,6 @@ class SettingsController {
       };
     }
 
-    if (opencodeUpdate) {
-      const currentOpencode = this.settings?.integrations?.opencode || {};
-      const nextOpencode = {
-        ...opencodeUpdate,
-      };
-
-      if (nextOpencode.enabled !== undefined) {
-        nextOpencode.enabled = Boolean(nextOpencode.enabled);
-      }
-      if (nextOpencode.remoteAutoInstall !== undefined) {
-        nextOpencode.remoteAutoInstall = Boolean(nextOpencode.remoteAutoInstall);
-      }
-      if (nextOpencode.binaryPath !== undefined) {
-        nextOpencode.binaryPath = String(nextOpencode.binaryPath || '').trim() || currentOpencode.binaryPath || 'opencode';
-      }
-      if (nextOpencode.defaultAgent !== undefined) {
-        nextOpencode.defaultAgent = String(nextOpencode.defaultAgent || '').trim().toLowerCase() || currentOpencode.defaultAgent || 'build';
-      }
-      if (nextOpencode.defaultModel !== undefined) {
-        nextOpencode.defaultModel = String(nextOpencode.defaultModel || '').trim();
-      }
-      if (nextOpencode.remoteDefaultWorkspace !== undefined) {
-        nextOpencode.remoteDefaultWorkspace = String(nextOpencode.remoteDefaultWorkspace || '').trim();
-      }
-      if (nextOpencode.allowedWorkspaceRoots !== undefined) {
-        nextOpencode.allowedWorkspaceRoots = this.normalizeStringArray(
-          nextOpencode.allowedWorkspaceRoots,
-          currentOpencode.allowedWorkspaceRoots || [],
-        );
-      }
-      if (nextOpencode.providerEnvAllowlist !== undefined) {
-        nextOpencode.providerEnvAllowlist = this.normalizeStringArray(
-          nextOpencode.providerEnvAllowlist,
-          currentOpencode.providerEnvAllowlist || [],
-        );
-      }
-
-      normalized.integrations = {
-        ...(normalized.integrations || {}),
-        opencode: nextOpencode,
-      };
-    }
-
     return normalized;
   }
 
@@ -608,10 +561,6 @@ class SettingsController {
       ssh.username = effective.username || '';
     }
 
-    if (publicSettings.integrations?.opencode) {
-      publicSettings.integrations.opencode = this.getEffectiveOpencodeConfig();
-    }
-
     if (publicSettings.integrations?.deploy) {
       publicSettings.integrations.deploy = this.getEffectiveDeployConfig();
     }
@@ -626,6 +575,9 @@ class SettingsController {
 
     if (publicSettings.security) {
       publicSettings.security.requireAuth = authEnabled;
+    }
+    if (publicSettings.integrations?.opencode) {
+      delete publicSettings.integrations.opencode;
     }
 
     return publicSettings;
@@ -701,30 +653,15 @@ class SettingsController {
   }
 
   getEffectiveOpencodeConfig() {
-    const stored = this.settings?.integrations?.opencode || {};
-    const providerEnvAllowlist = this.normalizeStringArray(
-      stored.providerEnvAllowlist,
-      config.opencode.providerEnvAllowlist || [],
-    );
-
-    for (const key of OPENCODE_OPAQUE_ENV_KEYS) {
-      if (!providerEnvAllowlist.includes(key)) {
-        providerEnvAllowlist.push(key);
-      }
-    }
-
     return {
-      enabled: stored.enabled !== false && config.opencode.enabled !== false,
-      binaryPath: String(stored.binaryPath || config.opencode.binaryPath || 'opencode').trim() || 'opencode',
-      defaultAgent: String(stored.defaultAgent || config.opencode.defaultAgent || 'build').trim().toLowerCase() || 'build',
-      defaultModel: String(stored.defaultModel || config.opencode.defaultModel || '').trim(),
-      allowedWorkspaceRoots: this.normalizeStringArray(
-        stored.allowedWorkspaceRoots,
-        config.opencode.allowedWorkspaceRoots || [],
-      ),
-      remoteDefaultWorkspace: String(stored.remoteDefaultWorkspace || config.opencode.remoteDefaultWorkspace || '').trim(),
-      providerEnvAllowlist,
-      remoteAutoInstall: stored.remoteAutoInstall === true || config.opencode.remoteAutoInstall === true,
+      enabled: false,
+      binaryPath: '',
+      defaultAgent: '',
+      defaultModel: '',
+      allowedWorkspaceRoots: [],
+      remoteDefaultWorkspace: '',
+      providerEnvAllowlist: [],
+      remoteAutoInstall: false,
     };
   }
 
@@ -904,16 +841,6 @@ class SettingsController {
           defaultContainerPort: config.managedApps.defaultContainerPort || 80,
           registryPullSecretName: config.managedApps.registryPullSecretName || 'gitea-registry-credentials',
           webhookEndpointPath: config.managedApps.webhookEndpointPath || '/api/integrations/gitea/build-events',
-        },
-        opencode: {
-          enabled: config.opencode.enabled !== false,
-          binaryPath: config.opencode.binaryPath || 'opencode',
-          defaultAgent: config.opencode.defaultAgent || 'build',
-          defaultModel: config.opencode.defaultModel || '',
-          allowedWorkspaceRoots: [...(config.opencode.allowedWorkspaceRoots || [])],
-          remoteDefaultWorkspace: config.opencode.remoteDefaultWorkspace || '',
-          providerEnvAllowlist: [...(config.opencode.providerEnvAllowlist || [])],
-          remoteAutoInstall: config.opencode.remoteAutoInstall === true,
         }
       }
     };

@@ -517,20 +517,6 @@ class ApiClient {
     }
 
     /**
-     * Get managed OpenCode runtime status and gateway catalog details
-     */
-    async getOpenCodeRuntime() {
-        return this.get('/api/admin/opencode/runtime');
-    }
-
-    /**
-     * Bootstrap a managed OpenCode runtime for the requested target/workspace
-     */
-    async bootstrapOpenCodeRuntime(payload = {}) {
-        return this.post('/api/admin/opencode/bootstrap', payload);
-    }
-    
-    /**
      * Get settings
      */
     async getSettings() {

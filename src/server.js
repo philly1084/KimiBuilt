@@ -36,7 +36,6 @@ const authRouter = require('./routes/auth');
 const toolsRouter = require('./routes/tools');
 const workloadsRouter = require('./routes/workloads');
 const managedAppsRouter = require('./routes/managed-apps');
-const opencodeRouter = require('./routes/opencode');
 const giteaIntegrationsRouter = require('./routes/integrations-gitea');
 const providerSessionsRouter = require('./routes/provider-sessions');
 const DashboardController = require('./routes/admin/dashboard.controller');
@@ -47,7 +46,6 @@ const { ConversationOrchestrator } = require('./conversation-orchestrator');
 const { ConversationRunService } = require('./conversation-run-service');
 const { AgentWorkloadService } = require('./workloads/service');
 const { AgentWorkloadRunner } = require('./workloads/runner');
-const { OpenCodeService } = require('./opencode/service');
 const { ManagedAppService } = require('./managed-apps/service');
 const { ProviderSessionService } = require('./provider-session-service');
 const { TemplateStore } = require('./template-store');
@@ -253,9 +251,6 @@ app.use('/admin', providerSessionsRouter);
 app.use('/api/tools', toolsRouter);
 app.use('/api', workloadsRouter);
 app.use('/api', managedAppsRouter);
-if (config.opencode.enabled !== false) {
-    app.use('/api', opencodeRouter);
-}
 
 app.use(express.static(path.join(__dirname, '../frontend'), buildFrontendStaticOptions()));
 
@@ -268,7 +263,6 @@ app.use(errorHandler);
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 setupWebSocket(wss, app);
-app.locals.opencodeService = null;
 
 async function start() {
     try {
@@ -363,13 +357,6 @@ async function start() {
         console.log('[Boot] Conversation orchestrator ready');
 
         app.locals.conversationOrchestrator = conversationOrchestrator;
-        if (config.opencode.enabled !== false) {
-            app.locals.opencodeService = new OpenCodeService({
-                sessionStore,
-            });
-        } else {
-            console.log('[Boot] OpenCode runtime disabled');
-        }
         app.locals.providerSessionService = new ProviderSessionService();
         app.locals.conversationRunService = new ConversationRunService({
             app,

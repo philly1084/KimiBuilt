@@ -4,7 +4,6 @@ const express = require('express');
 const request = require('supertest');
 
 const adminRouter = require('./index');
-const { config } = require('../../config');
 
 describe('/api/admin workload routes', () => {
     function buildApp(service, opencodeService = null) {
@@ -96,93 +95,4 @@ describe('/api/admin workload routes', () => {
         expect(response.body.success).toBe(true);
     });
 
-    test('returns OpenCode runtime details for the admin dashboard', async () => {
-        const opencodeService = {
-            getAdminRuntimeDetails: jest.fn(async () => ({
-                runtime: {
-                    enabled: true,
-                    defaultAgent: 'build',
-                    defaultModel: 'gpt-4o',
-                },
-                gateway: {
-                    baseURL: 'https://kimibuilt.example.com/v1',
-                    localBaseURL: 'http://127.0.0.1:3000/v1',
-                    authEnabled: true,
-                    authMode: 'explicit',
-                    remoteReachable: true,
-                    remoteReachabilityError: null,
-                },
-                models: [
-                    {
-                        id: 'gpt-4o',
-                        name: 'gpt-4o',
-                        provider: 'openai',
-                        isDefault: true,
-                        isSmallModel: false,
-                    },
-                ],
-            })),
-        };
-        const app = buildApp({
-            isAvailable: jest.fn(() => true),
-        }, opencodeService);
-
-        const response = await request(app).get('/api/admin/opencode/runtime');
-
-        expect(response.status).toBe(200);
-        expect(opencodeService.getAdminRuntimeDetails).toHaveBeenCalledTimes(1);
-        expect(response.body.success).toBe(true);
-        expect(response.body.data.gateway.baseURL).toBe('https://kimibuilt.example.com/v1');
-        expect(response.body.data.models[0].id).toBe('gpt-4o');
-    });
-
-    test('bootstraps the OpenCode runtime from the admin dashboard', async () => {
-        const opencodeService = {
-            bootstrapRuntime: jest.fn(async () => ({
-                status: 'ready',
-                target: 'remote-default',
-                workspacePath: '/var/www/test.demoserver2.buzz',
-                message: 'Remote OpenCode is ready for /var/www/test.demoserver2.buzz.',
-            })),
-        };
-        const app = buildApp({
-            isAvailable: jest.fn(() => true),
-        }, opencodeService);
-
-        const response = await request(app)
-            .post('/api/admin/opencode/bootstrap')
-            .send({
-                target: 'remote-default',
-                workspacePath: '/var/www/test.demoserver2.buzz',
-            });
-
-        expect(response.status).toBe(200);
-        expect(opencodeService.bootstrapRuntime).toHaveBeenCalledWith({
-            target: 'remote-default',
-            workspacePath: '/var/www/test.demoserver2.buzz',
-        });
-        expect(response.body.success).toBe(true);
-        expect(response.body.data.status).toBe('ready');
-    });
-
-    test('returns 404 for OpenCode admin routes when OpenCode is disabled', async () => {
-        const originalEnabled = config.opencode.enabled;
-        config.opencode.enabled = false;
-
-        try {
-            const app = buildApp({
-                isAvailable: jest.fn(() => true),
-            });
-
-            const response = await request(app).get('/api/admin/opencode/runtime');
-
-            expect(response.status).toBe(404);
-            expect(response.body).toEqual({
-                success: false,
-                error: 'OpenCode is disabled',
-            });
-        } finally {
-            config.opencode.enabled = originalEnabled;
-        }
-    });
 });

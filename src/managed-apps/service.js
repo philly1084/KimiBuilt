@@ -5,10 +5,17 @@ const { config } = require('../config');
 const settingsController = require('../routes/admin/settings.controller');
 const { clusterStateRegistry } = require('../cluster-state-registry');
 const { broadcastToAdmins, broadcastToSession } = require('../realtime-hub');
+const { createResponse } = require('../openai-client');
+const { extractResponseText } = require('../artifacts/artifact-service');
+const { parseLenientJson } = require('../utils/lenient-json');
 const { managedAppStore } = require('./store');
 const { GiteaClient } = require('./gitea-client');
 const { KubernetesClient } = require('./kubernetes-client');
-const { buildDefaultScaffoldFiles } = require('./scaffold');
+const {
+    buildDefaultScaffoldFiles,
+    buildManagedAppAuthoringPrompt,
+    normalizeGeneratedManagedAppSourceFiles,
+} = require('./scaffold');
 
 function normalizeText(value = '') {
     return String(value || '').trim();
@@ -152,6 +159,46 @@ function normalizeFilesInput(files = []) {
             path: normalizeText(entry.path),
             content: String(entry.content || ''),
         }));
+}
+
+function createManagedAppLlmClient() {
+    return {
+        complete: async (prompt, options = {}) => {
+            const response = await createResponse({
+                input: prompt,
+                stream: false,
+                model: options.model || null,
+                reasoningEffort: options.reasoningEffort || null,
+            });
+            return extractResponseText(response);
+        },
+    };
+}
+
+function mergeRepositoryFiles(baseFiles = [], overrideFiles = []) {
+    const merged = new Map();
+
+    (Array.isArray(baseFiles) ? baseFiles : []).forEach((entry) => {
+        if (!entry || typeof entry !== 'object' || !normalizeText(entry.path)) {
+            return;
+        }
+        merged.set(normalizeText(entry.path), {
+            path: normalizeText(entry.path),
+            content: String(entry.content || ''),
+        });
+    });
+
+    (Array.isArray(overrideFiles) ? overrideFiles : []).forEach((entry) => {
+        if (!entry || typeof entry !== 'object' || !normalizeText(entry.path)) {
+            return;
+        }
+        merged.set(normalizeText(entry.path), {
+            path: normalizeText(entry.path),
+            content: String(entry.content || ''),
+        });
+    });
+
+    return Array.from(merged.values()).sort((left, right) => left.path.localeCompare(right.path));
 }
 
 function buildImageTagFromCommit(commitSha = '') {
@@ -417,6 +464,7 @@ class ManagedAppService {
         this.store = options.store || managedAppStore;
         this.giteaClient = options.giteaClient || new GiteaClient();
         this.kubernetesClient = options.kubernetesClient || new KubernetesClient();
+        this.llmClient = options.llmClient || createManagedAppLlmClient();
     }
 
     isAvailable() {
@@ -746,13 +794,8 @@ class ManagedAppService {
         };
     }
 
-    buildRepositoryFiles(app = {}, input = {}) {
-        const files = normalizeFilesInput(input.files);
-        if (files.length > 0) {
-            return files;
-        }
-
-        return buildDefaultScaffoldFiles({
+    async buildRepositoryFiles(app = {}, input = {}, context = {}) {
+        const baseFiles = buildDefaultScaffoldFiles({
             appName: app.appName,
             slug: app.slug,
             publicHost: app.publicHost,
@@ -763,6 +806,41 @@ class ManagedAppService {
             registryHost: this.getEffectiveGiteaConfig().registryHost,
             buildEventsUrl: this.buildBuildEventsUrl(),
         });
+        const explicitFiles = normalizeFilesInput(input.files);
+        if (explicitFiles.length > 0) {
+            return mergeRepositoryFiles(baseFiles, explicitFiles);
+        }
+
+        const sourcePrompt = normalizeText(input.sourcePrompt || input.prompt || app.sourcePrompt);
+        if (!sourcePrompt || !this.llmClient || typeof this.llmClient.complete !== 'function') {
+            return baseFiles;
+        }
+
+        try {
+            const completion = await this.llmClient.complete(
+                buildManagedAppAuthoringPrompt({
+                    appName: app.appName,
+                    slug: app.slug,
+                    publicHost: app.publicHost,
+                    namespace: app.namespace,
+                    sourcePrompt,
+                }),
+                {
+                    model: context.model || '',
+                    reasoningEffort: 'medium',
+                },
+            );
+            const parsed = parseLenientJson(String(completion || '').trim());
+            const generatedFiles = normalizeGeneratedManagedAppSourceFiles(parsed?.files || parsed);
+            if (generatedFiles.length === 0) {
+                return baseFiles;
+            }
+
+            return mergeRepositoryFiles(baseFiles, generatedFiles);
+        } catch (error) {
+            console.warn(`[ManagedApp] Falling back to the default scaffold for ${app.slug || 'managed-app'}: ${error.message}`);
+            return baseFiles;
+        }
     }
 
     async ensurePersistedApp(app = null, blueprint = {}, ownerId = null) {
@@ -863,7 +941,7 @@ class ManagedAppService {
                 owner: effectiveRepoOwner,
                 repo: effectiveRepoName,
                 branch: persistedApp.defaultBranch,
-                files: this.buildRepositoryFiles(persistedApp, input),
+                files: await this.buildRepositoryFiles(persistedApp, input, context),
                 commitMessagePrefix: existing ? 'Update managed app' : 'Seed managed app',
             });
             commitSha = seedResult.commitSha;

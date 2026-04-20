@@ -262,6 +262,131 @@ describe('ManagedAppService', () => {
         }));
     });
 
+    test('generates app source files from the managed-app prompt before seeding the repo', async () => {
+        const store = {
+            ensureAvailable: jest.fn(async () => {}),
+            isAvailable: jest.fn(() => true),
+            getAppBySlug: jest.fn(async () => null),
+            getAppByRepo: jest.fn(async () => null),
+            createApp: jest.fn(async (input) => ({
+                id: 'app-llm-1',
+                ownerId: 'user-1',
+                sessionId: 'session-1',
+                ...input,
+            })),
+            updateApp: jest.fn(async (_id, _ownerId, updates) => ({
+                id: 'app-llm-1',
+                ownerId: 'user-1',
+                sessionId: 'session-1',
+                slug: 'launch-site',
+                appName: 'Launch Site',
+                repoOwner: 'agent-apps',
+                repoName: 'launch-site',
+                repoUrl: 'https://gitea.demoserver2.buzz/agent-apps/launch-site.git',
+                repoCloneUrl: 'https://gitea.demoserver2.buzz/agent-apps/launch-site.git',
+                repoSshUrl: 'ssh://git@gitea.demoserver2.buzz/agent-apps/launch-site.git',
+                defaultBranch: 'main',
+                imageRepo: 'gitea.demoserver2.buzz/agent-apps/launch-site',
+                namespace: 'app-launch-site',
+                publicHost: 'launch-site.demoserver2.buzz',
+                sourcePrompt: 'Create and deploy a launch page.',
+                metadata: {},
+                ...updates,
+            })),
+            createBuildRun: jest.fn(async () => ({
+                id: 'run-llm-1',
+                buildStatus: 'queued',
+                deployStatus: 'not_requested',
+                verificationStatus: 'pending',
+                imageTag: 'sha-abcdef123456',
+            })),
+        };
+        const giteaClient = {
+            isConfigured: jest.fn(() => true),
+            ensureOrganization: jest.fn(async () => ({ created: false })),
+            ensureRepository: jest.fn(async () => ({
+                repository: {
+                    html_url: 'https://gitea.demoserver2.buzz/agent-apps/launch-site',
+                    clone_url: 'https://gitea.demoserver2.buzz/agent-apps/launch-site.git',
+                    ssh_url: 'ssh://git@gitea.demoserver2.buzz/agent-apps/launch-site.git',
+                },
+            })),
+            upsertFiles: jest.fn(async () => ({
+                commitSha: 'abcdef1234567890',
+                committedPaths: ['public/index.html', 'public/styles.css', 'public/app.js'],
+            })),
+        };
+        const llmClient = {
+            complete: jest.fn(async () => JSON.stringify({
+                files: [
+                    {
+                        path: 'public/index.html',
+                        content: '<!DOCTYPE html><html><body><main><h1>Launch Site</h1></main><script src="./app.js"></script></body></html>',
+                    },
+                    {
+                        path: 'public/styles.css',
+                        content: 'body{margin:0;background:#111;color:#fff;}main{padding:48px;}',
+                    },
+                    {
+                        path: 'public/app.js',
+                        content: 'document.body.dataset.ready = "true";',
+                    },
+                ],
+            })),
+        };
+        const service = new ManagedAppService({
+            store,
+            giteaClient,
+            kubernetesClient: {
+                isConfigured: () => true,
+            },
+            llmClient,
+        });
+
+        service.getEffectiveGiteaConfig = () => ({
+            baseURL: 'https://gitea.demoserver2.buzz',
+            org: 'agent-apps',
+            registryHost: 'gitea.demoserver2.buzz',
+        });
+        service.getEffectiveManagedAppsConfig = () => ({
+            appBaseDomain: 'demoserver2.buzz',
+            namespacePrefix: 'app-',
+            defaultBranch: 'main',
+            defaultContainerPort: 80,
+        });
+        service.buildBuildEventsUrl = () => 'https://kimibuilt.demoserver2.buzz/api/integrations/gitea/build-events';
+
+        await service.createApp({
+            prompt: 'Create and deploy a managed app called launch-site with a sharp launch page and a CTA.',
+        }, 'user-1', {
+            sessionId: 'session-1',
+            model: 'gpt-5.4-mini',
+        });
+
+        expect(llmClient.complete).toHaveBeenCalledTimes(1);
+        expect(giteaClient.upsertFiles).toHaveBeenCalledWith(expect.objectContaining({
+            owner: 'agent-apps',
+            repo: 'launch-site',
+            files: expect.arrayContaining([
+                expect.objectContaining({
+                    path: 'public/index.html',
+                    content: expect.stringContaining('<h1>Launch Site</h1>'),
+                }),
+                expect.objectContaining({
+                    path: 'public/styles.css',
+                    content: expect.stringContaining('background:#111'),
+                }),
+                expect.objectContaining({
+                    path: 'public/app.js',
+                    content: 'document.body.dataset.ready = "true";',
+                }),
+                expect.objectContaining({
+                    path: '.gitea/workflows/build-and-publish.yml',
+                }),
+            ]),
+        }));
+    });
+
     test('recovers the persisted app from the store before creating the build run', async () => {
         const store = {
             ensureAvailable: jest.fn(async () => {}),

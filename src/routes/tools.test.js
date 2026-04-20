@@ -6,7 +6,7 @@ const request = require('supertest');
 const toolsRouter = require('./tools');
 
 describe('/api/tools routes', () => {
-    function buildApp(opencodeServiceOverrides = {}) {
+    function buildApp() {
         const app = express();
         app.use(express.json());
         app.locals.managedAppService = {
@@ -14,21 +14,6 @@ describe('/api/tools routes', () => {
             kubernetesClient: {
                 isConfigured: jest.fn(() => true),
             },
-        };
-        app.locals.opencodeService = {
-            getExecutionCapabilities: jest.fn(() => ({
-                anyReady: false,
-                localReady: false,
-                remoteReady: false,
-            })),
-            createRun: jest.fn(),
-            runTool: jest.fn(async () => ({
-                async: false,
-                runId: 'run-1',
-                status: 'completed',
-                summary: 'Build fixed.',
-            })),
-            ...opencodeServiceOverrides,
         };
         app.use('/api/tools', toolsRouter);
         return app;
@@ -53,45 +38,6 @@ describe('/api/tools routes', () => {
         expect(response.status).toBe(200);
         expect(response.body.meta.includeAllTools).toBe(false);
         expect(response.body.data.map((tool) => tool.id)).not.toContain('managed-app');
-    });
-
-    test('tool invoke forwards the selected frontend model to opencode-run', async () => {
-        const runTool = jest.fn(async () => ({
-            async: false,
-            runId: 'run-opencode-1',
-            status: 'completed',
-            summary: 'Build fixed.',
-        }));
-        const app = buildApp({
-            runTool,
-        });
-
-        const response = await request(app)
-            .post('/api/tools/invoke')
-            .send({
-                tool: 'opencode-run',
-                model: 'gpt-5.4-mini',
-                params: {
-                    prompt: 'Fix the build in this repo.',
-                    workspacePath: 'C:/Users/phill/KimiBuilt',
-                    target: 'local',
-                },
-                taskType: 'chat',
-                clientSurface: 'web-chat',
-            });
-
-        expect(response.status).toBe(200);
-        expect(runTool).toHaveBeenCalledWith(
-            expect.objectContaining({
-                prompt: 'Fix the build in this repo.',
-                workspacePath: 'C:/Users/phill/KimiBuilt',
-                target: 'local',
-                model: 'gpt-5.4-mini',
-            }),
-            expect.objectContaining({
-                sessionId: expect.any(String),
-            }),
-        );
     });
 
     test('managed-app tool details report the remote ssh provider', async () => {

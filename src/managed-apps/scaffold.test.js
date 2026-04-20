@@ -1,6 +1,9 @@
 'use strict';
 
-const { buildDefaultScaffoldFiles } = require('./scaffold');
+const {
+    buildDefaultScaffoldFiles,
+    normalizeGeneratedManagedAppSourceFiles,
+} = require('./scaffold');
 
 describe('managed app scaffold', () => {
     test('generates a BuildKit-based Gitea workflow for the external control plane', () => {
@@ -30,5 +33,41 @@ describe('managed app scaffold', () => {
         expect(workflow.content).toContain('"imageRepo":"$IMAGE_REPO"');
         expect(workflow.content).toContain('"platforms":"$TARGET_PLATFORMS"');
         expect(workflow.content).not.toContain('secrets.GITEA_REGISTRY_USERNAME');
+    });
+
+    test('normalizes generated source files down to the supported public bundle', () => {
+        const files = normalizeGeneratedManagedAppSourceFiles([
+            {
+                path: 'public/index.html',
+                content: '<!DOCTYPE html><html><body>Hello</body></html>',
+            },
+            {
+                path: 'public/styles.css',
+                content: 'body{margin:0;}',
+            },
+            {
+                path: 'README.md',
+                content: '# ignored',
+            },
+            {
+                path: 'public/app.js',
+                content: 'console.log("ok");',
+            },
+        ]);
+
+        expect(files).toEqual([
+            {
+                path: 'public/index.html',
+                content: '<!DOCTYPE html><html><body>Hello</body></html>',
+            },
+            {
+                path: 'public/styles.css',
+                content: 'body{margin:0;}',
+            },
+            {
+                path: 'public/app.js',
+                content: 'console.log("ok");',
+            },
+        ]);
     });
 });

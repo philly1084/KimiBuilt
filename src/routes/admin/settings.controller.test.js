@@ -51,16 +51,6 @@ jest.mock('../../config', () => ({
       registryPullSecretName: 'gitea-registry-credentials',
       webhookEndpointPath: '/api/integrations/gitea/build-events',
     },
-    opencode: {
-      enabled: true,
-      binaryPath: 'opencode',
-      defaultAgent: 'build',
-      defaultModel: 'gpt-4o',
-      allowedWorkspaceRoots: ['C:/Users/phill/KimiBuilt'],
-      remoteDefaultWorkspace: '/srv/apps/kimibuilt',
-      providerEnvAllowlist: ['OPENAI_API_KEY', 'OPENAI_BASE_URL'],
-      remoteAutoInstall: false,
-    },
   },
 }));
 
@@ -218,29 +208,6 @@ describe('settings.controller personality support', () => {
       filePath: 'agent-notes.md',
     }));
     expect(publicSettings.integrations.ssh.password).toBeUndefined();
-  });
-
-  test('prefers stored OpenCode settings over config defaults where appropriate', () => {
-    controller.settings.integrations.opencode.binaryPath = '/custom/opencode';
-    controller.settings.integrations.opencode.defaultAgent = 'plan';
-
-    const effective = controller.getEffectiveOpencodeConfig();
-
-    expect(effective.binaryPath).toBe('/custom/opencode');
-    expect(effective.defaultAgent).toBe('plan');
-    expect(effective.gatewayBaseURL).toBeUndefined();
-  });
-
-  test('keeps opaque GitHub token env names in the effective OpenCode config', () => {
-    controller.settings.integrations.opencode.providerEnvAllowlist = ['OPENAI_API_KEY'];
-
-    const effective = controller.getEffectiveOpencodeConfig();
-
-    expect(effective.providerEnvAllowlist).toEqual(expect.arrayContaining([
-      'OPENAI_API_KEY',
-      'GITHUB_TOKEN',
-      'GH_TOKEN',
-    ]));
   });
 
   test('prefers stored deploy defaults over config defaults and exposes them publicly', () => {

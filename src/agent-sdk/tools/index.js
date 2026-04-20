@@ -527,15 +527,6 @@ function resolveDocumentService(context = {}) {
   return service;
 }
 
-function resolveOpenCodeService(context = {}) {
-  const service = context?.opencodeService || null;
-  if (!service?.runTool || !service?.createRun) {
-    throw new Error('OpenCode runtime is unavailable because the service is not initialized.');
-  }
-
-  return service;
-}
-
 function resolvePodcastService(context = {}) {
   const service = context?.podcastService || podcastService;
   if (!service?.createPodcast) {
@@ -3318,75 +3309,6 @@ class ToolManager {
       },
     ];
 
-    const opencodeTools = [
-      {
-        id: 'opencode-run',
-        name: 'OpenCode Run',
-        category: 'system',
-        description: 'Run long-form repository work through the managed OpenCode runtime using the configured KimiBuilt OpenAI-compatible gateway and model catalog.',
-        backend: {
-          handler: async (params = {}, context = {}) => {
-            const service = resolveOpenCodeService(context);
-            const requestedModel = String(params?.model || context?.model || '').trim();
-            const effectiveParams = requestedModel && !String(params?.model || '').trim()
-              ? {
-                ...params,
-                model: requestedModel,
-              }
-              : params;
-            return service.runTool(effectiveParams, {
-              ownerId: context?.ownerId || context?.userId || null,
-              userId: context?.userId || context?.ownerId || null,
-              sessionId: params.sessionId || context?.sessionId || null,
-            });
-          },
-          sideEffects: ['write', 'execute'],
-          timeout: 30000,
-        },
-        inputSchema: {
-          type: 'object',
-          required: ['prompt'],
-          properties: {
-            prompt: { type: 'string' },
-            message: { type: 'string' },
-            workspacePath: { type: 'string' },
-            target: {
-              type: 'string',
-              enum: ['local', 'remote-default'],
-            },
-            sessionId: { type: 'string' },
-            opencodeSessionId: { type: 'string' },
-            agent: { type: 'string' },
-            model: { type: 'string' },
-            async: { type: 'boolean' },
-            approvalMode: {
-              type: 'string',
-              enum: ['manual', 'auto'],
-            },
-            metadata: { type: 'object' },
-          },
-          additionalProperties: false,
-        },
-        skill: {
-          triggerPatterns: [
-            'use opencode',
-            'run opencode',
-            'implement in this repo',
-            'fix this repo',
-            'refactor this codebase',
-            'build this project',
-            'test this repo',
-            'long form repo work',
-          ],
-          requiresConfirmation: false,
-        },
-        frontend: {
-          exposeToFrontend: true,
-          icon: 'wrench',
-        },
-      },
-    ];
-
     const interactionTools = [
       {
         id: USER_CHECKPOINT_TOOL_ID,
@@ -3567,11 +3489,7 @@ class ToolManager {
     ];
 
     // Register all system tools
-    const enabledOpencodeTools = config.opencode?.enabled === false
-      ? []
-      : opencodeTools;
-
-    [...fileTools, ...codeTools, ...docsTools, ...mediaTools, ...workloadTools, ...enabledOpencodeTools, ...interactionTools].forEach(def => {
+    [...fileTools, ...codeTools, ...docsTools, ...mediaTools, ...workloadTools, ...interactionTools].forEach(def => {
       this.registry.register({
         ...def,
         version: '1.0.0',

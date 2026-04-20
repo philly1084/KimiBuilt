@@ -24,7 +24,6 @@ class Dashboard {
             selectedRun: null,
             editingWorkloadId: null,
             settings: {},
-            opencodeRuntime: null,
             tokenAnalysis: null,
             stats: {
                 totalTasks: 0,
@@ -295,19 +294,6 @@ class Dashboard {
             this.testConnection();
         });
 
-        document.getElementById('refreshOpenCodeRuntimeBtn')?.addEventListener('click', () => {
-            this.loadOpenCodeRuntime();
-        });
-
-        document.getElementById('opencodeSettingsForm')?.addEventListener('submit', (e) => {
-            e.preventDefault();
-            this.saveOpenCodeSettings();
-        });
-
-        document.getElementById('bootstrapOpenCodeRemoteBtn')?.addEventListener('click', () => {
-            this.bootstrapRemoteOpenCode();
-        });
-        
         // API key visibility toggles
         document.getElementById('showApiKey')?.addEventListener('click', () => {
             this.togglePasswordVisibility('apiKey');
@@ -705,9 +691,8 @@ class Dashboard {
      */
     async loadSettings() {
         try {
-            const [settingsResponse, opencodeResponse] = await Promise.allSettled([
+            const [settingsResponse] = await Promise.allSettled([
                 apiClient.get('/api/admin/settings'),
-                apiClient.getOpenCodeRuntime(),
             ]);
 
             if (settingsResponse.status === 'fulfilled') {
@@ -720,32 +705,11 @@ class Dashboard {
                 throw settingsResponse.reason;
             }
 
-            if (opencodeResponse.status === 'fulfilled') {
-                this.state.opencodeRuntime = this.unwrapApiPayload(opencodeResponse.value, null);
-                this.renderOpenCodeRuntime(this.state.opencodeRuntime);
-            } else {
-                console.error('Error loading OpenCode runtime:', opencodeResponse.reason);
-                this.renderOpenCodeRuntime(null, opencodeResponse.reason);
-            }
         } catch (error) {
             console.error('Error loading settings:', error);
         }
     }
 
-    async loadOpenCodeRuntime() {
-        try {
-            const response = await apiClient.getOpenCodeRuntime();
-            const runtime = this.unwrapApiPayload(response, null);
-            this.state.opencodeRuntime = runtime;
-            this.renderOpenCodeRuntime(runtime);
-            return runtime;
-        } catch (error) {
-            console.error('Error loading OpenCode runtime:', error);
-            this.renderOpenCodeRuntime(null, error);
-            throw error;
-        }
-    }
-    
     /**
      * Setup prompt editor
      */
@@ -3500,7 +3464,6 @@ class Dashboard {
 
             const response = await apiClient.put('/api/admin/settings', settings);
             this.applySettings(this.unwrapApiPayload(response, settings));
-            await this.loadOpenCodeRuntime().catch(() => null);
             this.showToast('API settings saved', 'success');
         } catch (error) {
             console.error('Error saving API settings:', error);
@@ -3545,70 +3508,6 @@ class Dashboard {
 
     joinListForTextarea(values = []) {
         return Array.isArray(values) ? values.join('\n') : '';
-    }
-
-    async saveOpenCodeSettings({ silent = false, refreshRuntime = true } = {}) {
-        try {
-            const settings = {
-                integrations: {
-                    opencode: {
-                        enabled: document.getElementById('opencodeEnabled').value === 'true',
-                        binaryPath: document.getElementById('opencodeBinaryPath').value.trim(),
-                        defaultAgent: document.getElementById('opencodeDefaultAgentInput').value.trim(),
-                        defaultModel: document.getElementById('opencodeDefaultModelInput').value.trim(),
-                        remoteDefaultWorkspace: document.getElementById('opencodeRemoteDefaultWorkspaceInput').value.trim(),
-                        allowedWorkspaceRoots: this.parseDelimitedList(document.getElementById('opencodeAllowedWorkspaceRootsInput').value),
-                        providerEnvAllowlist: this.parseDelimitedList(document.getElementById('opencodeProviderEnvAllowlistInput').value),
-                        remoteAutoInstall: document.getElementById('opencodeRemoteAutoInstallInput').checked,
-                    },
-                },
-            };
-
-            const response = await apiClient.put('/api/admin/settings', settings);
-            this.applySettings(this.unwrapApiPayload(response, settings));
-            if (refreshRuntime) {
-                await this.loadOpenCodeRuntime().catch(() => null);
-            }
-            if (!silent) {
-                this.showToast('OpenCode settings saved', 'success');
-            }
-            return settings;
-        } catch (error) {
-            console.error('Error saving OpenCode settings:', error);
-            if (!silent) {
-                this.showToast('Failed to save OpenCode settings', 'error');
-            }
-            throw error;
-        }
-    }
-
-    async bootstrapRemoteOpenCode() {
-        const summary = document.getElementById('opencodeBootstrapSummary');
-        const workspacePath = document.getElementById('opencodeRemoteDefaultWorkspaceInput')?.value.trim();
-
-        try {
-            if (summary) {
-                summary.textContent = 'Saving OpenCode settings and bootstrapping the remote workspace...';
-            }
-            await this.saveOpenCodeSettings({ silent: true, refreshRuntime: false });
-            const response = await apiClient.bootstrapOpenCodeRuntime({
-                target: 'remote-default',
-                ...(workspacePath ? { workspacePath } : {}),
-                approvalMode: 'manual',
-            });
-            const result = this.unwrapApiPayload(response, {});
-            await this.loadOpenCodeRuntime().catch(() => null);
-            if (summary) {
-                summary.textContent = result.message || `Remote OpenCode is ready for ${result.workspacePath || workspacePath || 'the configured workspace'}.`;
-            }
-            this.showToast(result.message || 'Remote OpenCode bootstrapped successfully', 'success');
-        } catch (error) {
-            console.error('Error bootstrapping remote OpenCode:', error);
-            if (summary) {
-                summary.textContent = error.message || 'Remote OpenCode bootstrap failed.';
-            }
-            this.showToast(error.message || 'Failed to bootstrap remote OpenCode', 'error');
-        }
     }
 
     async resetPersonality() {
@@ -3920,22 +3819,7 @@ class Dashboard {
             sshSummary.textContent = summary;
         }
 
-        const opencode = settings.integrations?.opencode || {};
         const deploy = settings.integrations?.deploy || {};
-        this.setInputValue('opencodeEnabled', opencode.enabled !== false ? 'true' : 'false');
-        this.setInputValue('opencodeBinaryPath', opencode.binaryPath || 'opencode');
-        this.setInputValue('opencodeDefaultAgentInput', opencode.defaultAgent || 'build');
-        this.setInputValue('opencodeDefaultModelInput', opencode.defaultModel || '');
-        this.setInputValue('opencodeRemoteDefaultWorkspaceInput', opencode.remoteDefaultWorkspace || '');
-        this.setInputValue('opencodeAllowedWorkspaceRootsInput', this.joinListForTextarea(opencode.allowedWorkspaceRoots || []));
-        this.setInputValue('opencodeProviderEnvAllowlistInput', this.joinListForTextarea(opencode.providerEnvAllowlist || []));
-        this.setCheckboxValue('opencodeRemoteAutoInstallInput', opencode.remoteAutoInstall === true);
-        const opencodeBootstrapSummary = document.getElementById('opencodeBootstrapSummary');
-        if (opencodeBootstrapSummary) {
-            opencodeBootstrapSummary.textContent = opencode.remoteAutoInstall === true
-                ? 'Remote auto-install is enabled. Bootstrap will install `opencode` on the remote host if it is missing.'
-                : 'Remote auto-install is disabled. Install `opencode` on the remote host manually or enable auto-install before bootstrapping.';
-        }
 
         this.setInputValue('deployRepositoryUrl', deploy.repositoryUrl || '');
         this.setInputValue('deployBranch', deploy.branch || 'master');
@@ -3949,132 +3833,6 @@ class Dashboard {
         this.setInputValue('deployTlsClusterIssuer', deploy.tlsClusterIssuer || 'letsencrypt-prod');
     }
 
-    renderOpenCodeRuntime(runtime = null, error = null) {
-        const enabledBadge = document.getElementById('opencodeEnabledBadge');
-        const authBadge = document.getElementById('opencodeGatewayAuthBadge');
-        const remoteBadge = document.getElementById('opencodeRemoteReachabilityBadge');
-        const activeInstancesBadge = document.getElementById('opencodeActiveInstancesBadge');
-        const runtimeSummary = document.getElementById('opencodeRuntimeSummary');
-        const authSummary = document.getElementById('opencodeGatewayAuthSummary');
-        const remoteSummary = document.getElementById('opencodeRemoteReachabilitySummary');
-        const activeInstancesSummary = document.getElementById('opencodeActiveInstancesSummary');
-        const gatewayUrl = document.getElementById('opencodeGatewayUrl');
-        const localGatewayUrl = document.getElementById('opencodeLocalGatewayUrl');
-        const defaultAgent = document.getElementById('opencodeDefaultAgent');
-        const defaultModel = document.getElementById('opencodeDefaultModel');
-        const workspacePolicy = document.getElementById('opencodeWorkspacePolicy');
-        const modelCatalog = document.getElementById('opencodeModelCatalog');
-
-        if (!enabledBadge || !runtimeSummary || !modelCatalog) {
-            return;
-        }
-
-        if (error || !runtime) {
-            this.setStatusBadge(enabledBadge, 'error', 'unavailable');
-            this.setStatusBadge(authBadge, 'neutral', 'unknown');
-            this.setStatusBadge(remoteBadge, 'neutral', 'unknown');
-            this.setStatusBadge(activeInstancesBadge, 'neutral', '0');
-            runtimeSummary.textContent = error?.message || 'OpenCode runtime details are unavailable.';
-            authSummary.textContent = 'Gateway auth status is unavailable.';
-            remoteSummary.textContent = 'Remote reachability has not been verified.';
-            activeInstancesSummary.textContent = 'No live instance data is available.';
-            if (gatewayUrl) gatewayUrl.textContent = '--';
-            if (localGatewayUrl) localGatewayUrl.textContent = '--';
-            if (defaultAgent) defaultAgent.textContent = '--';
-            if (defaultModel) defaultModel.textContent = '--';
-            if (workspacePolicy) {
-                workspacePolicy.innerHTML = '<p class="empty-state">Workspace policy unavailable.</p>';
-            }
-            modelCatalog.innerHTML = `<p class="empty-state">${this.escapeHtml(error?.message || 'OpenCode runtime details are unavailable.')}</p>`;
-            return;
-        }
-
-        const runtimeMeta = runtime.runtime || {};
-        const gateway = runtime.gateway || {};
-        const defaults = runtime.defaults || {};
-        const models = Array.isArray(runtime.models) ? runtime.models : [];
-        const counts = runtime.counts || {};
-        const allowedRoots = Array.isArray(runtimeMeta.allowedWorkspaceRoots) ? runtimeMeta.allowedWorkspaceRoots : [];
-        const authMode = this.formatOpenCodeAuthMode(gateway.authMode);
-        const activeInstances = Number(counts.activeInstances || runtimeMeta.activeInstances || 0);
-
-        this.setStatusBadge(
-            enabledBadge,
-            runtimeMeta.enabled === false ? 'warning' : 'healthy',
-            runtimeMeta.enabled === false ? 'disabled' : 'enabled',
-        );
-        this.setStatusBadge(
-            authBadge,
-            gateway.authEnabled ? 'healthy' : 'warning',
-            gateway.authEnabled ? authMode : 'disabled',
-        );
-        this.setStatusBadge(
-            remoteBadge,
-            gateway.remoteReachable ? 'healthy' : 'warning',
-            gateway.remoteReachable ? 'ready' : 'blocked',
-        );
-        this.setStatusBadge(
-            activeInstancesBadge,
-            activeInstances > 0 ? 'info' : 'neutral',
-            String(activeInstances),
-        );
-
-        runtimeSummary.textContent = runtimeMeta.enabled === false
-            ? 'Managed OpenCode runs are disabled in settings.'
-            : `${models.length} gateway model${models.length === 1 ? '' : 's'} available with ${activeInstances} active instance${activeInstances === 1 ? '' : 's'}.`;
-        authSummary.textContent = gateway.authEnabled
-            ? `OpenCode authenticates to KimiBuilt /v1 with a ${authMode} gateway bearer token.`
-            : 'No gateway bearer token could be resolved for OpenCode.';
-        remoteSummary.textContent = gateway.remoteReachable
-            ? 'Remote hosts can use the configured KimiBuilt base URL for OpenCode /v1 traffic.'
-            : (gateway.remoteReachabilityError || 'Remote hosts cannot reach the configured KimiBuilt base URL.');
-        activeInstancesSummary.textContent = activeInstances > 0
-            ? `${activeInstances} managed OpenCode instance${activeInstances === 1 ? '' : 's'} currently cached.`
-            : 'No OpenCode instances are active right now.';
-
-        if (gatewayUrl) gatewayUrl.textContent = gateway.baseURL || '--';
-        if (localGatewayUrl) localGatewayUrl.textContent = gateway.localBaseURL || '--';
-        if (defaultAgent) defaultAgent.textContent = defaults.agent || runtimeMeta.defaultAgent || '--';
-        if (defaultModel) defaultModel.textContent = defaults.model || runtimeMeta.defaultModel || '--';
-
-        if (workspacePolicy) {
-            const items = [
-                `<div class="opencode-runtime-list-item"><strong>Binary path:</strong> <code>${this.escapeHtml(runtimeMeta.binaryPath || 'opencode')}</code></div>`,
-                `<div class="opencode-runtime-list-item"><strong>Remote auto-install:</strong> <code>${runtimeMeta.remoteAutoInstall === true ? 'enabled' : 'disabled'}</code></div>`,
-                runtimeMeta.remoteDefaultWorkspace
-                    ? `<div class="opencode-runtime-list-item"><strong>Remote default workspace:</strong> <code>${this.escapeHtml(runtimeMeta.remoteDefaultWorkspace)}</code></div>`
-                    : '',
-                ...allowedRoots.map((root) => (
-                    `<div class="opencode-runtime-list-item"><strong>Allowed local root:</strong> <code>${this.escapeHtml(root)}</code></div>`
-                )),
-            ].filter(Boolean);
-            workspacePolicy.innerHTML = items.length > 0
-                ? items.join('')
-                : '<p class="empty-state">No workspace restrictions are configured.</p>';
-        }
-
-        modelCatalog.innerHTML = models.length > 0
-            ? models.map((model) => `
-                <div class="opencode-model-item">
-                    <div class="opencode-model-header">
-                        <div class="opencode-model-title">
-                            <strong>${this.escapeHtml(model.id || model.name || 'unknown')}</strong>
-                            <span class="opencode-model-provider">${this.escapeHtml(model.provider || 'unknown provider')}</span>
-                        </div>
-                        <div class="opencode-model-badges">
-                            ${model.isDefault ? '<span class="status-badge info">default</span>' : ''}
-                            ${model.isSmallModel ? '<span class="status-badge neutral">small</span>' : ''}
-                        </div>
-                    </div>
-                    <div class="opencode-model-meta">
-                        <span>Context: <code>${this.escapeHtml(model.contextWindow ? model.contextWindow.toLocaleString() : 'n/a')}</code></span>
-                        <span>Output: <code>${this.escapeHtml(model.outputLimit ? model.outputLimit.toLocaleString() : 'n/a')}</code></span>
-                    </div>
-                </div>
-            `).join('')
-            : '<p class="empty-state">No chat-capable models were discovered from the KimiBuilt gateway.</p>';
-    }
-
     setStatusBadge(element, tone = 'neutral', label = '') {
         if (!element) {
             return;
@@ -4082,17 +3840,6 @@ class Dashboard {
 
         element.className = `status-badge ${tone}`;
         element.textContent = label;
-    }
-
-    formatOpenCodeAuthMode(mode = '') {
-        const normalized = String(mode || '').trim().toLowerCase();
-        if (normalized === 'explicit') {
-            return 'explicit';
-        }
-        if (normalized === 'derived') {
-            return 'derived';
-        }
-        return 'disabled';
     }
 
     setInputValue(id, value) {

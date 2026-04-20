@@ -3657,6 +3657,7 @@ function hasManagedAppIntentText(text = '') {
         /\b(create|build|deploy|publish|launch|ship|update|redeploy|inspect|list)\b[\s\S]{0,40}\b(app|website|site|frontend|service|game)\b/i,
         /\b(app|website|site|frontend|service|game)\b[\s\S]{0,40}\b(create|build|deploy|publish|launch|ship|update|redeploy|inspect|list)\b/i,
         /\b(gitea|container registry|image repo|namespace|ingress host)\b/i,
+        /\b(dns|domain|tls|certificate|cert-manager|traefik|ingress)\b[\s\S]{0,60}\b(app|website|site|frontend|service)\b/i,
     ].some((pattern) => pattern.test(normalized));
 }
 
@@ -6739,7 +6740,7 @@ class ConversationOrchestrator extends EventEmitter {
             || '',
         ).trim();
         const shouldBypassEndToEndWorkflow = hasManagedAppIntent && allowedToolIds.includes('managed-app');
-        const workflowSeed = executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
+        const inferredWorkflowSeed = executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
             && !shouldBypassEndToEndWorkflow
             ? inferEndToEndBuilderWorkflow({
                 objective,
@@ -6754,6 +6755,13 @@ class ConversationOrchestrator extends EventEmitter {
                 remoteTarget: sshContext.target || null,
                 deployDefaults,
             })
+            : null;
+        const workflowSeed = inferredWorkflowSeed
+            && (
+                !['repo-only', 'repo-then-deploy'].includes(String(inferredWorkflowSeed.lane || '').trim())
+                || allowedToolIds.includes('opencode-run')
+            )
+            ? inferredWorkflowSeed
             : null;
         const projectPlanSeed = inferForegroundProjectPlan({
             objective,

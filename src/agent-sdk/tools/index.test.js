@@ -36,12 +36,11 @@ jest.mock('../../generated-audio-artifacts', () => ({
 }));
 
 const { ToolManager } = require('./index');
-const { getUnifiedRegistry } = require('../registry/UnifiedRegistry');
 const { artifactService } = require('../../artifacts/artifact-service');
 const { assetManager } = require('../../asset-manager');
+const config = require('../../config');
 const { piperTtsService } = require('../../tts/piper-tts-service');
 const { persistGeneratedAudio } = require('../../generated-audio-artifacts');
-const { config } = require('../../config');
 const fs = require('fs').promises;
 const os = require('os');
 const path = require('path');
@@ -96,24 +95,10 @@ describe('ToolManager image tools', () => {
 
     expect(toolManager.getTool('git-safe')).toBeTruthy();
     expect(toolManager.getTool('k3s-deploy')).toBeTruthy();
-    expect(toolManager.getTool('opencode-run')).toBeTruthy();
+    expect(toolManager.getTool('managed-app')).toBeTruthy();
+    expect(toolManager.getTool('opencode-run')).toBeFalsy();
     expect(toolManager.getTool('agent-delegate')).toBeTruthy();
     expect(toolManager.getTool('podcast')).toBeTruthy();
-  });
-
-  test('does not register opencode-run when the runtime is disabled in config', async () => {
-    const originalEnabled = config.opencode.enabled;
-    config.opencode.enabled = false;
-
-    try {
-      getUnifiedRegistry().unregister('opencode-run');
-      const toolManager = new ToolManager();
-      await toolManager.initialize();
-
-      expect(toolManager.getTool('opencode-run')).toBeFalsy();
-    } finally {
-      config.opencode.enabled = originalEnabled;
-    }
   });
 
   test('registers remote operation skills with kubectl and k3s trigger coverage', async () => {
@@ -166,88 +151,6 @@ describe('ToolManager image tools', () => {
       podcastService: service,
     }));
     expect(result.data.audio).toEqual({ artifactId: 'artifact-podcast-1' });
-  });
-
-  test('routes opencode-run through the injected OpenCode service', async () => {
-    const toolManager = new ToolManager();
-    await toolManager.initialize();
-
-    const opencodeService = {
-      createRun: jest.fn(),
-      runTool: jest.fn(async () => ({
-        async: false,
-        runId: 'run-1',
-        status: 'completed',
-        workspacePath: '/srv/apps/kimibuilt',
-        summary: 'Build fixed.',
-      })),
-    };
-
-    const result = await toolManager.executeTool('opencode-run', {
-      prompt: 'Fix the build in this repo.',
-      workspacePath: '/srv/apps/kimibuilt',
-      target: 'remote-default',
-    }, {
-      sessionId: 'session-1',
-      ownerId: 'user-1',
-      opencodeService,
-    });
-
-    expect(result.success).toBe(true);
-    expect(opencodeService.runTool).toHaveBeenCalledWith(
-      expect.objectContaining({
-        prompt: 'Fix the build in this repo.',
-        workspacePath: '/srv/apps/kimibuilt',
-        target: 'remote-default',
-      }),
-      expect.objectContaining({
-        ownerId: 'user-1',
-        sessionId: 'session-1',
-      }),
-    );
-    expect(result.data.summary).toBe('Build fixed.');
-  });
-
-  test('forwards the caller model to opencode-run when params omit it', async () => {
-    const toolManager = new ToolManager();
-    await toolManager.initialize();
-
-    const opencodeService = {
-      createRun: jest.fn(),
-      runTool: jest.fn(async () => ({
-        async: false,
-        runId: 'run-2',
-        status: 'completed',
-        workspacePath: '/srv/apps/kimibuilt',
-        summary: 'Model-aware build fixed.',
-      })),
-    };
-
-    const result = await toolManager.executeTool('opencode-run', {
-      prompt: 'Fix the build in this repo.',
-      workspacePath: '/srv/apps/kimibuilt',
-      target: 'remote-default',
-    }, {
-      sessionId: 'session-1',
-      ownerId: 'user-1',
-      model: 'gpt-5.4-mini',
-      opencodeService,
-    });
-
-    expect(result.success).toBe(true);
-    expect(opencodeService.runTool).toHaveBeenCalledWith(
-      expect.objectContaining({
-        prompt: 'Fix the build in this repo.',
-        workspacePath: '/srv/apps/kimibuilt',
-        target: 'remote-default',
-        model: 'gpt-5.4-mini',
-      }),
-      expect.objectContaining({
-        ownerId: 'user-1',
-        sessionId: 'session-1',
-      }),
-    );
-    expect(result.data.summary).toBe('Model-aware build fixed.');
   });
 
   test('normalizes markdown-wrapped image URLs before validation', async () => {
