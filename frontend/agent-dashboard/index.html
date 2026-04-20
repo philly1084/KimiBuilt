@@ -1105,6 +1105,7 @@
                                 <div class="card">
                                     <div class="card-body">
                                         <form id="apiSettingsForm">
+                                            <input type="text" id="apiSettingsUsername" autocomplete="username" class="sr-only" tabindex="-1" aria-hidden="true">
                                             <div class="form-group">
                                                 <label for="apiEndpoint">API Endpoint</label>
                                                 <input type="url" class="form-control" id="apiEndpoint" value="http://localhost:3000">
@@ -1181,7 +1182,7 @@
                                         <div class="form-row">
                                             <div class="form-group">
                                                 <label for="sshUsername">SSH Username</label>
-                                                <input type="text" class="form-control" id="sshUsername" placeholder="ubuntu">
+                                                <input type="text" class="form-control" id="sshUsername" placeholder="ubuntu" autocomplete="username" form="apiSettingsForm">
                                             </div>
                                             <div class="form-group">
                                                 <label for="sshPrivateKeyPath">Private Key Path</label>
@@ -1191,7 +1192,7 @@
                                         <div class="form-group">
                                             <label for="sshPassword">SSH Password</label>
                                             <div class="input-group">
-                                                <input type="password" class="form-control" id="sshPassword" placeholder="Leave blank to keep current value" autocomplete="new-password">
+                                                <input type="password" class="form-control" id="sshPassword" placeholder="Leave blank to keep current value" autocomplete="new-password" form="apiSettingsForm">
                                                 <button type="button" class="btn btn-ghost" id="showSshPassword">
                                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                                         <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>

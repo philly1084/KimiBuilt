@@ -22,6 +22,8 @@ class Dashboard {
             workloads: [],
             runs: [],
             selectedRun: null,
+            workloadsAvailable: true,
+            workloadErrorMessage: '',
             editingWorkloadId: null,
             settings: {},
             tokenAnalysis: null,
@@ -663,6 +665,8 @@ class Dashboard {
 
             this.state.workloads = workloads;
             this.state.runs = runs;
+            this.state.workloadsAvailable = true;
+            this.state.workloadErrorMessage = '';
 
             if (this.state.selectedRun?.id) {
                 const nextSelectedRun = runs.find((run) => run.id === this.state.selectedRun.id) || null;
@@ -678,12 +682,32 @@ class Dashboard {
             this.renderAdminRuns(runs);
             this.renderAdminRunDetails(this.state.selectedRun);
         } catch (error) {
-            console.error('Error loading workloads:', error);
+            const unavailable = this.isPersistenceUnavailableError(error);
+            this.state.workloads = [];
+            this.state.runs = [];
+            this.state.selectedRun = null;
+            this.state.workloadsAvailable = !unavailable;
+            this.state.workloadErrorMessage = unavailable
+                ? 'Deferred workloads are unavailable until Postgres persistence is configured.'
+                : (error.userMessage || error.message || 'Failed to load workload data');
+
+            if (unavailable) {
+                console.warn('Deferred workloads unavailable:', error.message || error);
+            } else {
+                console.error('Error loading workloads:', error);
+            }
+
             this.renderWorkloadSummary([], []);
-            this.renderAdminWorkloads([]);
-            this.renderAdminRuns([]);
-            this.renderAdminRunDetails(null, error);
+            this.renderAdminWorkloads([], this.state.workloadErrorMessage);
+            this.renderAdminRuns([], this.state.workloadErrorMessage);
+            this.renderAdminRunDetails(null, unavailable ? null : error, this.state.workloadErrorMessage);
         }
+    }
+
+    isPersistenceUnavailableError(error) {
+        const message = String(error?.message || '').toLowerCase();
+        return Number(error?.status) === 503
+            && message.includes('postgres persistence');
     }
     
     /**
@@ -1101,14 +1125,14 @@ class Dashboard {
         setText('workloadsBadge', counts.running + counts.queued);
     }
 
-    renderAdminWorkloads(workloads = []) {
+    renderAdminWorkloads(workloads = [], emptyMessage = 'No deferred workloads are persisted yet.') {
         const tbody = document.getElementById('adminWorkloadsTableBody');
         if (!tbody) return;
 
         if (!workloads.length) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="8" class="empty-state">No deferred workloads are persisted yet.</td>
+                    <td colspan="8" class="empty-state">${this.escapeHtml(emptyMessage)}</td>
                 </tr>
             `;
             return;
@@ -1139,14 +1163,14 @@ class Dashboard {
         `).join('');
     }
 
-    renderAdminRuns(runs = []) {
+    renderAdminRuns(runs = [], emptyMessage = 'No workload runs have been recorded yet.') {
         const tbody = document.getElementById('adminRunsTableBody');
         if (!tbody) return;
 
         if (!runs.length) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="8" class="empty-state">No workload runs have been recorded yet.</td>
+                    <td colspan="8" class="empty-state">${this.escapeHtml(emptyMessage)}</td>
                 </tr>
             `;
             return;
@@ -1174,7 +1198,7 @@ class Dashboard {
         `).join('');
     }
 
-    renderAdminRunDetails(run = null, error = null) {
+    renderAdminRunDetails(run = null, error = null, emptyMessage = 'Select a run to inspect lifecycle details.') {
         const container = document.getElementById('adminRunDetails');
         if (!container) return;
 
@@ -1184,7 +1208,7 @@ class Dashboard {
         }
 
         if (!run) {
-            container.innerHTML = '<p class="empty-state">Select a run to inspect lifecycle details.</p>';
+            container.innerHTML = `<p class="empty-state">${this.escapeHtml(emptyMessage)}</p>`;
             return;
         }
 
