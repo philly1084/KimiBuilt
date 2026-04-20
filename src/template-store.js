@@ -297,7 +297,14 @@ function buildDocumentTemplateBody(template = {}) {
 
 function buildDocumentTemplateRecords() {
     const engine = new TemplateEngine();
-    const templates = engine.getTemplates();
+    const templates = engine.getTemplates().filter((template) => {
+        if (template && typeof template === 'object' && !Array.isArray(template)) {
+            return true;
+        }
+
+        console.warn('[TemplateStore] Ignoring invalid document template entry while seeding built-in templates.');
+        return false;
+    });
 
     return templates.map((template) => {
         const variables = normalizeVariableDefinitions(template.variables);
@@ -817,8 +824,12 @@ class TemplateStore {
             const stats = parsed?.stats && typeof parsed.stats === 'object' ? parsed.stats : {};
 
             templates.forEach((template) => {
-                const normalized = this.normalizeTemplate(template, { source: 'custom' });
-                this.templates.set(normalized.id, normalized);
+                try {
+                    const normalized = this.normalizeTemplate(template, { source: 'custom' });
+                    this.templates.set(normalized.id, normalized);
+                } catch (error) {
+                    console.warn(`[TemplateStore] Skipping invalid stored template: ${error.message}`);
+                }
             });
 
             Object.entries(stats).forEach(([templateId, entry]) => {

@@ -121,6 +121,11 @@ function loadBuiltInTemplates() {
   for (const file of templateFiles) {
     try {
       const template = require(file);
+      if (!template || typeof template !== 'object' || Array.isArray(template)) {
+        console.warn(`[TemplateEngine] Ignoring invalid built-in template payload: ${file}`);
+        continue;
+      }
+
       templates.push(template);
     } catch (err) {
       console.warn(`[TemplateEngine] Could not load template: ${file}`);
@@ -143,6 +148,10 @@ class TemplateEngine {
    */
   loadBuiltInTemplates() {
     for (const template of BUILT_IN_TEMPLATES) {
+      if (!template || typeof template !== 'object' || Array.isArray(template) || !template.id) {
+        continue;
+      }
+
       this.templates.set(template.id, template);
     }
   }
