@@ -220,6 +220,42 @@ describe('end-to-end builder workflow', () => {
         })).toEqual([]);
     });
 
+    test('uses managed-app for repo implementation when the managed control plane is available', () => {
+        const workflow = inferEndToEndBuilderWorkflow({
+            objective: 'Fix the hello-stack app and deploy it to k3s on the remote server using Gitea.',
+            workspacePath: '/workspace/app',
+            repositoryPath: '/workspace/app',
+            opencodeTarget: 'remote-default',
+            remoteTarget: {
+                host: '10.0.0.5',
+                username: 'ubuntu',
+                port: 22,
+            },
+        });
+        const toolPolicy = {
+            candidateToolIds: ['managed-app', 'remote-command'],
+            preferredRemoteToolId: 'remote-command',
+        };
+
+        const implementationPlan = buildEndToEndWorkflowPlan({
+            workflow,
+            toolPolicy,
+            remoteToolId: 'remote-command',
+        });
+
+        expect(implementationPlan).toEqual([{
+            tool: 'managed-app',
+            reason: 'Implement the requested app changes through the managed app control plane.',
+            params: {
+                action: 'create',
+                prompt: 'Fix the hello-stack app and deploy it to k3s on the remote server using Gitea.',
+                sourcePrompt: 'Fix the hello-stack app and deploy it to k3s on the remote server using Gitea.',
+                requestedAction: 'build',
+                deployTarget: 'ssh',
+            },
+        }]);
+    });
+
     test('uses remote-command to build and deploy a remote workspace after OpenCode implementation', () => {
         const workflow = inferEndToEndBuilderWorkflow({
             objective: 'Fix the app in the remote repo, deploy it to k3s on the same server, and verify the rollout.',

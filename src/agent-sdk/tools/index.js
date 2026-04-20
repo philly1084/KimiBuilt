@@ -3187,7 +3187,7 @@ class ToolManager {
                 sessionId: params.sessionId || sessionId,
               }, ownerId, {
                 sessionId: params.sessionId || sessionId,
-                model: context?.model || '',
+                model: params.model || context?.model || '',
                 executionProfile: context?.executionProfile || '',
               });
             }
@@ -3196,13 +3196,13 @@ class ToolManager {
               const result = await service.updateApp(
                 resolveManagedAppReference(params),
                 {
-                  ...params,
+                ...params,
                   sessionId: params.sessionId || sessionId,
                 },
                 ownerId,
                 {
                   sessionId: params.sessionId || sessionId,
-                  model: context?.model || '',
+                  model: params.model || context?.model || '',
                   executionProfile: context?.executionProfile || '',
                 },
               );
@@ -3258,6 +3258,7 @@ class ToolManager {
             imageTag: { type: 'string' },
             containerPort: { type: 'integer' },
             sessionId: { type: 'string' },
+            model: { type: 'string' },
             limit: { type: 'integer' },
             platformNamespace: { type: 'string' },
             runnerScope: { type: 'string', enum: ['org', 'instance', 'repo'] },

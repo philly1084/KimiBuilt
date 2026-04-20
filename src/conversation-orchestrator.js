@@ -1067,11 +1067,13 @@ function buildScoredCandidateToolMap({
         case 'remote-ops':
             adjustCandidateToolScore(scoreMap, remoteToolId, 1.25, 'Remote operations should start with the trusted remote tool.');
             adjustCandidateToolScore(scoreMap, 'opencode-run', workflowNeedsRepoLane && opencodeTargetReady ? 0.95 : 0, 'The active remote workflow includes repository work.');
+            adjustCandidateToolScore(scoreMap, 'managed-app', workflowNeedsRepoLane || workflowNeedsDeployLane || hasManagedAppIntent ? 1.1 : 0, 'Remote app authoring and deployment should prefer the managed app control plane.');
             adjustCandidateToolScore(scoreMap, 'k3s-deploy', workflowNeedsDeployLane || explicitK3sDeployIntent ? 0.95 : 0, 'The active remote workflow includes deployment work.');
             adjustCandidateToolScore(scoreMap, 'git-safe', explicitGitIntent || workflowNeedsDeployLane ? 0.55 : 0, 'Git save/publish flow is relevant to the remote task.');
             break;
         case 'repo-work':
             adjustCandidateToolScore(scoreMap, 'opencode-run', opencodeTargetReady ? 1.3 : 0.8, 'Repository implementation work should prefer the managed code runtime.');
+            adjustCandidateToolScore(scoreMap, 'managed-app', executionProfile === REMOTE_BUILD_EXECUTION_PROFILE ? 1.2 : 0.35, 'Remote repository-backed app work should prefer the managed app control plane.');
             adjustCandidateToolScore(scoreMap, 'git-safe', explicitGitIntent ? 0.75 : 0.3, 'Repository work may end with a save/push step.');
             break;
         case 'research':
@@ -1146,8 +1148,8 @@ function buildScoredCandidateToolMap({
     if ((hasOpencodeIntent || workflowNeedsRepoLane) && opencodeTargetReady) {
         adjustCandidateToolScore(scoreMap, 'opencode-run', 0.95, 'Repository work is relevant and the code runtime is ready.');
     }
-    if (hasManagedAppIntent) {
-        adjustCandidateToolScore(scoreMap, 'managed-app', 1.05, 'Managed app creation or deployment intent should use the dedicated control plane.');
+    if (hasManagedAppIntent || (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE && (workflowNeedsRepoLane || workflowNeedsDeployLane))) {
+        adjustCandidateToolScore(scoreMap, 'managed-app', 1.1, 'Managed app creation, software changes, and deployment should use the dedicated control plane.');
     }
     if (explicitGitIntent || workflowNeedsDeployLane) {
         adjustCandidateToolScore(scoreMap, 'git-safe', 0.75, 'Git state or save flow is relevant.');
@@ -1245,7 +1247,7 @@ function shouldAllowDirectAction(action = null, { toolPolicy = {}, toolEvents = 
     }
 
     if (classification.preferredExecutionPath === 'plan-first') {
-        return ['web-search', 'web-fetch', 'web-scrape', 'opencode-run', 'agent-workload'].includes(action.tool);
+        return ['web-search', 'web-fetch', 'web-scrape', 'managed-app', 'agent-workload'].includes(action.tool);
     }
 
     return true;
@@ -3656,9 +3658,30 @@ function hasManagedAppIntentText(text = '') {
         /\bmanaged app\b/i,
         /\b(create|build|deploy|publish|launch|ship|update|redeploy|inspect|list)\b[\s\S]{0,40}\b(app|website|site|frontend|service|game)\b/i,
         /\b(app|website|site|frontend|service|game)\b[\s\S]{0,40}\b(create|build|deploy|publish|launch|ship|update|redeploy|inspect|list)\b/i,
+        /\b(develop|software changes?|code changes?|fix|edit|modify|rewrite|refactor|patch)\b[\s\S]{0,40}\b(app|website|site|frontend|service|game)\b/i,
+        /\b(app|website|site|frontend|service|game)\b[\s\S]{0,40}\b(develop|software changes?|code changes?|fix|edit|modify|rewrite|refactor|patch)\b/i,
         /\b(gitea|container registry|image repo|namespace|ingress host)\b/i,
+        /\b(gitea|remote server|server|ssh)\b[\s\S]{0,60}\b(app|website|site|frontend|service|game)\b/i,
+        /\b(app|website|site|frontend|service|game)\b[\s\S]{0,60}\b(gitea|remote server|server|ssh)\b/i,
         /\b(dns|domain|tls|certificate|cert-manager|traefik|ingress)\b[\s\S]{0,60}\b(app|website|site|frontend|service)\b/i,
     ].some((pattern) => pattern.test(normalized));
+}
+
+function hasManagedAppAuthoringIntent(text = '', options = {}) {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized || hasDiscoveryPlanningIntentText(normalized) || hasOpencodeToolUsageIntent(normalized)) {
+        return false;
+    }
+
+    const executionProfile = String(options.executionProfile || '').trim();
+    const appContext = /\b(app|website|site|frontend|service|game|landing page|web app|web site)\b/.test(normalized)
+        || hasManagedAppIntentText(normalized);
+    const changeIntent = /\b(create|build|deploy|publish|launch|ship|update|fix|edit|modify|rewrite|refactor|patch|develop|make)\b/.test(normalized);
+    const remoteContext = executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
+        || hasRemoteManagedAppTargetIntent(normalized)
+        || /\b(gitea|k3s|k8s|kubernetes|cluster|dns|domain|tls|traefik|cert-manager)\b/.test(normalized);
+
+    return appContext && changeIntent && remoteContext;
 }
 
 function normalizeManagedAppDeployTarget(value = '') {
@@ -3723,7 +3746,7 @@ function cleanManagedAppReference(candidate = '') {
         return '';
     }
 
-    normalized = normalized.split(/\b(?:make|that|which|with|using|and)\b/i)[0].trim();
+    normalized = normalized.split(/\b(?:make|that|which|with|using|and|on|via|for)\b/i)[0].trim();
     if (!normalized) {
         return '';
     }
@@ -3743,6 +3766,7 @@ function extractManagedAppReference(text = '') {
     }
 
     const patterns = [
+        /\b(?:fix|update|modify|change|edit|refresh|rebuild|deploy|redeploy|publish|inspect|show|build|create|make)\s+([a-z0-9][a-z0-9-]{1,63})\s+(?:app|website|site|frontend|service|game)\b/i,
         /\b(?:managed app|app|website|site|frontend|service|game)\s+(?:called|named)\s+["'`]?([^"',.\n]+?)["'`]?(?=$|[,.!?]|\s+(?:make|that|which|with|using)\b)/i,
         /\b(?:called|named)\s+["'`]?([^"',.\n]+?)["'`]?(?=$|[,.!?]|\s+(?:make|that|which|with|using)\b)/i,
         /\b(?:managed app|app|website|site|frontend|service|game)\s+["'`]([^"'`\n]{1,64})["'`]/i,
@@ -3771,6 +3795,7 @@ function inferManagedAppRequestedAction(text = '') {
 function buildManagedAppDirectAction(objective = '', options = {}) {
     const normalized = String(objective || '').trim();
     const executionProfile = String(options.executionProfile || '').trim() || DEFAULT_EXECUTION_PROFILE;
+    const workflowLane = String(options.workflow?.lane || '').trim();
     const reference = extractManagedAppReference(normalized);
     const requestedAction = inferManagedAppRequestedAction(normalized);
     const hasCreateIntent = /\b(create|build|make|generate|new)\b/i.test(normalized);
@@ -3778,6 +3803,10 @@ function buildManagedAppDirectAction(objective = '', options = {}) {
     const hasInspectIntent = /\b(inspect|show|status|details?)\b/i.test(normalized);
     const hasListIntent = /\blist\b/i.test(normalized);
     const hasDeployIntent = /\b(deploy|redeploy|publish|launch|ship|go live|live)\b/i.test(normalized);
+    const hasAuthoringWorkflow = workflowLane === 'repo-only' || workflowLane === 'repo-then-deploy';
+    const workflowRequestedAction = workflowLane === 'repo-then-deploy'
+        ? 'deploy'
+        : (workflowLane === 'repo-only' ? 'build' : requestedAction);
     const isSlugLikeReference = /^[a-z0-9]+(?:-[a-z0-9]+)*$/i.test(reference);
 
     if (hasListIntent && !hasCreateIntent && !hasUpdateIntent && !hasDeployIntent) {
@@ -3816,7 +3845,7 @@ function buildManagedAppDirectAction(objective = '', options = {}) {
         };
     }
 
-    if (hasUpdateIntent && reference) {
+    if ((hasUpdateIntent && reference) || (hasAuthoringWorkflow && reference && !hasCreateIntent)) {
         return {
             tool: 'managed-app',
             reason: 'Managed app update requests should use the dedicated control-plane tool.',
@@ -3825,7 +3854,7 @@ function buildManagedAppDirectAction(objective = '', options = {}) {
                 appRef: reference,
                 prompt: normalized,
                 sourcePrompt: normalized,
-                requestedAction,
+                requestedAction: workflowRequestedAction,
             }, {
                 objective: normalized,
                 executionProfile,
@@ -3840,7 +3869,7 @@ function buildManagedAppDirectAction(objective = '', options = {}) {
             action: 'create',
             prompt: normalized,
             sourcePrompt: normalized,
-            requestedAction,
+            requestedAction: workflowRequestedAction,
             ...(reference
                 ? (isSlugLikeReference
                     ? { slug: reference.toLowerCase() }
@@ -6695,6 +6724,9 @@ class ConversationOrchestrator extends EventEmitter {
         const hasOpencodeUsageIntent = hasOpencodeToolUsageIntent(prompt);
         const hasOpencodeIntent = hasOpencodeRepoWorkIntent(prompt);
         const hasManagedAppIntent = hasManagedAppIntentText(prompt);
+        const hasManagedAppAuthoringRequest = hasManagedAppAuthoringIntent(prompt, {
+            executionProfile,
+        });
         const explicitGitIntent = /\b(git|github)\b[\s\S]{0,80}\b(status|diff|branch|stage|add|commit|push|save and push|save-and-push)\b/.test(prompt);
         const explicitK3sDeployIntent = /\b(deploy|rollout|apply|set image|update image|sync)\b[\s\S]{0,60}\b(k3s|k8s|kubernetes|kubectl|manifest|deployment|helm)\b/.test(prompt)
             || /\b(add|install|put)\b[\s\S]{0,40}\b(to|on|into|in)\b[\s\S]{0,20}\b(k3s|k8s|kubernetes|cluster)\b/.test(prompt);
@@ -6739,7 +6771,8 @@ class ConversationOrchestrator extends EventEmitter {
             || config.deploy.defaultRepositoryPath
             || '',
         ).trim();
-        const shouldBypassEndToEndWorkflow = hasManagedAppIntent && allowedToolIds.includes('managed-app');
+        const shouldBypassEndToEndWorkflow = allowedToolIds.includes('managed-app')
+            && (hasManagedAppIntent || hasManagedAppAuthoringRequest);
         const inferredWorkflowSeed = executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
             && !shouldBypassEndToEndWorkflow
             ? inferEndToEndBuilderWorkflow({
@@ -6760,6 +6793,7 @@ class ConversationOrchestrator extends EventEmitter {
             && (
                 !['repo-only', 'repo-then-deploy'].includes(String(inferredWorkflowSeed.lane || '').trim())
                 || allowedToolIds.includes('opencode-run')
+                || allowedToolIds.includes('managed-app')
             )
             ? inferredWorkflowSeed
             : null;
@@ -6814,7 +6848,7 @@ class ConversationOrchestrator extends EventEmitter {
             hasSubAgentIntent,
             hasOpencodeUsageIntent,
             hasOpencodeIntent,
-            hasManagedAppIntent,
+            hasManagedAppIntent: hasManagedAppIntent || hasManagedAppAuthoringRequest,
             explicitGitIntent,
                 explicitK3sDeployIntent,
                 hasWorkloadSetupIntent,
@@ -6869,7 +6903,7 @@ class ConversationOrchestrator extends EventEmitter {
             if ((explicitGitIntent || workflowNeedsDeployLane) && allowedToolIds.includes('git-safe')) {
                 candidates.add('git-safe');
             }
-            if (hasManagedAppIntent && allowedToolIds.includes('managed-app')) {
+            if ((hasManagedAppIntent || hasManagedAppAuthoringRequest || workflowNeedsRepoLane || workflowNeedsDeployLane) && allowedToolIds.includes('managed-app')) {
                 candidates.add('managed-app');
             }
             if ((explicitK3sDeployIntent || workflowNeedsDeployLane) && allowedToolIds.includes('k3s-deploy')) {
@@ -6998,7 +7032,7 @@ class ConversationOrchestrator extends EventEmitter {
             if ((hasOpencodeIntent || workflowNeedsRepoLane) && opencodeTargetReady && allowedToolIds.includes('opencode-run')) {
                 candidates.add('opencode-run');
             }
-            if (hasManagedAppIntent && allowedToolIds.includes('managed-app')) {
+            if ((hasManagedAppIntent || hasManagedAppAuthoringRequest || (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE && (workflowNeedsRepoLane || workflowNeedsDeployLane))) && allowedToolIds.includes('managed-app')) {
                 candidates.add('managed-app');
             }
             if (/\b(git|github)\b[\s\S]{0,80}\b(status|diff|branch|stage|add|commit|push|save and push|save-and-push)\b/.test(prompt)
@@ -7227,10 +7261,24 @@ class ConversationOrchestrator extends EventEmitter {
             });
         }
 
-        if (toolPolicy.candidateToolIds.includes('managed-app')
-            && hasManagedAppIntentText(objective)) {
+        const shouldUseManagedAppAuthoringAction = toolPolicy.candidateToolIds.includes('managed-app')
+            && (
+                hasManagedAppIntentText(objective)
+                || hasManagedAppAuthoringIntent(objective, {
+                    executionProfile: toolPolicy.executionProfile,
+                })
+                || (
+                    toolPolicy.executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
+                    && ['repo-only', 'repo-then-deploy'].includes(String(toolPolicy.workflow?.lane || '').trim())
+                    && hasManagedAppAuthoringIntent(objective, {
+                        executionProfile: toolPolicy.executionProfile,
+                    })
+                )
+            );
+        if (shouldUseManagedAppAuthoringAction) {
             return finalizeAction(buildManagedAppDirectAction(objective, {
                 executionProfile: toolPolicy.executionProfile,
+                workflow: toolPolicy.workflow,
             }));
         }
 
@@ -7721,8 +7769,8 @@ class ConversationOrchestrator extends EventEmitter {
             'Only use tools listed above.',
             'Do not invent SSH hosts, usernames, file paths, or credentials.',
             'Every `remote-command` step must include a non-empty `params.command` string.',
-            'Use `opencode-run` for repo or workspace implementation, fix, refactor, build, compile, and test work when the request is about changing code rather than one-off host operations.',
-            'Every `opencode-run` step must include a non-empty `params.prompt` string. Include `params.workspacePath` when the runtime or session already identifies the workspace, and use `params.target` set to `remote-default` only for remote repository work.',
+            'Use `managed-app` for agent-owned app implementation, software changes, Gitea builds, and remote k3s deployments when the request is about creating or updating an app on the remote server.',
+            'Every `managed-app` step must include a valid `params.action`. For `create` or `update`, include a non-empty `params.prompt` string. For remote app work, include `params.deployTarget` set to `ssh`.',
             'Keep `remote-command` for kubectl, host inspection, package installs, logs, restarts, deployments, DNS, TLS, and other infrastructure operations.',
             'Every `agent-workload` step must use the deferred workload schema only: `{"tool":"agent-workload","reason":"why","params":{"action":"create_from_scenario","request":"the full original user request","timezone":"IANA/Zone"}}`.',
             'Do not parse the schedule, cron, or remote command yourself for `agent-workload`; pass the full original request and let the runtime canonicalize it.',
@@ -8519,9 +8567,10 @@ class ConversationOrchestrator extends EventEmitter {
         }
 
         if (allowedToolIds.includes('managed-app')) {
-            parts.push('Use `managed-app` for agent-owned applications that should be created in external Gitea and deployed to the configured cluster target.');
-            parts.push('Prefer `managed-app` over raw `git-safe`, `remote-command`, or `k3s-deploy` when the request is to create, inspect, update, build, publish, or redeploy an app tracked by the managed app catalog.');
+            parts.push('Use `managed-app` for agent-owned applications that should be created or updated in external Gitea and deployed to the configured remote cluster target.');
+            parts.push('Prefer `managed-app` over raw `git-safe`, `remote-command`, or `k3s-deploy` when the request is to create software, change app code, inspect, build, publish, or redeploy an app tracked by the managed app catalog.');
             parts.push('For new app requests, let `managed-app create` allocate the repo, image repo, namespace, and host instead of improvising those names in chat.');
+            parts.push('For remote app software changes, use `managed-app update` when the app reference is known; otherwise use `managed-app create` with the app prompt so the control plane can reconcile the app record and remote build pipeline.');
             parts.push('When the request says SSH, remote server, Gitea, or remote k3s deployment, include `deployTarget: "ssh"` in `managed-app` params so the control plane deploys through the remote host instead of the in-cluster Kubernetes API.');
         }
 

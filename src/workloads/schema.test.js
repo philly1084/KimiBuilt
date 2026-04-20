@@ -112,7 +112,7 @@ describe('workload schema', () => {
         });
     });
 
-    test('normalizes structured opencode execution payloads', () => {
+    test('normalizes structured managed-app execution payloads', () => {
         const workload = validateWorkloadPayload({
             sessionId: 'session-1',
             title: 'Fix the repo',
@@ -121,12 +121,11 @@ describe('workload schema', () => {
                 type: 'manual',
             },
             execution: {
-                tool: 'opencode-run',
+                tool: 'managed-app',
                 params: {
-                    workspacePath: '/srv/apps/kimibuilt',
-                    target: 'remote-default',
-                    agent: 'build',
-                    approvalMode: 'manual',
+                    action: 'update',
+                    appRef: 'kimibuilt',
+                    deployTarget: 'ssh',
                 },
             },
             policy: {
@@ -139,13 +138,13 @@ describe('workload schema', () => {
         });
 
         expect(workload.execution).toEqual({
-            tool: 'opencode-run',
+            tool: 'managed-app',
             params: {
+                action: 'update',
                 prompt: 'Fix the failing build in this repo.',
-                workspacePath: '/srv/apps/kimibuilt',
-                target: 'remote-default',
-                agent: 'build',
-                approvalMode: 'manual',
+                sourcePrompt: 'Fix the failing build in this repo.',
+                appRef: 'kimibuilt',
+                deployTarget: 'ssh',
             },
         });
     });

@@ -185,7 +185,6 @@ class ConversationRunService {
                 managedAppsSummary,
                 workloadService: this.app?.locals?.agentWorkloadService,
                 managedAppService: this.app?.locals?.managedAppService || null,
-                opencodeService: this.app?.locals?.opencodeService || null,
                 sessionIsolation,
                 subAgentDepth: Number(metadata?.subAgentDepth || 0),
                 subAgentOrchestrationId: metadata?.subAgentOrchestrationId || null,
@@ -372,9 +371,6 @@ class ConversationRunService {
         const params = execution?.params && typeof execution.params === 'object'
             ? { ...execution.params }
             : {};
-        if (toolId === 'opencode-run' && !String(params.model || '').trim() && String(metadata?.requestedModel || '').trim()) {
-            params.model = String(metadata.requestedModel).trim();
-        }
         const runtimeToolManager = await ensureRuntimeToolManager(this.app);
         const sessionIsolation = isSessionIsolationEnabled(metadata, resolvedSession);
         const result = await runtimeToolManager.executeTool(toolId, params, {
@@ -386,8 +382,8 @@ class ConversationRunService {
             sessionIsolation,
             workloadService: this.app?.locals?.agentWorkloadService,
             managedAppService: this.app?.locals?.managedAppService || null,
-            opencodeService: this.app?.locals?.opencodeService || null,
             executionProfile: metadata.executionProfile || null,
+            model: String(metadata?.requestedModel || '').trim() || null,
             subAgentDepth: Number(metadata?.subAgentDepth || 0),
         });
 
@@ -415,9 +411,7 @@ class ConversationRunService {
                 username: params.username || null,
                 port: params.port || null,
             })
-            : toolId === 'opencode-run'
-                ? formatOpenCodeToolResult(result.data || {})
-                : JSON.stringify(result.data || {}, null, 2);
+            : JSON.stringify(result.data || {}, null, 2);
         const memoryMetadata = this.buildMemoryMetadata(ownerId, metadata, resolvedSession);
 
         if (outputText) {
@@ -587,32 +581,6 @@ class ConversationRunService {
             metadata,
         });
     }
-}
-
-function formatOpenCodeToolResult(data = {}) {
-    const lines = [
-        `OpenCode ${String(data.status || 'completed').trim() || 'completed'} in ${data.workspacePath || 'workspace'} using the ${data.agent || 'build'} agent.`,
-    ];
-
-    if (data.summary) {
-        lines.push('', String(data.summary).trim());
-    }
-
-    const changedFiles = Array.isArray(data.diff)
-        ? data.diff
-            .map((entry) => String(entry?.path || entry?.file || entry?.newPath || '').trim())
-            .filter(Boolean)
-        : [];
-
-    if (changedFiles.length > 0) {
-        lines.push('', 'Changed files:', ...changedFiles.map((filePath) => `- ${filePath}`));
-    }
-
-    if (!data.summary && changedFiles.length === 0 && data.message) {
-        lines.push('', String(data.message).trim());
-    }
-
-    return lines.join('\n').trim();
 }
 
 module.exports = {

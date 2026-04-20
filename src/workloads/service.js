@@ -193,7 +193,7 @@ class AgentWorkloadService {
             return execution;
         }
 
-        if (sanitizeText(execution.tool || execution.name).toLowerCase() !== 'opencode-run' || !sanitizeText(requestedModel)) {
+        if (sanitizeText(execution.tool || execution.name).toLowerCase() !== 'managed-app' || !sanitizeText(requestedModel)) {
             return execution;
         }
 

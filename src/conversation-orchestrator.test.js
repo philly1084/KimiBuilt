@@ -4156,6 +4156,57 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
+    test('routes remote-build app authoring requests through managed-app instead of a repo runner', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['managed-app', 'remote-command', 'git-safe', 'k3s-deploy', 'tool-doc-read']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Build and deploy a website called hello-stack on the remote server using Gitea and the k3s cluster with DNS and TLS.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            toolPolicy,
+        });
+
+        expect(toolPolicy.candidateToolIds).toContain('managed-app');
+        expect(directAction).toEqual({
+            tool: 'managed-app',
+            reason: 'Managed app creation and deployment requests should use the dedicated control-plane tool.',
+            params: {
+                action: 'create',
+                prompt: objective,
+                sourcePrompt: objective,
+                requestedAction: 'deploy',
+                slug: 'hello-stack',
+                deployTarget: 'ssh',
+            },
+        });
+    });
+
     test('treats plural podcast workflow prompts as explicit podcast tool requests', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {

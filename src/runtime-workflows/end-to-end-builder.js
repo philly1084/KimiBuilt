@@ -807,13 +807,32 @@ function buildImplementationPrompt(workflow = null) {
         'Implement the requested repository changes in the workspace.',
         workflow?.lane === 'repo-then-deploy'
             ? (isRemoteWorkspaceDeployWorkflow(workflow)
-                ? 'Keep the changes ready for a later remote build and k3s deployment step on the same server. Do not perform kubectl or deployment actions from inside OpenCode.'
-                : 'Keep the changes ready for a later git-safe save/push step. Deployment will happen in a separate follow-up. Do not perform git pushes or remote deployment from inside OpenCode.')
+                ? 'Keep the changes ready for a later remote build and k3s deployment step on the same server. Do not perform kubectl or deployment actions from inside this authoring step.'
+                : 'Keep the changes ready for a later git-safe save/push step. Deployment will happen in a separate follow-up. Do not perform git pushes or remote deployment from inside this authoring step.')
             : 'Focus on the code or content changes and summarize any relevant build or test results.',
         '',
         'User objective:',
         objective || '(empty)',
     ].join('\n');
+}
+
+function buildManagedAppAuthoringPlanStep(workflow = null) {
+    const objective = normalizeText(workflow?.objective);
+    const requestedAction = workflow?.lane === 'repo-then-deploy' ? 'deploy' : 'build';
+
+    return {
+        tool: 'managed-app',
+        reason: workflow?.lane === 'repo-then-deploy'
+            ? 'Implement the app changes through the managed app control plane and queue the remote Gitea build/deploy flow.'
+            : 'Implement the requested app changes through the managed app control plane.',
+        params: {
+            action: 'create',
+            prompt: objective,
+            sourcePrompt: objective,
+            requestedAction,
+            deployTarget: 'ssh',
+        },
+    };
 }
 
 function buildGitCommitMessage(workflow = null) {
@@ -1077,10 +1096,11 @@ function evaluateEndToEndBuilderWorkflow({
 
     if ((currentWorkflow.lane === 'repo-only' || currentWorkflow.lane === 'repo-then-deploy')
         && !currentWorkflow.progress.implemented
-        && !candidateToolIds.has('opencode-run')) {
+        && !candidateToolIds.has('opencode-run')
+        && !candidateToolIds.has('managed-app')) {
         return buildBlockedWorkflowState(
             currentWorkflow,
-            'Repository implementation is required before this workflow can continue, but `opencode-run` is not ready for the selected execution target.',
+            'Repository implementation is required before this workflow can continue, but neither `managed-app` nor `opencode-run` is ready for the selected execution target.',
         );
     }
 
@@ -1162,6 +1182,12 @@ function buildEndToEndWorkflowPlan({
     const remoteTool = normalizeText(remoteToolId || toolPolicy?.preferredRemoteToolId || 'remote-command') || 'remote-command';
     const repositoryPath = currentWorkflow.repositoryPath || config.deploy.defaultRepositoryPath || '';
     const usesRemoteWorkspaceDeploy = isRemoteWorkspaceDeployWorkflow(currentWorkflow);
+
+    if ((currentWorkflow.lane === 'repo-only' || currentWorkflow.lane === 'repo-then-deploy')
+        && !currentWorkflow.progress.implemented
+        && candidateToolIds.has('managed-app')) {
+        return [buildManagedAppAuthoringPlanStep(currentWorkflow)];
+    }
 
     if ((currentWorkflow.lane === 'repo-only' || currentWorkflow.lane === 'repo-then-deploy')
         && !currentWorkflow.progress.implemented
@@ -1335,6 +1361,28 @@ function advanceEndToEndBuilderWorkflow({
                 workspacePath: normalizeText(event?.result?.data?.workspacePath) || currentWorkflow.workspacePath,
                 stage: currentWorkflow.lane === 'repo-only' ? 'completed' : 'saving',
                 status: currentWorkflow.lane === 'repo-only' ? COMPLETED_WORKFLOW_STATUS : ACTIVE_WORKFLOW_STATUS,
+            });
+            continue;
+        }
+
+        if (toolId === 'managed-app') {
+            const deployRequested = event?.result?.data?.buildRun?.deployRequested === true
+                || action === 'deploy';
+            const deployed = action === 'deploy';
+            const completed = currentWorkflow.lane === 'repo-only' || (currentWorkflow.lane === 'repo-then-deploy' && !deployRequested);
+            currentWorkflow = markMeaningfulProgress({
+                ...currentWorkflow,
+                progress: {
+                    ...currentWorkflow.progress,
+                    implemented: ['create', 'update', 'deploy'].includes(action) || currentWorkflow.progress.implemented,
+                    deployed: deployed || currentWorkflow.progress.deployed,
+                },
+                stage: completed
+                    ? 'completed'
+                    : (deployRequested ? 'deploying' : 'saving'),
+                status: completed
+                    ? COMPLETED_WORKFLOW_STATUS
+                    : ACTIVE_WORKFLOW_STATUS,
             });
             continue;
         }

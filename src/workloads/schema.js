@@ -11,11 +11,11 @@ const VALID_TRIGGER_TYPES = new Set(['manual', 'once', 'cron']);
 const VALID_STAGE_CONDITIONS = new Set(['always', 'on_success', 'on_failure']);
 const BLOCKED_AUTONOMOUS_TOOL_IDS = new Set([
     'remote-command',
-    'opencode-run',
+    'managed-app',
     'k3s-deploy',
     'docker-exec',
 ]);
-const VALID_EXECUTION_TOOLS = new Set(['remote-command', 'ssh-execute', 'opencode-run']);
+const VALID_EXECUTION_TOOLS = new Set(['remote-command', 'ssh-execute', 'managed-app']);
 
 function sanitizeText(value = '') {
     return String(value || '').trim();
@@ -183,57 +183,72 @@ function normalizeExecution(execution = null, options = {}) {
         ? execution.params
         : {};
 
-    if (normalizedTool === 'opencode-run') {
-        const prompt = sanitizeText(rawParams.prompt || execution.prompt || options.defaultPrompt || '');
-        if (!prompt) {
-            throw new Error('execution.params.prompt is required for structured workload execution');
+    if (normalizedTool === 'managed-app') {
+        const action = sanitizeText(rawParams.action || execution.action || '').toLowerCase();
+        const validManagedAppActions = new Set(['create', 'update', 'deploy', 'inspect', 'doctor', 'reconcile', 'list']);
+        if (!validManagedAppActions.has(action)) {
+            throw new Error(`execution.params.action must be one of: ${Array.from(validManagedAppActions).join(', ')}`);
         }
 
-        const workspacePath = sanitizeText(
-            rawParams.workspacePath
-            || rawParams.workspace_path
-            || execution.workspacePath
-            || execution.workspace_path
+        const prompt = sanitizeText(rawParams.prompt || execution.prompt || options.defaultPrompt || '');
+        if ((action === 'create' || action === 'update') && !prompt) {
+            throw new Error('execution.params.prompt is required for managed-app create/update structured workload execution');
+        }
+
+        const appRef = sanitizeText(
+            rawParams.appRef
+            || rawParams.app
+            || rawParams.id
+            || rawParams.slug
+            || execution.appRef
+            || execution.app
+            || execution.id
+            || execution.slug
             || '',
         );
-        if (!workspacePath) {
-            throw new Error('execution.params.workspacePath is required for opencode-run structured workload execution');
+        if (['update', 'deploy', 'inspect'].includes(action) && !appRef) {
+            throw new Error(`execution.params.appRef is required for managed-app ${action} structured workload execution`);
         }
 
-        const target = sanitizeText(rawParams.target || execution.target || 'local').toLowerCase() || 'local';
-        if (!['local', 'remote-default'].includes(target)) {
-            throw new Error('execution.params.target must be "local" or "remote-default" for opencode-run');
+        const deployTarget = sanitizeText(
+            rawParams.deployTarget
+            || rawParams.deploymentTarget
+            || rawParams.target
+            || execution.deployTarget
+            || execution.deploymentTarget
+            || execution.target
+            || '',
+        ).toLowerCase();
+        if (deployTarget && !['ssh', 'remote', 'remote-ssh', 'remote_ssh'].includes(deployTarget)) {
+            throw new Error('execution.params.deployTarget must resolve to "ssh" for managed-app');
         }
 
         const params = {
-            prompt,
-            workspacePath,
-            target,
+            action,
         };
-        const agent = sanitizeText(rawParams.agent || execution.agent || '');
         const model = sanitizeText(rawParams.model || execution.model || '');
-        const approvalMode = sanitizeText(
-            rawParams.approvalMode
-            || rawParams.approval_mode
-            || execution.approvalMode
-            || execution.approval_mode
-            || '',
-        ).toLowerCase();
+        const requestedAction = sanitizeText(rawParams.requestedAction || execution.requestedAction || '');
+        const sourcePrompt = sanitizeText(rawParams.sourcePrompt || execution.sourcePrompt || prompt || '');
+        const limit = Number(rawParams.limit || execution.limit || 0);
 
-        if (agent) {
-            params.agent = agent;
+        if (appRef) {
+            params.appRef = appRef;
+        }
+        if (prompt) {
+            params.prompt = prompt;
+            params.sourcePrompt = sourcePrompt;
+        }
+        if (requestedAction) {
+            params.requestedAction = requestedAction;
+        }
+        if (deployTarget) {
+            params.deployTarget = 'ssh';
         }
         if (model) {
             params.model = model;
         }
-        if (approvalMode) {
-            if (!['manual', 'auto'].includes(approvalMode)) {
-                throw new Error('execution.params.approvalMode must be "manual" or "auto" for opencode-run');
-            }
-            params.approvalMode = approvalMode;
-        }
-        if (rawParams.async === true || execution.async === true) {
-            params.async = true;
+        if (Number.isFinite(limit) && limit > 0) {
+            params.limit = Math.trunc(limit);
         }
 
         return {

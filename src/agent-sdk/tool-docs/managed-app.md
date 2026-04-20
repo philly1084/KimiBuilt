@@ -1,6 +1,6 @@
 # managed-app
 
-Creates and manages agent-owned applications through the external Gitea control plane and the remote SSH/k3s deployment lane.
+Creates, updates, and deploys agent-owned applications through the external Gitea control plane and the remote SSH/k3s deployment lane.
 
 Managed-app deployment is SSH-only. It should deploy through the configured remote host and remote k3s cluster, not through the backend pod's local Kubernetes service account.
 
@@ -8,8 +8,8 @@ Use this tool as the single control-plane entry point when the remote Gitea inst
 
 ## Actions
 
-- `create`: registers or provisions a managed app, creates the external Gitea repository when configured, seeds scaffold files, and records a build run when a commit is created.
-- `update`: updates an existing managed app by slug or id and can commit new files into the managed repo.
+- `create`: registers or provisions a managed app, creates the external Gitea repository when configured, generates the initial app source, seeds the repo, and records a build run when a commit is created.
+- `update`: updates an existing managed app by slug or id, applies software changes into the managed repo, and can queue a new remote build/deploy cycle.
 - `deploy`: deploys an existing managed app into the configured remote k3s app cluster over SSH.
 - `inspect`: returns the app record plus recent build runs.
 - `doctor`: SSHes to the remote deploy host and inspects the managed-app platform namespace so the agent can check Gitea, BuildKit, `act-runner`, runner labels, and runner token state in one call.
@@ -38,3 +38,4 @@ Use this tool as the single control-plane entry point when the remote Gitea inst
 - The external Gitea workflow is expected to POST build events to `/api/integrations/gitea/build-events` with `X-KimiBuilt-Webhook-Secret`.
 - The `doctor` action is the preferred first check when Gitea Actions are queued or waiting. It inspects the same remote cluster the managed-app deploy lane uses.
 - The `reconcile` action is the preferred repair path when the platform exists but Gitea runners are missing, tokened incorrectly, or stuck waiting. It is designed for the case where the Gitea instance and deploy cluster live on the same remote server or k3s environment.
+- For remote app authoring requests, prefer `managed-app create` or `managed-app update` over ad hoc repo-runner tools. This control plane is the intended path for code changes, Gitea builds, and remote k3s deployment on the same server.
