@@ -18,6 +18,7 @@ const DEFAULT_SOURCE_FILE_PATHS = Object.freeze([
     'public/styles.css',
     'public/app.js',
 ]);
+const DEFAULT_GITEA_JOB_IMAGE = 'catthehacker/ubuntu:act-latest';
 
 function buildWorkflowYaml({
     appName = '',
@@ -38,6 +39,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    container:
+      image: ${DEFAULT_GITEA_JOB_IMAGE}
     env:
       APP_NAME: ${appName}
       APP_SLUG: ${slug}
@@ -127,6 +130,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          IMAGE_TAG="\${IMAGE_TAG:-sha-\${GITHUB_SHA::12}}"
           test -n "\${KIMIBUILT_BUILD_EVENTS_SECRET:-}"
           TARGET_BUILD_EVENTS_URL="\${KIMIBUILT_BUILD_EVENTS_URL:-$DEFAULT_BUILD_EVENTS_URL}"
           PAYLOAD="$(cat <<EOF
@@ -143,6 +147,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          IMAGE_TAG="\${IMAGE_TAG:-sha-\${GITHUB_SHA::12}}"
           test -n "\${KIMIBUILT_BUILD_EVENTS_SECRET:-}"
           TARGET_BUILD_EVENTS_URL="\${KIMIBUILT_BUILD_EVENTS_URL:-$DEFAULT_BUILD_EVENTS_URL}"
           PAYLOAD="$(cat <<EOF

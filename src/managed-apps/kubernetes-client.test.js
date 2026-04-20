@@ -150,7 +150,7 @@ describe('KubernetesClient', () => {
                     '__KIMIBUILT_DEPLOYMENT__=act-runner|present|1|0|0|0',
                     '__KIMIBUILT_SECRET__=gitea-actions|present',
                     '__KIMIBUILT_RUNNER_TOKEN__=placeholder',
-                    '__KIMIBUILT_RUNNER_LABELS__=ubuntu-latest:host',
+                    '__KIMIBUILT_RUNNER_LABELS__=ubuntu-latest:docker://catthehacker/ubuntu:act-latest',
                     '__KIMIBUILT_GITEA_INSTANCE_URL__=https://gitea.demoserver2.buzz',
                     '__KIMIBUILT_GITEA_INGRESS_HOST__=gitea.demoserver2.buzz',
                     '__KIMIBUILT_RUNNER_LOG__=registration token invalid',
@@ -183,7 +183,7 @@ describe('KubernetesClient', () => {
         expect(result.deployments.gitea.ready).toBe(true);
         expect(result.deployments['act-runner'].ready).toBe(false);
         expect(result.runnerTokenState).toBe('placeholder');
-        expect(result.runnerLabels).toBe('ubuntu-latest:host');
+        expect(result.runnerLabels).toBe('ubuntu-latest:docker://catthehacker/ubuntu:act-latest');
         expect(result.giteaInstanceUrl).toBe('https://gitea.demoserver2.buzz');
         expect(result.runnerLogExcerpt).toContain('registration token invalid');
         expect(result.executionHost).toBe('deploy.example:22');
@@ -219,7 +219,7 @@ describe('KubernetesClient', () => {
             deploymentTarget: 'ssh',
             desiredRunnerReplicas: 1,
             runnerRegistrationToken: 'runner-token-123',
-            runnerLabels: 'ubuntu-latest:host',
+            runnerLabels: 'ubuntu-latest:docker://catthehacker/ubuntu:act-latest',
             giteaInstanceUrl: 'https://gitea.demoserver2.buzz',
         });
 

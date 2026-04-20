@@ -569,6 +569,29 @@ function buildAutonomyBudgetPauseUpdate({ toolEvents = [], workflow = null, proj
     return `${statusSummary} Paused here.`;
 }
 
+function buildAutonomyContinuationReason({ toolEvents = [], workflow = null, projectPlan = null } = {}) {
+    const completedEvents = (Array.isArray(toolEvents) ? toolEvents : [])
+        .filter((event) => (event?.result?.success !== false) && ((event?.toolCall?.function?.name || event?.result?.toolId || '') !== USER_CHECKPOINT_TOOL_ID));
+    const latestCompleted = completedEvents[completedEvents.length - 1] || null;
+    const latestReason = normalizeInlineText(latestCompleted?.reason || '');
+    const currentFocus = getActiveProjectMilestoneTitle(projectPlan) || getNextWorkflowTaskTitle(workflow);
+    const blocker = normalizeInlineText(workflow?.lastError || '');
+    const parts = [];
+
+    if (currentFocus) {
+        parts.push(`Continuing will resume at: ${truncateText(currentFocus, 96)}.`);
+    } else if (latestReason) {
+        parts.push(`Continuing will pick up after: ${truncateText(latestReason, 96)}.`);
+    }
+
+    if (blocker) {
+        parts.push(`Current blocker: ${truncateText(blocker, 96)}.`);
+    }
+
+    parts.push('It will keep the current progress instead of starting over.');
+    return truncateText(parts.join(' '), 220);
+}
+
 function buildAutonomyContinuationCheckpoint({ toolEvents = [], workflow = null, projectPlan = null } = {}) {
     const update = buildAutonomyBudgetPauseUpdate({
         toolEvents,
@@ -577,14 +600,18 @@ function buildAutonomyContinuationCheckpoint({ toolEvents = [], workflow = null,
     });
     const checkpoint = normalizeCheckpointRequest({
         id: `${AUTONOMY_CONTINUATION_CHECKPOINT_ID_PREFIX}-${Date.now().toString(36)}`,
-        title: 'Continue now?',
+        title: 'Continue from here?',
         preamble: update,
-        whyThisMatters: 'I can continue from the current state if you want me to keep going.',
-        question: 'Do you want me to continue now?',
+        whyThisMatters: buildAutonomyContinuationReason({
+            toolEvents,
+            workflow,
+            projectPlan,
+        }),
+        question: 'Do you want me to continue from the current state?',
         options: [{
             id: 'continue-now',
-            label: 'Yes, continue',
-            description: 'Keep working from the current state now.',
+            label: 'Yes, continue here',
+            description: 'Resume from the current step without restarting.',
         }, {
             id: 'stop-here',
             label: 'No, stop here',

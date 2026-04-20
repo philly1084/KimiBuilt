@@ -2912,13 +2912,15 @@ describe('ConversationOrchestrator', () => {
                     toolId: 'user-checkpoint',
                     data: expect.objectContaining({
                         checkpoint: expect.objectContaining({
-                            title: 'Continue now?',
+                            title: 'Continue from here?',
                             preamble: expect.stringContaining('Status:'),
-                            question: 'Do you want me to continue now?',
+                            whyThisMatters: expect.stringContaining('current progress'),
+                            question: 'Do you want me to continue from the current state?',
                             options: expect.arrayContaining([
                                 expect.objectContaining({
                                     id: 'continue-now',
-                                    label: 'Yes, continue',
+                                    label: 'Yes, continue here',
+                                    description: expect.stringContaining('without restarting'),
                                 }),
                                 expect.objectContaining({
                                     id: 'stop-here',

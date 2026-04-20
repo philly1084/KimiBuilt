@@ -689,7 +689,7 @@ describe('ManagedAppService', () => {
                 },
             },
             runnerTokenState: 'placeholder',
-            runnerLabels: 'ubuntu-latest:host',
+            runnerLabels: 'ubuntu-latest:docker://catthehacker/ubuntu:act-latest',
             giteaInstanceUrl: 'https://gitea.demoserver2.buzz',
             runnerLogExcerpt: ['registration token invalid'],
             raw: {
@@ -768,7 +768,7 @@ describe('ManagedAppService', () => {
                     },
                 },
                 runnerTokenState: 'placeholder',
-                runnerLabels: 'ubuntu-latest:host',
+                runnerLabels: 'ubuntu-latest:docker://catthehacker/ubuntu:act-latest',
                 giteaInstanceUrl: 'https://gitea.demoserver2.buzz',
                 runnerLogExcerpt: ['registration token invalid'],
                 raw: {
@@ -812,7 +812,7 @@ describe('ManagedAppService', () => {
                     },
                 },
                 runnerTokenState: 'present',
-                runnerLabels: 'ubuntu-latest:host',
+                runnerLabels: 'ubuntu-latest:docker://catthehacker/ubuntu:act-latest',
                 giteaInstanceUrl: 'https://gitea.demoserver2.buzz',
                 runnerLogExcerpt: [],
                 raw: {
@@ -850,7 +850,7 @@ describe('ManagedAppService', () => {
                 status: 'online',
                 disabled: false,
                 busy: false,
-                labels: [{ name: 'ubuntu-latest:host' }],
+                labels: [{ name: 'ubuntu-latest:docker://catthehacker/ubuntu:act-latest' }],
             }],
         }));
 
@@ -889,7 +889,7 @@ describe('ManagedAppService', () => {
             platformNamespace: 'agent-platform',
             deploymentTarget: 'ssh',
             runnerRegistrationToken: 'runner-token-123',
-            runnerLabels: 'ubuntu-latest:host',
+            runnerLabels: 'ubuntu-latest:docker://catthehacker/ubuntu:act-latest',
             giteaInstanceUrl: 'https://gitea.demoserver2.buzz',
         }));
         expect(listActionsRunners).toHaveBeenCalledWith(expect.objectContaining({

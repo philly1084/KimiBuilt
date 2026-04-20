@@ -22,6 +22,8 @@ describe('managed app scaffold', () => {
         const workflow = files.find((entry) => entry.path === '.gitea/workflows/build-and-publish.yml');
 
         expect(workflow).toBeTruthy();
+        expect(workflow.content).toContain('container:');
+        expect(workflow.content).toContain('image: catthehacker/ubuntu:act-latest');
         expect(workflow.content).toContain('BUILDKIT_HOST');
         expect(workflow.content).toContain('TARGET_PLATFORMS');
         expect(workflow.content).toContain('linux/amd64,linux/arm64');
@@ -29,6 +31,7 @@ describe('managed app scaffold', () => {
         expect(workflow.content).toContain('--opt platform="$TARGET_PLATFORMS"');
         expect(workflow.content).toContain('--import-cache "type=registry,ref=$IMAGE_REPO:latest"');
         expect(workflow.content).toContain('KIMIBUILT_BUILD_EVENTS_SECRET');
+        expect(workflow.content).toContain('IMAGE_TAG="${IMAGE_TAG:-sha-${GITHUB_SHA::12}}"');
         expect(workflow.content).toContain('PAYLOAD="$(cat <<EOF');
         expect(workflow.content).toContain('"imageRepo":"$IMAGE_REPO"');
         expect(workflow.content).toContain('"platforms":"$TARGET_PLATFORMS"');

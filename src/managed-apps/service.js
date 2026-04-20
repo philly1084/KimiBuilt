@@ -23,6 +23,7 @@ function normalizeText(value = '') {
 
 const MAX_MANAGED_APP_SLUG_LENGTH = 63;
 const MAX_KUBERNETES_NAME_LENGTH = 63;
+const DEFAULT_GITEA_RUNNER_LABELS = 'ubuntu-latest:docker://catthehacker/ubuntu:act-latest';
 
 function baseSlugify(value = '') {
     return String(value || '')
@@ -407,6 +408,10 @@ function buildPlatformDoctorSuggestions(report = {}) {
         suggestions.push('The runner log excerpt points at a registration or token problem. Reissue the runner registration token from Gitea and update `gitea-actions`.');
     }
 
+    if (/\bcannot find:\s*node in path\b/.test(runnerLogText) || /\bubuntu-latest:host\b/i.test(runnerLabels)) {
+        suggestions.push(`Use a container-backed runner label such as \`${DEFAULT_GITEA_RUNNER_LABELS}\` so JavaScript actions like \`actions/checkout\` have Node available.`);
+    }
+
     if (runnerLabels && !/\bubuntu-latest\b/i.test(runnerLabels)) {
         suggestions.push(`The runner labels are currently \`${runnerLabels}\`. The managed-app workflow expects an \`ubuntu-latest\` compatible label.`);
     }
@@ -643,7 +648,7 @@ class ManagedAppService {
         const desiredRunnerReplicas = Number.isFinite(Number(input.runnerReplicas))
             ? Math.max(0, Number(input.runnerReplicas))
             : 1;
-        const runnerLabels = normalizeText(input.runnerLabels || before.runnerLabels || 'ubuntu-latest:host');
+        const runnerLabels = normalizeText(input.runnerLabels || before.runnerLabels || DEFAULT_GITEA_RUNNER_LABELS);
         const giteaInstanceUrl = normalizeText(input.giteaInstanceUrl || giteaConfig.baseURL || before.giteaInstanceUrl);
         const reconciliation = await this.kubernetesClient.reconcileManagedAppPlatform({
             platformNamespace,
