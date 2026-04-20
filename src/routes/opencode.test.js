@@ -4,6 +4,7 @@ const express = require('express');
 const request = require('supertest');
 
 const opencodeRouter = require('./opencode');
+const { config } = require('../config');
 
 function buildApp(service) {
     const app = express();
@@ -14,6 +15,12 @@ function buildApp(service) {
     });
     app.locals.opencodeService = service;
     app.use('/api', opencodeRouter);
+    app.use((err, _req, res, _next) => {
+        res.status(err.statusCode || 500).json({
+            success: false,
+            error: err.message,
+        });
+    });
     return app;
 }
 
@@ -101,5 +108,28 @@ describe('/api/opencode routes', () => {
         expect(response.body.data[1]).toEqual(expect.objectContaining({
             eventType: 'completed',
         }));
+    });
+
+    test('returns 404 when OpenCode is disabled', async () => {
+        const originalEnabled = config.opencode.enabled;
+        config.opencode.enabled = false;
+
+        try {
+            const response = await request(buildApp({
+                createRun: jest.fn(),
+            }))
+                .post('/api/opencode/runs')
+                .send({
+                    prompt: 'Fix the build.',
+                });
+
+            expect(response.status).toBe(404);
+            expect(response.body).toEqual({
+                success: false,
+                error: 'OpenCode is disabled',
+            });
+        } finally {
+            config.opencode.enabled = originalEnabled;
+        }
     });
 });

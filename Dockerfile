@@ -1,7 +1,7 @@
 # ================================
 # Stage 1: Install dependencies
 # ================================
-FROM --platform=$TARGETPLATFORM node:20-bookworm-slim AS deps
+FROM node:20-bookworm-slim AS deps
 
 WORKDIR /app
 
@@ -11,7 +11,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 # ================================
 # Stage 2: Production image
 # ================================
-FROM --platform=$TARGETPLATFORM node:20-bookworm-slim
+FROM node:20-bookworm-slim
 
 WORKDIR /app
 
@@ -56,7 +56,7 @@ RUN mkdir -p /app/data/piper/voices && \
     "${PIPER_VOICES_BASE_URL}/${PIPER_VOICES_REF}/en/en_US/kathleen/low/en_US-kathleen-low.onnx.json" \
     --output /app/data/piper/voices/en_US-kathleen-low.onnx.json
 
-RUN mkdir -p /home/kimibuilt/.kimibuilt /home/kimibuilt/.opencode && \
+RUN mkdir -p /home/kimibuilt/.kimibuilt && \
   chown -R kimibuilt:kimibuilt /home/kimibuilt /app
 
 ENV NODE_ENV=production
@@ -66,11 +66,9 @@ ENV KIMIBUILT_DATA_DIR=/home/kimibuilt/.kimibuilt
 ENV KIMIBUILT_STATE_DIR=/home/kimibuilt/.kimibuilt
 ENV PIPER_TTS_BINARY_PATH=/usr/local/bin/piper
 ENV PIPER_TTS_VOICES_PATH=/app/data/piper/voices/manifest.json
-ENV PATH=/home/kimibuilt/.opencode/bin:$PATH
+ENV OPENCODE_ENABLED=false
 
 USER kimibuilt
-
-RUN curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path
 
 EXPOSE 3000
 

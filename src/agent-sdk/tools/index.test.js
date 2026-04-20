@@ -36,6 +36,7 @@ jest.mock('../../generated-audio-artifacts', () => ({
 }));
 
 const { ToolManager } = require('./index');
+const { getUnifiedRegistry } = require('../registry/UnifiedRegistry');
 const { artifactService } = require('../../artifacts/artifact-service');
 const { assetManager } = require('../../asset-manager');
 const { piperTtsService } = require('../../tts/piper-tts-service');
@@ -98,6 +99,21 @@ describe('ToolManager image tools', () => {
     expect(toolManager.getTool('opencode-run')).toBeTruthy();
     expect(toolManager.getTool('agent-delegate')).toBeTruthy();
     expect(toolManager.getTool('podcast')).toBeTruthy();
+  });
+
+  test('does not register opencode-run when the runtime is disabled in config', async () => {
+    const originalEnabled = config.opencode.enabled;
+    config.opencode.enabled = false;
+
+    try {
+      getUnifiedRegistry().unregister('opencode-run');
+      const toolManager = new ToolManager();
+      await toolManager.initialize();
+
+      expect(toolManager.getTool('opencode-run')).toBeFalsy();
+    } finally {
+      config.opencode.enabled = originalEnabled;
+    }
   });
 
   test('registers remote operation skills with kubectl and k3s trigger coverage', async () => {

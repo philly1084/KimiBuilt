@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const { config } = require('../config');
 
 const router = express.Router();
 
@@ -9,6 +10,12 @@ function getOwnerId(req) {
 }
 
 function getService(req) {
+    if (config.opencode.enabled === false) {
+        const error = new Error('OpenCode is disabled');
+        error.statusCode = 404;
+        throw error;
+    }
+
     const service = req.app.locals.opencodeService;
     if (!service) {
         const error = new Error('OpenCode service is not initialized');

@@ -253,7 +253,9 @@ app.use('/admin', providerSessionsRouter);
 app.use('/api/tools', toolsRouter);
 app.use('/api', workloadsRouter);
 app.use('/api', managedAppsRouter);
-app.use('/api', opencodeRouter);
+if (config.opencode.enabled !== false) {
+    app.use('/api', opencodeRouter);
+}
 
 app.use(express.static(path.join(__dirname, '../frontend'), buildFrontendStaticOptions()));
 
@@ -266,6 +268,7 @@ app.use(errorHandler);
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 setupWebSocket(wss, app);
+app.locals.opencodeService = null;
 
 async function start() {
     try {
@@ -360,9 +363,13 @@ async function start() {
         console.log('[Boot] Conversation orchestrator ready');
 
         app.locals.conversationOrchestrator = conversationOrchestrator;
-        app.locals.opencodeService = new OpenCodeService({
-            sessionStore,
-        });
+        if (config.opencode.enabled !== false) {
+            app.locals.opencodeService = new OpenCodeService({
+                sessionStore,
+            });
+        } else {
+            console.log('[Boot] OpenCode runtime disabled');
+        }
         app.locals.providerSessionService = new ProviderSessionService();
         app.locals.conversationRunService = new ConversationRunService({
             app,

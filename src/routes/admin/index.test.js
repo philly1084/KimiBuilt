@@ -4,6 +4,7 @@ const express = require('express');
 const request = require('supertest');
 
 const adminRouter = require('./index');
+const { config } = require('../../config');
 
 describe('/api/admin workload routes', () => {
     function buildApp(service, opencodeService = null) {
@@ -162,5 +163,26 @@ describe('/api/admin workload routes', () => {
         });
         expect(response.body.success).toBe(true);
         expect(response.body.data.status).toBe('ready');
+    });
+
+    test('returns 404 for OpenCode admin routes when OpenCode is disabled', async () => {
+        const originalEnabled = config.opencode.enabled;
+        config.opencode.enabled = false;
+
+        try {
+            const app = buildApp({
+                isAvailable: jest.fn(() => true),
+            });
+
+            const response = await request(app).get('/api/admin/opencode/runtime');
+
+            expect(response.status).toBe(404);
+            expect(response.body).toEqual({
+                success: false,
+                error: 'OpenCode is disabled',
+            });
+        } finally {
+            config.opencode.enabled = originalEnabled;
+        }
     });
 });

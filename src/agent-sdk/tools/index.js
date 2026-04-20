@@ -3567,7 +3567,11 @@ class ToolManager {
     ];
 
     // Register all system tools
-    [...fileTools, ...codeTools, ...docsTools, ...mediaTools, ...workloadTools, ...opencodeTools, ...interactionTools].forEach(def => {
+    const enabledOpencodeTools = config.opencode?.enabled === false
+      ? []
+      : opencodeTools;
+
+    [...fileTools, ...codeTools, ...docsTools, ...mediaTools, ...workloadTools, ...enabledOpencodeTools, ...interactionTools].forEach(def => {
       this.registry.register({
         ...def,
         version: '1.0.0',

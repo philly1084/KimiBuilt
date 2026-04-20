@@ -5,6 +5,7 @@
 
 const express = require('express');
 const router = express.Router();
+const { config } = require('../../config');
 
 // Controllers
 const promptsController = require('./prompts.controller');
@@ -18,6 +19,12 @@ const settingsController = require('./settings.controller');
 const getDashboardController = (req) => req.app.locals.dashboardController;
 const callController = (controller, method) => (req, res, next) =>
   controller[method](req, res, next);
+const requireOpencodeEnabled = (_req, res, next) => {
+  if (config.opencode.enabled === false) {
+    return res.status(404).json({ success: false, error: 'OpenCode is disabled' });
+  }
+  return next();
+};
 
 // API Routes
 
@@ -238,7 +245,7 @@ router.get('/runs/:id', async (req, res, next) => {
   }
 });
 
-router.get('/opencode/runtime', async (req, res, next) => {
+router.get('/opencode/runtime', requireOpencodeEnabled, async (req, res, next) => {
   try {
     const service = req.app.locals.opencodeService;
     if (!service?.getAdminRuntimeDetails) {
@@ -252,7 +259,7 @@ router.get('/opencode/runtime', async (req, res, next) => {
   }
 });
 
-router.post('/opencode/bootstrap', async (req, res, next) => {
+router.post('/opencode/bootstrap', requireOpencodeEnabled, async (req, res, next) => {
   try {
     const service = req.app.locals.opencodeService;
     if (!service?.bootstrapRuntime) {
