@@ -13,9 +13,19 @@ const logsController = require('./logs.controller');
 const skillsController = require('./skills.controller');
 const tracesController = require('./traces.controller');
 const settingsController = require('./settings.controller');
+const DashboardController = require('./dashboard.controller');
+const { setDashboardController } = require('../../admin/runtime-monitor');
 
 // Dashboard controller is initialized with orchestrator in server.js
-const getDashboardController = (req) => req.app.locals.dashboardController;
+const getDashboardController = (req) => {
+  if (!req.app.locals.dashboardController) {
+    const controller = new DashboardController(req.app.locals.conversationOrchestrator || null);
+    req.app.locals.dashboardController = controller;
+    setDashboardController(controller);
+  }
+
+  return req.app.locals.dashboardController;
+};
 const callController = (controller, method) => (req, res, next) =>
   controller[method](req, res, next);
 

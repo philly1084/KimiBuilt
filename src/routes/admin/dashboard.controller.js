@@ -23,6 +23,11 @@ class DashboardController {
     this.registry.on('invocation:recorded', this.handleRegistryInvocation);
   }
 
+  setOrchestrator(agentOrchestrator) {
+    this.orchestrator = agentOrchestrator;
+    return this;
+  }
+
   estimateTokens(text = '') {
     const normalized = String(text || '').trim();
     if (!normalized) {
@@ -917,9 +922,14 @@ class DashboardController {
 
   async checkEmbedder() {
     if (this.orchestrator?.embedder) {
-      if (typeof this.orchestrator.embedder.healthCheck === 'function') {
-        return (await this.orchestrator.embedder.healthCheck()) ? 'connected' : 'disconnected';
+      try {
+        if (typeof this.orchestrator.embedder.healthCheck === 'function') {
+          return (await this.orchestrator.embedder.healthCheck()) ? 'connected' : 'disconnected';
+        }
+      } catch {
+        return 'disconnected';
       }
+
       return 'connected';
     }
     return 'not_configured';

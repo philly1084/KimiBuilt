@@ -3,6 +3,24 @@
 const express = require('express');
 const request = require('supertest');
 
+jest.mock('./dashboard.controller', () => jest.fn().mockImplementation(function DashboardController(orchestrator) {
+    this.orchestrator = orchestrator;
+    this.getStats = jest.fn((_req, res) => res.json({ success: true, data: { source: 'stats' } }));
+    this.getHealth = jest.fn((_req, res) => res.json({ success: true, data: { status: 'healthy' } }));
+    this.getRecentActivity = jest.fn((_req, res) => res.json({ success: true, data: [] }));
+    this.executeTask = jest.fn();
+    this.cancelTask = jest.fn();
+    this.getActiveSessions = jest.fn();
+    this.getSessionDetails = jest.fn();
+    this.clearSession = jest.fn();
+}));
+
+jest.mock('../../admin/runtime-monitor', () => ({
+    setDashboardController: jest.fn(),
+}));
+
+const DashboardController = require('./dashboard.controller');
+const { setDashboardController } = require('../../admin/runtime-monitor');
 const adminRouter = require('./index');
 
 describe('/api/admin workload routes', () => {
@@ -95,4 +113,23 @@ describe('/api/admin workload routes', () => {
         expect(response.body.success).toBe(true);
     });
 
+    test('creates a fallback dashboard controller when startup did not initialize one', async () => {
+        const service = {
+            isAvailable: jest.fn(() => true),
+        };
+        const app = buildApp(service);
+        app.locals.conversationOrchestrator = { id: 'orchestrator-1' };
+
+        const statsResponse = await request(app).get('/api/admin/stats');
+        const activityResponse = await request(app).get('/api/admin/activity');
+        const healthResponse = await request(app).get('/api/admin/health');
+
+        expect(statsResponse.status).toBe(200);
+        expect(activityResponse.status).toBe(200);
+        expect(healthResponse.status).toBe(200);
+        expect(DashboardController).toHaveBeenCalledTimes(1);
+        expect(DashboardController).toHaveBeenCalledWith(app.locals.conversationOrchestrator);
+        expect(setDashboardController).toHaveBeenCalledTimes(1);
+        expect(app.locals.dashboardController).toBeTruthy();
+    });
 });

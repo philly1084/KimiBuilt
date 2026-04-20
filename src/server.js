@@ -60,6 +60,8 @@ validate();
 
 const app = express();
 app.set('trust proxy', 1);
+app.locals.dashboardController = new DashboardController(null);
+setDashboardController(app.locals.dashboardController);
 
 let startupState = {
     ready: false,
@@ -372,7 +374,7 @@ async function start() {
             workloadService: app.locals.agentWorkloadService,
         });
         app.locals.agentWorkloadRunner.start();
-        app.locals.dashboardController = new DashboardController(conversationOrchestrator);
+        app.locals.dashboardController.setOrchestrator(conversationOrchestrator);
         setDashboardController(app.locals.dashboardController);
         const ttsConfig = ttsService.getPublicConfig();
         console.log(`[Boot] TTS ${ttsConfig.provider || 'unknown'} ${ttsConfig.diagnostics?.status || 'unknown'}: ${ttsConfig.diagnostics?.message || 'No details available.'}`);
