@@ -1,0 +1,22 @@
+{
+  "id": "html-article-editorial",
+  "name": "HTML Editorial Article",
+  "category": "creative",
+  "description": "Web-first article layout with strong headline, narrative pacing, and visual rhythm.",
+  "icon": "article",
+  "tags": ["html", "article", "editorial", "publication"],
+  "blueprint": "html-article",
+  "packId": "html-publication",
+  "intent": "html",
+  "useCases": ["html", "article", "publication"],
+  "recommendedFormats": ["html", "md"],
+  "formats": ["html", "md"],
+  "requiredVariables": ["title", "subtitle", "body"],
+  "variables": {
+    "title": { "type": "text", "label": "Title", "required": true },
+    "subtitle": { "type": "text", "label": "Subtitle", "required": true },
+    "body": { "type": "richtext", "label": "Body", "required": true },
+    "callout": { "type": "textarea", "label": "Callout", "required": false },
+    "cta": { "type": "text", "label": "CTA", "required": false }
+  }
+}

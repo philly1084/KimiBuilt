@@ -28,6 +28,208 @@ const {
   findDocumentLayout,
 } = require('./document-layout-catalog');
 
+const TEMPLATE_PACK_CATALOG = {
+  'research-suite': {
+    id: 'research-suite',
+    label: 'Research suite',
+    intent: 'research',
+    useCase: 'research',
+    formats: ['html', 'pdf', 'docx', 'md'],
+    rationale: 'Evidence-first artifacts with citations, assumptions, and decision-ready synthesis.',
+  },
+  'html-dashboard': {
+    id: 'html-dashboard',
+    label: 'HTML dashboard',
+    intent: 'dashboard',
+    useCase: 'dashboard',
+    formats: ['html'],
+    rationale: 'Operational, KPI, and funnel dashboard structures for web publishing.',
+  },
+  'html-publication': {
+    id: 'html-publication',
+    label: 'HTML publication',
+    intent: 'html',
+    useCase: 'html',
+    formats: ['html'],
+    rationale: 'Readable, publish-ready web pages and product-facing content.',
+  },
+  'pdf-publication': {
+    id: 'pdf-publication',
+    label: 'PDF publication',
+    intent: 'pdf',
+    useCase: 'pdf',
+    formats: ['pdf'],
+    rationale: 'Print-safe whitepaper-grade outputs with structured sections and references.',
+  },
+};
+
+const BLUEPRINT_TO_PACK_MAP = {
+  'research-note': 'research-suite',
+  'research-methodology': 'research-suite',
+  'research-literature': 'research-suite',
+  'research-brief': 'research-suite',
+  'html-dashboard-kpi': 'html-dashboard',
+  'html-dashboard-operational': 'html-dashboard',
+  'html-dashboard-funnel': 'html-dashboard',
+  'html-article': 'html-publication',
+  'html-product-page': 'html-publication',
+  'html-technical-spec': 'html-publication',
+  'pdf-whitepaper': 'pdf-publication',
+  'pdf-audit-report': 'pdf-publication',
+  'pdf-executive-brief': 'pdf-publication',
+};
+
+function normalizeTemplateFormatList(value = []) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((entry) => String(entry || '').trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function normalizeIntent(value = '') {
+  return String(value || '').trim().toLowerCase();
+}
+
+function normalizeUseCase(value = '') {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function safeLimit(value, fallback = 1) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function toTitleCase(value = '') {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return '';
+  }
+
+  return raw
+    .split(/[-_\s]+/g)
+    .filter(Boolean)
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(' ');
+}
+
+function splitIntentTokens(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/g)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 2);
+}
+
+function normalizeIntentToken(value = '') {
+  return String(value || '').trim().toLowerCase();
+}
+
+function blueprintIdIntentHints(documentType = '') {
+  const normalized = normalizeDocumentType(documentType);
+
+  if (normalized.startsWith('research-')) {
+    return 'research';
+  }
+
+  if (normalized.startsWith('html-dashboard-')) {
+    return 'dashboard';
+  }
+
+  if (normalized.startsWith('html-')) {
+    return 'html';
+  }
+
+  if (normalized.startsWith('pdf-')) {
+    return 'pdf';
+  }
+
+  return '';
+}
+
+function resolveTemplatePackHint(template = {}) {
+  const explicitPackId = String(template.packId || '').trim();
+  const outputIntent = normalizeIntentToken(template.intent || template.outputIntent);
+  const packByBlueprint = BLUEPRINT_TO_PACK_MAP[String(template.blueprint || '').trim()];
+
+  if (explicitPackId) {
+    return explicitPackId;
+  }
+
+  if (packByBlueprint) {
+    return packByBlueprint;
+  }
+
+  if (outputIntent === 'research') {
+    return 'research-suite';
+  }
+
+  if (outputIntent === 'dashboard') {
+    return 'html-dashboard';
+  }
+
+  if (outputIntent === 'html') {
+    return 'html-publication';
+  }
+
+  if (outputIntent === 'pdf') {
+    return 'pdf-publication';
+  }
+
+  return 'general';
+}
+
+function buildTemplateRationale({ template = {}, blueprint = {}, format = '', intent = '', useCase = '' } = {}) {
+  const reasons = [];
+  if (template.intent && intent && template.intent.toLowerCase() === intent.toLowerCase()) {
+    reasons.push(`Matches ${template.intent} intent.`);
+  }
+
+  if (template.useCases && Array.isArray(template.useCases) && useCase) {
+    const matching = template.useCases.some((entry) => String(entry || '').toLowerCase().includes(useCase.toLowerCase()));
+    if (matching) {
+      reasons.push('Matches requested use case.');
+    }
+  }
+
+  if (template.blueprint && blueprint && template.blueprint === blueprint.id) {
+    reasons.push(`Matches ${blueprint.label} blueprint.`);
+  }
+
+  if (format) {
+    reasons.push(`Supports ${format.toUpperCase()} output.`);
+  }
+
+  const packRationale = summarizePackRationale(template.packReason || []);
+  if (packRationale && !reasons.length) {
+    reasons.push(packRationale);
+  }
+
+  return reasons[0] || 'Good fit for this request.';
+}
+
+function buildPackLabel(value = '') {
+  const labeled = String(value || '').trim();
+  return labeled ? toTitleCase(labeled) : 'General Pack';
+}
+
+function summarizePackRationale(entries = []) {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return 'Balanced coverage for your selected format.';
+  }
+
+  return entries
+    .slice(0, 2)
+    .map((entry) => entry.toLowerCase())
+    .join(' + ') || 'Balanced coverage for your selected format.';
+}
+
 class DocumentService {
   constructor(openaiClient) {
     this.generators = {
@@ -55,6 +257,17 @@ class DocumentService {
     const template = await this.templateEngine.getTemplate(templateId);
     if (!template) {
       throw new Error(`Template not found: ${templateId}`);
+    }
+
+    const normalizedFormat = String(format || '').trim().toLowerCase();
+    const formatCompatibility = this.validateTemplateFormatCompatibility(template, normalizedFormat);
+    if (!formatCompatibility.supported) {
+      throw new Error(formatCompatibility.error);
+    }
+
+    const variableValidation = this.templateEngine.validateTemplateVariableRequirements(template, variables);
+    if (!variableValidation.valid) {
+      throw new Error(`Missing required template variables: ${variableValidation.missing.join(', ')}`);
     }
 
     // Populate template with variables
@@ -423,11 +636,17 @@ class DocumentService {
 
   /**
    * Get available templates
-   * @param {string} category - Optional category filter
+   * @param {string|Object} filters - Optional category filter or template query object
    * @returns {Promise<Array>} List of templates
    */
-  async getTemplates(category = null) {
-    return this.templateEngine.getTemplates(category);
+  async getTemplates(filters = null) {
+    return this.templateEngine.getTemplates(filters || null).map((template) => ({
+      ...template,
+      packId: this.resolveTemplatePackId(template),
+      packLabel: this.resolveTemplatePackLabel(template),
+      useCase: template.useCases || template.useCase || [],
+      packReason: this.resolvePackRationale(template),
+    }));
   }
 
   /**
@@ -449,9 +668,26 @@ class DocumentService {
 
   getRecommendedFormatsForBlueprint(documentType = 'document') {
     const normalizedType = normalizeDocumentType(documentType);
+    const intent = this.resolveIntentFromBlueprint(normalizedType);
 
     if (normalizedType === 'website-slides') {
       return ['html', 'pptx'];
+    }
+
+    if (intent === 'research') {
+      return ['html', 'pdf', 'docx', 'md'];
+    }
+
+    if (intent === 'dashboard') {
+      return ['html', 'pdf'];
+    }
+
+    if (intent === 'html') {
+      return ['html', 'docx', 'md'];
+    }
+
+    if (intent === 'pdf') {
+      return ['pdf', 'docx'];
     }
 
     if (normalizedType === 'presentation' || normalizedType === 'pitch-deck') {
@@ -463,6 +699,136 @@ class DocumentService {
     }
 
     return ['docx', 'pdf', 'html', 'md'];
+  }
+
+  resolveTemplatePackId(template = {}) {
+    const packId = resolveTemplatePackHint(template);
+    if (TEMPLATE_PACK_CATALOG[packId]) {
+      return packId;
+    }
+
+    return packId;
+  }
+
+  resolveTemplatePackLabel(template = {}) {
+    const packId = this.resolveTemplatePackId(template);
+    return TEMPLATE_PACK_CATALOG[packId]?.label || buildPackLabel(packId);
+  }
+
+  resolvePackRationale(template = {}) {
+    const packId = this.resolveTemplatePackId(template);
+    return TEMPLATE_PACK_CATALOG[packId]?.rationale || '';
+  }
+
+  resolveIntentFromBlueprint(documentType = '') {
+    const blueprint = resolveDocumentBlueprint(documentType);
+    const blueprintIntent = normalizeIntentToken(blueprint.outputIntent);
+    if (blueprintIntent) {
+      return blueprintIntent;
+    }
+
+    return normalizeIntentToken(blueprintIdIntentHints(documentType));
+  }
+
+  inferBlueprintForIntent(intent = '', existingType = 'document') {
+    const requestedIntent = normalizeIntentToken(intent);
+    if (!requestedIntent) {
+      return normalizeDocumentType(existingType);
+    }
+
+    if (requestedIntent === 'research') {
+      return 'research-note';
+    }
+
+    if (requestedIntent === 'dashboard') {
+      return 'html-dashboard-kpi';
+    }
+
+    if (requestedIntent === 'html') {
+      return 'html-article';
+    }
+
+    if (requestedIntent === 'pdf') {
+      return 'pdf-whitepaper';
+    }
+
+    return normalizeDocumentType(requestedIntent);
+  }
+
+  buildTemplateMetadata(template = {}) {
+    return {
+      id: template.id,
+      name: template.name,
+      category: template.category,
+      description: template.description,
+      icon: template.icon,
+      formats: this.getTemplateAvailableFormats(template),
+      blueprint: template.blueprint || null,
+      packId: this.resolveTemplatePackId(template),
+      packLabel: this.resolveTemplatePackLabel(template),
+      packRationale: this.resolvePackRationale(template),
+      useCase: template.useCase || template.useCases || [],
+      useCases: template.useCases || [],
+      intent: template.intent || template.outputIntent || '',
+      rationale: buildTemplateRationale({
+        template,
+        blueprint: resolveDocumentBlueprint(template.blueprint || 'document'),
+      }),
+    };
+  }
+
+  summarizePackSuggestions(templates = [], options = {}) {
+    const limit = Math.max(1, Number(options.limit) || 6);
+    const bucket = new Map();
+
+    for (const template of templates) {
+      const packId = this.resolveTemplatePackId(template);
+      const current = bucket.get(packId) || {
+        packId,
+        label: this.resolveTemplatePackLabel(template),
+        useCase: String(template.useCases?.[0] || template.useCase || this.resolveIntentFromBlueprint(template.blueprint || 'document')),
+        intent: this.resolveIntentFromBlueprint(template.blueprint || 'document'),
+        recommendedFormats: this.getTemplateAvailableFormats(template),
+        templates: [],
+        rationale: this.resolvePackRationale(template),
+        score: 0,
+      };
+
+      current.templates.push(template);
+      current.score = Math.max(current.score, Number(template.score || 0));
+      bucket.set(packId, current);
+    }
+
+    const packEntries = Array.from(bucket.values())
+      .map((entry) => ({
+        packId: entry.packId,
+        label: entry.label,
+        useCase: entry.useCase,
+        intent: entry.intent,
+        rationale: entry.rationale,
+        score: entry.score,
+        templateCount: entry.templates.length,
+        templates: entry.templates.slice(0, 3).map((template) => ({
+          id: template.id,
+          name: template.name,
+          description: template.description,
+          icon: template.icon,
+        })),
+        recommendedFormats: entry.templates.length === 0
+          ? options.formats || []
+          : Array.from(new Set(entry.templates.flatMap((template) => this.getTemplateAvailableFormats(template)))),
+      }))
+      .sort((a, b) => b.score - a.score || b.templateCount - a.templateCount || String(a.label || '').localeCompare(String(b.label || '')))
+      .slice(0, limit);
+
+    return packEntries.map(({ templates, score, ...entry }) => {
+      const top = Array.isArray(templates) ? templates : [];
+      return {
+        ...entry,
+        templateCount: top.length ? entry.templateCount : 0,
+        templates: top,
+      };
+    });
   }
 
   getPipelineForBlueprint(documentType = '', format = '') {
@@ -482,9 +848,30 @@ class DocumentService {
       return 'document';
     }
 
+    const normalizedType = normalizeDocumentType(normalized);
+    if (normalizedType !== 'document') {
+      return normalizedType;
+    }
+
     if (/\bwebsite\b[\s\S]{0,30}\b(slides|deck|storyboard|narrative)\b/.test(normalized)
       || /\b(slides|storyboard)\b[\s\S]{0,30}\bwebsite\b/.test(normalized)) {
       return 'website-slides';
+    }
+
+    if (/\b(research|investigate|literature|methodology|evidence|bibliography)\b/.test(normalized)) {
+      return 'research-note';
+    }
+
+    if (/\b(dashboard|kpi|funnel|operational|conversion)\b/.test(normalized)) {
+      return 'html-dashboard-kpi';
+    }
+
+    if (/\b(whitepaper|audit|publication|paper|reportable)\b/.test(normalized)) {
+      return 'pdf-whitepaper';
+    }
+
+    if (/\b(article|product page|technical spec|html page|web page|landing)\b/.test(normalized)) {
+      return 'html-article';
     }
 
     if (/\b(pitch deck|investor deck|fundraising deck)\b/.test(normalized)) {
@@ -522,9 +909,13 @@ class DocumentService {
     return 'document';
   }
 
-  scoreTemplateForWorkflow(template = {}, blueprintId = 'document', prompt = '') {
+  scoreTemplateForWorkflow(template = {}, blueprintId = 'document', prompt = '', intent = '', useCase = '', packId = '') {
     const normalizedPrompt = String(prompt || '').trim().toLowerCase();
     const tags = Array.isArray(template.tags) ? template.tags.map((tag) => String(tag || '').toLowerCase()) : [];
+    const normalizedIntent = normalizeIntentToken(intent);
+    const normalizedUseCase = normalizeIntentToken(useCase);
+    const normalizedPackId = String(packId || '').trim().toLowerCase();
+    const templatePackId = String(this.resolveTemplatePackId(template) || '').toLowerCase();
     const haystack = [
       template.id,
       template.name,
@@ -560,6 +951,38 @@ class DocumentService {
       score += 16;
     }
 
+    if (normalizedIntent) {
+      if (blueprintId === 'report' && normalizedIntent === 'research') {
+        score += 6;
+      }
+
+      if (String(template.intent || template.outputIntent || '').toLowerCase() === normalizedIntent) {
+        score += 24;
+      }
+
+      if (String(template.outputIntent || '').toLowerCase() === normalizedIntent) {
+        score += 24;
+      }
+
+      if (templatePackId === `research-${normalizedIntent}` || templatePackId === `${normalizedIntent}-suite` || templatePackId === `${normalizedIntent}-pack`) {
+        score += 18;
+      }
+
+      if (templatePackId === normalizedPackId) {
+        score += 20;
+      }
+    }
+
+    if (normalizedPackId && templatePackId === normalizedPackId) {
+      score += 24;
+    }
+
+    if (normalizedUseCase && Array.isArray(template.useCases) && template.useCases.some((entry) => (
+      String(entry || '').toLowerCase().includes(normalizedUseCase)
+    ))) {
+      score += 14;
+    }
+
     if ((blueprintId === 'report' || blueprintId === 'data-story') && /(report|data|analytics|insight|technical)/.test(haystack)) {
       score += 14;
     }
@@ -581,8 +1004,28 @@ class DocumentService {
     return score;
   }
 
-  recommendDocumentWorkflow({ prompt = '', documentType = '', format = '', limit = 4 } = {}) {
-    const inferredType = normalizeDocumentType(documentType || this.inferDocumentTypeFromPrompt(prompt));
+  recommendDocumentWorkflow({
+    prompt = '',
+    documentType = '',
+    intent = '',
+    useCase = '',
+    packId = '',
+    format = '',
+    limit = 4,
+    includePackSummaries = true,
+  } = {}) {
+    const requestedIntent = normalizeIntentToken(intent);
+    const requestedUseCase = normalizeIntentToken(useCase);
+    const requestedPackId = String(packId || '').trim().toLowerCase();
+    const inferredFromPrompt = this.inferDocumentTypeFromPrompt(prompt);
+    const selectedType = documentType
+      ? normalizeDocumentType(documentType)
+      : (requestedIntent
+        ? this.inferBlueprintForIntent(requestedIntent, inferredFromPrompt || 'document')
+        : normalizeDocumentType(inferredFromPrompt));
+    const inferredType = requestedIntent
+      ? this.inferBlueprintForIntent(requestedIntent, selectedType)
+      : selectedType;
     const blueprint = resolveDocumentBlueprint(inferredType);
     const recommendedFormats = this.getRecommendedFormatsForBlueprint(inferredType);
     const normalizedFormat = String(format || '').trim().toLowerCase();
@@ -590,12 +1033,29 @@ class DocumentService {
       ? normalizedFormat
       : recommendedFormats[0];
     const pipeline = this.getPipelineForBlueprint(inferredType, recommendedFormat);
-    const scoredTemplates = this.templateEngine.getTemplates()
-      .map((template) => ({
+    const scoredTemplates = this.templateEngine.getTemplates({
+      format: recommendedFormat,
+      intent: requestedIntent,
+      useCase: requestedUseCase,
+      packId: requestedPackId,
+    }).length > 0
+      ? this.templateEngine.getTemplates({
+        format: recommendedFormat,
+        intent: requestedIntent,
+        useCase: requestedUseCase,
+        packId: requestedPackId,
+      }).map((template) => ({
         ...template,
-        score: this.scoreTemplateForWorkflow(template, inferredType, prompt),
+        score: this.scoreTemplateForWorkflow(template, inferredType, prompt, requestedIntent, requestedUseCase, requestedPackId),
       }))
-      .filter((template) => template.score > 0);
+      : this.templateEngine.getTemplates({
+        format: recommendedFormat,
+        intent: requestedIntent,
+        useCase: requestedUseCase,
+      }).map((template) => ({
+        ...template,
+        score: this.scoreTemplateForWorkflow(template, inferredType, prompt, requestedIntent, requestedUseCase, requestedPackId),
+      }));
 
     const compatibleTemplates = scoredTemplates.filter((template) => (
       this.getTemplateAvailableFormats(template).includes(recommendedFormat)
@@ -605,7 +1065,21 @@ class DocumentService {
       ? compatibleTemplates
       : scoredTemplates;
 
-    const recommendedTemplates = templatePool
+    const enrichedTemplates = templatePool
+      .map((template) => ({
+        ...this.buildTemplateMetadata(template),
+        score: template.score,
+        scoreReason: template.score > 0 ? buildTemplateRationale({
+          template,
+          blueprint,
+          format: recommendedFormat,
+          intent: requestedIntent,
+          useCase: requestedUseCase,
+        }) : 'No clear fit yet',
+      }))
+      .filter((template) => template.score > 0 || templatePool.length < 3);
+
+    const recommendedTemplates = enrichedTemplates
       .sort((a, b) => b.score - a.score || String(a.name || '').localeCompare(String(b.name || '')))
       .slice(0, Math.max(1, Number(limit) || 4))
       .map((template) => ({
@@ -615,10 +1089,25 @@ class DocumentService {
         description: template.description,
         icon: template.icon,
         formats: this.getTemplateAvailableFormats(template),
+        packId: template.packId,
+        packLabel: template.packLabel,
+        packRationale: template.packRationale,
         blueprint: template.blueprint || null,
         useCases: template.useCases || [],
+        intent: template.intent || '',
         score: template.score,
+        rationale: template.scoreReason,
       }));
+
+    const scoredTemplatePool = enrichedTemplates.filter((template) => template.score > 0);
+    const selectedPackId = requestedPackId || this.resolveTemplatePackId(recommendedTemplates[0] || {});
+    const packSuggestions = includePackSummaries
+      ? this.summarizePackSuggestions(scoredTemplatePool, {
+        limit: 6,
+        formats: [recommendedFormat],
+      })
+      : [];
+
     const designOptions = getDocumentLayoutOptions({
       blueprintId: blueprint.id,
       format: recommendedFormat,
@@ -628,7 +1117,13 @@ class DocumentService {
 
     return {
       requestedType: String(documentType || '').trim() || null,
+      requestedIntent: requestedIntent || null,
+      requestedUseCase: requestedUseCase || null,
       inferredType,
+      packId: selectedPackId || null,
+      availableFormats: this.getTemplateAvailableFormats({
+        formats: [recommendedFormat],
+      }),
       blueprint: {
         id: blueprint.id,
         label: blueprint.label,
@@ -639,10 +1134,14 @@ class DocumentService {
       recommendedFormat,
       recommendedFormats,
       recommendedTemplates,
+      recommendedTemplatePacks: packSuggestions,
       designOptions,
       selectedDesignOption,
       checklist: [...blueprint.requiredElements],
       structurePatterns: [...blueprint.structurePatterns],
+      recommendationsFallbackReason: scoredTemplates.length === 0
+        ? 'No template match for requested intent; defaults used.'
+        : null,
       nextAction: pipeline === 'presentation'
         ? 'Start with a narrative slide outline, then generate the deck.'
         : 'Start with a strong title, summary, and section structure before generating the file.',
@@ -700,6 +1199,9 @@ class DocumentService {
   buildDocumentPlan({
     prompt = '',
     documentType = '',
+    intent = '',
+    useCase = '',
+    packId = '',
     format = '',
     tone = 'professional',
     length = 'medium',
@@ -709,7 +1211,15 @@ class DocumentService {
     existingContent = '',
     session = null,
   } = {}) {
-    const recommendation = this.recommendDocumentWorkflow({ prompt, documentType, format, limit });
+    const recommendation = this.recommendDocumentWorkflow({
+      prompt,
+      documentType,
+      intent,
+      useCase,
+      packId,
+      format,
+      limit,
+    });
     const blueprint = resolveDocumentBlueprint(recommendation.inferredType);
     const title = this.derivePlanTitle(prompt, blueprint);
     const outlineType = recommendation.pipeline === 'presentation' ? 'slides' : 'sections';
@@ -787,6 +1297,27 @@ class DocumentService {
    */
   generateFilename(name, format) {
     return createUniqueFilename(name, format, 'document');
+  }
+
+  validateTemplateFormatCompatibility(template = {}, format = '') {
+    const normalizedFormat = String(format || '').trim().toLowerCase();
+    if (!normalizedFormat) {
+      return { supported: false, error: 'Document format is required.' };
+    }
+
+    const availableFormats = this.getTemplateAvailableFormats(template);
+    if (availableFormats.length === 0) {
+      return { supported: true };
+    }
+
+    if (availableFormats.includes(normalizedFormat)) {
+      return { supported: true };
+    }
+
+    return {
+      supported: false,
+      error: `Template "${template.name || template.id || 'document'}" does not support ${normalizedFormat.toUpperCase()}. Available formats: ${availableFormats.join(', ')}`,
+    };
   }
 
   storeGeneratedDocument({ document = {}, filename, mimeType, metadata = {}, preview = null }) {

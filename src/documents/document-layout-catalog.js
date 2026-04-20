@@ -104,7 +104,51 @@ const DOCUMENT_LAYOUT_CATALOG = {
       'Keep each panel focused on one analytical job.',
     ],
   },
+  'dashboard-kpi-grid': {
+    id: 'dashboard-kpi-grid',
+    label: 'Dashboard KPI Grid',
+    summary: 'Metric cards, compact trend bars, and quick status blocks designed for scan-first operations.',
+    bestFor: 'KPI tracking, health monitors, weekly performance briefs, and operational visibility.',
+    layout: 'Metrics-first dashboard shell with dense but readable status cards, trend strips, and alert list.',
+    defaultTheme: 'executive',
+    showOutline: false,
+    navigationLabel: 'Overview',
+    navigationTitle: 'Dashboard sections',
+    minorIdeas: [
+      'Keep top KPI cards visually dominant and sort by business priority.',
+      'Pair every alert block with an owner and due date field.',
+      'Reserve dense tables for drill-down only after card-level summary.',
+    ],
+    guardrails: [
+      'Do not overpack cards; keep each card readable on mobile.',
+      'Avoid mixing narrative paragraphs with card-first sections.',
+      'Keep status language consistent (good, warning, critical).',
+    ],
+  },
+  'dashboard-funnel': {
+    id: 'dashboard-funnel',
+    label: 'Funnel Flow',
+    summary: 'Stage-based workflow with conversion lanes, drop-off summaries, and action calls.',
+    bestFor: 'Funnel and conversion dashboards, onboarding flow analysis, and growth pipelines.',
+    layout: 'Ordered stage track with percentage/value pairing, exception rows, and flow notes.',
+    defaultTheme: 'bold',
+    showOutline: false,
+    navigationLabel: 'Funnel',
+    navigationTitle: 'Flow stages',
+    minorIdeas: [
+      'Name each stage explicitly in the section header.',
+      'Show both percent and count for each stage.',
+      'Call out the biggest drop-off next to an action suggestion.',
+    ],
+    guardrails: [
+      'Do not hide denominator changes; show sample size changes at each stage.',
+      'Avoid decorative arrows unless they improve flow clarity.',
+      'Do not use funnel language if your stages are not conversion-related.',
+    ],
+  },
 };
+
+const { resolveDocumentBlueprint } = require('./document-design-blueprints');
 
 const DEFAULT_LAYOUT_ORDER = [
   'editorial-rhythm',
@@ -112,6 +156,8 @@ const DEFAULT_LAYOUT_ORDER = [
   'chapter-bands',
   'field-guide-rail',
   'casefile-panels',
+  'dashboard-kpi-grid',
+  'dashboard-funnel',
 ];
 
 const BLUEPRINT_LAYOUT_MAP = {
@@ -122,6 +168,19 @@ const BLUEPRINT_LAYOUT_MAP = {
   letter: ['editorial-rhythm', 'field-guide-rail'],
   'executive-brief': ['briefing-grid', 'casefile-panels', 'field-guide-rail'],
   'data-story': ['casefile-panels', 'briefing-grid', 'editorial-rhythm'],
+  'research-note': ['briefing-grid', 'casefile-panels', 'editorial-rhythm'],
+  'research-methodology': ['field-guide-rail', 'briefing-grid', 'chapter-bands'],
+  'research-literature': ['casefile-panels', 'briefing-grid', 'editorial-rhythm'],
+  'research-brief': ['briefing-grid', 'editorial-rhythm'],
+  'html-dashboard-kpi': ['dashboard-kpi-grid', 'briefing-grid', 'field-guide-rail'],
+  'html-dashboard-operational': ['dashboard-kpi-grid', 'field-guide-rail', 'chapter-bands'],
+  'html-dashboard-funnel': ['dashboard-funnel', 'dashboard-kpi-grid', 'briefing-grid'],
+  'html-article': ['editorial-rhythm', 'chapter-bands', 'field-guide-rail'],
+  'html-product-page': ['chapter-bands', 'editorial-rhythm', 'casefile-panels'],
+  'html-technical-spec': ['field-guide-rail', 'casefile-panels', 'briefing-grid'],
+  'pdf-whitepaper': ['casefile-panels', 'editorial-rhythm', 'briefing-grid'],
+  'pdf-audit-report': ['briefing-grid', 'field-guide-rail', 'casefile-panels'],
+  'pdf-executive-brief': ['briefing-grid', 'chapter-bands', 'field-guide-rail'],
 };
 
 const DIRECTION_LAYOUT_MAP = {
@@ -187,6 +246,12 @@ function getDocumentLayoutOptions({
   const blueprintScores = buildLayoutScoreMap(
     BLUEPRINT_LAYOUT_MAP[normalizedBlueprintId] || DEFAULT_LAYOUT_ORDER,
     10,
+  );
+  const blueprint = resolveDocumentBlueprint(normalizedBlueprintId);
+  const preferredLayouts = Array.isArray(blueprint?.preferredLayouts) ? blueprint.preferredLayouts : [];
+  const preferredLayoutScores = buildLayoutScoreMap(
+    preferredLayouts.filter((layoutId) => DOCUMENT_LAYOUT_CATALOG[layoutId]),
+    18,
   );
   const directionScores = buildLayoutScoreMap(
     DIRECTION_LAYOUT_MAP[normalizedDirectionId] || [],

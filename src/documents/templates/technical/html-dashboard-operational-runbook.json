@@ -1,0 +1,22 @@
+{
+  "id": "html-dashboard-operational-runbook",
+  "name": "HTML Operational Dashboard",
+  "category": "technical",
+  "description": "Operational dashboard for service status, blockers, owners, and queue health.",
+  "icon": "ops",
+  "tags": ["dashboard", "html", "operations", "runbook"],
+  "blueprint": "html-dashboard-operational",
+  "packId": "html-dashboard",
+  "intent": "dashboard",
+  "useCases": ["dashboard", "operational dashboard", "service review"],
+  "recommendedFormats": ["html"],
+  "formats": ["html"],
+  "requiredVariables": ["title", "status_summary", "queues"],
+  "variables": {
+    "title": { "type": "text", "label": "Title", "required": true },
+    "status_summary": { "type": "richtext", "label": "Status Summary", "required": true },
+    "queues": { "type": "textarea", "label": "Queues", "required": true, "hint": "One queue per line: Name: Status" },
+    "blockers": { "type": "textarea", "label": "Blockers", "required": false },
+    "owners": { "type": "textarea", "label": "Owners", "required": false }
+  }
+}

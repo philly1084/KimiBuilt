@@ -1,0 +1,23 @@
+{
+  "id": "research-note-brief",
+  "name": "Research Note Brief",
+  "category": "technical",
+  "description": "Evidence-backed research note for quick synthesis, citations, and next actions.",
+  "icon": "research",
+  "tags": ["research", "brief", "evidence", "citations"],
+  "blueprint": "research-note",
+  "packId": "research-suite",
+  "intent": "research",
+  "useCases": ["research", "research note", "evidence summary"],
+  "recommendedFormats": ["html", "pdf", "docx", "md"],
+  "formats": ["html", "pdf", "docx", "md"],
+  "requiredVariables": ["title", "research_question", "findings"],
+  "variables": {
+    "title": { "type": "text", "label": "Title", "required": true },
+    "research_question": { "type": "textarea", "label": "Research Question", "required": true },
+    "sources": { "type": "textarea", "label": "Sources", "required": false, "hint": "One source per line." },
+    "findings": { "type": "richtext", "label": "Findings", "required": true },
+    "assumptions": { "type": "textarea", "label": "Assumptions", "required": false },
+    "next_steps": { "type": "textarea", "label": "Next Steps", "required": false }
+  }
+}

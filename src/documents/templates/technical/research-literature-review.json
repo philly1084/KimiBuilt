@@ -1,0 +1,23 @@
+{
+  "id": "research-literature-review",
+  "name": "Research Literature Review",
+  "category": "technical",
+  "description": "Literature synthesis template for comparing findings, methods, and evidence gaps.",
+  "icon": "literature",
+  "tags": ["research", "literature", "review", "comparison"],
+  "blueprint": "research-literature",
+  "packId": "research-suite",
+  "intent": "research",
+  "useCases": ["research", "literature review", "evidence map"],
+  "recommendedFormats": ["html", "pdf", "docx"],
+  "formats": ["html", "pdf", "docx"],
+  "requiredVariables": ["title", "scope", "theme_map", "recommendations"],
+  "variables": {
+    "title": { "type": "text", "label": "Title", "required": true },
+    "scope": { "type": "textarea", "label": "Scope", "required": true },
+    "theme_map": { "type": "richtext", "label": "Theme Map", "required": true },
+    "comparisons": { "type": "richtext", "label": "Comparisons", "required": false },
+    "gaps": { "type": "textarea", "label": "Gaps", "required": false },
+    "recommendations": { "type": "textarea", "label": "Recommendations", "required": true }
+  }
+}

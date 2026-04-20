@@ -7,12 +7,18 @@ class DocumentCreator {
   constructor(apiClient) {
     this.api = apiClient;
     this.templates = [];
+    this.templatePacks = [];
     this.categories = [];
     this.currentTemplate = null;
     this.modalElement = null;
     this.planRefreshTimer = null;
     this.currentProductionPlan = null;
     this.selectedDesignOptionId = '';
+    this.selectedIntent = '';
+    this.selectedUseCase = '';
+    this.selectedPackId = '';
+    this.selectedTemplateFormat = '';
+    this.templateSearchQuery = '';
     
     this.init();
   }
@@ -103,15 +109,27 @@ class DocumentCreator {
   /**
    * Load available templates from API
    */
-  async loadTemplates() {
+  async loadTemplates(filters = {}) {
     try {
-      const response = await fetch('/api/documents/templates');
+      const params = new URLSearchParams();
+      Object.entries(filters || {}).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && String(value).trim() !== '') {
+          params.set(key, String(value));
+        }
+      });
+      if (!params.has('limit')) {
+        params.set('limit', '12');
+      }
+
+      const response = await fetch(`/api/documents/templates?${params.toString()}`);
       const data = await response.json();
       this.templates = data.templates;
+      this.templatePacks = Array.isArray(data.packs) ? data.packs : [];
       this.categories = data.categories;
     } catch (error) {
       console.error('[DocumentCreator] Failed to load templates:', error);
       this.templates = this.getDefaultTemplates();
+      this.templatePacks = [];
     }
   }
 
@@ -162,23 +180,37 @@ class DocumentCreator {
                      oninput="documentCreator.filterTemplates(this.value)">
             </div>
             
-            <div class="doc-categories">
-              <button class="doc-category-btn active" data-category="all" onclick="documentCreator.selectCategory('all')">
+            <div class="doc-intent-picker">
+              <button class="doc-category-btn active" data-intent="" onclick="documentCreator.selectIntent('')">
                 All
               </button>
-              <button class="doc-category-btn" data-category="business" onclick="documentCreator.selectCategory('business')">
-                Business
+              <button class="doc-category-btn" data-intent="research" onclick="documentCreator.selectIntent('research')">
+                Research
               </button>
-              <button class="doc-category-btn" data-category="personal" onclick="documentCreator.selectCategory('personal')">
-                Personal
+              <button class="doc-category-btn" data-intent="dashboard" onclick="documentCreator.selectIntent('dashboard')">
+                Dashboard
               </button>
-              <button class="doc-category-btn" data-category="creative" onclick="documentCreator.selectCategory('creative')">
-                Creative
+              <button class="doc-category-btn" data-intent="html" onclick="documentCreator.selectIntent('html')">
+                HTML
               </button>
-              <button class="doc-category-btn" data-category="technical" onclick="documentCreator.selectCategory('technical')">
-                Technical
+              <button class="doc-category-btn" data-intent="pdf" onclick="documentCreator.selectIntent('pdf')">
+                PDF
               </button>
             </div>
+
+            <div class="doc-surface-bar">
+              <label for="doc-template-format">Surface</label>
+              <select id="doc-template-format" onchange="documentCreator.selectTemplateSurfaceFormat(this.value)">
+                <option value="">Any format</option>
+                <option value="html">HTML</option>
+                <option value="pdf">PDF</option>
+                <option value="docx">DOCX</option>
+                <option value="md">Markdown</option>
+                <option value="pptx">PPTX</option>
+              </select>
+            </div>
+
+            <div id="doc-template-packs" class="doc-pack-grid"></div>
             
             <div id="doc-templates-grid" class="doc-templates-grid">
               <!-- Templates rendered here -->
@@ -228,6 +260,19 @@ class DocumentCreator {
                 <label>Document Type:</label>
                 <select id="doc-ai-type">
                   <option value="">Auto-detect</option>
+                  <option value="research-note">Research Note</option>
+                  <option value="research-methodology">Research Methodology</option>
+                  <option value="research-literature">Research Literature Brief</option>
+                  <option value="research-brief">Research Brief</option>
+                  <option value="html-dashboard-kpi">HTML KPI Dashboard</option>
+                  <option value="html-dashboard-operational">HTML Operational Dashboard</option>
+                  <option value="html-dashboard-funnel">HTML Funnel Dashboard</option>
+                  <option value="html-article">HTML Article</option>
+                  <option value="html-product-page">HTML Product Page</option>
+                  <option value="html-technical-spec">HTML Technical Spec</option>
+                  <option value="pdf-whitepaper">PDF Whitepaper</option>
+                  <option value="pdf-audit-report">PDF Audit Report</option>
+                  <option value="pdf-executive-brief">PDF Executive Brief</option>
                   <option value="proposal">Proposal</option>
                   <option value="report">Report</option>
                   <option value="executive-brief">Executive Brief</option>
@@ -313,7 +358,7 @@ class DocumentCreator {
       lucide.createIcons();
     }
     
-    // Render initial templates
+    this.renderPackSuggestions();
     this.renderTemplates();
     this.setupAIGenerationAssist();
   }
@@ -355,17 +400,19 @@ class DocumentCreator {
     this.modalElement.classList.remove('hidden');
     this.selectedDesignOptionId = '';
     this.clearProductionPlan();
+    const catalogPromise = this.refreshTemplateCatalog();
     
     // If a template hint was provided, try to find and select it
     if (templateHint) {
-      const template = this.templates.find(t => 
-        t.id === templateHint || 
-        t.name.toLowerCase().includes(templateHint.toLowerCase())
-      );
-      if (template) {
-        this.selectTemplate(template.id);
-        return;
-      }
+      catalogPromise.then(() => {
+        const template = this.templates.find(t => 
+          t.id === templateHint || 
+          t.name.toLowerCase().includes(templateHint.toLowerCase())
+        );
+        if (template) {
+          this.selectTemplate(template.id);
+        }
+      });
     }
     
     this.goToStep(1);
@@ -390,12 +437,14 @@ class DocumentCreator {
   goToStep(step) {
     document.querySelectorAll('.doc-step').forEach(el => el.classList.add('hidden'));
     document.getElementById(`doc-step-${step}`)?.classList.remove('hidden');
+    document.getElementById('doc-modal-footer').style.display = '';
     
     // Update action button
     const actionBtn = document.getElementById('doc-action-btn');
     if (step === 1) {
       actionBtn.textContent = 'Use AI Instead ✨';
       actionBtn.onclick = () => this.goToStep(3);
+      this.refreshTemplateCatalog();
     } else if (step === 2) {
       actionBtn.textContent = 'Generate Document';
       actionBtn.onclick = () => this.generateFromTemplate();
@@ -458,6 +507,9 @@ class DocumentCreator {
         body: JSON.stringify({
           prompt,
           documentType,
+          intent: this.selectedIntent || undefined,
+          useCase: this.selectedUseCase || undefined,
+          packId: this.selectedPackId || undefined,
           format,
           tone,
           length,
@@ -488,6 +540,7 @@ class DocumentCreator {
 
     this.currentProductionPlan = plan;
     const recommendedTemplates = Array.isArray(plan.recommendedTemplates) ? plan.recommendedTemplates : [];
+    const recommendedPacks = Array.isArray(plan.recommendedTemplatePacks) ? plan.recommendedTemplatePacks : [];
     const designOptions = Array.isArray(plan.designOptions) ? plan.designOptions : [];
     const selectedDesignOption = this.resolveSelectedDesignOption(plan, designOptions);
     const outline = Array.isArray(plan.outline) ? plan.outline : [];
@@ -504,6 +557,14 @@ class DocumentCreator {
     const templateMarkup = recommendedTemplates.map((template) => `
       <button type="button" class="doc-plan-template-chip" onclick="documentCreator.useRecommendedTemplate('${template.id}')">
         ${template.icon || '📄'} ${template.name}
+      </button>
+    `).join('');
+    const packMarkup = recommendedPacks.map((pack) => `
+      <button type="button" class="doc-pack-card${pack.packId === this.selectedPackId ? ' is-active' : ''}" onclick="documentCreator.useRecommendedPack('${pack.packId}', '${pack.intent || ''}', '${pack.useCase || ''}')">
+        <span class="doc-pack-label">${pack.label}</span>
+        <strong>${pack.useCase || pack.intent || 'pack'}</strong>
+        <em>${pack.rationale || 'Curated template set.'}</em>
+        <span class="doc-pack-meta">${pack.templateCount || 0} templates</span>
       </button>
     `).join('');
     const formatButtons = (plan.recommendedFormats || []).map((entry) => `
@@ -538,6 +599,7 @@ class DocumentCreator {
       </div>
       <div class="doc-plan-format-row">${formatButtons}</div>
       <div class="doc-plan-outline">${outlineMarkup}</div>
+      ${packMarkup ? `<div class="doc-plan-designs"><span>Suggested packs:</span><div class="doc-pack-grid">${packMarkup}</div></div>` : ''}
       ${designMarkup ? `<div class="doc-plan-designs"><span>Approved layout directions:</span><div class="doc-plan-design-grid">${designMarkup}</div>${guardrailMarkup}</div>` : ''}
       ${templateMarkup ? `<div class="doc-plan-templates"><span>Start from template:</span>${templateMarkup}</div>` : ''}
     `;
@@ -570,6 +632,68 @@ class DocumentCreator {
     panel.innerHTML = '';
   }
 
+  async refreshTemplateCatalog() {
+    const surfaceSelect = document.getElementById('doc-template-format');
+    if (surfaceSelect) {
+      surfaceSelect.value = this.selectedTemplateFormat || '';
+    }
+    document.querySelectorAll('.doc-intent-picker .doc-category-btn').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.intent === this.selectedIntent);
+    });
+
+    await this.loadTemplates({
+      intent: this.selectedIntent || '',
+      useCase: this.selectedUseCase || '',
+      packId: this.selectedPackId || '',
+      format: this.selectedTemplateFormat || '',
+      limit: this.selectedPackId ? 24 : 100,
+    });
+    this.renderPackSuggestions();
+    this.renderTemplates();
+  }
+
+  renderPackSuggestions() {
+    const container = document.getElementById('doc-template-packs');
+    if (!container) {
+      return;
+    }
+
+    if (!Array.isArray(this.templatePacks) || this.templatePacks.length === 0) {
+      container.innerHTML = '<div class="doc-empty-state">No packs match the current filters.</div>';
+      return;
+    }
+
+    container.innerHTML = this.templatePacks.slice(0, 6).map((pack) => `
+      <button type="button" class="doc-pack-card${pack.packId === this.selectedPackId ? ' is-active' : ''}" onclick="documentCreator.selectPack('${pack.packId}')">
+        <span class="doc-pack-label">${pack.label}</span>
+        <strong>${pack.useCase || pack.intent || 'document pack'}</strong>
+        <em>${pack.rationale || 'Curated templates for this output family.'}</em>
+        <span class="doc-pack-meta">${pack.templateCount || 0} templates</span>
+      </button>
+    `).join('');
+  }
+
+  selectIntent(intent = '') {
+    this.selectedIntent = intent;
+    this.selectedUseCase = intent;
+    this.selectedPackId = '';
+    document.querySelectorAll('.doc-intent-picker .doc-category-btn').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.intent === intent);
+    });
+    this.refreshTemplateCatalog();
+  }
+
+  selectTemplateSurfaceFormat(format = '') {
+    this.selectedTemplateFormat = format;
+    this.selectedPackId = '';
+    this.refreshTemplateCatalog();
+  }
+
+  selectPack(packId = '') {
+    this.selectedPackId = packId;
+    this.refreshTemplateCatalog();
+  }
+
   applyRecommendedFormat(format) {
     const formatSelect = document.getElementById('doc-ai-format');
     if (formatSelect) {
@@ -586,6 +710,17 @@ class DocumentCreator {
     this.selectTemplate(templateId);
   }
 
+  useRecommendedPack(packId, intent = '', useCase = '') {
+    if (intent) {
+      this.selectedIntent = intent;
+    }
+    if (useCase) {
+      this.selectedUseCase = useCase;
+    }
+    this.selectedPackId = packId || '';
+    this.goToStep(1);
+  }
+
   useDesignOption(designOptionId) {
     if (!designOptionId) {
       return;
@@ -600,21 +735,43 @@ class DocumentCreator {
   /**
    * Render templates grid
    */
-  renderTemplates(category = 'all') {
+  renderTemplates() {
     const grid = document.getElementById('doc-templates-grid');
     if (!grid) return;
     
-    const filtered = category === 'all' 
-      ? this.templates 
-      : this.templates.filter(t => t.category === category);
+    if (!this.selectedPackId) {
+      grid.innerHTML = '<div class="doc-empty-state">Choose a pack to reveal templates.</div>';
+      return;
+    }
+
+    const lowerQuery = String(this.templateSearchQuery || '').toLowerCase();
+    const filtered = this.templates.filter((template) => {
+      if (!lowerQuery) {
+        return true;
+      }
+
+      return [
+        template.name,
+        template.description,
+        template.intent,
+        template.packLabel,
+        ...(Array.isArray(template.useCases) ? template.useCases : []),
+      ].join(' ').toLowerCase().includes(lowerQuery);
+    });
+
+    if (filtered.length === 0) {
+      grid.innerHTML = '<div class="doc-empty-state">No templates match this search inside the selected pack.</div>';
+      return;
+    }
     
-    grid.innerHTML = filtered.map(template => `
+    grid.innerHTML = filtered.map((template) => `
       <div class="doc-template-card" onclick="documentCreator.selectTemplate('${template.id}')">
         <div class="doc-template-icon">${template.icon || '📄'}</div>
         <div class="doc-template-name">${template.name}</div>
         <div class="doc-template-desc-small">${template.description || ''}</div>
+        <div class="doc-template-pack">${template.packLabel || ''}</div>
         <div class="doc-template-formats">
-          ${template.formats.map(f => `<span class="doc-format-badge">${f.toUpperCase()}</span>`).join('')}
+          ${template.formats.map((f) => `<span class="doc-format-badge">${f.toUpperCase()}</span>`).join('')}
         </div>
       </div>
     `).join('');
@@ -624,33 +781,15 @@ class DocumentCreator {
    * Filter templates by search query
    */
   filterTemplates(query) {
-    const cards = document.querySelectorAll('.doc-template-card');
-    const lowerQuery = query.toLowerCase();
-    
-    cards.forEach(card => {
-      const name = card.querySelector('.doc-template-name')?.textContent.toLowerCase() || '';
-      const desc = card.querySelector('.doc-template-desc-small')?.textContent.toLowerCase() || '';
-      
-      if (name.includes(lowerQuery) || desc.includes(lowerQuery)) {
-        card.style.display = 'block';
-      } else {
-        card.style.display = 'none';
-      }
-    });
+    this.templateSearchQuery = query;
+    this.renderTemplates();
   }
 
   /**
    * Select a category
    */
   selectCategory(category) {
-    document.querySelectorAll('.doc-category-btn').forEach(btn => {
-      btn.classList.remove('active');
-      if (btn.dataset.category === category) {
-        btn.classList.add('active');
-      }
-    });
-    
-    this.renderTemplates(category);
+    this.selectIntent(category === 'all' ? '' : category);
   }
 
   /**
@@ -922,6 +1061,9 @@ class DocumentCreator {
           sessionId: sessionId || undefined,
           prompt,
           documentType,
+          intent: this.selectedIntent || undefined,
+          useCase: this.selectedUseCase || undefined,
+          packId: this.selectedPackId || undefined,
           tone,
           length,
           style,
@@ -1172,6 +1314,96 @@ const documentCreatorStyles = `
   flex-wrap: wrap;
 }
 
+.doc-intent-picker {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.doc-surface-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-secondary) 82%, transparent);
+}
+
+.doc-surface-bar label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.doc-surface-bar select {
+  min-width: 140px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.doc-pack-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.doc-pack-card {
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-secondary) 90%, transparent), color-mix(in srgb, var(--bg-tertiary) 92%, transparent));
+  color: var(--text-primary);
+  padding: 14px;
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  display: grid;
+  gap: 6px;
+}
+
+.doc-pack-card:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent);
+  box-shadow: 0 12px 24px rgba(0,0,0,0.08);
+}
+
+.doc-pack-card.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.doc-pack-label {
+  font-size: 11px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.doc-pack-card strong {
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.doc-pack-card em {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  font-style: normal;
+}
+
+.doc-pack-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
 .doc-category-btn {
   padding: 6px 14px;
   border-radius: 20px;
@@ -1227,6 +1459,14 @@ const documentCreatorStyles = `
   font-size: 12px;
   color: var(--text-secondary);
   line-height: 1.3;
+}
+
+.doc-template-pack {
+  font-size: 11px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-top: 8px;
 }
 
 .doc-template-formats {
@@ -1617,6 +1857,14 @@ const documentCreatorStyles = `
 
 .doc-success svg {
   margin-bottom: 16px;
+}
+
+.doc-empty-state {
+  padding: 16px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-secondary) 80%, transparent);
 }
 </style>
 `;

@@ -1,0 +1,23 @@
+{
+  "id": "research-brief-decision",
+  "name": "Research Brief Decision Memo",
+  "category": "technical",
+  "description": "Short decision-oriented research brief with evidence quality and action guidance.",
+  "icon": "brief",
+  "tags": ["research", "brief", "decision", "summary"],
+  "blueprint": "research-brief",
+  "packId": "research-suite",
+  "intent": "research",
+  "useCases": ["research", "decision brief", "research summary"],
+  "recommendedFormats": ["html", "pdf", "docx", "md"],
+  "formats": ["html", "pdf", "docx", "md"],
+  "requiredVariables": ["title", "audience", "top_findings", "recommendation"],
+  "variables": {
+    "title": { "type": "text", "label": "Title", "required": true },
+    "audience": { "type": "text", "label": "Audience", "required": true },
+    "top_findings": { "type": "richtext", "label": "Top Findings", "required": true },
+    "impact": { "type": "textarea", "label": "Impact", "required": false },
+    "risks": { "type": "textarea", "label": "Risks", "required": false },
+    "recommendation": { "type": "textarea", "label": "Recommendation", "required": true }
+  }
+}

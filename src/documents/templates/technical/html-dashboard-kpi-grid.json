@@ -1,0 +1,22 @@
+{
+  "id": "html-dashboard-kpi-grid",
+  "name": "HTML KPI Grid Dashboard",
+  "category": "technical",
+  "description": "Responsive KPI dashboard with metric cards, trends, and action queue.",
+  "icon": "dashboard",
+  "tags": ["dashboard", "html", "kpi", "metrics"],
+  "blueprint": "html-dashboard-kpi",
+  "packId": "html-dashboard",
+  "intent": "dashboard",
+  "useCases": ["dashboard", "kpi dashboard", "metrics review"],
+  "recommendedFormats": ["html"],
+  "formats": ["html"],
+  "requiredVariables": ["title", "headline", "metrics"],
+  "variables": {
+    "title": { "type": "text", "label": "Title", "required": true },
+    "headline": { "type": "textarea", "label": "Headline", "required": true },
+    "metrics": { "type": "textarea", "label": "Metrics", "required": true, "hint": "One metric per line: Label: Value" },
+    "alerts": { "type": "textarea", "label": "Alerts", "required": false },
+    "actions": { "type": "textarea", "label": "Actions", "required": false }
+  }
+}

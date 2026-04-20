@@ -1,0 +1,23 @@
+{
+  "id": "pdf-executive-brief-board",
+  "name": "PDF Executive Brief",
+  "category": "business",
+  "description": "Board-ready PDF brief with decision framing, tradeoffs, and ownership.",
+  "icon": "board",
+  "tags": ["pdf", "executive brief", "board", "decision"],
+  "blueprint": "pdf-executive-brief",
+  "packId": "pdf-publication",
+  "intent": "pdf",
+  "useCases": ["pdf", "executive brief", "board brief"],
+  "recommendedFormats": ["pdf", "docx"],
+  "formats": ["pdf", "docx"],
+  "requiredVariables": ["title", "decision", "signals", "recommendation"],
+  "variables": {
+    "title": { "type": "text", "label": "Title", "required": true },
+    "decision": { "type": "textarea", "label": "Decision", "required": true },
+    "signals": { "type": "richtext", "label": "Supporting Signals", "required": true },
+    "alternatives": { "type": "textarea", "label": "Alternatives", "required": false },
+    "risks": { "type": "textarea", "label": "Risks", "required": false },
+    "recommendation": { "type": "textarea", "label": "Recommendation", "required": true }
+  }
+}

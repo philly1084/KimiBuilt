@@ -1,0 +1,23 @@
+{
+  "id": "html-technical-spec-system",
+  "name": "HTML Technical Specification",
+  "category": "technical",
+  "description": "Technical specification for requirements, interfaces, risks, and validation criteria.",
+  "icon": "spec",
+  "tags": ["html", "technical spec", "requirements", "engineering"],
+  "blueprint": "html-technical-spec",
+  "packId": "html-publication",
+  "intent": "html",
+  "useCases": ["html", "technical specification", "engineering spec"],
+  "recommendedFormats": ["html", "md"],
+  "formats": ["html", "md"],
+  "requiredVariables": ["title", "scope", "requirements", "validation"],
+  "variables": {
+    "title": { "type": "text", "label": "Title", "required": true },
+    "scope": { "type": "textarea", "label": "Scope", "required": true },
+    "requirements": { "type": "richtext", "label": "Requirements", "required": true },
+    "interfaces": { "type": "richtext", "label": "Interfaces", "required": false },
+    "risks": { "type": "textarea", "label": "Risks", "required": false },
+    "validation": { "type": "textarea", "label": "Validation", "required": true }
+  }
+}

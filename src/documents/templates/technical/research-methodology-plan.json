@@ -1,0 +1,24 @@
+{
+  "id": "research-methodology-plan",
+  "name": "Research Methodology Plan",
+  "category": "technical",
+  "description": "Structured methodology document for protocol, sampling, and validation design.",
+  "icon": "method",
+  "tags": ["research", "methodology", "protocol", "validation"],
+  "blueprint": "research-methodology",
+  "packId": "research-suite",
+  "intent": "research",
+  "useCases": ["research", "methodology", "study design"],
+  "recommendedFormats": ["html", "pdf", "docx"],
+  "formats": ["html", "pdf", "docx"],
+  "requiredVariables": ["title", "objective", "method", "analysis_plan"],
+  "variables": {
+    "title": { "type": "text", "label": "Title", "required": true },
+    "objective": { "type": "textarea", "label": "Objective", "required": true },
+    "hypothesis": { "type": "textarea", "label": "Hypothesis", "required": false },
+    "method": { "type": "richtext", "label": "Method", "required": true },
+    "sampling": { "type": "textarea", "label": "Sampling", "required": false },
+    "analysis_plan": { "type": "richtext", "label": "Analysis Plan", "required": true },
+    "validation_notes": { "type": "textarea", "label": "Validation Notes", "required": false }
+  }
+}

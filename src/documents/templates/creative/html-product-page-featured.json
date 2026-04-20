@@ -1,0 +1,23 @@
+{
+  "id": "html-product-page-featured",
+  "name": "HTML Product Page",
+  "category": "creative",
+  "description": "Product page template with value proposition, proof, objections, and CTA flow.",
+  "icon": "product",
+  "tags": ["html", "product page", "conversion", "marketing"],
+  "blueprint": "html-product-page",
+  "packId": "html-publication",
+  "intent": "html",
+  "useCases": ["html", "product page", "landing page"],
+  "recommendedFormats": ["html"],
+  "formats": ["html"],
+  "requiredVariables": ["title", "value_prop", "features", "cta"],
+  "variables": {
+    "title": { "type": "text", "label": "Title", "required": true },
+    "value_prop": { "type": "textarea", "label": "Value Proposition", "required": true },
+    "features": { "type": "richtext", "label": "Features", "required": true },
+    "proof": { "type": "textarea", "label": "Proof", "required": false },
+    "faq": { "type": "textarea", "label": "FAQ", "required": false },
+    "cta": { "type": "text", "label": "Primary CTA", "required": true }
+  }
+}

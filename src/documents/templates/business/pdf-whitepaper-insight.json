@@ -1,0 +1,23 @@
+{
+  "id": "pdf-whitepaper-insight",
+  "name": "PDF Insight Whitepaper",
+  "category": "business",
+  "description": "Publication-grade whitepaper template for thesis, evidence, and implications.",
+  "icon": "whitepaper",
+  "tags": ["pdf", "whitepaper", "insight", "publication"],
+  "blueprint": "pdf-whitepaper",
+  "packId": "pdf-publication",
+  "intent": "pdf",
+  "useCases": ["pdf", "whitepaper", "industry report"],
+  "recommendedFormats": ["pdf", "docx"],
+  "formats": ["pdf", "docx"],
+  "requiredVariables": ["title", "executive_summary", "analysis", "recommendations"],
+  "variables": {
+    "title": { "type": "text", "label": "Title", "required": true },
+    "executive_summary": { "type": "richtext", "label": "Executive Summary", "required": true },
+    "context": { "type": "richtext", "label": "Context", "required": false },
+    "analysis": { "type": "richtext", "label": "Analysis", "required": true },
+    "recommendations": { "type": "textarea", "label": "Recommendations", "required": true },
+    "references": { "type": "textarea", "label": "References", "required": false }
+  }
+}

@@ -25,6 +25,9 @@ const aiGenerateSchema = {
   sessionId: { required: false, type: 'string' },
   prompt: { required: true, type: 'string' },
   documentType: { required: false, type: 'string' },
+  intent: { required: false, type: 'string' },
+  useCase: { required: false, type: 'string' },
+  packId: { required: false, type: 'string' },
   tone: { required: false, type: 'string' },
   length: { required: false, type: 'string' },
   style: { required: false, type: 'string' },
@@ -40,6 +43,9 @@ const aiGenerateSchema = {
 const recommendSchema = {
   prompt: { required: false, type: 'string' },
   documentType: { required: false, type: 'string' },
+  intent: { required: false, type: 'string' },
+  useCase: { required: false, type: 'string' },
+  packId: { required: false, type: 'string' },
   format: { required: false, type: 'string' },
   limit: { required: false, type: 'number' }
 };
@@ -47,6 +53,9 @@ const recommendSchema = {
 const planSchema = {
   prompt: { required: false, type: 'string' },
   documentType: { required: false, type: 'string' },
+  intent: { required: false, type: 'string' },
+  useCase: { required: false, type: 'string' },
+  packId: { required: false, type: 'string' },
   format: { required: false, type: 'string' },
   tone: { required: false, type: 'string' },
   length: { required: false, type: 'string' },
@@ -283,29 +292,36 @@ async function buildDocumentTemplateSelection(templateStore, {
  */
 router.get('/templates', async (req, res, next) => {
   try {
-    const { category } = req.query;
+    const {
+      category = '',
+      packId = '',
+      useCase = '',
+      intent = '',
+      format = '',
+      limit,
+    } = req.query;
     const documentService = req.app.locals.documentService;
-    
-    const templates = await documentService.getTemplates(category);
-    
-    // Return simplified template info (without full structure)
-    const simplified = templates.map(t => ({
-      id: t.id,
-      name: t.name,
-      category: t.category,
-      description: t.description,
-      icon: t.icon,
-      tags: t.tags,
-      formats: documentService.getTemplateAvailableFormats(t),
-      blueprint: t.blueprint || null,
-      recommendedFormats: documentService.getTemplateAvailableFormats(t),
-      useCases: t.useCases || []
+
+    const templates = await documentService.getTemplates({
+      category,
+      packId,
+      useCase,
+      intent,
+      format,
+      limit,
+    });
+
+    const simplified = templates.map((template) => ({
+      ...documentService.buildTemplateMetadata(template),
+      tags: template.tags,
+      recommendedFormats: documentService.getTemplateAvailableFormats(template),
     }));
-    
+
     res.json({
       templates: simplified,
+      packs: documentService.summarizePackSuggestions(templates, { limit: 12 }),
       categories: documentService.templateEngine.getCategories(),
-      count: simplified.length
+      count: simplified.length,
     });
   } catch (err) {
     next(err);
@@ -347,21 +363,14 @@ router.get('/templates/:id', async (req, res, next) => {
     
     res.json({
       template: {
-        id: template.id,
-        name: template.name,
-        category: template.category,
-        description: template.description,
-        icon: template.icon,
+        ...documentService.buildTemplateMetadata(template),
         tags: template.tags,
-        formats: documentService.getTemplateAvailableFormats(template),
-        blueprint: template.blueprint || null,
         recommendedFormats: documentService.getTemplateAvailableFormats(template),
-        useCases: template.useCases || [],
         variables: template.variables,
         aiEnhancement: template.aiEnhancement,
         productionProfile: template.productionProfile || null,
-        variants: template.variants
-      }
+        variants: template.variants,
+      },
     });
   } catch (err) {
     next(err);
@@ -495,6 +504,9 @@ router.post('/ai-generate', validate(aiGenerateSchema), async (req, res, next) =
       sessionId = null,
       prompt,
       documentType,
+      intent = '',
+      useCase = '',
+      packId = '',
       tone = 'professional',
       length = 'medium',
       style = '',
@@ -518,6 +530,9 @@ router.post('/ai-generate', validate(aiGenerateSchema), async (req, res, next) =
     const productionPlan = documentService.buildDocumentPlan({
       prompt,
       documentType,
+      intent,
+      useCase,
+      packId,
       format,
       tone,
       length,
@@ -527,6 +542,9 @@ router.post('/ai-generate', validate(aiGenerateSchema), async (req, res, next) =
 
     let document = await documentService.aiGenerate(prompt, {
       documentType,
+      intent,
+      useCase,
+      packId,
       tone,
       length,
       format,

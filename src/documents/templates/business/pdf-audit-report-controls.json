@@ -1,0 +1,23 @@
+{
+  "id": "pdf-audit-report-controls",
+  "name": "PDF Audit Report",
+  "category": "business",
+  "description": "Audit report for findings, severity, evidence, remediation owners, and deadlines.",
+  "icon": "audit",
+  "tags": ["pdf", "audit", "controls", "findings"],
+  "blueprint": "pdf-audit-report",
+  "packId": "pdf-publication",
+  "intent": "pdf",
+  "useCases": ["pdf", "audit report", "controls review"],
+  "recommendedFormats": ["pdf", "docx"],
+  "formats": ["pdf", "docx"],
+  "requiredVariables": ["title", "scope", "findings", "remediation"],
+  "variables": {
+    "title": { "type": "text", "label": "Title", "required": true },
+    "scope": { "type": "textarea", "label": "Scope", "required": true },
+    "criteria": { "type": "textarea", "label": "Criteria", "required": false },
+    "findings": { "type": "richtext", "label": "Findings", "required": true },
+    "evidence": { "type": "textarea", "label": "Evidence", "required": false },
+    "remediation": { "type": "textarea", "label": "Remediation", "required": true }
+  }
+}

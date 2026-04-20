@@ -7,6 +7,94 @@ const fsPromises = fs.promises;
 const path = require('path');
 const { glob } = require('glob');
 
+function normalizeFilterList(value = []) {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => String(entry || '').trim().toLowerCase())
+      .filter(Boolean);
+  }
+
+  if (typeof value === 'string') {
+    return value
+      .split(',')
+      .map((entry) => String(entry || '').trim().toLowerCase())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function normalizeTemplateFilters(filters = {}) {
+  if (typeof filters === 'string') {
+    return {
+      category: filters,
+      useCases: [],
+      intent: '',
+      intents: [],
+      format: '',
+      packId: '',
+      source: '',
+      limit: null,
+    };
+  }
+
+  return {
+    category: String(filters.category || '').trim(),
+    packId: String(filters.packId || '').trim(),
+    useCase: String(filters.useCase || '').trim(),
+    useCases: normalizeFilterList(filters.useCases),
+    intent: String(filters.intent || '').trim(),
+    intents: normalizeFilterList(filters.intents),
+    format: String(filters.format || '').trim(),
+    source: String(filters.source || '').trim(),
+    limit: filters.limit == null ? null : Math.max(1, Number(filters.limit) || 1),
+  };
+}
+
+function normalizeTemplateUseCaseMatch(rawUseCases = []) {
+  const candidates = normalizeFilterList(rawUseCases);
+  if (!candidates.length) {
+    return [];
+  }
+
+  return candidates;
+}
+
+function templateUseCaseMatches(template = {}, candidates = []) {
+  if (!candidates.length) {
+    return false;
+  }
+
+  const templateUseCases = normalizeTemplateUseCaseMatch(template.useCases || template.useCase);
+  return candidates.some((candidate) => templateUseCases.some((entry) => (
+    entry === candidate || entry.includes(candidate) || candidate.includes(entry)
+  )));
+}
+
+function normalizeIntentFilter(value = '') {
+  return String(value || '').trim().toLowerCase();
+}
+
+function templateIntentMatches(template = {}, candidates = []) {
+  if (!candidates.length) {
+    return false;
+  }
+
+  const templateIntent = normalizeIntentFilter(template.intent || template.outputIntent);
+  if (templateIntent && candidates.includes(templateIntent)) {
+    return true;
+  }
+
+  const templateUseCases = normalizeTemplateUseCaseMatch(template.useCases || template.useCase);
+  return candidates.some((candidate) => templateUseCases.some((entry) => (
+    entry.includes(candidate) || candidate.includes(entry)
+  )));
+}
+
+function normalizeTemplateFormatList(value = []) {
+  return Array.isArray(value) ? value.map((entry) => String(entry || '').trim().toLowerCase()).filter(Boolean) : [];
+}
+
 function collectBuiltInTemplateFiles(directoryPath) {
   if (!fs.existsSync(directoryPath)) {
     return [];
@@ -96,13 +184,64 @@ class TemplateEngine {
    * @returns {Array} List of templates
    */
   getTemplates(category = null) {
+    const filterOptions = normalizeTemplateFilters(category);
     const templates = Array.from(this.templates.values());
-    
-    if (category) {
-      return templates.filter(t => t.category === category);
+    let filtered = templates;
+
+    if (filterOptions.category) {
+      filtered = filtered.filter((t) => t.category === filterOptions.category);
     }
-    
-    return templates;
+
+    if (filterOptions.packId) {
+      filtered = filtered.filter((t) => (
+        String(t.packId || '').trim().toLowerCase() === filterOptions.packId.toLowerCase()
+      ));
+    }
+
+    if (filterOptions.useCase) {
+      const normalizedUseCase = filterOptions.useCase.toLowerCase();
+      filterOptions.useCases = Array.from(new Set([...filterOptions.useCases, normalizedUseCase]));
+    }
+
+    const normalizedUseCases = normalizeTemplateUseCaseMatch(filterOptions.useCases);
+    if (normalizedUseCases.length > 0) {
+      filtered = filtered.filter((t) => (
+        templateUseCaseMatches(t, normalizedUseCases)
+      ));
+    }
+
+    if (filterOptions.intent) {
+      const normalizedIntent = normalizeIntentFilter(filterOptions.intent);
+      filterOptions.intents = Array.from(new Set([...filterOptions.intents, normalizedIntent]));
+    }
+
+    const normalizedIntents = filterOptions.intents
+      .map((entry) => normalizeIntentFilter(entry))
+      .filter(Boolean);
+    if (normalizedIntents.length > 0) {
+      filtered = filtered.filter((t) => (
+        templateIntentMatches(t, normalizedIntents)
+      ));
+    }
+
+    if (filterOptions.source) {
+      const normalizedSource = filterOptions.source.toLowerCase();
+      filtered = filtered.filter((template) => String(template.source || 'built-in').toLowerCase() === normalizedSource);
+    }
+
+    if (filterOptions.format) {
+      const normalizedFormat = filterOptions.format.toLowerCase();
+      filtered = filtered.filter((template) => (
+        normalizeTemplateFormatList(template.formats).includes(normalizedFormat)
+        || normalizeTemplateFormatList(template.recommendedFormats).includes(normalizedFormat)
+      ));
+    }
+
+    if (filterOptions.limit != null) {
+      return filtered.slice(0, filterOptions.limit);
+    }
+
+    return filtered;
   }
 
   /**
@@ -233,7 +372,94 @@ class TemplateEngine {
       return false;
     }
 
+    if (template.requiredVariables) {
+      const requiredVariableContract = this.validateRequiredVariableContract(template, template.requiredVariables);
+      if (!requiredVariableContract.valid) {
+        console.error(`[TemplateEngine] Template requiredVariables invalid: ${requiredVariableContract.reason}`);
+        return false;
+      }
+    }
+
     return true;
+  }
+
+  validateRequiredVariableContract(template = {}, requiredVariables = []) {
+    const normalizedTemplate = template || {};
+    const normalizedIds = Array.isArray(requiredVariables)
+      ? requiredVariables
+          .map((entry) => {
+            if (typeof entry === 'string') {
+              return String(entry || '').trim();
+            }
+
+            if (entry && typeof entry === 'object') {
+              return String(entry.id || entry.name || '').trim();
+            }
+
+            return '';
+          })
+          .filter(Boolean)
+      : [];
+
+    if (normalizedIds.length === 0) {
+      return { valid: true };
+    }
+
+    const availableVariables = this.getTemplateVariables(normalizedTemplate.id || normalizedTemplate)
+      .map((entry) => String(entry?.id || '').trim())
+      .filter(Boolean);
+    const availableSet = new Set(availableVariables);
+    const missing = normalizedIds.filter((variableId) => !availableSet.has(variableId));
+
+    if (missing.length > 0) {
+      return {
+        valid: false,
+        reason: `Template ${String(normalizedTemplate.id || '').trim() || '[unknown]'} requires missing variables: ${missing.join(', ')}`,
+      };
+    }
+
+    return { valid: true };
+  }
+
+  getRequiredVariableDefinitions(template = {}) {
+    const variables = this.getTemplateVariables(template.id || template);
+    if (!Array.isArray(variables) || variables.length === 0) {
+      return [];
+    }
+
+    return variables
+      .filter((entry) => entry && entry.required === true && String(entry.id || '').trim())
+      .map((entry) => String(entry.id).trim())
+      .filter(Boolean);
+  }
+
+  validateTemplateVariableRequirements(template = {}, values = {}) {
+    const requiredVariables = Array.isArray(template.requiredVariables)
+      ? template.requiredVariables.map((entry) => String(entry || '').trim()).filter(Boolean)
+      : this.getRequiredVariableDefinitions(template);
+
+    const available = (typeof values === 'object' && values !== null) ? values : {};
+    const missing = requiredVariables.filter((id) => {
+      const value = available[id];
+      if (value === undefined || value === null) {
+        return true;
+      }
+
+      if (Array.isArray(value)) {
+        return value.length === 0;
+      }
+
+      if (typeof value === 'string') {
+        return String(value).trim() === '';
+      }
+
+      return false;
+    });
+
+    return {
+      valid: missing.length === 0,
+      missing,
+    };
   }
 
   /**

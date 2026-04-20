@@ -1,0 +1,22 @@
+{
+  "id": "html-dashboard-funnel-growth",
+  "name": "HTML Funnel Dashboard",
+  "category": "technical",
+  "description": "Funnel dashboard for stage conversion, drop-offs, and experiment priorities.",
+  "icon": "funnel",
+  "tags": ["dashboard", "html", "funnel", "conversion"],
+  "blueprint": "html-dashboard-funnel",
+  "packId": "html-dashboard",
+  "intent": "dashboard",
+  "useCases": ["dashboard", "funnel dashboard", "conversion analysis"],
+  "recommendedFormats": ["html"],
+  "formats": ["html"],
+  "requiredVariables": ["title", "stages", "analysis"],
+  "variables": {
+    "title": { "type": "text", "label": "Title", "required": true },
+    "stages": { "type": "textarea", "label": "Stages", "required": true, "hint": "One stage per line: Stage: Count / Rate" },
+    "analysis": { "type": "richtext", "label": "Analysis", "required": true },
+    "dropoffs": { "type": "textarea", "label": "Drop-Off Notes", "required": false },
+    "experiments": { "type": "textarea", "label": "Experiments", "required": false }
+  }
+}
