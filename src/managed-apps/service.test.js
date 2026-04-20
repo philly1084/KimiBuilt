@@ -58,6 +58,59 @@ describe('ManagedAppService', () => {
         expect(blueprint.publicHost).toBe('hello-stack.demoserver2.buzz');
     });
 
+    test('derives a clean repo name from the prompt subject instead of the opening phrasing', () => {
+        const service = new ManagedAppService();
+
+        service.getEffectiveGiteaConfig = () => ({
+            baseURL: 'https://gitea.demoserver2.buzz',
+            org: 'agent-apps',
+            registryHost: 'gitea.demoserver2.buzz',
+        });
+        service.getEffectiveManagedAppsConfig = () => ({
+            appBaseDomain: 'demoserver2.buzz',
+            namespacePrefix: 'app-',
+            defaultBranch: 'main',
+            defaultContainerPort: 80,
+        });
+
+        const blueprint = service.buildAppBlueprint({
+            prompt: 'Can you make me an expense tracker app for our server?',
+        }, 'user-1', 'session-1');
+
+        expect(blueprint.slug).toBe('expense-tracker');
+        expect(blueprint.appName).toBe('Expense Tracker');
+        expect(blueprint.repoName).toBe('expense-tracker');
+    });
+
+    test('falls back to a generic managed app name when the prompt has no usable subject', () => {
+        const service = new ManagedAppService();
+        const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(1713571200000);
+
+        service.getEffectiveGiteaConfig = () => ({
+            baseURL: 'https://gitea.demoserver2.buzz',
+            org: 'agent-apps',
+            registryHost: 'gitea.demoserver2.buzz',
+        });
+        service.getEffectiveManagedAppsConfig = () => ({
+            appBaseDomain: 'demoserver2.buzz',
+            namespacePrefix: 'app-',
+            defaultBranch: 'main',
+            defaultContainerPort: 80,
+        });
+
+        try {
+            const blueprint = service.buildAppBlueprint({
+                prompt: 'Can you use on our server?',
+            }, 'user-1', 'session-1');
+
+            expect(blueprint.slug).toBe('managed-app-1713571200000');
+            expect(blueprint.appName).toBe('Managed App 1713571200000');
+            expect(blueprint.repoName).toBe('managed-app-1713571200000');
+        } finally {
+            nowSpy.mockRestore();
+        }
+    });
+
     test('prefers ssh for new managed app blueprints when the remote deploy lane is available', () => {
         const service = new ManagedAppService({
             kubernetesClient: {

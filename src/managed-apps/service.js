@@ -24,6 +24,15 @@ function normalizeText(value = '') {
 const MAX_MANAGED_APP_SLUG_LENGTH = 63;
 const MAX_KUBERNETES_NAME_LENGTH = 63;
 const DEFAULT_GITEA_RUNNER_LABELS = 'ubuntu-latest:docker://catthehacker/ubuntu:act-latest';
+const DEFAULT_MANAGED_APP_SLUG_PREFIX = 'managed-app';
+const PROMPT_NAME_STOPWORDS = new Set([
+    'a', 'an', 'and', 'app', 'application', 'build', 'built', 'called', 'can', 'could', 'create', 'deploy',
+    'deployment', 'for', 'from', 'generate', 'help', 'host', 'hosting', 'i', 'in', 'into', 'it', 'just',
+    'like', 'make', 'managed', 'me', 'my', 'named', 'need', 'on', 'our', 'ours', 'page', 'please', 'project',
+    'put', 'really', 'remote', 'repo', 'repository', 'server', 'servers', 'service', 'should', 'simple',
+    'site', 'something', 'stuff', 'that', 'the', 'this', 'to', 'tool', 'too', 'use', 'using', 'us', 'want',
+    'we', 'website', 'will', 'with', 'would', 'you', 'your',
+]);
 
 function baseSlugify(value = '') {
     return String(value || '')
@@ -100,12 +109,12 @@ function summarizePromptName(value = '') {
         return '';
     }
 
-    const stopwords = new Set([
-        'a', 'an', 'and', 'app', 'application', 'build', 'called', 'create', 'deploy', 'for', 'generate',
-        'it', 'make', 'managed', 'named', 'page', 'please', 'simple', 'site', 'the', 'this', 'to', 'website',
-    ]);
-    const meaningful = tokens.filter((token) => !stopwords.has(token));
-    const selected = (meaningful.length > 0 ? meaningful : tokens).slice(0, 6);
+    const meaningful = tokens.filter((token) => !PROMPT_NAME_STOPWORDS.has(token));
+    if (meaningful.length === 0) {
+        return '';
+    }
+
+    const selected = meaningful.slice(0, 6);
     return selected.join(' ');
 }
 
@@ -119,6 +128,10 @@ function deriveRequestedAppName(input = {}) {
         || extractExplicitAppName(input.prompt || input.sourcePrompt || '')
         || summarizePromptName(input.prompt || input.sourcePrompt || ''),
     );
+}
+
+function buildFallbackRequestedAppName() {
+    return `${DEFAULT_MANAGED_APP_SLUG_PREFIX}-${Date.now()}`;
 }
 
 function titleizeSlug(value = '') {
@@ -739,9 +752,9 @@ class ManagedAppService {
         const giteaConfig = this.getEffectiveGiteaConfig();
         const managedAppsConfig = this.getEffectiveManagedAppsConfig();
         const explicitPromptName = extractExplicitAppName(input.prompt || input.sourcePrompt || '');
-        const rawName = deriveRequestedAppName(input) || `app-${Date.now()}`;
+        const rawName = deriveRequestedAppName(input) || buildFallbackRequestedAppName();
         const deploymentTarget = this.resolveDeploymentTarget(input, context, null);
-        const slug = slugify(input.slug || rawName || `app-${Date.now()}`, {
+        const slug = slugify(input.slug || rawName || buildFallbackRequestedAppName(), {
             maxLength: MAX_MANAGED_APP_SLUG_LENGTH,
         });
         const appName = normalizeText(
