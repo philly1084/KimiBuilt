@@ -188,4 +188,50 @@ describe('KubernetesClient', () => {
         expect(result.runnerLogExcerpt).toContain('registration token invalid');
         expect(result.executionHost).toBe('deploy.example:22');
     });
+
+    test('reconcileManagedAppPlatform updates the runner secret and restarts act-runner over SSH', async () => {
+        const sshTool = {
+            handler: jest.fn(async () => ({
+                stdout: [
+                    '__KIMIBUILT_PLATFORM_NAMESPACE__=agent-platform',
+                    '__KIMIBUILT_RECONCILE_ACTION__=gitea-actions-secret-applied',
+                    '__KIMIBUILT_RECONCILE_ACTION__=act-runner-labels-set',
+                    '__KIMIBUILT_RECONCILE_ACTION__=act-runner-instance-url-set',
+                    '__KIMIBUILT_RECONCILE_ACTION__=act-runner-scaled-1',
+                    '__KIMIBUILT_RECONCILE_ACTION__=act-runner-restarted',
+                ].join('\n'),
+                stderr: '',
+                exitCode: 0,
+                host: 'deploy.example:22',
+            })),
+        };
+        const client = new KubernetesClient({
+            managedAppsConfig: {
+                platformNamespace: 'agent-platform',
+            },
+            sshTool,
+        });
+
+        client.isSshConfigured = jest.fn(() => true);
+
+        const result = await client.reconcileManagedAppPlatform({
+            platformNamespace: 'agent-platform',
+            deploymentTarget: 'ssh',
+            desiredRunnerReplicas: 1,
+            runnerRegistrationToken: 'runner-token-123',
+            runnerLabels: 'ubuntu-latest:host',
+            giteaInstanceUrl: 'https://gitea.demoserver2.buzz',
+        });
+
+        expect(sshTool.handler).toHaveBeenCalledWith(expect.objectContaining({
+            command: expect.stringContaining('"runner-registration-token": "runner-token-123"'),
+            timeout: 180000,
+        }), {}, expect.any(Object));
+        expect(result.actions).toEqual(expect.arrayContaining([
+            'gitea-actions-secret-applied',
+            'act-runner-scaled-1',
+            'act-runner-restarted',
+        ]));
+        expect(result.executionHost).toBe('deploy.example:22');
+    });
 });

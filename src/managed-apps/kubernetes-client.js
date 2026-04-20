@@ -553,6 +553,29 @@ class KubernetesClient {
         };
     }
 
+    buildOpaqueSecretManifest({
+        namespace = '',
+        name = '',
+        labels = {},
+        stringData = {},
+    } = {}) {
+        return {
+            apiVersion: 'v1',
+            kind: 'Secret',
+            metadata: {
+                name: sanitizeKubernetesName(name, 'managed-app-secret'),
+                namespace,
+                labels,
+            },
+            type: 'Opaque',
+            stringData: Object.fromEntries(
+                Object.entries(stringData || {})
+                    .map(([key, value]) => [String(key || '').trim(), String(value ?? '')])
+                    .filter(([key]) => Boolean(key)),
+            ),
+        };
+    }
+
     quoteShellArg(value) {
         return `'${String(value || '').replace(/'/g, `'"'"'`)}'`;
     }
@@ -627,6 +650,91 @@ class KubernetesClient {
         ].join('\n');
     }
 
+    buildRemotePlatformReconcileCommand({
+        platformNamespace = '',
+        desiredRunnerReplicas = 1,
+        runnerRegistrationToken = '',
+        runnerLabels = '',
+        giteaInstanceUrl = '',
+    } = {}) {
+        const namespace = sanitizeKubernetesName(
+            platformNamespace || this.managedAppsConfig.platformNamespace || 'agent-platform',
+            'agent-platform',
+        );
+        const actRunnerDesiredReplicas = Math.max(0, parseInteger(desiredRunnerReplicas, 1));
+        const secretManifest = normalizeText(runnerRegistrationToken)
+            ? this.buildOpaqueSecretManifest({
+                namespace,
+                name: 'gitea-actions',
+                labels: {
+                    'kimibuilt.io/managed-app-platform': 'true',
+                },
+                stringData: {
+                    'runner-registration-token': normalizeText(runnerRegistrationToken),
+                },
+            })
+            : null;
+
+        return [
+            'set -e',
+            'kubectl_cmd() {',
+            '  if command -v kubectl >/dev/null 2>&1; then kubectl "$@"; return; fi',
+            '  if command -v k3s >/dev/null 2>&1; then k3s kubectl "$@"; return; fi',
+            '  echo "kubectl or k3s is required on the remote host" >&2',
+            '  exit 1',
+            '}',
+            'if [ -f /etc/rancher/k3s/k3s.yaml ] && [ -z "${KUBECONFIG:-}" ]; then export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; fi',
+            `platform_namespace=${this.quoteShellArg(namespace)}`,
+            `desired_runner_replicas=${this.quoteShellArg(String(actRunnerDesiredReplicas))}`,
+            `desired_runner_labels=${this.quoteShellArg(normalizeText(runnerLabels))}`,
+            `desired_gitea_instance_url=${this.quoteShellArg(normalizeText(giteaInstanceUrl))}`,
+            'echo "__KIMIBUILT_PLATFORM_NAMESPACE__=${platform_namespace}"',
+            'if ! kubectl_cmd get namespace "$platform_namespace" >/dev/null 2>&1; then',
+            '  echo "__KIMIBUILT_RECONCILE_ACTION__=platform-namespace-missing"',
+            '  exit 1',
+            'fi',
+            'scale_min_if_needed() {',
+            '  name="$1"',
+            '  minimum="$2"',
+            '  if kubectl_cmd get deployment "$name" -n "$platform_namespace" >/dev/null 2>&1; then',
+            "    current=$(kubectl_cmd get deployment \"$name\" -n \"$platform_namespace\" -o jsonpath='{.spec.replicas}' 2>/dev/null || true)",
+            '    if [ -z "${current:-}" ]; then current=0; fi',
+            '    if [ "$current" -lt "$minimum" ]; then',
+            '      kubectl_cmd scale deployment "$name" -n "$platform_namespace" --replicas="$minimum" >/dev/null',
+            '      echo "__KIMIBUILT_RECONCILE_ACTION__=${name}-scaled-${minimum}"',
+            '    fi',
+            '  fi',
+            '}',
+            'scale_min_if_needed gitea 1',
+            'scale_min_if_needed buildkitd 1',
+            secretManifest
+                ? [
+                    'cat <<\'EOF\' | kubectl_cmd apply -f -',
+                    JSON.stringify(secretManifest, null, 2),
+                    'EOF',
+                    'echo "__KIMIBUILT_RECONCILE_ACTION__=gitea-actions-secret-applied"',
+                ].join('\n')
+                : '',
+            'if kubectl_cmd get deployment act-runner -n "$platform_namespace" >/dev/null 2>&1; then',
+            '  if [ -n "${desired_runner_labels:-}" ]; then',
+            '    kubectl_cmd set env deployment/act-runner -n "$platform_namespace" GITEA_RUNNER_LABELS="${desired_runner_labels}" >/dev/null',
+            '    echo "__KIMIBUILT_RECONCILE_ACTION__=act-runner-labels-set"',
+            '  fi',
+            '  if [ -n "${desired_gitea_instance_url:-}" ]; then',
+            '    kubectl_cmd set env deployment/act-runner -n "$platform_namespace" GITEA_INSTANCE_URL="${desired_gitea_instance_url}" >/dev/null',
+            '    echo "__KIMIBUILT_RECONCILE_ACTION__=act-runner-instance-url-set"',
+            '  fi',
+            '  kubectl_cmd scale deployment act-runner -n "$platform_namespace" --replicas="${desired_runner_replicas}" >/dev/null',
+            '  echo "__KIMIBUILT_RECONCILE_ACTION__=act-runner-scaled-${desired_runner_replicas}"',
+            '  kubectl_cmd rollout restart deployment/act-runner -n "$platform_namespace" >/dev/null',
+            '  echo "__KIMIBUILT_RECONCILE_ACTION__=act-runner-restarted"',
+            '  kubectl_cmd rollout status deployment/act-runner -n "$platform_namespace" --timeout=180s',
+            'else',
+            '  echo "__KIMIBUILT_RECONCILE_ACTION__=act-runner-missing"',
+            'fi',
+        ].filter(Boolean).join('\n');
+    }
+
     async inspectManagedAppPlatform({
         platformNamespace = '',
         deploymentTarget = '',
@@ -690,6 +798,45 @@ class KubernetesClient {
             runnerLogExcerpt: runnerLogs.slice(-20),
             raw: {
                 stdout,
+                stderr: String(result.stderr || ''),
+                exitCode: Number(result.exitCode || 0),
+            },
+        };
+    }
+
+    async reconcileManagedAppPlatform({
+        platformNamespace = '',
+        deploymentTarget = '',
+        desiredRunnerReplicas = 1,
+        runnerRegistrationToken = '',
+        runnerLabels = '',
+        giteaInstanceUrl = '',
+    } = {}) {
+        if (!this.isSshConfigured()) {
+            throw new Error('Managed app platform reconciliation requires SSH access to the remote deploy host.');
+        }
+
+        const target = this.resolveDeployTarget(deploymentTarget);
+        const command = this.buildRemotePlatformReconcileCommand({
+            platformNamespace,
+            desiredRunnerReplicas,
+            runnerRegistrationToken,
+            runnerLabels,
+            giteaInstanceUrl,
+        });
+        const result = await this.sshTool.handler({
+            command,
+            timeout: 180000,
+        }, {}, createNoopTracker());
+
+        return {
+            deploymentTarget: target || 'ssh',
+            platformNamespace: readMarkerValue(result.stdout || '', '__KIMIBUILT_PLATFORM_NAMESPACE__')
+                || sanitizeKubernetesName(platformNamespace || this.managedAppsConfig.platformNamespace || 'agent-platform', 'agent-platform'),
+            executionHost: result.host,
+            actions: readMarkerValues(result.stdout || '', '__KIMIBUILT_RECONCILE_ACTION__'),
+            raw: {
+                stdout: String(result.stdout || ''),
                 stderr: String(result.stderr || ''),
                 exitCode: Number(result.exitCode || 0),
             },

@@ -13,6 +13,7 @@ Use this tool as the single control-plane entry point when the remote Gitea inst
 - `deploy`: deploys an existing managed app into the configured remote k3s app cluster over SSH.
 - `inspect`: returns the app record plus recent build runs.
 - `doctor`: SSHes to the remote deploy host and inspects the managed-app platform namespace so the agent can check Gitea, BuildKit, `act-runner`, runner labels, and runner token state in one call.
+- `reconcile`: uses the configured Gitea API plus remote SSH/k3s access to fetch or rotate the runner registration token, update the `gitea-actions` secret on the remote cluster, and restart or scale `act-runner`.
 - `list`: lists the current user's managed apps.
 
 ## Required setup
@@ -36,3 +37,4 @@ Use this tool as the single control-plane entry point when the remote Gitea inst
 - Cluster verification state is also recorded in the file-backed cluster registry so later turns can reuse rollout, ingress, TLS, and HTTPS context.
 - The external Gitea workflow is expected to POST build events to `/api/integrations/gitea/build-events` with `X-KimiBuilt-Webhook-Secret`.
 - The `doctor` action is the preferred first check when Gitea Actions are queued or waiting. It inspects the same remote cluster the managed-app deploy lane uses.
+- The `reconcile` action is the preferred repair path when the platform exists but Gitea runners are missing, tokened incorrectly, or stuck waiting. It is designed for the case where the Gitea instance and deploy cluster live on the same remote server or k3s environment.

@@ -388,6 +388,30 @@ function buildPlatformDoctorMessage(report = {}, healthy = false) {
     ].filter(Boolean).join('; ');
 }
 
+function isPlatformHealthy(report = {}) {
+    return Boolean(
+        report.namespaceExists
+        && isDeploymentReady(getDeploymentStatus(report, 'gitea'))
+        && isDeploymentReady(getDeploymentStatus(report, 'buildkitd'))
+        && isDeploymentReady(getDeploymentStatus(report, 'act-runner'))
+        && normalizeText(report.runnerTokenState).toLowerCase() === 'present',
+    );
+}
+
+function normalizeRunnerRecords(payload = {}) {
+    const runners = Array.isArray(payload?.runners) ? payload.runners : [];
+    return runners.map((runner) => ({
+        id: runner?.id,
+        name: normalizeText(runner?.name),
+        status: normalizeText(runner?.status).toLowerCase(),
+        disabled: runner?.disabled === true,
+        busy: runner?.busy === true,
+        labels: (Array.isArray(runner?.labels) ? runner.labels : [])
+            .map((label) => normalizeText(label?.name || label))
+            .filter(Boolean),
+    }));
+}
+
 class ManagedAppService {
     constructor(options = {}) {
         this.store = options.store || managedAppStore;
@@ -533,6 +557,128 @@ class ManagedAppService {
             healthy,
             suggestions,
             message: buildPlatformDoctorMessage(platform, healthy),
+        };
+    }
+
+    async reconcilePlatform(input = {}, ownerId = null, context = {}) {
+        const deploymentTarget = this.resolveDeploymentTarget(input, context, null);
+        if (!this.giteaClient.isConfigured()) {
+            const error = new Error('Managed app platform reconciliation requires a configured external Gitea control plane.');
+            error.statusCode = 503;
+            throw error;
+        }
+        if (!this.kubernetesClient.isConfigured(deploymentTarget)) {
+            const error = new Error('Managed app platform reconciliation requires configured SSH access to the remote deploy host.');
+            error.statusCode = 503;
+            throw error;
+        }
+
+        const giteaConfig = this.getEffectiveGiteaConfig();
+        const managedAppsConfig = this.getEffectiveManagedAppsConfig();
+        const platformNamespace = normalizeText(input.platformNamespace || managedAppsConfig.platformNamespace || 'agent-platform');
+        const before = await this.kubernetesClient.inspectManagedAppPlatform({
+            platformNamespace,
+            deploymentTarget,
+        });
+        const runnerScope = normalizeText(input.runnerScope || 'org').toLowerCase() || 'org';
+        const shouldRotateRunnerToken = input.rotateRunnerToken === true
+            || ['missing', 'missing-secret', 'placeholder'].includes(normalizeText(before.runnerTokenState).toLowerCase())
+            || (Array.isArray(before.runnerLogExcerpt)
+                && before.runnerLogExcerpt.some((line) => /\bunauthorized\b|\bforbidden\b|\binvalid\b|\btoken\b/i.test(String(line || ''))));
+        const runnerToken = await this.giteaClient.getRunnerRegistrationToken({
+            scope: runnerScope,
+            org: giteaConfig.org,
+            owner: input.repoOwner,
+            repo: input.repoName,
+            rotate: shouldRotateRunnerToken,
+        });
+        const desiredRunnerReplicas = Number.isFinite(Number(input.runnerReplicas))
+            ? Math.max(0, Number(input.runnerReplicas))
+            : 1;
+        const runnerLabels = normalizeText(input.runnerLabels || before.runnerLabels || 'ubuntu-latest:host');
+        const giteaInstanceUrl = normalizeText(input.giteaInstanceUrl || giteaConfig.baseURL || before.giteaInstanceUrl);
+        const reconciliation = await this.kubernetesClient.reconcileManagedAppPlatform({
+            platformNamespace,
+            deploymentTarget,
+            desiredRunnerReplicas,
+            runnerRegistrationToken: runnerToken.token,
+            runnerLabels,
+            giteaInstanceUrl,
+        });
+        const platform = await this.kubernetesClient.inspectManagedAppPlatform({
+            platformNamespace,
+            deploymentTarget,
+        });
+
+        let runnerCatalog = {
+            scope: runnerScope,
+            runners: [],
+            totalCount: 0,
+            error: '',
+        };
+        try {
+            const listed = await this.giteaClient.listActionsRunners({
+                scope: runnerScope,
+                org: giteaConfig.org,
+                owner: input.repoOwner,
+                repo: input.repoName,
+            });
+            runnerCatalog = {
+                ...listed,
+                error: '',
+            };
+        } catch (error) {
+            runnerCatalog.error = error.message;
+        }
+
+        const runners = normalizeRunnerRecords(runnerCatalog);
+        const onlineRunnerCount = runners.filter((runner) => !runner.disabled && runner.status && runner.status !== 'offline').length;
+        const healthy = isPlatformHealthy(platform) && onlineRunnerCount > 0;
+        const suggestions = buildPlatformDoctorSuggestions(platform);
+        if (!runnerCatalog.error && onlineRunnerCount === 0) {
+            suggestions.push(`Gitea reports no online ${runnerScope}-level runners yet. The runner may still be registering, or the deployment labels may not match the workflow.`);
+        }
+        if (runnerCatalog.error) {
+            suggestions.push(`Runner verification through the Gitea API failed after reconciliation: ${runnerCatalog.error}`);
+        }
+
+        return {
+            before: {
+                ...before,
+                expected: {
+                    deploymentTarget,
+                    platformNamespace,
+                    giteaBaseURL: giteaConfig.baseURL,
+                    registryHost: giteaConfig.registryHost,
+                },
+            },
+            platform: {
+                ...platform,
+                expected: {
+                    deploymentTarget,
+                    platformNamespace,
+                    giteaBaseURL: giteaConfig.baseURL,
+                    registryHost: giteaConfig.registryHost,
+                    runnerLabels,
+                    runnerReplicas: desiredRunnerReplicas,
+                },
+            },
+            reconciliation,
+            runnerToken: {
+                scope: runnerToken.scope,
+                rotated: runnerToken.rotated,
+                source: 'gitea-api',
+            },
+            giteaRunners: {
+                scope: runnerCatalog.scope,
+                totalCount: Number(runnerCatalog.totalCount || runners.length || 0),
+                onlineCount: onlineRunnerCount,
+                runners,
+                ...(runnerCatalog.error ? { error: runnerCatalog.error } : {}),
+            },
+            healthy,
+            suggestions: Array.from(new Set(suggestions.filter(Boolean))),
+            message: `Managed app platform reconciliation on ${normalizeText(platform.executionHost || reconciliation.executionHost || 'remote ssh target')}: ${reconciliation.actions.join(', ') || 'no changes reported'}; ${healthy ? 'platform healthy' : 'platform still needs attention'}.`,
         };
     }
 

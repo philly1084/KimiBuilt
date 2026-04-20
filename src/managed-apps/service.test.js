@@ -606,6 +606,177 @@ describe('ManagedAppService', () => {
         expect(result.message).toContain('platform needs attention');
     });
 
+    test('reconcilePlatform repairs the remote runner stack through Gitea and SSH', async () => {
+        const inspectManagedAppPlatform = jest.fn()
+            .mockResolvedValueOnce({
+                deploymentTarget: 'ssh',
+                platformNamespace: 'agent-platform',
+                namespaceExists: true,
+                executionHost: 'deploy.example:22',
+                deployments: {
+                    gitea: {
+                        name: 'gitea',
+                        present: true,
+                        desiredReplicas: 1,
+                        readyReplicas: 1,
+                        availableReplicas: 1,
+                        updatedReplicas: 1,
+                        ready: true,
+                    },
+                    buildkitd: {
+                        name: 'buildkitd',
+                        present: true,
+                        desiredReplicas: 1,
+                        readyReplicas: 1,
+                        availableReplicas: 1,
+                        updatedReplicas: 1,
+                        ready: true,
+                    },
+                    'act-runner': {
+                        name: 'act-runner',
+                        present: true,
+                        desiredReplicas: 0,
+                        readyReplicas: 0,
+                        availableReplicas: 0,
+                        updatedReplicas: 0,
+                        ready: false,
+                    },
+                },
+                runnerTokenState: 'placeholder',
+                runnerLabels: 'ubuntu-latest:host',
+                giteaInstanceUrl: 'https://gitea.demoserver2.buzz',
+                runnerLogExcerpt: ['registration token invalid'],
+                raw: {
+                    stdout: '',
+                    stderr: '',
+                    exitCode: 0,
+                },
+            })
+            .mockResolvedValueOnce({
+                deploymentTarget: 'ssh',
+                platformNamespace: 'agent-platform',
+                namespaceExists: true,
+                executionHost: 'deploy.example:22',
+                deployments: {
+                    gitea: {
+                        name: 'gitea',
+                        present: true,
+                        desiredReplicas: 1,
+                        readyReplicas: 1,
+                        availableReplicas: 1,
+                        updatedReplicas: 1,
+                        ready: true,
+                    },
+                    buildkitd: {
+                        name: 'buildkitd',
+                        present: true,
+                        desiredReplicas: 1,
+                        readyReplicas: 1,
+                        availableReplicas: 1,
+                        updatedReplicas: 1,
+                        ready: true,
+                    },
+                    'act-runner': {
+                        name: 'act-runner',
+                        present: true,
+                        desiredReplicas: 1,
+                        readyReplicas: 1,
+                        availableReplicas: 1,
+                        updatedReplicas: 1,
+                        ready: true,
+                    },
+                },
+                runnerTokenState: 'present',
+                runnerLabels: 'ubuntu-latest:host',
+                giteaInstanceUrl: 'https://gitea.demoserver2.buzz',
+                runnerLogExcerpt: [],
+                raw: {
+                    stdout: '',
+                    stderr: '',
+                    exitCode: 0,
+                },
+            });
+        const reconcileManagedAppPlatform = jest.fn(async () => ({
+            deploymentTarget: 'ssh',
+            platformNamespace: 'agent-platform',
+            executionHost: 'deploy.example:22',
+            actions: [
+                'gitea-actions-secret-applied',
+                'act-runner-scaled-1',
+                'act-runner-restarted',
+            ],
+            raw: {
+                stdout: '',
+                stderr: '',
+                exitCode: 0,
+            },
+        }));
+        const getRunnerRegistrationToken = jest.fn(async () => ({
+            scope: 'org',
+            token: 'runner-token-123',
+            rotated: true,
+        }));
+        const listActionsRunners = jest.fn(async () => ({
+            scope: 'org',
+            totalCount: 1,
+            runners: [{
+                id: 7,
+                name: 'agent-platform-runner',
+                status: 'online',
+                disabled: false,
+                busy: false,
+                labels: [{ name: 'ubuntu-latest:host' }],
+            }],
+        }));
+
+        const service = new ManagedAppService({
+            giteaClient: {
+                isConfigured: jest.fn(() => true),
+                getRunnerRegistrationToken,
+                listActionsRunners,
+            },
+            kubernetesClient: {
+                isConfigured: jest.fn((target) => target === 'ssh'),
+                inspectManagedAppPlatform,
+                reconcileManagedAppPlatform,
+            },
+        });
+
+        service.getEffectiveGiteaConfig = () => ({
+            baseURL: 'https://gitea.demoserver2.buzz',
+            org: 'agent-apps',
+            registryHost: 'gitea.demoserver2.buzz',
+        });
+        service.getEffectiveManagedAppsConfig = () => ({
+            platformNamespace: 'agent-platform',
+        });
+
+        const result = await service.reconcilePlatform({}, 'user-1', {
+            executionProfile: 'remote-build',
+        });
+
+        expect(getRunnerRegistrationToken).toHaveBeenCalledWith(expect.objectContaining({
+            scope: 'org',
+            org: 'agent-apps',
+            rotate: true,
+        }));
+        expect(reconcileManagedAppPlatform).toHaveBeenCalledWith(expect.objectContaining({
+            platformNamespace: 'agent-platform',
+            deploymentTarget: 'ssh',
+            runnerRegistrationToken: 'runner-token-123',
+            runnerLabels: 'ubuntu-latest:host',
+            giteaInstanceUrl: 'https://gitea.demoserver2.buzz',
+        }));
+        expect(listActionsRunners).toHaveBeenCalledWith(expect.objectContaining({
+            scope: 'org',
+            org: 'agent-apps',
+        }));
+        expect(result.healthy).toBe(true);
+        expect(result.giteaRunners.onlineCount).toBe(1);
+        expect(result.runnerToken.rotated).toBe(true);
+        expect(result.message).toContain('act-runner-restarted');
+    });
+
     test('deployApp routes managed apps with ssh deployment targets through the remote kubernetes client', async () => {
         const app = {
             id: 'app-1',

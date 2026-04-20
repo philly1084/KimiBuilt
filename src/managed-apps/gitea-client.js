@@ -23,6 +23,26 @@ function encodeBase64(value = '') {
     return Buffer.from(String(value || ''), 'utf8').toString('base64');
 }
 
+function normalizeRunnerScope(value = '') {
+    const normalized = normalizeText(value).toLowerCase();
+    if (['global', 'instance', 'admin'].includes(normalized)) {
+        return 'instance';
+    }
+    if (['repo', 'repository'].includes(normalized)) {
+        return 'repo';
+    }
+    return 'org';
+}
+
+function extractRunnerRegistrationToken(payload = {}) {
+    return normalizeText(
+        payload?.token
+        || payload?.registration_token
+        || payload?.value
+        || payload?.raw,
+    );
+}
+
 class GiteaClient {
     getConfig() {
         return typeof settingsController.getEffectiveGiteaConfig === 'function'
@@ -98,6 +118,76 @@ class GiteaClient {
         return this.request('GET', `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, {
             allowNotFound: true,
         });
+    }
+
+    buildRunnerScopePath({ scope = 'org', org = '', owner = '', repo = '' } = {}) {
+        const normalizedScope = normalizeRunnerScope(scope);
+        if (normalizedScope === 'instance') {
+            return '/admin/actions/runners';
+        }
+
+        if (normalizedScope === 'repo') {
+            const repoOwner = normalizeText(owner);
+            const repoName = normalizeText(repo);
+            if (!repoOwner || !repoName) {
+                throw new Error('Repository runner operations require an owner and repository name.');
+            }
+            return `/repos/${encodeURIComponent(repoOwner)}/${encodeURIComponent(repoName)}/actions/runners`;
+        }
+
+        const orgName = normalizeText(org) || normalizeText(this.getConfig().org);
+        if (!orgName) {
+            throw new Error('Organization runner operations require a Gitea organization name.');
+        }
+        return `/orgs/${encodeURIComponent(orgName)}/actions/runners`;
+    }
+
+    async listActionsRunners({ scope = 'org', org = '', owner = '', repo = '' } = {}) {
+        const normalizedScope = normalizeRunnerScope(scope);
+        const payload = await this.request('GET', this.buildRunnerScopePath({
+            scope: normalizedScope,
+            org,
+            owner,
+            repo,
+        }));
+        const runners = Array.isArray(payload?.runners)
+            ? payload.runners
+            : (Array.isArray(payload) ? payload : []);
+
+        return {
+            scope: normalizedScope,
+            runners,
+            totalCount: Number(payload?.total_count || runners.length || 0),
+        };
+    }
+
+    async getRunnerRegistrationToken({
+        scope = 'org',
+        org = '',
+        owner = '',
+        repo = '',
+        rotate = false,
+    } = {}) {
+        const normalizedScope = normalizeRunnerScope(scope);
+        const payload = await this.request(
+            rotate ? 'POST' : 'GET',
+            `${this.buildRunnerScopePath({
+                scope: normalizedScope,
+                org,
+                owner,
+                repo,
+            })}/registration-token`,
+        );
+        const token = extractRunnerRegistrationToken(payload);
+        if (!token) {
+            throw new Error(`Gitea did not return a runner registration token for the ${normalizedScope} scope.`);
+        }
+
+        return {
+            scope: normalizedScope,
+            token,
+            rotated: rotate === true,
+        };
     }
 
     async getOrganization(name = '') {

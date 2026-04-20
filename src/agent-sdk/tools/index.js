@@ -3125,7 +3125,7 @@ class ToolManager {
         id: 'managed-app',
         name: 'Managed App Control Plane',
         category: 'system',
-        description: 'Create, update, inspect, diagnose, list, and deploy agent-created apps through the external Gitea control plane and the remote SSH/k3s deployment lane.',
+        description: 'Create, update, inspect, diagnose, reconcile, list, and deploy agent-created apps through the external Gitea control plane and the remote SSH/k3s deployment lane.',
         backend: {
           handler: async (params = {}, context = {}) => {
             const { service, ownerId, sessionId } = resolveManagedAppService(context);
@@ -3160,6 +3160,22 @@ class ToolManager {
 
             if (action === 'doctor') {
               const result = await service.doctorPlatform(
+                params,
+                ownerId,
+                {
+                  sessionId: params.sessionId || sessionId,
+                  executionProfile: context?.executionProfile || '',
+                },
+              );
+
+              return {
+                action,
+                ...result,
+              };
+            }
+
+            if (action === 'reconcile') {
+              const result = await service.reconcilePlatform(
                 params,
                 ownerId,
                 {
@@ -3232,7 +3248,7 @@ class ToolManager {
           properties: {
             action: {
               type: 'string',
-              enum: ['create', 'update', 'deploy', 'inspect', 'doctor', 'list'],
+              enum: ['create', 'update', 'deploy', 'inspect', 'doctor', 'reconcile', 'list'],
             },
             appRef: { type: 'string' },
             app: { type: 'string' },
@@ -3253,6 +3269,13 @@ class ToolManager {
             sessionId: { type: 'string' },
             limit: { type: 'integer' },
             platformNamespace: { type: 'string' },
+            runnerScope: { type: 'string', enum: ['org', 'instance', 'repo'] },
+            runnerLabels: { type: 'string' },
+            runnerReplicas: { type: 'integer' },
+            rotateRunnerToken: { type: 'boolean' },
+            giteaInstanceUrl: { type: 'string' },
+            repoOwner: { type: 'string' },
+            repoName: { type: 'string' },
             metadata: { type: 'object' },
             files: {
               type: 'array',
@@ -3282,6 +3305,9 @@ class ToolManager {
             'gitea runner',
             'buildkit',
             'why are actions waiting',
+            'repair gitea runner',
+            'fix queued actions',
+            'reconcile managed app platform',
           ],
           requiresConfirmation: false,
         },

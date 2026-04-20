@@ -1225,6 +1225,49 @@ describe('ToolManager image tools', () => {
     expect(result.data.platform.platformNamespace).toBe('agent-platform');
   });
 
+  test('routes managed app reconcile requests through the managed app service', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const reconcilePlatform = jest.fn(async () => ({
+      platform: {
+        platformNamespace: 'agent-platform',
+        executionHost: 'deploy.example:22',
+      },
+      reconciliation: {
+        actions: ['act-runner-restarted'],
+      },
+      giteaRunners: {
+        onlineCount: 1,
+      },
+      healthy: true,
+      suggestions: [],
+      message: 'Managed app platform reconciliation succeeded.',
+    }));
+
+    const result = await toolManager.executeTool('managed-app', {
+      action: 'reconcile',
+    }, {
+      ownerId: 'user-1',
+      sessionId: 'session-1',
+      executionProfile: 'remote-build',
+      managedAppService: {
+        isAvailable: () => true,
+        reconcilePlatform,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(reconcilePlatform).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'reconcile',
+    }), 'user-1', expect.objectContaining({
+      sessionId: 'session-1',
+      executionProfile: 'remote-build',
+    }));
+    expect(result.data.healthy).toBe(true);
+    expect(result.data.giteaRunners.onlineCount).toBe(1);
+  });
+
   test('normalizes managed app name fallbacks for deploy actions', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();
