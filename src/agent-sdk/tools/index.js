@@ -420,6 +420,23 @@ function normalizeManagedAppRef(value = '') {
     .replace(/-{2,}/g, '-');
 }
 
+function normalizeManagedAppAction(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) {
+    return '';
+  }
+
+  if (['diagnose', 'diagnostic', 'diagnostics'].includes(normalized)) {
+    return 'doctor';
+  }
+
+  if (['repair', 'repair-runner', 'repair-runners'].includes(normalized)) {
+    return 'reconcile';
+  }
+
+  return normalized;
+}
+
 function resolveManagedAppReference(params = {}) {
   const explicitRef = String(params.appRef || params.slug || params.id || params.app || '').trim();
   if (explicitRef) {
@@ -3116,11 +3133,11 @@ class ToolManager {
         id: 'managed-app',
         name: 'Managed App Control Plane',
         category: 'system',
-        description: 'Create, update, inspect, diagnose, reconcile, list, and deploy agent-created apps through the external Gitea control plane and the remote SSH/k3s deployment lane.',
+        description: 'Create, update, inspect, doctor (diagnose), reconcile (repair runners), list, and deploy agent-created apps through the external Gitea control plane and the remote SSH/k3s deployment lane.',
         backend: {
           handler: async (params = {}, context = {}) => {
             const { service, ownerId, sessionId } = resolveManagedAppService(context);
-            const action = String(params.action || '').trim().toLowerCase() || 'inspect';
+            const action = normalizeManagedAppAction(params.action) || 'inspect';
 
             if (action === 'list') {
               const apps = await service.listApps(
@@ -3239,7 +3256,21 @@ class ToolManager {
           properties: {
             action: {
               type: 'string',
-              enum: ['create', 'update', 'deploy', 'inspect', 'doctor', 'reconcile', 'list'],
+              enum: [
+                'create',
+                'update',
+                'deploy',
+                'inspect',
+                'doctor',
+                'diagnose',
+                'diagnostic',
+                'diagnostics',
+                'reconcile',
+                'repair',
+                'repair-runner',
+                'repair-runners',
+                'list',
+              ],
             },
             appRef: { type: 'string' },
             app: { type: 'string' },
@@ -3293,6 +3324,7 @@ class ToolManager {
             'publish this app to the cluster',
             'list managed apps',
             'managed app doctor',
+            'managed app diagnose',
             'gitea actions waiting',
             'gitea runner',
             'buildkit',

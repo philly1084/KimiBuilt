@@ -12,8 +12,8 @@ Use this tool as the single control-plane entry point when the remote Gitea inst
 - `update`: updates an existing managed app by slug or id, applies software changes into the managed repo, and can queue a new remote build/deploy cycle.
 - `deploy`: deploys an existing managed app into the configured remote k3s app cluster over SSH.
 - `inspect`: returns the app record plus recent build runs.
-- `doctor`: SSHes to the remote deploy host and inspects the managed-app platform namespace so the agent can check Gitea, BuildKit, `act-runner`, runner labels, and runner token state in one call.
-- `reconcile`: uses the configured Gitea API plus remote SSH/k3s access to fetch or rotate the runner registration token, update the `gitea-actions` secret on the remote cluster, and restart or scale `act-runner`.
+- `doctor`: SSHes to the remote deploy host and inspects the managed-app platform namespace so the agent can check Gitea, BuildKit, `act-runner`, runner labels, and runner token state in one call. `diagnose`, `diagnostic`, and `diagnostics` are accepted as aliases.
+- `reconcile`: uses the configured Gitea API plus remote SSH/k3s access to fetch or rotate the runner registration token, update the `gitea-actions` secret on the remote cluster, and restart or scale `act-runner`. `repair` and `repair-runner` are accepted as aliases.
 - `list`: lists the current user's managed apps.
 
 ## Required setup

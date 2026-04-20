@@ -21,6 +21,23 @@ function sanitizeText(value = '') {
     return String(value || '').trim();
 }
 
+function normalizeManagedAppAction(value = '') {
+    const normalized = sanitizeText(value).toLowerCase();
+    if (!normalized) {
+        return '';
+    }
+
+    if (['diagnose', 'diagnostic', 'diagnostics'].includes(normalized)) {
+        return 'doctor';
+    }
+
+    if (['repair', 'repair-runner', 'repair-runners'].includes(normalized)) {
+        return 'reconcile';
+    }
+
+    return normalized;
+}
+
 function validateWorkloadPayload(payload = {}, options = {}) {
     const errors = [];
     const ownerId = sanitizeText(options.ownerId);
@@ -184,7 +201,7 @@ function normalizeExecution(execution = null, options = {}) {
         : {};
 
     if (normalizedTool === 'managed-app') {
-        const action = sanitizeText(rawParams.action || execution.action || '').toLowerCase();
+        const action = normalizeManagedAppAction(rawParams.action || execution.action || '');
         const validManagedAppActions = new Set(['create', 'update', 'deploy', 'inspect', 'doctor', 'reconcile', 'list']);
         if (!validManagedAppActions.has(action)) {
             throw new Error(`execution.params.action must be one of: ${Array.from(validManagedAppActions).join(', ')}`);

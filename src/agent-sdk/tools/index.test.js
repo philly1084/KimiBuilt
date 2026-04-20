@@ -1144,6 +1144,42 @@ describe('ToolManager image tools', () => {
     expect(result.data.platform.platformNamespace).toBe('agent-platform');
   });
 
+  test('normalizes managed app diagnose requests into the doctor action', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const doctorPlatform = jest.fn(async () => ({
+      platform: {
+        platformNamespace: 'agent-platform',
+      },
+      healthy: true,
+      suggestions: [],
+      message: 'Managed app platform looks healthy.',
+    }));
+
+    const result = await toolManager.executeTool('managed-app', {
+      action: 'diagnose',
+    }, {
+      ownerId: 'user-1',
+      sessionId: 'session-1',
+      executionProfile: 'remote-build',
+      managedAppService: {
+        isAvailable: () => true,
+        doctorPlatform,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(doctorPlatform).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'diagnose',
+    }), 'user-1', expect.objectContaining({
+      sessionId: 'session-1',
+      executionProfile: 'remote-build',
+    }));
+    expect(result.data.action).toBe('doctor');
+    expect(result.data.healthy).toBe(true);
+  });
+
   test('routes managed app reconcile requests through the managed app service', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();
@@ -1184,6 +1220,48 @@ describe('ToolManager image tools', () => {
       executionProfile: 'remote-build',
     }));
     expect(result.data.healthy).toBe(true);
+    expect(result.data.giteaRunners.onlineCount).toBe(1);
+  });
+
+  test('normalizes managed app repair requests into the reconcile action', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const reconcilePlatform = jest.fn(async () => ({
+      platform: {
+        platformNamespace: 'agent-platform',
+      },
+      reconciliation: {
+        actions: ['runner-token-verified'],
+      },
+      giteaRunners: {
+        onlineCount: 1,
+      },
+      healthy: true,
+      suggestions: [],
+      message: 'Managed app platform reconciliation succeeded.',
+    }));
+
+    const result = await toolManager.executeTool('managed-app', {
+      action: 'repair',
+    }, {
+      ownerId: 'user-1',
+      sessionId: 'session-1',
+      executionProfile: 'remote-build',
+      managedAppService: {
+        isAvailable: () => true,
+        reconcilePlatform,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(reconcilePlatform).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'repair',
+    }), 'user-1', expect.objectContaining({
+      sessionId: 'session-1',
+      executionProfile: 'remote-build',
+    }));
+    expect(result.data.action).toBe('reconcile');
     expect(result.data.giteaRunners.onlineCount).toBe(1);
   });
 

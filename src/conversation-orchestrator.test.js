@@ -4207,6 +4207,115 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
+    test('routes managed app platform diagnose prompts directly to the doctor action', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['managed-app', 'remote-command', 'tool-doc-read']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Diagnose the managed app platform. Gitea actions are waiting and no runner is attached.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            toolPolicy,
+        });
+
+        expect(directAction).toEqual({
+            tool: 'managed-app',
+            reason: 'Managed app platform inspection requests should use the dedicated control-plane tool.',
+            params: {
+                action: 'doctor',
+            },
+        });
+    });
+
+    test('routes managed app platform repair prompts directly to the reconcile action', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['managed-app', 'remote-command', 'tool-doc-read']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Repair the managed app platform and fix queued actions because the Gitea runner is missing.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            toolPolicy,
+        });
+
+        expect(directAction).toEqual({
+            tool: 'managed-app',
+            reason: 'Managed app platform repair requests should use the dedicated control-plane tool.',
+            params: {
+                action: 'reconcile',
+            },
+        });
+    });
+
+    test('routes diagnose demo app prompts to managed-app inspect', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['managed-app', 'remote-command']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Diagnose demo app and show its status.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            toolPolicy,
+        });
+
+        expect(directAction).toEqual({
+            tool: 'managed-app',
+            reason: 'Managed app inspection requests should use the dedicated control-plane tool.',
+            params: {
+                action: 'inspect',
+                appRef: 'demo',
+            },
+        });
+    });
+
     test('treats plural podcast workflow prompts as explicit podcast tool requests', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {

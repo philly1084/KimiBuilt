@@ -3656,8 +3656,8 @@ function hasManagedAppIntentText(text = '') {
 
     return [
         /\bmanaged app\b/i,
-        /\b(create|build|deploy|publish|launch|ship|update|redeploy|inspect|list)\b[\s\S]{0,40}\b(app|website|site|frontend|service|game)\b/i,
-        /\b(app|website|site|frontend|service|game)\b[\s\S]{0,40}\b(create|build|deploy|publish|launch|ship|update|redeploy|inspect|list)\b/i,
+        /\b(create|build|deploy|publish|launch|ship|update|redeploy|inspect|check|verify|diagnose|debug|troubleshoot|status|show|list)\b[\s\S]{0,40}\b(app|website|site|frontend|service|game)\b/i,
+        /\b(app|website|site|frontend|service|game)\b[\s\S]{0,40}\b(create|build|deploy|publish|launch|ship|update|redeploy|inspect|check|verify|diagnose|debug|troubleshoot|status|show|list)\b/i,
         /\b(develop|software changes?|code changes?|fix|edit|modify|rewrite|refactor|patch)\b[\s\S]{0,40}\b(app|website|site|frontend|service|game)\b/i,
         /\b(app|website|site|frontend|service|game)\b[\s\S]{0,40}\b(develop|software changes?|code changes?|fix|edit|modify|rewrite|refactor|patch)\b/i,
         /\b(gitea|container registry|image repo|namespace|ingress host)\b/i,
@@ -3766,7 +3766,7 @@ function extractManagedAppReference(text = '') {
     }
 
     const patterns = [
-        /\b(?:fix|update|modify|change|edit|refresh|rebuild|deploy|redeploy|publish|inspect|show|build|create|make)\s+([a-z0-9][a-z0-9-]{1,63})\s+(?:app|website|site|frontend|service|game)\b/i,
+        /\b(?:fix|update|modify|change|edit|refresh|rebuild|deploy|redeploy|publish|inspect|show|check|verify|diagnose|debug|troubleshoot|status|describe|review|build|create|make)\s+([a-z0-9][a-z0-9-]{1,63})\s+(?:app|website|site|frontend|service|game)\b/i,
         /\b(?:managed app|app|website|site|frontend|service|game)\s+(?:called|named)\s+["'`]?([^"',.\n]+?)["'`]?(?=$|[,.!?]|\s+(?:make|that|which|with|using)\b)/i,
         /\b(?:called|named)\s+["'`]?([^"',.\n]+?)["'`]?(?=$|[,.!?]|\s+(?:make|that|which|with|using)\b)/i,
         /\b(?:managed app|app|website|site|frontend|service|game)\s+["'`]([^"'`\n]{1,64})["'`]/i,
@@ -3800,9 +3800,12 @@ function buildManagedAppDirectAction(objective = '', options = {}) {
     const requestedAction = inferManagedAppRequestedAction(normalized);
     const hasCreateIntent = /\b(create|build|make|generate|new)\b/i.test(normalized);
     const hasUpdateIntent = /\b(update|modify|change|edit|refresh|rebuild)\b/i.test(normalized);
-    const hasInspectIntent = /\b(inspect|show|status|details?)\b/i.test(normalized);
+    const hasInspectIntent = /\b(inspect|show|status|details?|check|verify|diagnose|debug|troubleshoot|health|healthy|state)\b/i.test(normalized);
     const hasListIntent = /\blist\b/i.test(normalized);
     const hasDeployIntent = /\b(deploy|redeploy|publish|launch|ship|go live|live)\b/i.test(normalized);
+    const hasPlatformCue = /\b(gitea|runner|runners|actions?|buildkit|platform|control plane|queued|queue|waiting|k3s|cluster|deploy host|remote server)\b/i.test(normalized);
+    const hasDoctorIntent = hasPlatformCue && /\b(doctor|diagnose|diagnostic|diagnostics|check|verify|debug|troubleshoot|health|healthy|state|status)\b/i.test(normalized);
+    const hasReconcileIntent = hasPlatformCue && /\b(reconcile|repair|fix|unstick|restart|recover|heal)\b/i.test(normalized);
     const hasAuthoringWorkflow = workflowLane === 'repo-only' || workflowLane === 'repo-then-deploy';
     const workflowRequestedAction = workflowLane === 'repo-then-deploy'
         ? 'deploy'
@@ -3816,6 +3819,26 @@ function buildManagedAppDirectAction(objective = '', options = {}) {
             params: {
                 action: 'list',
                 limit: 20,
+            },
+        };
+    }
+
+    if (hasReconcileIntent && !hasCreateIntent && !hasUpdateIntent && !hasDeployIntent) {
+        return {
+            tool: 'managed-app',
+            reason: 'Managed app platform repair requests should use the dedicated control-plane tool.',
+            params: {
+                action: 'reconcile',
+            },
+        };
+    }
+
+    if (hasDoctorIntent && !hasCreateIntent && !hasUpdateIntent && !hasDeployIntent) {
+        return {
+            tool: 'managed-app',
+            reason: 'Managed app platform inspection requests should use the dedicated control-plane tool.',
+            params: {
+                action: 'doctor',
             },
         };
     }
