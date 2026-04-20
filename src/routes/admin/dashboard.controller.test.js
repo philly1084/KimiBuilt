@@ -261,4 +261,41 @@ describe('DashboardController', () => {
       inferred: false,
     });
   });
+
+  test('reports optional admin capabilities in health without treating them as core service failures', async () => {
+    const controller = new DashboardController(null);
+    controller.checkVectorStore = jest.fn(async () => 'connected');
+    controller.checkLLMClient = jest.fn(async () => 'connected');
+    controller.checkEmbedder = jest.fn(async () => 'connected');
+
+    const req = {
+      app: {
+        locals: {
+          agentWorkloadService: {
+            isAvailable: jest.fn(() => false),
+          },
+          managedAppService: {
+            isAvailable: jest.fn(() => true),
+          },
+        },
+      },
+    };
+    const res = {
+      json: jest.fn(),
+      status: jest.fn().mockReturnThis(),
+    };
+
+    await controller.getHealth(req, res);
+
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      data: expect.objectContaining({
+        status: 'degraded',
+        capabilities: {
+          deferredWorkloads: false,
+          managedApps: true,
+        },
+      }),
+    }));
+  });
 });

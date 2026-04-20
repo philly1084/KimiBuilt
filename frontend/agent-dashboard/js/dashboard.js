@@ -23,6 +23,7 @@ class Dashboard {
             runs: [],
             selectedRun: null,
             workloadsAvailable: true,
+            workloadsSupported: null,
             workloadErrorMessage: '',
             editingWorkloadId: null,
             settings: {},
@@ -285,6 +286,11 @@ class Dashboard {
         document.getElementById('apiSettingsForm')?.addEventListener('submit', (e) => {
             e.preventDefault();
             this.saveApiSettings();
+        });
+
+        document.getElementById('sshSettingsForm')?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.saveSshSettings();
         });
 
         document.getElementById('deploySettingsForm')?.addEventListener('submit', (e) => {
@@ -655,6 +661,11 @@ class Dashboard {
     }
 
     async loadWorkloads() {
+        if (this.state.workloadsSupported === false) {
+            this.setDeferredWorkloadsUnavailable(this.state.workloadErrorMessage || this.getDeferredWorkloadUnavailableMessage());
+            return;
+        }
+
         try {
             const [workloadsResponse, runsResponse] = await Promise.all([
                 apiClient.getAdminWorkloads(100),
@@ -681,26 +692,28 @@ class Dashboard {
             this.renderAdminWorkloads(workloads);
             this.renderAdminRuns(runs);
             this.renderAdminRunDetails(this.state.selectedRun);
+            this.updateWorkloadControls();
         } catch (error) {
             const unavailable = this.isPersistenceUnavailableError(error);
+
+            if (unavailable) {
+                this.setDeferredWorkloadsUnavailable(this.getDeferredWorkloadUnavailableMessage());
+                console.warn('Deferred workloads unavailable:', error.message || error);
+                return;
+            }
+
             this.state.workloads = [];
             this.state.runs = [];
             this.state.selectedRun = null;
-            this.state.workloadsAvailable = !unavailable;
-            this.state.workloadErrorMessage = unavailable
-                ? 'Deferred workloads are unavailable until Postgres persistence is configured.'
-                : (error.userMessage || error.message || 'Failed to load workload data');
-
-            if (unavailable) {
-                console.warn('Deferred workloads unavailable:', error.message || error);
-            } else {
-                console.error('Error loading workloads:', error);
-            }
+            this.state.workloadsAvailable = true;
+            this.state.workloadErrorMessage = error.userMessage || error.message || 'Failed to load workload data';
+            console.error('Error loading workloads:', error);
 
             this.renderWorkloadSummary([], []);
             this.renderAdminWorkloads([], this.state.workloadErrorMessage);
             this.renderAdminRuns([], this.state.workloadErrorMessage);
-            this.renderAdminRunDetails(null, unavailable ? null : error, this.state.workloadErrorMessage);
+            this.renderAdminRunDetails(null, error, this.state.workloadErrorMessage);
+            this.updateWorkloadControls();
         }
     }
 
@@ -708,6 +721,52 @@ class Dashboard {
         const message = String(error?.message || '').toLowerCase();
         return Number(error?.status) === 503
             && message.includes('postgres persistence');
+    }
+
+    getDeferredWorkloadUnavailableMessage() {
+        return 'Deferred workloads are unavailable until Postgres persistence is configured.';
+    }
+
+    applyDashboardCapabilities(capabilities = {}) {
+        if (typeof capabilities.deferredWorkloads === 'boolean') {
+            this.state.workloadsSupported = capabilities.deferredWorkloads;
+            if (!capabilities.deferredWorkloads) {
+                this.setDeferredWorkloadsUnavailable(this.getDeferredWorkloadUnavailableMessage());
+                return;
+            } else {
+                this.state.workloadsSupported = true;
+            }
+        }
+
+        this.updateWorkloadControls();
+    }
+
+    setDeferredWorkloadsUnavailable(message = this.getDeferredWorkloadUnavailableMessage()) {
+        this.state.workloads = [];
+        this.state.runs = [];
+        this.state.selectedRun = null;
+        this.state.workloadsAvailable = false;
+        this.state.workloadsSupported = false;
+        this.state.workloadErrorMessage = message;
+
+        this.renderWorkloadSummary([], []);
+        this.renderAdminWorkloads([], message);
+        this.renderAdminRuns([], message);
+        this.renderAdminRunDetails(null, null, message);
+        this.updateWorkloadControls();
+    }
+
+    updateWorkloadControls() {
+        const refreshButton = document.getElementById('refreshWorkloadsBtn');
+        if (!refreshButton) {
+            return;
+        }
+
+        const unsupported = this.state.workloadsSupported === false;
+        refreshButton.disabled = unsupported;
+        refreshButton.title = unsupported
+            ? 'Deferred workloads require Postgres persistence.'
+            : 'Refresh deferred workloads';
     }
     
     /**
@@ -747,7 +806,7 @@ class Dashboard {
      */
     setupCharts() {
         const ctx = document.getElementById('requestVolumeCanvas');
-        if (!ctx) return;
+        if (!ctx || typeof Chart !== 'function') return;
         
         this.charts.requestVolume = new Chart(ctx, {
             type: 'line',
@@ -858,7 +917,9 @@ class Dashboard {
             case 'workload_completed':
             case 'workload_failed':
             case 'workload_updated':
-                this.loadWorkloads();
+                if (this.state.workloadsSupported !== false) {
+                    this.loadWorkloads();
+                }
                 if (data.type === 'workload_failed') {
                     const title = data?.data?.workload?.title || data?.data?.workloadId || 'workload';
                     this.showToast(`Deferred job failed: ${title}`, 'error');
@@ -899,7 +960,7 @@ class Dashboard {
             if (this.state.currentView === 'logs' && !this.state.logsPaused) {
                 await this.loadLogs();
             }
-            if (this.state.currentView === 'workloads') {
+            if (this.state.currentView === 'workloads' && this.state.workloadsSupported !== false) {
                 await this.loadWorkloads();
             }
         }, 30000);
@@ -1411,6 +1472,7 @@ class Dashboard {
             const response = await apiClient.get('/api/admin/health');
             const latency = Math.round(performance.now() - startedAt);
             const health = this.unwrapApiPayload(response, {});
+            this.applyDashboardCapabilities(health.capabilities || {});
             this.updateConnectionStatus(true);
             this.renderSystemHealth(health, latency);
         } catch (error) {
@@ -2177,8 +2239,16 @@ class Dashboard {
     
     confirmResetConfig() {
         if (confirm('Are you sure you want to reset all settings to defaults?')) {
-            localStorage.removeItem('dashboard_settings');
-            location.reload();
+            apiClient.post('/api/admin/settings/reset')
+                .then((response) => {
+                    const settings = this.unwrapApiPayload(response, {});
+                    this.applySettings(settings);
+                    this.showToast('Settings reset to defaults', 'success');
+                })
+                .catch((error) => {
+                    console.error('Error resetting settings:', error);
+                    this.showToast('Failed to reset settings', 'error');
+                });
         }
     }
     
@@ -3462,10 +3532,7 @@ class Dashboard {
     async saveApiSettings() {
         try {
             apiClient.apiKey = document.getElementById('apiKey').value.trim();
-            localStorage.setItem('api_key', apiClient.apiKey);
-
-            const sshPassword = document.getElementById('sshPassword').value;
-            const clearSshPassword = document.getElementById('clearSshPassword').checked;
+            apiClient.persistApiKey(apiClient.apiKey);
 
             const settings = {
                 api: {
@@ -3473,6 +3540,22 @@ class Dashboard {
                     timeout: parseInt(document.getElementById('requestTimeout').value, 10),
                     maxRetries: parseInt(document.getElementById('maxRetries').value, 10),
                 },
+            };
+
+            const response = await apiClient.put('/api/admin/settings', settings);
+            this.applySettings(this.unwrapApiPayload(response, settings));
+            this.showToast('API settings saved', 'success');
+        } catch (error) {
+            console.error('Error saving API settings:', error);
+            this.showToast('Failed to save API settings', 'error');
+        }
+    }
+
+    async saveSshSettings() {
+        try {
+            const sshPassword = document.getElementById('sshPassword').value;
+            const clearSshPassword = document.getElementById('clearSshPassword').checked;
+            const settings = {
                 integrations: {
                     ssh: {
                         enabled: document.getElementById('sshEnabled').value === 'true',
@@ -3488,10 +3571,10 @@ class Dashboard {
 
             const response = await apiClient.put('/api/admin/settings', settings);
             this.applySettings(this.unwrapApiPayload(response, settings));
-            this.showToast('API settings saved', 'success');
+            this.showToast('SSH defaults saved', 'success');
         } catch (error) {
-            console.error('Error saving API settings:', error);
-            this.showToast('Failed to save API settings', 'error');
+            console.error('Error saving SSH defaults:', error);
+            this.showToast('Failed to save SSH defaults', 'error');
         }
     }
 
@@ -3773,7 +3856,7 @@ class Dashboard {
         this.setInputValue('timezone', general.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone);
         this.setInputValue('dateFormat', general.dateFormat || 'YYYY-MM-DD');
         this.setInputValue('apiEndpoint', api.baseURL || window.location.origin);
-        this.setInputValue('apiKey', apiClient.apiKey || localStorage.getItem('api_key') || '');
+        this.setInputValue('apiKey', apiClient.apiKey || '');
         this.setInputValue('requestTimeout', api.timeout ?? 30000);
         this.setInputValue('maxRetries', api.maxRetries ?? 3);
         this.setInputValue('defaultTemperature', models.temperature ?? 0.7);

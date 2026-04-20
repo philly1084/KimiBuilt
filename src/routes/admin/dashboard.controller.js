@@ -306,6 +306,10 @@ class DashboardController {
    */
   async getHealth(req, res) {
     try {
+      const capabilities = {
+        deferredWorkloads: Boolean(req.app?.locals?.agentWorkloadService?.isAvailable?.()),
+        managedApps: Boolean(req.app?.locals?.managedAppService?.isAvailable?.()),
+      };
       const health = {
         status: 'healthy',
         services: {
@@ -314,6 +318,7 @@ class DashboardController {
           llmClient: await this.checkLLMClient(),
           embedder: await this.checkEmbedder()
         },
+        capabilities,
         uptime: process.uptime(),
         memory: process.memoryUsage(),
         timestamp: new Date().toISOString()

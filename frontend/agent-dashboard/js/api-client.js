@@ -3,10 +3,28 @@
  * Handles all HTTP communication with the backend API
  */
 
+function safeLocalStorageSet(key, value) {
+    try {
+        localStorage.setItem(key, value);
+        return true;
+    } catch (_error) {
+        return false;
+    }
+}
+
+function safeLocalStorageRemove(key) {
+    try {
+        localStorage.removeItem(key);
+        return true;
+    } catch (_error) {
+        return false;
+    }
+}
+
 class ApiClient {
     constructor(options = {}) {
         this.baseUrl = options.baseUrl || '';
-        this.apiKey = options.apiKey || localStorage.getItem('api_key') || '';
+        this.apiKey = options.apiKey || '';
         this.timeout = options.timeout || 30000;
         this.maxRetries = options.maxRetries || 3;
         this.retryDelay = options.retryDelay || 1000;
@@ -246,6 +264,16 @@ class ApiClient {
      */
     sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    persistApiKey(value = '') {
+        this.apiKey = String(value || '');
+        return safeLocalStorageSet('api_key', this.apiKey);
+    }
+
+    clearPersistedApiKey() {
+        this.apiKey = '';
+        return safeLocalStorageRemove('api_key');
     }
     
     // ==================== HTTP METHODS ====================
