@@ -352,6 +352,7 @@ class ChatApp {
         this.pageWasHidden = document.hidden === true;
         this.lastResumeSyncAt = 0;
         this.connectionStatus = 'checking';
+        this.managedAppProgressByKey = new Map();
         
         this.init();
     }
@@ -2102,6 +2103,179 @@ class ChatApp {
         }
     }
 
+    normalizeManagedAppPhase(phase = '') {
+        return String(phase || '').trim().toLowerCase() || 'updated';
+    }
+
+    isManagedAppTerminalPhase(phase = '') {
+        return [
+            'live',
+            'build_failed',
+            'deploy_failed',
+        ].includes(this.normalizeManagedAppPhase(phase));
+    }
+
+    buildManagedAppEventMessageId(event = {}) {
+        const appId = String(event?.app?.id || event?.app?.slug || 'managed-app').trim();
+        const buildRunId = String(event?.buildRun?.id || '').trim();
+        const phase = this.normalizeManagedAppPhase(event?.phase);
+
+        if (['created', 'updated'].includes(phase)) {
+            return `managed-app:${appId}:provisioning`;
+        }
+
+        return `managed-app:${appId}:${buildRunId || 'lifecycle'}`;
+    }
+
+    buildManagedAppProgressDetail(event = {}) {
+        const phase = this.normalizeManagedAppPhase(event?.phase);
+        const appName = String(event?.app?.appName || event?.app?.slug || 'Managed app').trim();
+        const publicHost = String(event?.app?.publicHost || '').trim();
+        const publicUrl = publicHost ? `https://${publicHost}` : '';
+
+        switch (phase) {
+            case 'created':
+            case 'updated':
+                return `${appName} is queued for build${publicUrl ? ` and launch at ${publicUrl}` : ''}.`;
+            case 'built':
+                return `${appName} finished building. Waiting for deployment to start.`;
+            case 'deploying':
+                return `${appName} is deploying${publicUrl ? ` to ${publicUrl}` : ''}.`;
+            case 'tls_ready':
+                return `${appName} has a certificate${publicUrl ? ` for ${publicUrl}` : ''}. Waiting for the public endpoint.`;
+            case 'pending_https':
+                return `${appName} rollout finished, but the public endpoint is still warming up.`;
+            case 'live':
+                return `${appName} is live${publicUrl ? ` at ${publicUrl}` : ''}.`;
+            case 'build_failed':
+                return `${appName} build failed.`;
+            case 'deploy_failed':
+                return `${appName} deployment failed.`;
+            default:
+                return `${appName} is updating.`;
+        }
+    }
+
+    buildManagedAppProgressText(progressState = {}) {
+        const steps = Array.isArray(progressState.steps) ? progressState.steps.slice(-4) : [];
+        return steps.map((step) => {
+            const phase = this.normalizeManagedAppPhase(step?.phase);
+            let prefix = '[now]';
+            if (['created', 'updated', 'built', 'live', 'tls_ready'].includes(phase)) {
+                prefix = '[done]';
+            } else if (phase === 'pending_https') {
+                prefix = '[wait]';
+            } else if (['build_failed', 'deploy_failed'].includes(phase)) {
+                prefix = '[fail]';
+            }
+
+            return `${prefix} ${String(step?.summary || '').trim()}`;
+        }).filter(Boolean).join('\n');
+    }
+
+    getManagedAppProgressVisuals(phase = '') {
+        const normalizedPhase = this.normalizeManagedAppPhase(phase);
+        if (['build_failed', 'deploy_failed'].includes(normalizedPhase)) {
+            return {
+                title: 'Build status',
+                icon: 'triangle-alert',
+                source: 'final',
+            };
+        }
+
+        if (normalizedPhase === 'live') {
+            return {
+                title: 'Build status',
+                icon: 'badge-check',
+                source: 'final',
+            };
+        }
+
+        return {
+            title: 'Build progress',
+            icon: 'activity',
+            source: 'stream',
+        };
+    }
+
+    applyManagedAppProgressEvent(sessionId, event = {}) {
+        const normalizedSessionId = String(sessionId || '').trim();
+        if (!normalizedSessionId) {
+            return null;
+        }
+
+        const summary = String(event?.summary || '').trim();
+        if (!summary) {
+            return null;
+        }
+
+        const messageId = this.buildManagedAppEventMessageId(event);
+        const phase = this.normalizeManagedAppPhase(event?.phase);
+        const stateKey = messageId;
+        const existingState = this.managedAppProgressByKey.get(stateKey) || {
+            steps: [],
+        };
+        const lastStep = existingState.steps[existingState.steps.length - 1] || null;
+        const nextStep = {
+            phase,
+            summary,
+            timestamp: event?.timestamp || new Date().toISOString(),
+        };
+        const nextSteps = (!lastStep || lastStep.phase !== nextStep.phase || lastStep.summary !== nextStep.summary)
+            ? [...existingState.steps, nextStep]
+            : existingState.steps;
+        const nextState = {
+            ...existingState,
+            appId: String(event?.app?.id || event?.app?.slug || '').trim(),
+            buildRunId: String(event?.buildRun?.id || '').trim(),
+            sessionId: normalizedSessionId,
+            phase,
+            detail: this.buildManagedAppProgressDetail(event),
+            steps: nextSteps.slice(-6),
+            terminal: this.isManagedAppTerminalPhase(phase),
+        };
+        this.managedAppProgressByKey.set(stateKey, nextState);
+
+        const existingMessage = this.getSessionMessage(normalizedSessionId, messageId) || {};
+        const progressText = this.buildManagedAppProgressText(nextState);
+        const visuals = this.getManagedAppProgressVisuals(phase);
+        const nextMessage = this.upsertSessionMessage(normalizedSessionId, {
+            ...existingMessage,
+            id: messageId,
+            role: 'assistant',
+            content: summary,
+            isStreaming: nextState.terminal !== true,
+            liveState: nextState.terminal ? null : {
+                phase: 'thinking',
+                detail: nextState.detail,
+            },
+            reasoningDisplaySource: visuals.source,
+            reasoningDisplayText: progressText,
+            reasoningDisplayFullText: progressText,
+            reasoningDisplayTitle: visuals.title,
+            reasoningDisplayIcon: visuals.icon,
+            reasoningDisplayAnimated: nextState.terminal !== true,
+            timestamp: event?.timestamp || existingMessage.timestamp || new Date().toISOString(),
+            metadata: {
+                ...(existingMessage.metadata || {}),
+                managedAppLifecycle: true,
+                managedAppProgressActive: nextState.terminal !== true,
+                managedAppPhase: phase,
+                managedAppId: nextState.appId,
+                buildRunId: nextState.buildRunId,
+            },
+        });
+
+        if (nextMessage) {
+            this.renderOrReplaceMessage(nextMessage);
+            if (nextState.terminal) {
+                uiHelpers.markMessageSettled(nextMessage.id);
+            }
+        }
+
+        return nextMessage;
+    }
+
     async handleManagedAppEvent(event) {
         const sessionId = event?.app?.sessionId || event?.sessionId || null;
         if (!sessionId) {
@@ -2116,6 +2290,7 @@ class ChatApp {
                 notifyNewAssistant: true,
                 previousMessages,
             });
+            this.applyManagedAppProgressEvent(sessionId, event);
         }
 
         const summary = String(event?.summary || '').trim();
