@@ -23,7 +23,7 @@ This boots:
 - Gitea
 - BuildKit
 - TLS ingress for `gitea.demoserver2.buzz`
-- `act-runner`, which now fetches its own registration token from Gitea during pod startup
+- `act-runner`, initially scaled to `0` until the bootstrap helper generates a fresh runner token and scales it up
 
 ### After Gitea Is Up
 
@@ -34,18 +34,20 @@ This boots:
    - In a test environment, `admin` is fine.
    - Give it repo/org/packages access.
    - Use that same Gitea username plus PAT for container registry auth on the runner and in KimiBuilt.
-3. In Rancher, edit secret `agent-platform-runtime` in namespace `agent-platform`.
-   - Set `gitea-registry-username` to a real Gitea user, such as `admin` in the test bootstrap.
-   - Set `gitea-registry-password` to a PAT for that user with package write access.
-   - Leave `gitea-org=agent-apps` and `gitea-runner-scope=org` unless you intentionally want a different runner scope.
-   - If webhook posts fail only because the KimiBuilt TLS certificate is not trusted on the runner yet, temporarily set `kimibuilt-build-events-insecure` to `1`.
-4. Restart deployment `act-runner` after the secret change.
+3. Run the bootstrap helper so it generates a fresh runner registration token from the Gitea pod, stores it in `gitea-actions`, updates runtime secrets, and scales `act-runner` to `1`.
 
 If you want a one-command update on the build cluster instead of clicking through Rancher, run:
 
 ```bash
 export GITEA_REGISTRY_USERNAME=admin
 export GITEA_REGISTRY_PASSWORD=<gitea-pat>
+./k8s/bootstrap-managed-app-platform.sh
+```
+
+For a true clean rebuild, delete the old namespace and PVC-backed state first:
+
+```bash
+export FRESH_INSTALL=1
 ./k8s/bootstrap-managed-app-platform.sh
 ```
 
@@ -65,6 +67,8 @@ Check:
 - `buildkitd` pod is `Running`
 - `act-runner` pod is `Running`
 - `https://gitea.demoserver2.buzz` loads
+
+This fresh-install path is only truly fresh when `FRESH_INSTALL=1` is used. Re-applying the manifest without deleting the namespace leaves the `gitea-data` PVC and the existing Gitea database in place.
 
 ## 2. KimiBuilt App Cluster
 

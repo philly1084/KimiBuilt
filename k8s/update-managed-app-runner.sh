@@ -9,8 +9,6 @@ DEFAULT_REGISTRY_HOST="${DEFAULT_REGISTRY_HOST:-gitea.demoserver2.buzz}"
 DEFAULT_BUILDKIT_HOST="${DEFAULT_BUILDKIT_HOST:-tcp://buildkitd.agent-platform.svc.cluster.local:1234}"
 DEFAULT_BUILD_EVENTS_INSECURE="${DEFAULT_BUILD_EVENTS_INSECURE:-0}"
 DEFAULT_RUNNER_REPLICAS="${DEFAULT_RUNNER_REPLICAS:-1}"
-DEFAULT_GITEA_ORG="${DEFAULT_GITEA_ORG:-agent-apps}"
-DEFAULT_GITEA_RUNNER_SCOPE="${DEFAULT_GITEA_RUNNER_SCOPE:-org}"
 
 usage() {
   cat <<'EOF'
@@ -22,8 +20,6 @@ Required environment variables:
 
 Optional environment variables:
   GITEA_REGISTRY_HOST            Default: gitea.demoserver2.buzz
-  GITEA_ORG                      Default: agent-apps
-  GITEA_RUNNER_SCOPE             Default: org
   KIMIBUILT_BUILD_EVENTS_URL     Existing secret value is reused when unset
   KIMIBUILT_BUILD_EVENTS_SECRET  Existing secret value is reused when unset
   KIMIBUILT_BUILD_EVENTS_INSECURE
@@ -95,8 +91,6 @@ require_value() {
 }
 
 registry_host="${GITEA_REGISTRY_HOST:-$(secret_value "$RUNTIME_SECRET_NAME" gitea-registry-host)}"
-gitea_org="${GITEA_ORG:-$(secret_value "$RUNTIME_SECRET_NAME" gitea-org)}"
-gitea_runner_scope="${GITEA_RUNNER_SCOPE:-$(secret_value "$RUNTIME_SECRET_NAME" gitea-runner-scope)}"
 registry_username="${GITEA_REGISTRY_USERNAME:-$(secret_value "$RUNTIME_SECRET_NAME" gitea-registry-username)}"
 registry_password="${GITEA_REGISTRY_PASSWORD:-$(secret_value "$RUNTIME_SECRET_NAME" gitea-registry-password)}"
 build_events_url="${KIMIBUILT_BUILD_EVENTS_URL:-$(secret_value "$RUNTIME_SECRET_NAME" kimibuilt-build-events-url)}"
@@ -105,8 +99,6 @@ build_events_insecure="${KIMIBUILT_BUILD_EVENTS_INSECURE:-$(secret_value "$RUNTI
 buildkit_host="${BUILDKIT_HOST:-$(secret_value "$RUNTIME_SECRET_NAME" buildkit-host)}"
 
 registry_host="${registry_host:-$DEFAULT_REGISTRY_HOST}"
-gitea_org="${gitea_org:-$DEFAULT_GITEA_ORG}"
-gitea_runner_scope="${gitea_runner_scope:-$DEFAULT_GITEA_RUNNER_SCOPE}"
 build_events_insecure="${build_events_insecure:-$DEFAULT_BUILD_EVENTS_INSECURE}"
 buildkit_host="${buildkit_host:-$DEFAULT_BUILDKIT_HOST}"
 
@@ -123,8 +115,6 @@ echo "Updating ${RUNTIME_SECRET_NAME} in namespace ${PLATFORM_NAMESPACE}..."
 kubectl_cmd create secret generic "$RUNTIME_SECRET_NAME" \
   --namespace "$PLATFORM_NAMESPACE" \
   --from-literal=gitea-registry-host="$registry_host" \
-  --from-literal=gitea-org="$gitea_org" \
-  --from-literal=gitea-runner-scope="$gitea_runner_scope" \
   --from-literal=gitea-registry-username="$registry_username" \
   --from-literal=gitea-registry-password="$registry_password" \
   --from-literal=kimibuilt-build-events-url="$build_events_url" \

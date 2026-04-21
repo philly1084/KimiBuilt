@@ -1,7 +1,8 @@
 # Test environment bootstrap for the separate Rancher-managed Gitea cluster.
 # Apply this to the external cluster, not the KimiBuilt app cluster.
-# The act-runner Deployment bootstraps itself by fetching the current runner
-# registration token from Gitea on startup.
+# The act-runner Deployment starts scaled to 0. The bootstrap helper generates
+# a fresh runner registration token from the Gitea pod and then scales the
+# runner up with that token stored in the gitea-actions secret.
 ---
 apiVersion: v1
 kind: Namespace
@@ -37,8 +38,6 @@ metadata:
 type: Opaque
 stringData:
   gitea-registry-host: gitea.demoserver2.buzz
-  gitea-org: agent-apps
-  gitea-runner-scope: org
   # Use a real Gitea username here. The test bootstrap only creates `admin`,
   # so the default registry credentials must match that account unless you
   # provision a separate service user yourself.
@@ -114,50 +113,6 @@ data:
       insecure: false
     host:
       workdir_parent: /workspace
-  bootstrap-runner.sh: |
-    #!/bin/sh
-    set -eu
-    api_base="${GITEA_INSTANCE_URL%/}/api/v1"
-    runner_scope="${GITEA_RUNNER_SCOPE:-org}"
-    case "$runner_scope" in
-      instance)
-        token_url="$api_base/admin/actions/runners/registration-token"
-        ;;
-      org)
-        if [ -z "${GITEA_ORG:-}" ]; then
-          echo "GITEA_ORG is required when GITEA_RUNNER_SCOPE=org" >&2
-          exit 1
-        fi
-        token_url="$api_base/orgs/$GITEA_ORG/actions/runners/registration-token"
-        ;;
-      *)
-        echo "Unsupported GITEA_RUNNER_SCOPE=$runner_scope" >&2
-        exit 1
-        ;;
-    esac
-    auth_user="${GITEA_ADMIN_USERNAME:-}"
-    auth_password="${GITEA_ADMIN_PASSWORD:-}"
-    if [ -z "$auth_user" ] || [ -z "$auth_password" ]; then
-      echo "GITEA admin credentials are required for runner bootstrap" >&2
-      exit 1
-    fi
-    token_payload="$(
-      curl -fsSL \
-        --retry 20 \
-        --retry-delay 3 \
-        --retry-all-errors \
-        --user "$auth_user:$auth_password" \
-        "$token_url"
-    )"
-    token="$(printf '%s' "$token_payload" | tr -d '\n' | sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
-    if [ -z "$token" ]; then
-      echo "Failed to extract runner registration token from Gitea" >&2
-      printf '%s\n' "$token_payload" >&2
-      exit 1
-    fi
-    mkdir -p /bootstrap-out
-    printf '%s' "$token" > /bootstrap-out/runner-registration-token
-    chmod 600 /bootstrap-out/runner-registration-token
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -338,7 +293,7 @@ metadata:
   name: act-runner
   namespace: agent-platform
 spec:
-  replicas: 1
+  replicas: 0
   selector:
     matchLabels:
       app: act-runner
@@ -347,54 +302,19 @@ spec:
       labels:
         app: act-runner
     spec:
-      initContainers:
-        - name: bootstrap-runner-token
-          image: curlimages/curl:8.11.1
-          command:
-            - sh
-            - /bootstrap/bootstrap-runner.sh
-          env:
-            - name: GITEA_INSTANCE_URL
-              value: https://gitea.demoserver2.buzz
-            - name: GITEA_ORG
-              valueFrom:
-                secretKeyRef:
-                  name: agent-platform-runtime
-                  key: gitea-org
-            - name: GITEA_RUNNER_SCOPE
-              valueFrom:
-                secretKeyRef:
-                  name: agent-platform-runtime
-                  key: gitea-runner-scope
-            - name: GITEA_ADMIN_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: gitea-admin
-                  key: username
-            - name: GITEA_ADMIN_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: gitea-admin
-                  key: password
-          volumeMounts:
-            - name: runner-bootstrap-script
-              mountPath: /bootstrap/bootstrap-runner.sh
-              subPath: bootstrap-runner.sh
-            - name: runner-bootstrap
-              mountPath: /bootstrap-out
       containers:
         - name: act-runner
           image: gitea/act_runner:0.2.11
-          command:
-            - sh
-            - -c
-            - |
-              set -eu
-              export GITEA_RUNNER_REGISTRATION_TOKEN="$(cat /bootstrap/runner-registration-token)"
-              exec act_runner daemon --config /data/config.yaml
           env:
+            - name: CONFIG_FILE
+              value: /data/config.yaml
             - name: GITEA_INSTANCE_URL
               value: https://gitea.demoserver2.buzz
+            - name: GITEA_RUNNER_REGISTRATION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: gitea-actions
+                  key: runner-registration-token
             - name: GITEA_RUNNER_NAME
               value: agent-platform-runner
             - name: GITEA_RUNNER_LABELS
@@ -439,20 +359,12 @@ spec:
           volumeMounts:
             - name: runner-data
               mountPath: /data
-            - name: runner-bootstrap
-              mountPath: /bootstrap
             - name: runner-config
               mountPath: /data/config.yaml
               subPath: config.yaml
             - name: runner-workspace
               mountPath: /workspace
       volumes:
-        - name: runner-bootstrap
-          emptyDir: {}
-        - name: runner-bootstrap-script
-          configMap:
-            name: act-runner-config
-            defaultMode: 493
         - name: runner-data
           emptyDir: {}
         - name: runner-config
