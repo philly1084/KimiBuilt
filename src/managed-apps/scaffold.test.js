@@ -22,7 +22,12 @@ describe('managed app scaffold', () => {
         const workflow = files.find((entry) => entry.path === '.gitea/workflows/build-and-publish.yml');
 
         expect(workflow).toBeTruthy();
-        expect(workflow.content).toContain('- name: Verify workspace');
+        expect(workflow.content).toContain('- name: Materialize repository');
+        expect(workflow.content).toContain('REPOSITORY_URL: ${{ gitea.server_url }}/${{ github.repository }}.git');
+        expect(workflow.content).toContain('GITHUB_TOKEN: ${{ github.token }}');
+        expect(workflow.content).toContain('KIMIBUILT_GIT_USERNAME: x-access-token');
+        expect(workflow.content).toContain('git fetch --depth=1 origin "${GITHUB_REF_NAME:-main}"');
+        expect(workflow.content).toContain('git checkout -B "${GITHUB_REF_NAME:-main}" FETCH_HEAD');
         expect(workflow.content).toContain('test -f Dockerfile');
         expect(workflow.content).toContain('BUILDKIT_HOST');
         expect(workflow.content).toContain('TARGET_PLATFORMS');

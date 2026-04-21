@@ -47,10 +47,45 @@ jobs:
       BUILDKIT_HOST: \${BUILDKIT_HOST:-tcp://buildkitd.agent-platform.svc.cluster.local:1234}
       TARGET_PLATFORMS: \${TARGET_PLATFORMS:-linux/amd64,linux/arm64}
     steps:
-      - name: Verify workspace
+      - name: Materialize repository
         shell: bash
+        env:
+          REPOSITORY_URL: \${{ gitea.server_url }}/\${{ github.repository }}.git
+          GITHUB_TOKEN: \${{ github.token }}
+          KIMIBUILT_GIT_USERNAME: x-access-token
         run: |
           set -euo pipefail
+          if ! command -v git >/dev/null 2>&1; then
+            echo "git is required on the runner host" >&2
+            exit 1
+          fi
+          git_askpass_dir="$(mktemp -d)"
+          git_askpass_script="$git_askpass_dir/askpass.sh"
+          cat > "$git_askpass_script" <<'EOF'
+          #!/bin/sh
+          case "$1" in
+            *Username*|*username*)
+              printf "%s" "\${KIMIBUILT_GIT_USERNAME:-x-access-token}"
+              ;;
+            *)
+              printf "%s" "\${KIMIBUILT_GIT_PASSWORD:-\${GITHUB_TOKEN:-}}"
+              ;;
+          esac
+          EOF
+          chmod 700 "$git_askpass_script"
+          export GIT_ASKPASS="$git_askpass_script"
+          export GIT_TERMINAL_PROMPT=0
+          export GCM_INTERACTIVE=Never
+          export KIMIBUILT_GIT_PASSWORD="\${KIMIBUILT_GIT_PASSWORD:-\${GITHUB_TOKEN:-}}"
+          trap 'rm -rf "$git_askpass_dir"' EXIT
+          if [ ! -d .git ]; then
+            git init .
+            git remote add origin "$REPOSITORY_URL"
+          else
+            git remote set-url origin "$REPOSITORY_URL"
+          fi
+          git fetch --depth=1 origin "\${GITHUB_REF_NAME:-main}"
+          git checkout -B "\${GITHUB_REF_NAME:-main}" FETCH_HEAD
           test -f Dockerfile
 
       - name: Prepare tags
