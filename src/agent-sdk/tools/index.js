@@ -2535,6 +2535,7 @@ class ToolManager {
               items: { type: 'string' },
             },
             cycleHostVoices: { type: 'boolean' },
+            allowVoiceFallback: { type: 'boolean' },
             sourceUrls: {
               type: 'array',
               items: { type: 'string' },

@@ -264,13 +264,13 @@ const normalizedPiperTimeoutMs = Math.max(
 );
 const normalizedPiperPodcastTimeoutMs = Math.max(
     normalizedPiperTimeoutMs,
-    parseInt(process.env.PIPER_TTS_PODCAST_TIMEOUT_MS, 10) || 180000,
+    parseInt(process.env.PIPER_TTS_PODCAST_TIMEOUT_MS, 10) || 210000,
 );
 const normalizedPiperPodcastChunkChars = Math.max(
     250,
     Math.min(
         normalizedPiperMaxTextChars,
-        parseInt(process.env.PIPER_TTS_PODCAST_CHUNK_CHARS, 10) || Math.min(900, normalizedPiperMaxTextChars),
+        parseInt(process.env.PIPER_TTS_PODCAST_CHUNK_CHARS, 10) || Math.min(760, normalizedPiperMaxTextChars),
     ),
 );
 

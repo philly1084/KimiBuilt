@@ -5,6 +5,12 @@ jest.mock('../realtime-hub', () => ({
     broadcastToSession: jest.fn(),
 }));
 
+jest.mock('../session-store', () => ({
+    sessionStore: {
+        upsertMessage: jest.fn(async () => null),
+    },
+}));
+
 const { ManagedAppService } = require('./service');
 
 describe('ManagedAppService', () => {
@@ -1036,7 +1042,7 @@ describe('ManagedAppService', () => {
             deploymentTarget: 'ssh',
             image: 'gitea.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
         }));
-        expect(result.message).toContain('via ssh');
+        expect(result.message).toContain('HTTPS is responding');
     });
 
     test('deployApp heals a missing image repo from current Gitea settings before deployment', async () => {
@@ -1311,7 +1317,7 @@ describe('ManagedAppService', () => {
         expect(deployManagedApp).toHaveBeenCalledWith(expect.objectContaining({
             deploymentTarget: 'ssh',
         }));
-        expect(result.message).toContain('via ssh');
+        expect(result.message).toContain('HTTPS is responding');
     });
 
     test('deployApp uses the configured ssh lane for legacy in-cluster managed apps', async () => {

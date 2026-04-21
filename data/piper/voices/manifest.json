@@ -2,13 +2,13 @@
   {
     "id": "amy-medium",
     "label": "Amy Soft",
-    "description": "Balanced U.S. English female voice with a soft, natural tone.",
+    "description": "Balanced U.S. English female voice with a soft, natural studio tone.",
     "modelPath": "data/piper/voices/en_US-amy-medium.onnx",
     "configPath": "data/piper/voices/en_US-amy-medium.onnx.json",
-    "lengthScale": 1.06,
-    "noiseScale": 0.42,
-    "noiseW": 0.72,
-    "sentenceSilence": 0.3
+    "lengthScale": 1.05,
+    "noiseScale": 0.4,
+    "noiseW": 0.7,
+    "sentenceSilence": 0.31
   },
   {
     "id": "amy-expressive",
@@ -16,10 +16,21 @@
     "description": "Amy tuned for brighter feminine inflection and more conversational lift.",
     "modelPath": "data/piper/voices/en_US-amy-medium.onnx",
     "configPath": "data/piper/voices/en_US-amy-medium.onnx.json",
-    "lengthScale": 0.98,
-    "noiseScale": 0.52,
-    "noiseW": 0.82,
-    "sentenceSilence": 0.24
+    "lengthScale": 0.99,
+    "noiseScale": 0.48,
+    "noiseW": 0.78,
+    "sentenceSilence": 0.26
+  },
+  {
+    "id": "amy-broadcast",
+    "label": "Amy Broadcast",
+    "description": "Crisper Amy variant tuned for steadier long-form narration and cleaner transitions.",
+    "modelPath": "data/piper/voices/en_US-amy-medium.onnx",
+    "configPath": "data/piper/voices/en_US-amy-medium.onnx.json",
+    "lengthScale": 1.01,
+    "noiseScale": 0.38,
+    "noiseW": 0.68,
+    "sentenceSilence": 0.32
   },
   {
     "id": "hfc-female-medium",
@@ -28,9 +39,9 @@
     "modelPath": "data/piper/voices/en_US-hfc_female-medium.onnx",
     "configPath": "data/piper/voices/en_US-hfc_female-medium.onnx.json",
     "lengthScale": 1.03,
-    "noiseScale": 0.48,
-    "noiseW": 0.76,
-    "sentenceSilence": 0.28
+    "noiseScale": 0.44,
+    "noiseW": 0.72,
+    "sentenceSilence": 0.3
   },
   {
     "id": "hfc-female-rich",
@@ -38,20 +49,20 @@
     "description": "Richer feminine local voice with steadier cadence and fuller body for assistant replies.",
     "modelPath": "data/piper/voices/en_US-hfc_female-medium.onnx",
     "configPath": "data/piper/voices/en_US-hfc_female-medium.onnx.json",
-    "lengthScale": 1.01,
-    "noiseScale": 0.44,
-    "noiseW": 0.72,
-    "sentenceSilence": 0.26
+    "lengthScale": 1,
+    "noiseScale": 0.4,
+    "noiseW": 0.68,
+    "sentenceSilence": 0.28
   },
   {
     "id": "kathleen-low",
     "label": "Kathleen Gentle",
-    "description": "Very soft female voice with lighter fidelity and a relaxed pace.",
+    "description": "Soft intimate female voice with a relaxed pace that fits calmer reflective segments.",
     "modelPath": "data/piper/voices/en_US-kathleen-low.onnx",
     "configPath": "data/piper/voices/en_US-kathleen-low.onnx.json",
-    "lengthScale": 1.12,
-    "noiseScale": 0.36,
-    "noiseW": 0.68,
-    "sentenceSilence": 0.34
+    "lengthScale": 1.08,
+    "noiseScale": 0.34,
+    "noiseW": 0.64,
+    "sentenceSilence": 0.32
   }
 ]

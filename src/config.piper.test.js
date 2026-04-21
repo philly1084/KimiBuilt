@@ -32,6 +32,7 @@ describe('config bundled Piper defaults', () => {
         expect(config.tts.piper.voicesPath).toContain(path.join('data', 'piper', 'voices', 'manifest.json'));
         expect(config.tts.piper.voices).toEqual(expect.arrayContaining([
             expect.objectContaining({ id: 'amy-medium' }),
+            expect.objectContaining({ id: 'amy-broadcast' }),
             expect.objectContaining({ id: 'hfc-female-rich' }),
         ]));
         expect(config.tts.piper.defaultVoiceId).toBe('hfc-female-rich');

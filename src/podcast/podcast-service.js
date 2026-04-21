@@ -42,11 +42,12 @@ const DEFAULT_PODCAST_TTS_CONCURRENCY = Math.max(
 const MAX_PODCAST_RESEARCH_CONCURRENCY = 12;
 const MAX_PODCAST_TTS_CONCURRENCY = 24;
 const PODCAST_HIGH_QUALITY_VOICE_IDS = Object.freeze([
-  'amy-expressive',
-  'amy-medium',
   'hfc-female-rich',
   'hfc-female-medium',
   'kathleen-low',
+  'amy-expressive',
+  'amy-broadcast',
+  'amy-medium',
 ]);
 const DEFAULT_MAX_VOICE_FALLBACK_ATTEMPTS = 2;
 const MAX_PODCAST_TTS_SPLIT_DEPTH = 3;
@@ -63,7 +64,7 @@ const DEFAULT_HOSTS = Object.freeze([
     name: 'June',
     role: 'Co-host',
     persona: 'Sharper, more analytical, and slightly playful when unpacking details and tradeoffs.',
-    preferredVoiceIds: ['amy-expressive', 'amy-medium', 'kathleen-low'],
+    preferredVoiceIds: ['amy-expressive', 'amy-broadcast', 'amy-medium'],
   },
 ]);
 
@@ -609,13 +610,12 @@ function resolveHosts(params = {}, voiceConfig = {}) {
       providedVoiceId,
     );
 
-    const fallbackVoiceId = !providedVoiceId && voiceConfig?.defaultVoiceId
-      ? String(voiceConfig.defaultVoiceId || '').trim()
-      : providedVoiceId;
-    const normalizedFallbackVoiceId = String(fallbackVoiceId || '').trim();
     const configuredVoiceIds = uniqueOrdered([
       ...voiceIds,
-      normalizedFallbackVoiceId,
+      ...(voiceIds.length === 0 ? [
+        String(providedVoiceId || '').trim(),
+        String(voiceConfig?.defaultVoiceId || '').trim(),
+      ] : []),
     ]).filter(Boolean);
     const voiceId = pickPrimaryHostVoice(configuredVoiceIds, usedVoiceIds);
 
@@ -1249,7 +1249,7 @@ class PodcastService {
     });
 
     const cycleHostVoices = params.cycleHostVoices === true;
-    const allowVoiceFallback = params.allowVoiceFallback === true;
+    const allowVoiceFallback = params.allowVoiceFallback !== false;
     const speechWavBuffer = await this.synthesizeTurns(
       turnVoicePlan.plans,
       hosts,
@@ -1325,6 +1325,7 @@ class PodcastService {
           mixed: wantsMixing,
           enhanced: wantsEnhancement,
           mp3Exported: wantsMp3,
+          allowVoiceFallback,
           scriptRequestTimeoutMs: podcastScriptRequestTimeoutMs,
           researchConcurrency: podcastResearchConcurrency,
           ttsConcurrency: podcastTtsConcurrency,
@@ -1392,6 +1393,7 @@ class PodcastService {
             mixed: wantsMixing,
             enhanced: wantsEnhancement,
             mp3Exported: true,
+            allowVoiceFallback,
             researchConcurrency: podcastResearchConcurrency,
             ttsConcurrency: podcastTtsConcurrency,
             ttsTimeoutMs: podcastTtsTimeoutMs,
@@ -1433,6 +1435,7 @@ class PodcastService {
         mixed: wantsMixing,
         enhanced: wantsEnhancement,
         mp3Exported: wantsMp3,
+        allowVoiceFallback,
         researchConcurrency: podcastResearchConcurrency,
         ttsConcurrency: podcastTtsConcurrency,
         ttsTimeoutMs: podcastTtsTimeoutMs,

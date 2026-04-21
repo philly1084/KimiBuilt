@@ -2082,6 +2082,13 @@ class ChatApp {
             return;
         }
 
+        if (payload?.type === 'managed-app') {
+            this.handleManagedAppEvent(payload).catch((error) => {
+                console.warn('Failed to process managed app event:', error);
+            });
+            return;
+        }
+
         if ([
             'workload_queued',
             'workload_started',
@@ -2092,6 +2099,34 @@ class ChatApp {
             this.handleWorkloadEvent(payload).catch((error) => {
                 console.warn('Failed to process workload event:', error);
             });
+        }
+    }
+
+    async handleManagedAppEvent(event) {
+        const sessionId = event?.app?.sessionId || event?.sessionId || null;
+        if (!sessionId) {
+            return;
+        }
+
+        await this.refreshSessionSummaries();
+
+        if (sessionManager.currentSessionId === sessionId) {
+            const previousMessages = [...sessionManager.getMessages(sessionId)];
+            await this.loadSessionMessages(sessionId, {
+                notifyNewAssistant: true,
+                previousMessages,
+            });
+        }
+
+        const summary = String(event?.summary || '').trim();
+        if (summary) {
+            const toastTitle = String(event?.phase || 'managed-app')
+                .trim()
+                .replace(/[_-]+/g, ' ');
+            const toastTone = ['build_failed', 'deploy_failed'].includes(String(event?.phase || '').trim().toLowerCase())
+                ? 'error'
+                : 'info';
+            uiHelpers.showToast(summary, toastTone, toastTitle || 'managed app');
         }
     }
 

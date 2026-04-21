@@ -104,6 +104,10 @@ function createNoopTracker() {
     };
 }
 
+function parseBooleanMarkerValue(text = '', marker = '') {
+    return /^true$/i.test(readMarkerValue(text, marker));
+}
+
 class KubernetesClient {
     constructor(options = {}) {
         this.config = options.config || config.kubernetes;
@@ -480,6 +484,109 @@ class KubernetesClient {
                 error: error.message,
             };
         }
+    }
+
+    async waitForHttps(publicHost = '', {
+        timeoutMs = 300000,
+        intervalMs = 5000,
+        requestTimeoutMs = 15000,
+    } = {}) {
+        const deadline = Date.now() + Math.max(1000, Number(timeoutMs) || 300000);
+        let lastResult = {
+            ok: false,
+            error: 'HTTPS verification did not run.',
+        };
+
+        while (Date.now() < deadline) {
+            lastResult = await this.verifyHttps(publicHost, requestTimeoutMs);
+            if (lastResult.ok) {
+                return {
+                    ...lastResult,
+                    attemptsCompleted: true,
+                };
+            }
+
+            await sleep(Math.max(250, Number(intervalMs) || 5000));
+        }
+
+        return {
+            ...lastResult,
+            attemptsCompleted: true,
+        };
+    }
+
+    buildRemoteTlsStatusCommand({
+        namespace = '',
+        ingressName = '',
+        tlsSecretName = '',
+        timeoutSeconds = 300,
+        pollIntervalSeconds = 5,
+    } = {}) {
+        return [
+            'set -e',
+            'kubectl_cmd() {',
+            '  if command -v kubectl >/dev/null 2>&1; then kubectl "$@"; return; fi',
+            '  if command -v k3s >/dev/null 2>&1; then k3s kubectl "$@"; return; fi',
+            '  echo "kubectl or k3s is required on the remote host" >&2',
+            '  exit 1',
+            '}',
+            'if [ -f /etc/rancher/k3s/k3s.yaml ] && [ -z "${KUBECONFIG:-}" ]; then export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; fi',
+            `namespace=${this.quoteShellArg(namespace)}`,
+            `ingress_name=${this.quoteShellArg(ingressName)}`,
+            `tls_secret_name=${this.quoteShellArg(tlsSecretName)}`,
+            `timeout_seconds=${this.quoteShellArg(String(Math.max(30, Number(timeoutSeconds) || 300)))}`,
+            `poll_interval_seconds=${this.quoteShellArg(String(Math.max(1, Number(pollIntervalSeconds) || 5)))}`,
+            'deadline=$(( $(date +%s) + timeout_seconds ))',
+            'tls_ready=false',
+            'certificate_ready=unknown',
+            'while [ "$(date +%s)" -le "$deadline" ]; do',
+            '  if kubectl_cmd get secret "$tls_secret_name" -n "$namespace" >/dev/null 2>&1; then',
+            '    tls_ready=true',
+            '    break',
+            '  fi',
+            '  sleep "$poll_interval_seconds"',
+            'done',
+            'echo "__KIMIBUILT_TLS_SECRET__=${tls_ready}"',
+            'ingress_host=$(kubectl_cmd get ingress "$ingress_name" -n "$namespace" -o jsonpath=\'{.spec.rules[0].host}\' 2>/dev/null || true)',
+            'if [ -n "${ingress_host:-}" ]; then echo "__KIMIBUILT_INGRESS_HOST__=${ingress_host}"; fi',
+            'ingress_address=$(kubectl_cmd get ingress "$ingress_name" -n "$namespace" -o jsonpath=\'{range .status.loadBalancer.ingress[*]}{.ip}{.hostname}{" "}{end}\' 2>/dev/null || true)',
+            'if [ -n "${ingress_address:-}" ]; then echo "__KIMIBUILT_INGRESS_ADDRESS__=${ingress_address}"; fi',
+            'if [ "$tls_ready" = "true" ]; then',
+            '  certificate_ready=true',
+            'else',
+            '  certificate_ready=unknown',
+            'fi',
+            'echo "__KIMIBUILT_CERTIFICATE_READY__=${certificate_ready}"',
+        ].join('\n');
+    }
+
+    async waitForRemoteTlsSecret({
+        namespace = '',
+        ingressName = '',
+        tlsSecretName = '',
+        timeoutMs = 300000,
+    } = {}) {
+        const command = this.buildRemoteTlsStatusCommand({
+            namespace,
+            ingressName,
+            tlsSecretName,
+            timeoutSeconds: Math.ceil(Math.max(1000, Number(timeoutMs) || 300000) / 1000),
+        });
+        const result = await this.sshTool.handler({
+            command,
+            timeout: Math.max(60000, Number(timeoutMs) || 300000),
+        }, {}, createNoopTracker());
+
+        return {
+            ok: parseBooleanMarkerValue(result.stdout || '', '__KIMIBUILT_TLS_SECRET__'),
+            certificateReady: parseBooleanMarkerValue(result.stdout || '', '__KIMIBUILT_CERTIFICATE_READY__'),
+            ingressHost: readMarkerValue(result.stdout || '', '__KIMIBUILT_INGRESS_HOST__'),
+            ingressAddress: readMarkerValue(result.stdout || '', '__KIMIBUILT_INGRESS_ADDRESS__'),
+            stdout: String(result.stdout || ''),
+            stderr: String(result.stderr || ''),
+            exitCode: Number(result.exitCode || 0),
+            host: result.host,
+        };
     }
 
     async deployManagedApp({
@@ -942,8 +1049,35 @@ class KubernetesClient {
             command,
             timeout: 180000,
         }, {}, createNoopTracker());
-        const tls = /__KIMIBUILT_TLS_SECRET__=true/i.test(result.stdout || '');
-        const https = await this.verifyHttps(host, this.managedAppsConfig.httpsVerifyTimeoutMs || 15000);
+        const rolloutOk = Number(result.exitCode || 0) === 0;
+        const tlsStatus = rolloutOk
+            ? await this.waitForRemoteTlsSecret({
+                namespace: appNamespace,
+                ingressName: appName,
+                tlsSecretName,
+                timeoutMs: this.managedAppsConfig.tlsReadyTimeoutMs || 300000,
+            })
+            : {
+                ok: false,
+                certificateReady: false,
+                ingressHost: host,
+                ingressAddress: '',
+                stdout: '',
+                stderr: '',
+                exitCode: Number(result.exitCode || 0),
+                host: result.host,
+            };
+        const https = rolloutOk
+            ? await this.waitForHttps(host, {
+                timeoutMs: this.managedAppsConfig.httpsVerifyTimeoutMs || 300000,
+                intervalMs: this.managedAppsConfig.httpsVerifyIntervalMs || 5000,
+                requestTimeoutMs: this.managedAppsConfig.httpsRequestTimeoutMs || 15000,
+            })
+            : {
+                ok: false,
+                error: 'Rollout failed before HTTPS verification started.',
+                attemptsCompleted: false,
+            };
 
         return {
             namespace: appNamespace,
@@ -952,18 +1086,19 @@ class KubernetesClient {
             ingress: appName,
             tlsSecretName,
             rollout: {
-                ok: Number(result.exitCode || 0) === 0,
+                ok: rolloutOk,
                 exitCode: result.exitCode,
                 stdout: result.stdout,
                 stderr: result.stderr,
                 host: result.host,
             },
             verification: {
-                rollout: Number(result.exitCode || 0) === 0,
+                rollout: rolloutOk,
                 ingress: true,
-                tls,
+                tls: tlsStatus.ok === true,
                 https: https.ok === true,
             },
+            tlsStatus,
             https,
             executionHost: result.host,
         };

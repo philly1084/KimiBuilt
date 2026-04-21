@@ -8,6 +8,7 @@ const { broadcastToAdmins, broadcastToSession } = require('../realtime-hub');
 const { createResponse } = require('../openai-client');
 const { extractResponseText } = require('../artifacts/artifact-service');
 const { parseLenientJson } = require('../utils/lenient-json');
+const { sessionStore } = require('../session-store');
 const { managedAppStore } = require('./store');
 const { GiteaClient } = require('./gitea-client');
 const { KubernetesClient } = require('./kubernetes-client');
@@ -477,12 +478,66 @@ function normalizeRunnerRecords(payload = {}) {
     }));
 }
 
+function buildLifecycleMessageKey(app = null, buildRun = null, phase = '') {
+    const appId = normalizeText(app?.id || app?.slug || 'managed-app');
+    const buildRunId = normalizeText(buildRun?.id);
+    const normalizedPhase = normalizeText(phase).toLowerCase();
+
+    if (['created', 'updated'].includes(normalizedPhase)) {
+        return `managed-app:${appId}:provisioning`;
+    }
+
+    return `managed-app:${appId}:${buildRunId || 'lifecycle'}`;
+}
+
+function buildManagedAppStatusSummary(app = null, buildRun = null, phase = '', deployment = null) {
+    const appName = normalizeText(app?.appName || app?.slug || 'Managed app');
+    const publicUrl = normalizeText(app?.publicHost) ? `https://${normalizeText(app.publicHost)}` : '';
+    const repoRef = normalizeText(app?.repoOwner) && normalizeText(app?.repoName)
+        ? `${normalizeText(app.repoOwner)}/${normalizeText(app.repoName)}`
+        : '';
+    const imageRef = normalizeText(app?.metadata?.lastImage || deployment?.image || '');
+    const buildError = normalizeText(
+        buildRun?.error?.message
+        || buildRun?.metadata?.payload?.error
+        || buildRun?.metadata?.payload?.message
+        || deployment?.rollout?.error
+        || deployment?.https?.error,
+    );
+
+    switch (normalizeText(phase).toLowerCase()) {
+        case 'created':
+            return `${appName} was created${repoRef ? ` in ${repoRef}` : ''}. Build and deploy are queued.`;
+        case 'updated':
+            return `${appName} was updated${repoRef ? ` in ${repoRef}` : ''}. Build and deploy are queued.`;
+        case 'built':
+            return `${appName} finished building${imageRef ? ` as \`${imageRef}\`` : ''}.`;
+        case 'build_failed':
+            return `${appName} build failed${buildError ? `: ${buildError}` : '.'}`;
+        case 'deploying':
+            return `${appName} is deploying${publicUrl ? ` to ${publicUrl}` : ''}. Waiting for rollout and TLS.`;
+        case 'live':
+            return `${appName} is live${publicUrl ? ` at ${publicUrl}` : ''}. HTTPS is responding.`;
+        case 'tls_ready':
+            return `${appName} is deployed${publicUrl ? ` at ${publicUrl}` : ''}. TLS is ready; waiting for public HTTPS to respond.`;
+        case 'pending_https':
+            return `${appName} rollout succeeded${publicUrl ? ` at ${publicUrl}` : ''}, but public HTTPS is not ready yet.`;
+        case 'deploy_failed':
+            return `${appName} deployment failed${buildError ? `: ${buildError}` : '.'}`;
+        case 'deployed':
+            return `${appName} was deployed${publicUrl ? ` to ${publicUrl}` : ''}.`;
+        default:
+            return `${appName} status changed to ${normalizeText(phase) || 'updated'}.`;
+    }
+}
+
 class ManagedAppService {
     constructor(options = {}) {
         this.store = options.store || managedAppStore;
         this.giteaClient = options.giteaClient || new GiteaClient();
         this.kubernetesClient = options.kubernetesClient || new KubernetesClient();
         this.llmClient = options.llmClient || createManagedAppLlmClient();
+        this.sessionStore = options.sessionStore || sessionStore;
     }
 
     isAvailable() {
@@ -1013,7 +1068,7 @@ class ManagedAppService {
             : null;
 
         const finalApp = finalPersistedApp || updatedApp || persistedApp;
-        this.broadcastLifecycleEvent(finalApp, buildRun, existing ? 'updated' : 'created');
+        await this.broadcastLifecycleEvent(finalApp, buildRun, existing ? 'updated' : 'created');
 
         return {
             app: finalApp,
@@ -1116,6 +1171,12 @@ class ManagedAppService {
         }
 
         const image = `${resolvedImageRepo}:${imageTag}`;
+        await this.broadcastLifecycleEvent(deployableApp, latestBuildRun, 'deploying', {
+            summary: buildManagedAppStatusSummary(deployableApp, latestBuildRun, 'deploying'),
+            deployment: {
+                image,
+            },
+        });
 
         const deployResult = await this.kubernetesClient.deployManagedApp({
             slug: deployableApp.slug,
@@ -1133,6 +1194,9 @@ class ManagedAppService {
         const verificationStatus = deployResult.verification.https
             ? 'live'
             : (deployResult.verification.tls ? 'tls_ready' : 'pending_https');
+        const lifecyclePhase = deployResult.verification.https
+            ? 'live'
+            : (deployResult.verification.tls ? 'tls_ready' : (deployResult.rollout.ok ? 'pending_https' : 'deploy_failed'));
         const appStatus = deployResult.verification.https
             ? 'live'
             : (deployResult.verification.rollout ? 'deployed' : 'deploy_failed');
@@ -1170,13 +1234,25 @@ class ManagedAppService {
             verificationStatus,
             deployment: deployResult,
         });
-        this.broadcastLifecycleEvent(updatedApp, buildRun, 'deployed');
+        await this.broadcastLifecycleEvent(updatedApp, buildRun, lifecyclePhase, {
+            deployment: {
+                ...deployResult,
+                image,
+            },
+            summary: buildManagedAppStatusSummary(updatedApp, buildRun, lifecyclePhase, {
+                ...deployResult,
+                image,
+            }),
+        });
 
         return {
             app: updatedApp,
             buildRun,
             deployment: deployResult,
-            message: `${updatedApp.appName} deployed to ${updatedApp.publicHost} via ${deploymentTarget}.`,
+            message: buildManagedAppStatusSummary(updatedApp, buildRun, lifecyclePhase, {
+                ...deployResult,
+                image,
+            }),
         };
     }
 
@@ -1255,7 +1331,7 @@ class ManagedAppService {
                     lastFailedBuild: buildRun,
                 },
             });
-            this.broadcastLifecycleEvent(updatedApp, buildRun, 'build_failed');
+            await this.broadcastLifecycleEvent(updatedApp, buildRun, 'build_failed');
             return {
                 app: updatedApp,
                 buildRun,
@@ -1291,7 +1367,7 @@ class ManagedAppService {
             };
         }
 
-        this.broadcastLifecycleEvent(updatedApp, buildRun, 'built');
+        await this.broadcastLifecycleEvent(updatedApp, buildRun, 'built');
         return {
             app: updatedApp,
             buildRun,
@@ -1346,12 +1422,51 @@ class ManagedAppService {
         clusterStateRegistry.saveState();
     }
 
-    broadcastLifecycleEvent(app = null, buildRun = null, phase = '') {
+    async persistLifecycleMessage(app = null, buildRun = null, phase = '', details = {}) {
+        if (!app?.sessionId || !this.sessionStore?.upsertMessage) {
+            return null;
+        }
+
+        const summary = normalizeText(details.summary || buildManagedAppStatusSummary(app, buildRun, phase, details.deployment || null));
+        if (!summary) {
+            return null;
+        }
+
+        try {
+            return await this.sessionStore.upsertMessage(app.sessionId, {
+                id: buildLifecycleMessageKey(app, buildRun, phase),
+                role: 'assistant',
+                content: summary,
+                timestamp: new Date().toISOString(),
+                metadata: {
+                    managedAppLifecycle: true,
+                    managedAppPhase: normalizeText(phase).toLowerCase() || 'updated',
+                    managedAppId: normalizeText(app?.id),
+                    managedAppSlug: normalizeText(app?.slug),
+                    buildRunId: normalizeText(buildRun?.id),
+                    publicHost: normalizeText(app?.publicHost),
+                    ...(details.deployment ? { deployment: details.deployment } : {}),
+                },
+            });
+        } catch (error) {
+            console.warn(`[ManagedApp] Failed to persist lifecycle message for ${app.slug || app.id || 'managed-app'}: ${error.message}`);
+            return null;
+        }
+    }
+
+    async broadcastLifecycleEvent(app = null, buildRun = null, phase = '', details = {}) {
+        const summary = normalizeText(details.summary || buildManagedAppStatusSummary(app, buildRun, phase, details.deployment || null));
+        await this.persistLifecycleMessage(app, buildRun, phase, {
+            ...details,
+            summary,
+        });
         const payload = {
             type: 'managed-app',
             phase,
             app,
             buildRun,
+            summary,
+            ...(details.deployment ? { deployment: details.deployment } : {}),
         };
         broadcastToAdmins(payload);
         if (app?.sessionId) {

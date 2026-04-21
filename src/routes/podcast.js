@@ -28,6 +28,7 @@ const generateSchema = {
   hostBVoiceId: { required: false, type: 'string' },
   hostBVoiceIds: { required: false, type: 'array', items: { type: 'string' } },
   cycleHostVoices: { required: false, type: 'boolean' },
+  allowVoiceFallback: { required: false, type: 'boolean' },
   sourceUrls: { required: false, type: 'array', items: { type: 'string' } },
   searchDomains: { required: false, type: 'array', items: { type: 'string' } },
   maxSources: { required: false, type: 'number' },

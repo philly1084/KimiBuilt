@@ -135,7 +135,10 @@ describe('KubernetesClient', () => {
             deploymentTarget: 'in-cluster',
         });
 
-        expect(sshTool.handler).toHaveBeenCalledTimes(1);
+        expect(sshTool.handler).toHaveBeenCalledTimes(2);
+        expect(sshTool.handler).toHaveBeenNthCalledWith(2, expect.objectContaining({
+            command: expect.stringContaining('__KIMIBUILT_TLS_SECRET__'),
+        }), {}, expect.any(Object));
         expect(result.rollout.ok).toBe(true);
     });
 

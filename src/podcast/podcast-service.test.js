@@ -9,14 +9,15 @@ jest.mock('../tts/piper-tts-service', () => ({
       provider: 'piper',
       maxTextChars: 2400,
       timeoutMs: 45000,
-      podcastTimeoutMs: 180000,
-      podcastChunkChars: 900,
+      podcastTimeoutMs: 210000,
+      podcastChunkChars: 760,
       defaultVoiceId: 'hfc-female-rich',
       voices: [
         { id: 'hfc-female-rich', label: 'HFC Rich', provider: 'piper' },
         { id: 'hfc-female-medium', label: 'HFC Warm', provider: 'piper' },
         { id: 'kathleen-low', label: 'Kathleen Gentle', provider: 'piper' },
         { id: 'amy-expressive', label: 'Amy Expressive', provider: 'piper' },
+        { id: 'amy-broadcast', label: 'Amy Broadcast', provider: 'piper' },
         { id: 'amy-medium', label: 'Amy Medium', provider: 'piper' },
       ],
     })),
@@ -824,6 +825,69 @@ describe('PodcastService', () => {
     }));
     expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(4, expect.objectContaining({
       voiceId: 'hfc-female-medium',
+    }));
+  });
+
+  test('uses the curated six-voice host pools when cycling is enabled without explicit voice ids', async () => {
+    const executeTool = jest.fn(async (toolId) => {
+      if (toolId === 'web-search') {
+        return {
+          success: true,
+          data: {
+            results: [
+              { title: 'Podcast pacing', url: 'https://example.com/pacing', snippet: 'Conversational pacing matters.' },
+            ],
+          },
+        };
+      }
+
+      if (toolId === 'web-fetch') {
+        return {
+          success: true,
+          data: {
+            headers: { 'content-type': 'text/html' },
+            body: '<p>Alternating tones can keep a long conversation feeling fresh.</p>',
+          },
+        };
+      }
+
+      throw new Error(`Unexpected tool: ${toolId}`);
+    });
+
+    createResponse.mockResolvedValueOnce({
+      output_text: JSON.stringify({
+        title: 'Podcast Pacing',
+        summary: 'A short conversation on cadence.',
+        turns: [
+          { speaker: 'Maya', text: 'A strong opener should feel steady and easy to follow.' },
+          { speaker: 'June', text: 'Then you can sharpen the pace without making it feel clipped.' },
+          { speaker: 'Maya', text: 'That second beat is where a warmer follow-up voice helps.' },
+          { speaker: 'June', text: 'And the next reply can feel slightly tighter without sounding robotic.' },
+        ],
+      }),
+    });
+
+    const service = new PodcastService();
+    await service.createPodcast({
+      topic: 'How to pace a conversational podcast',
+      cycleHostVoices: true,
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+      toolManager: { executeTool },
+    });
+
+    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      voiceId: 'hfc-female-rich',
+    }));
+    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      voiceId: 'amy-expressive',
+    }));
+    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      voiceId: 'hfc-female-medium',
+    }));
+    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(4, expect.objectContaining({
+      voiceId: 'amy-broadcast',
     }));
   });
 
