@@ -36,12 +36,16 @@ describe('managed app scaffold', () => {
         expect(workflow.content).toContain('curl or wget is required on the runner host');
         expect(workflow.content).toContain('buildctl --addr "$BUILDKIT_ADDR" build');
         expect(workflow.content).toContain('--opt platform="$TARGET_PLATFORMS"');
+        expect(workflow.content).toContain('--output "type=image,name=$IMAGE_REPO:$IMAGE_TAG,push=true"');
         expect(workflow.content).toContain('--import-cache "type=registry,ref=$IMAGE_REPO:latest"');
         expect(workflow.content).toContain('KIMIBUILT_BUILD_EVENTS_SECRET');
         expect(workflow.content).toContain('IMAGE_TAG="${IMAGE_TAG:-sha-${GITHUB_SHA::12}}"');
         expect(workflow.content).toContain('post_json() {');
         expect(workflow.content).toContain('post_json "$TARGET_BUILD_EVENTS_URL" "$PAYLOAD" "$KIMIBUILT_BUILD_EVENTS_SECRET"');
         expect(workflow.content).toContain('--post-data="$payload"');
+        expect(workflow.content).toContain('KIMIBUILT_BUILD_EVENTS_INSECURE');
+        expect(workflow.content).toContain('--no-check-certificate');
+        expect(workflow.content).toContain('KimiBuilt failure notification failed');
         expect(workflow.content).toContain('PAYLOAD="$(cat <<EOF');
         expect(workflow.content).toContain('"imageRepo":"$IMAGE_REPO"');
         expect(workflow.content).toContain('"platforms":"$TARGET_PLATFORMS"');

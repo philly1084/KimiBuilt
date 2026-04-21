@@ -169,7 +169,7 @@ jobs:
             --local context=. \\
             --local dockerfile=. \\
             --opt platform="$TARGET_PLATFORMS" \\
-            --output "type=image,name=$IMAGE_REPO:$IMAGE_TAG,$IMAGE_REPO:latest,push=true" \\
+            --output "type=image,name=$IMAGE_REPO:$IMAGE_TAG,push=true" \\
             --export-cache type=inline \\
             --import-cache "type=registry,ref=$IMAGE_REPO:latest"
 
@@ -182,15 +182,27 @@ jobs:
             url="$1"
             payload="$2"
             secret="$3"
+            insecure_flag="\${KIMIBUILT_BUILD_EVENTS_INSECURE:-0}"
             if command -v curl >/dev/null 2>&1; then
-              curl -fsSL -X POST "$url" \\
+              curl_args="-fsSL"
+              if [ "$insecure_flag" = "1" ] || [ "$insecure_flag" = "true" ]; then
+                curl_args="$curl_args -k"
+              fi
+              # shellcheck disable=SC2086
+              curl $curl_args -X POST "$url" \\
                 -H "Content-Type: application/json" \\
                 -H "X-KimiBuilt-Webhook-Secret: $secret" \\
                 -d "$payload"
               return
             fi
             if command -v wget >/dev/null 2>&1; then
+              wget_insecure_args=""
+              if [ "$insecure_flag" = "1" ] || [ "$insecure_flag" = "true" ]; then
+                wget_insecure_args="--no-check-certificate"
+              fi
+              # shellcheck disable=SC2086
               wget -qO- \\
+                $wget_insecure_args \\
                 --header="Content-Type: application/json" \\
                 --header="X-KimiBuilt-Webhook-Secret: $secret" \\
                 --post-data="$payload" \\
@@ -207,7 +219,7 @@ jobs:
           {"repoOwner":"${giteaOrg}","repoName":"${slug}","slug":"${slug}","imageRepo":"$IMAGE_REPO","platforms":"$TARGET_PLATFORMS","commitSha":"$GITHUB_SHA","imageTag":"$IMAGE_TAG","buildStatus":"success","runId":"\${{ gitea.run_id }}","runUrl":"\${{ gitea.server_url }}/${giteaOrg}/${slug}/actions/runs/\${{ gitea.run_id }}"}
           EOF
           )"
-          post_json "$TARGET_BUILD_EVENTS_URL" "$PAYLOAD" "$KIMIBUILT_BUILD_EVENTS_SECRET"
+          post_json "$TARGET_BUILD_EVENTS_URL" "$PAYLOAD" "$KIMIBUILT_BUILD_EVENTS_SECRET" || echo "KimiBuilt success notification failed" >&2
 
       - name: Notify KimiBuilt on failure
         if: failure()
@@ -218,15 +230,27 @@ jobs:
             url="$1"
             payload="$2"
             secret="$3"
+            insecure_flag="\${KIMIBUILT_BUILD_EVENTS_INSECURE:-0}"
             if command -v curl >/dev/null 2>&1; then
-              curl -fsSL -X POST "$url" \\
+              curl_args="-fsSL"
+              if [ "$insecure_flag" = "1" ] || [ "$insecure_flag" = "true" ]; then
+                curl_args="$curl_args -k"
+              fi
+              # shellcheck disable=SC2086
+              curl $curl_args -X POST "$url" \\
                 -H "Content-Type: application/json" \\
                 -H "X-KimiBuilt-Webhook-Secret: $secret" \\
                 -d "$payload"
               return
             fi
             if command -v wget >/dev/null 2>&1; then
+              wget_insecure_args=""
+              if [ "$insecure_flag" = "1" ] || [ "$insecure_flag" = "true" ]; then
+                wget_insecure_args="--no-check-certificate"
+              fi
+              # shellcheck disable=SC2086
               wget -qO- \\
+                $wget_insecure_args \\
                 --header="Content-Type: application/json" \\
                 --header="X-KimiBuilt-Webhook-Secret: $secret" \\
                 --post-data="$payload" \\
@@ -243,7 +267,7 @@ jobs:
           {"repoOwner":"${giteaOrg}","repoName":"${slug}","slug":"${slug}","imageRepo":"$IMAGE_REPO","platforms":"$TARGET_PLATFORMS","commitSha":"$GITHUB_SHA","imageTag":"$IMAGE_TAG","buildStatus":"failed","runId":"\${{ gitea.run_id }}","runUrl":"\${{ gitea.server_url }}/${giteaOrg}/${slug}/actions/runs/\${{ gitea.run_id }}"}
           EOF
           )"
-          post_json "$TARGET_BUILD_EVENTS_URL" "$PAYLOAD" "$KIMIBUILT_BUILD_EVENTS_SECRET"
+          post_json "$TARGET_BUILD_EVENTS_URL" "$PAYLOAD" "$KIMIBUILT_BUILD_EVENTS_SECRET" || echo "KimiBuilt failure notification failed" >&2
 `;
 }
 
