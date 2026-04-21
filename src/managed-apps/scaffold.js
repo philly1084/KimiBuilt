@@ -44,7 +44,7 @@ jobs:
       IMAGE_REPO: ${imageRepo}
       REGISTRY_HOST: ${registryHost}
       DEFAULT_BUILD_EVENTS_URL: ${buildEventsUrl || 'https://kimibuilt.example.com/api/integrations/gitea/build-events'}
-      TARGET_PLATFORMS: \${TARGET_PLATFORMS:-linux/amd64,linux/arm64}
+      DEFAULT_TARGET_PLATFORMS: linux/amd64,linux/arm64
     steps:
       - name: Materialize repository
         shell: bash
@@ -93,6 +93,7 @@ jobs:
           set -euo pipefail
           echo "SHORT_SHA=\${GITHUB_SHA::12}" >> "$GITHUB_ENV"
           echo "IMAGE_TAG=sha-\${GITHUB_SHA::12}" >> "$GITHUB_ENV"
+          echo "TARGET_PLATFORMS=\${TARGET_PLATFORMS:-$DEFAULT_TARGET_PLATFORMS}" >> "$GITHUB_ENV"
 
       - name: Install buildctl
         shell: bash

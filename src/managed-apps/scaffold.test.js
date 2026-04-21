@@ -30,8 +30,9 @@ describe('managed app scaffold', () => {
         expect(workflow.content).toContain('git checkout -B "${GITHUB_REF_NAME:-main}" FETCH_HEAD');
         expect(workflow.content).toContain('test -f Dockerfile');
         expect(workflow.content).toContain('BUILDKIT_ADDR="${BUILDKIT_HOST:-tcp://buildkitd.agent-platform.svc.cluster.local:1234}"');
-        expect(workflow.content).toContain('TARGET_PLATFORMS');
+        expect(workflow.content).toContain('DEFAULT_TARGET_PLATFORMS: linux/amd64,linux/arm64');
         expect(workflow.content).toContain('linux/amd64,linux/arm64');
+        expect(workflow.content).toContain('echo "TARGET_PLATFORMS=${TARGET_PLATFORMS:-$DEFAULT_TARGET_PLATFORMS}" >> "$GITHUB_ENV"');
         expect(workflow.content).toContain('download() {');
         expect(workflow.content).toContain('curl or wget is required on the runner host');
         expect(workflow.content).toContain('buildctl --addr "$BUILDKIT_ADDR" build');
