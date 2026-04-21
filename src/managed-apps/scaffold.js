@@ -44,7 +44,6 @@ jobs:
       IMAGE_REPO: ${imageRepo}
       REGISTRY_HOST: ${registryHost}
       DEFAULT_BUILD_EVENTS_URL: ${buildEventsUrl || 'https://kimibuilt.example.com/api/integrations/gitea/build-events'}
-      BUILDKIT_HOST: \${BUILDKIT_HOST:-tcp://buildkitd.agent-platform.svc.cluster.local:1234}
       TARGET_PLATFORMS: \${TARGET_PLATFORMS:-linux/amd64,linux/arm64}
     steps:
       - name: Materialize repository
@@ -164,7 +163,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          buildctl --addr "$BUILDKIT_HOST" build \\
+          BUILDKIT_ADDR="\${BUILDKIT_HOST:-tcp://buildkitd.agent-platform.svc.cluster.local:1234}"
+          buildctl --addr "$BUILDKIT_ADDR" build \\
             --frontend dockerfile.v0 \\
             --local context=. \\
             --local dockerfile=. \\
@@ -191,10 +191,9 @@ jobs:
             fi
             if command -v wget >/dev/null 2>&1; then
               wget -qO- \\
-                --method=POST \\
                 --header="Content-Type: application/json" \\
                 --header="X-KimiBuilt-Webhook-Secret: $secret" \\
-                --body-data="$payload" \\
+                --post-data="$payload" \\
                 "$url"
               return
             fi
@@ -228,10 +227,9 @@ jobs:
             fi
             if command -v wget >/dev/null 2>&1; then
               wget -qO- \\
-                --method=POST \\
                 --header="Content-Type: application/json" \\
                 --header="X-KimiBuilt-Webhook-Secret: $secret" \\
-                --body-data="$payload" \\
+                --post-data="$payload" \\
                 "$url"
               return
             fi
