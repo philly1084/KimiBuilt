@@ -99,6 +99,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          download() {
+            url="$1"
+            if command -v curl >/dev/null 2>&1; then
+              curl -fsSL "$url"
+              return
+            fi
+            if command -v wget >/dev/null 2>&1; then
+              wget -qO- "$url"
+              return
+            fi
+            echo "curl or wget is required on the runner host" >&2
+            exit 1
+          }
           ARCH="$(uname -m)"
           case "$ARCH" in
             x86_64|amd64) BUILDKIT_ARCH=amd64 ;;
@@ -109,7 +122,7 @@ jobs:
               ;;
           esac
           BUILDKIT_VERSION="\${BUILDKIT_VERSION:-v0.17.2}"
-          curl -fsSL "https://github.com/moby/buildkit/releases/download/$BUILDKIT_VERSION/buildkit-$BUILDKIT_VERSION.linux-$BUILDKIT_ARCH.tar.gz" \\
+          download "https://github.com/moby/buildkit/releases/download/$BUILDKIT_VERSION/buildkit-$BUILDKIT_VERSION.linux-$BUILDKIT_ARCH.tar.gz" \\
             | tar -xz --strip-components=1 -C "$RUNNER_TEMP" bin/buildctl
           chmod +x "$RUNNER_TEMP/buildctl"
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
@@ -165,6 +178,29 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          post_json() {
+            url="$1"
+            payload="$2"
+            secret="$3"
+            if command -v curl >/dev/null 2>&1; then
+              curl -fsSL -X POST "$url" \\
+                -H "Content-Type: application/json" \\
+                -H "X-KimiBuilt-Webhook-Secret: $secret" \\
+                -d "$payload"
+              return
+            fi
+            if command -v wget >/dev/null 2>&1; then
+              wget -qO- \\
+                --method=POST \\
+                --header="Content-Type: application/json" \\
+                --header="X-KimiBuilt-Webhook-Secret: $secret" \\
+                --body-data="$payload" \\
+                "$url"
+              return
+            fi
+            echo "curl or wget is required on the runner host" >&2
+            exit 1
+          }
           IMAGE_TAG="\${IMAGE_TAG:-sha-\${GITHUB_SHA::12}}"
           test -n "\${KIMIBUILT_BUILD_EVENTS_SECRET:-}"
           TARGET_BUILD_EVENTS_URL="\${KIMIBUILT_BUILD_EVENTS_URL:-$DEFAULT_BUILD_EVENTS_URL}"
@@ -172,16 +208,36 @@ jobs:
           {"repoOwner":"${giteaOrg}","repoName":"${slug}","slug":"${slug}","imageRepo":"$IMAGE_REPO","platforms":"$TARGET_PLATFORMS","commitSha":"$GITHUB_SHA","imageTag":"$IMAGE_TAG","buildStatus":"success","runId":"\${{ gitea.run_id }}","runUrl":"\${{ gitea.server_url }}/${giteaOrg}/${slug}/actions/runs/\${{ gitea.run_id }}"}
           EOF
           )"
-          curl -fsSL -X POST "$TARGET_BUILD_EVENTS_URL" \\
-            -H "Content-Type: application/json" \\
-            -H "X-KimiBuilt-Webhook-Secret: $KIMIBUILT_BUILD_EVENTS_SECRET" \\
-            -d "$PAYLOAD"
+          post_json "$TARGET_BUILD_EVENTS_URL" "$PAYLOAD" "$KIMIBUILT_BUILD_EVENTS_SECRET"
 
       - name: Notify KimiBuilt on failure
         if: failure()
         shell: bash
         run: |
           set -euo pipefail
+          post_json() {
+            url="$1"
+            payload="$2"
+            secret="$3"
+            if command -v curl >/dev/null 2>&1; then
+              curl -fsSL -X POST "$url" \\
+                -H "Content-Type: application/json" \\
+                -H "X-KimiBuilt-Webhook-Secret: $secret" \\
+                -d "$payload"
+              return
+            fi
+            if command -v wget >/dev/null 2>&1; then
+              wget -qO- \\
+                --method=POST \\
+                --header="Content-Type: application/json" \\
+                --header="X-KimiBuilt-Webhook-Secret: $secret" \\
+                --body-data="$payload" \\
+                "$url"
+              return
+            fi
+            echo "curl or wget is required on the runner host" >&2
+            exit 1
+          }
           IMAGE_TAG="\${IMAGE_TAG:-sha-\${GITHUB_SHA::12}}"
           test -n "\${KIMIBUILT_BUILD_EVENTS_SECRET:-}"
           TARGET_BUILD_EVENTS_URL="\${KIMIBUILT_BUILD_EVENTS_URL:-$DEFAULT_BUILD_EVENTS_URL}"
@@ -189,10 +245,7 @@ jobs:
           {"repoOwner":"${giteaOrg}","repoName":"${slug}","slug":"${slug}","imageRepo":"$IMAGE_REPO","platforms":"$TARGET_PLATFORMS","commitSha":"$GITHUB_SHA","imageTag":"$IMAGE_TAG","buildStatus":"failed","runId":"\${{ gitea.run_id }}","runUrl":"\${{ gitea.server_url }}/${giteaOrg}/${slug}/actions/runs/\${{ gitea.run_id }}"}
           EOF
           )"
-          curl -fsSL -X POST "$TARGET_BUILD_EVENTS_URL" \\
-            -H "Content-Type: application/json" \\
-            -H "X-KimiBuilt-Webhook-Secret: $KIMIBUILT_BUILD_EVENTS_SECRET" \\
-            -d "$PAYLOAD"
+          post_json "$TARGET_BUILD_EVENTS_URL" "$PAYLOAD" "$KIMIBUILT_BUILD_EVENTS_SECRET"
 `;
 }
 
