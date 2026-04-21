@@ -23,7 +23,7 @@ function normalizeText(value = '') {
 
 const MAX_MANAGED_APP_SLUG_LENGTH = 63;
 const MAX_KUBERNETES_NAME_LENGTH = 63;
-const DEFAULT_GITEA_RUNNER_LABELS = 'ubuntu-latest:docker://catthehacker/ubuntu:act-latest';
+const DEFAULT_GITEA_RUNNER_LABELS = 'ubuntu-latest:host';
 const DEFAULT_MANAGED_APP_SLUG_PREFIX = 'managed-app';
 const PROMPT_NAME_STOPWORDS = new Set([
     'a', 'an', 'and', 'app', 'application', 'build', 'built', 'called', 'can', 'could', 'create', 'deploy',
@@ -421,8 +421,8 @@ function buildPlatformDoctorSuggestions(report = {}) {
         suggestions.push('The runner log excerpt points at a registration or token problem. Reissue the runner registration token from Gitea and update `gitea-actions`.');
     }
 
-    if (/\bcannot find:\s*node in path\b/.test(runnerLogText) || /\bubuntu-latest:host\b/i.test(runnerLabels)) {
-        suggestions.push(`Use a container-backed runner label such as \`${DEFAULT_GITEA_RUNNER_LABELS}\` so JavaScript actions like \`actions/checkout\` have Node available.`);
+    if (/\bcannot find:\s*node in path\b/.test(runnerLogText)) {
+        suggestions.push('This runner does not have Node in host mode. Managed-app workflows should avoid JavaScript-based actions like `actions/checkout`, or the runner image must be extended to include Node.');
     }
 
     if (runnerLabels && !/\bubuntu-latest\b/i.test(runnerLabels)) {

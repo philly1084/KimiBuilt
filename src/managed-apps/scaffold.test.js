@@ -22,8 +22,8 @@ describe('managed app scaffold', () => {
         const workflow = files.find((entry) => entry.path === '.gitea/workflows/build-and-publish.yml');
 
         expect(workflow).toBeTruthy();
-        expect(workflow.content).toContain('container:');
-        expect(workflow.content).toContain('image: catthehacker/ubuntu:act-latest');
+        expect(workflow.content).toContain('- name: Verify workspace');
+        expect(workflow.content).toContain('test -f Dockerfile');
         expect(workflow.content).toContain('BUILDKIT_HOST');
         expect(workflow.content).toContain('TARGET_PLATFORMS');
         expect(workflow.content).toContain('linux/amd64,linux/arm64');
@@ -35,6 +35,7 @@ describe('managed app scaffold', () => {
         expect(workflow.content).toContain('PAYLOAD="$(cat <<EOF');
         expect(workflow.content).toContain('"imageRepo":"$IMAGE_REPO"');
         expect(workflow.content).toContain('"platforms":"$TARGET_PLATFORMS"');
+        expect(workflow.content).not.toContain('uses: actions/checkout@v4');
         expect(workflow.content).not.toContain('secrets.GITEA_REGISTRY_USERNAME');
     });
 

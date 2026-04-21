@@ -302,7 +302,7 @@ spec:
             - name: GITEA_RUNNER_NAME
               value: agent-platform-runner
             - name: GITEA_RUNNER_LABELS
-              value: ubuntu-latest:docker://catthehacker/ubuntu:act-latest
+              value: ubuntu-latest:host
             - name: GITEA_RUNNER_EPHEMERAL
               value: "false"
             - name: GITEA_RUNNER_REGISTRATION_TOKEN

@@ -18,7 +18,6 @@ const DEFAULT_SOURCE_FILE_PATHS = Object.freeze([
     'public/styles.css',
     'public/app.js',
 ]);
-const DEFAULT_GITEA_JOB_IMAGE = 'catthehacker/ubuntu:act-latest';
 
 function buildWorkflowYaml({
     appName = '',
@@ -39,8 +38,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: ${DEFAULT_GITEA_JOB_IMAGE}
     env:
       APP_NAME: ${appName}
       APP_SLUG: ${slug}
@@ -50,8 +47,11 @@ jobs:
       BUILDKIT_HOST: \${BUILDKIT_HOST:-tcp://buildkitd.agent-platform.svc.cluster.local:1234}
       TARGET_PLATFORMS: \${TARGET_PLATFORMS:-linux/amd64,linux/arm64}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Verify workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f Dockerfile
 
       - name: Prepare tags
         shell: bash
