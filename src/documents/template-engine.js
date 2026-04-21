@@ -38,6 +38,20 @@ function normalizeTemplateFilters(filters = {}) {
     };
   }
 
+  if (!filters || typeof filters !== 'object' || Array.isArray(filters)) {
+    return {
+      category: '',
+      packId: '',
+      useCase: '',
+      useCases: [],
+      intent: '',
+      intents: [],
+      format: '',
+      source: '',
+      limit: null,
+    };
+  }
+
   return {
     category: String(filters.category || '').trim(),
     packId: String(filters.packId || '').trim(),

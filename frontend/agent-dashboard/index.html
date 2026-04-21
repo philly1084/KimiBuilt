@@ -1169,11 +1169,11 @@
                                             <div class="form-row">
                                                 <div class="form-group">
                                                     <label for="sshHost">SSH Host / IP</label>
-                                                    <input type="text" class="form-control" id="sshHost" placeholder="10.0.0.5">
+                                                    <input type="text" class="form-control" id="sshHost" placeholder="10.0.0.5" autocomplete="off">
                                                 </div>
                                                 <div class="form-group">
                                                     <label for="sshPort">SSH Port</label>
-                                                    <input type="number" class="form-control" id="sshPort" value="22" min="1" max="65535">
+                                                    <input type="number" class="form-control" id="sshPort" value="22" min="1" max="65535" autocomplete="off">
                                                 </div>
                                             </div>
                                             <div class="form-row">
@@ -1183,7 +1183,7 @@
                                                 </div>
                                                 <div class="form-group">
                                                     <label for="sshPrivateKeyPath">Private Key Path</label>
-                                                    <input type="text" class="form-control" id="sshPrivateKeyPath" placeholder="/home/lillybuilt/.ssh/id_rsa">
+                                                    <input type="text" class="form-control" id="sshPrivateKeyPath" placeholder="/home/lillybuilt/.ssh/id_rsa" autocomplete="off">
                                                 </div>
                                             </div>
                                             <div class="form-group">
@@ -1499,7 +1499,6 @@
     <div class="toast-container" id="toastContainer"></div>
 
     <!-- Scripts -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
     <script src="js/api-client.js"></script>
     <script src="js/dashboard.js"></script>
 </body>

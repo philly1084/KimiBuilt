@@ -272,9 +272,15 @@ async function start() {
         await sessionStore.initialize();
         console.log('[Boot] Session store ready');
 
+        let runtimeVectorStore = vectorStore;
         console.log('[Boot] Initializing memory service...');
-        await memoryService.initialize();
-        console.log('[Boot] Memory service ready');
+        try {
+            await memoryService.initialize();
+            console.log('[Boot] Memory service ready');
+        } catch (error) {
+            runtimeVectorStore = null;
+            console.warn(`[Boot] Memory service unavailable, continuing without vector-backed recall: ${error.message}`);
+        }
 
         console.log('[Boot] Initializing tool platform...');
         const toolManager = getToolManager();
@@ -354,11 +360,13 @@ async function start() {
             sessionStore,
             memoryService,
             embedder,
-            vectorStore,
+            vectorStore: runtimeVectorStore,
         });
         console.log('[Boot] Conversation orchestrator ready');
 
         app.locals.conversationOrchestrator = conversationOrchestrator;
+        app.locals.dashboardController.setOrchestrator(conversationOrchestrator);
+        setDashboardController(app.locals.dashboardController);
         app.locals.providerSessionService = new ProviderSessionService();
         app.locals.conversationRunService = new ConversationRunService({
             app,
@@ -374,8 +382,6 @@ async function start() {
             workloadService: app.locals.agentWorkloadService,
         });
         app.locals.agentWorkloadRunner.start();
-        app.locals.dashboardController.setOrchestrator(conversationOrchestrator);
-        setDashboardController(app.locals.dashboardController);
         const ttsConfig = ttsService.getPublicConfig();
         console.log(`[Boot] TTS ${ttsConfig.provider || 'unknown'} ${ttsConfig.diagnostics?.status || 'unknown'}: ${ttsConfig.diagnostics?.message || 'No details available.'}`);
         const audioProcessingConfig = audioProcessingService.getPublicConfig();

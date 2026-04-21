@@ -805,52 +805,17 @@ class Dashboard {
      * Setup charts
      */
     setupCharts() {
-        const ctx = document.getElementById('requestVolumeCanvas');
-        if (!ctx || typeof Chart !== 'function') return;
-        
-        this.charts.requestVolume = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: [],
-                datasets: [{
-                    label: 'Requests',
-                    data: [],
-                    borderColor: '#58a6ff',
-                    backgroundColor: 'rgba(88, 166, 255, 0.1)',
-                    fill: true,
-                    tension: 0.4,
-                    pointRadius: 0,
-                    pointHoverRadius: 4
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false }
-                },
-                scales: {
-                    x: {
-                        grid: { display: false },
-                        ticks: { 
-                            color: '#6e7681',
-                            font: { size: 11 }
-                        }
-                    },
-                    y: {
-                        grid: { color: '#21262d' },
-                        ticks: {
-                            color: '#6e7681',
-                            font: { size: 11 }
-                        }
-                    }
-                },
-                interaction: {
-                    intersect: false,
-                    mode: 'index'
-                }
-            }
-        });
+        const canvas = document.getElementById('requestVolumeCanvas');
+        if (!canvas) return;
+
+        this.charts.requestVolume = {
+            canvas,
+            labels: [],
+            values: [],
+            resize: () => this.drawRequestVolumeChart(),
+        };
+
+        this.drawRequestVolumeChart();
     }
     
     /**
@@ -2527,9 +2492,130 @@ class Dashboard {
             return;
         }
 
-        this.charts.requestVolume.data.labels = Array.isArray(chart.labels) ? chart.labels : [];
-        this.charts.requestVolume.data.datasets[0].data = Array.isArray(chart.values) ? chart.values : [];
-        this.charts.requestVolume.update();
+        this.charts.requestVolume.labels = Array.isArray(chart.labels) ? chart.labels : [];
+        this.charts.requestVolume.values = Array.isArray(chart.values) ? chart.values : [];
+        this.drawRequestVolumeChart();
+    }
+
+    drawRequestVolumeChart() {
+        const chart = this.charts.requestVolume;
+        const canvas = chart?.canvas;
+        if (!canvas) {
+            return;
+        }
+
+        const context = canvas.getContext('2d');
+        if (!context) {
+            return;
+        }
+
+        const rect = canvas.getBoundingClientRect();
+        const cssWidth = Math.max(320, Math.round(rect.width || canvas.clientWidth || 640));
+        const cssHeight = Math.max(220, Math.round(rect.height || canvas.clientHeight || 320));
+        const devicePixelRatio = Math.max(1, window.devicePixelRatio || 1);
+
+        if (canvas.width !== Math.round(cssWidth * devicePixelRatio) || canvas.height !== Math.round(cssHeight * devicePixelRatio)) {
+            canvas.width = Math.round(cssWidth * devicePixelRatio);
+            canvas.height = Math.round(cssHeight * devicePixelRatio);
+        }
+
+        context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+        context.clearRect(0, 0, cssWidth, cssHeight);
+
+        const labels = Array.isArray(chart.labels) ? chart.labels : [];
+        const values = Array.isArray(chart.values) ? chart.values.map((value) => Number(value) || 0) : [];
+        const leftPad = 40;
+        const rightPad = 16;
+        const topPad = 16;
+        const bottomPad = 28;
+        const plotWidth = Math.max(1, cssWidth - leftPad - rightPad);
+        const plotHeight = Math.max(1, cssHeight - topPad - bottomPad);
+        const maxValue = Math.max(1, ...values);
+        const gridLines = 4;
+
+        context.strokeStyle = '#21262d';
+        context.lineWidth = 1;
+        for (let index = 0; index <= gridLines; index += 1) {
+            const y = topPad + (plotHeight / gridLines) * index;
+            context.beginPath();
+            context.moveTo(leftPad, y);
+            context.lineTo(cssWidth - rightPad, y);
+            context.stroke();
+        }
+
+        context.fillStyle = '#6e7681';
+        context.font = '11px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+        context.textAlign = 'right';
+        context.textBaseline = 'middle';
+        for (let index = 0; index <= gridLines; index += 1) {
+            const value = Math.round(maxValue - (maxValue / gridLines) * index);
+            const y = topPad + (plotHeight / gridLines) * index;
+            context.fillText(String(value), leftPad - 8, y);
+        }
+
+        if (!values.length) {
+            context.fillStyle = '#6e7681';
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            context.font = '12px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+            context.fillText('No request volume data yet.', cssWidth / 2, cssHeight / 2);
+            return;
+        }
+
+        const stepX = values.length > 1 ? plotWidth / (values.length - 1) : 0;
+        const points = values.map((value, index) => ({
+            x: leftPad + (stepX * index),
+            y: topPad + plotHeight - ((Math.max(0, value) / maxValue) * plotHeight),
+        }));
+
+        context.beginPath();
+        points.forEach((point, index) => {
+            if (index === 0) {
+                context.moveTo(point.x, point.y);
+            } else {
+                context.lineTo(point.x, point.y);
+            }
+        });
+        context.lineTo(leftPad + plotWidth, topPad + plotHeight);
+        context.lineTo(leftPad, topPad + plotHeight);
+        context.closePath();
+        context.fillStyle = 'rgba(88, 166, 255, 0.12)';
+        context.fill();
+
+        context.beginPath();
+        points.forEach((point, index) => {
+            if (index === 0) {
+                context.moveTo(point.x, point.y);
+            } else {
+                context.lineTo(point.x, point.y);
+            }
+        });
+        context.strokeStyle = '#58a6ff';
+        context.lineWidth = 2;
+        context.stroke();
+
+        context.fillStyle = '#58a6ff';
+        points.forEach((point) => {
+            context.beginPath();
+            context.arc(point.x, point.y, 2.5, 0, Math.PI * 2);
+            context.fill();
+        });
+
+        context.fillStyle = '#6e7681';
+        context.textAlign = 'center';
+        context.textBaseline = 'top';
+        context.font = '11px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+        const labelCount = Math.min(6, labels.length);
+        if (labelCount === 1) {
+            context.fillText(String(labels[0] || ''), leftPad + (plotWidth / 2), cssHeight - bottomPad + 8);
+            return;
+        }
+
+        for (let index = 0; index < labelCount; index += 1) {
+            const labelIndex = Math.round((index / (labelCount - 1)) * (labels.length - 1));
+            const x = leftPad + ((labels.length > 1 ? labelIndex / (labels.length - 1) : 0.5) * plotWidth);
+            context.fillText(String(labels[labelIndex] || ''), x, cssHeight - bottomPad + 8);
+        }
     }
 
     normalizeModel(model = {}) {

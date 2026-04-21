@@ -298,7 +298,7 @@ function buildDocumentTemplateBody(template = {}) {
 function buildDocumentTemplateRecords() {
     const engine = new TemplateEngine();
     const templates = engine.getTemplates().filter((template) => {
-        if (template && typeof template === 'object' && !Array.isArray(template)) {
+        if (template != null && typeof template === 'object' && !Array.isArray(template)) {
             return true;
         }
 

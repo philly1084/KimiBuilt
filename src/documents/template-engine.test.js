@@ -1,6 +1,13 @@
 const { TemplateEngine } = require('./template-engine');
 
 describe('TemplateEngine', () => {
+  test('treats null filters as an empty template query', () => {
+    const engine = new TemplateEngine();
+
+    expect(() => engine.getTemplates(null)).not.toThrow();
+    expect(Array.isArray(engine.getTemplates(null))).toBe(true);
+  });
+
   test('supports object-form template variables when building defaults', () => {
     const engine = new TemplateEngine();
 
