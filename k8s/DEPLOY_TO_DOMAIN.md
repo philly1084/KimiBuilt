@@ -1,9 +1,9 @@
 # Deploy to Custom Domain
 
-Your domain: `kimibuilt.secdevsolutions.help`
+Your domain: `kimibuilt.demoserver2.buzz`
 
 ## Current Issue
-- Frontend: `https://kimibuilt.secdevsolutions.help/web-chat/` ✅
+- Frontend: `https://kimibuilt.demoserver2.buzz/web-chat/` ✅
 - Backend: `http://kimibuilt.local/v1` ❌ (doesn't exist in DNS)
 
 ## Solution: Update Ingress
@@ -25,10 +25,10 @@ metadata:
 spec:
   tls:
     - hosts:
-        - kimibuilt.secdevsolutions.help
+        - kimibuilt.demoserver2.buzz
       secretName: kimibuilt-tls-secret  # You need a TLS cert
   rules:
-    - host: kimibuilt.secdevsolutions.help
+    - host: kimibuilt.demoserver2.buzz
       http:
         paths:
           # Backend API at /v1
@@ -109,7 +109,7 @@ kubectl create secret tls kimibuilt-tls-secret \
 If using Rancher:
 1. Go to your cluster in Rancher UI
 2. Resources > Secrets > Certificates
-3. Add Certificate for `kimibuilt.secdevsolutions.help`
+3. Add Certificate for `kimibuilt.demoserver2.buzz`
 4. Reference it in the ingress
 
 ## After Deployment
@@ -127,15 +127,15 @@ Or the auto-detect code I already added should handle it automatically.
 
 ```bash
 # Test backend
-curl https://kimibuilt.secdevsolutions.help/v1/models
+curl https://kimibuilt.demoserver2.buzz/v1/models
 
 # Test health
-curl https://kimibuilt.secdevsolutions.help/health
+curl https://kimibuilt.demoserver2.buzz/health
 ```
 
 ## If You're Using a Separate Frontend Server
 
-If your frontend (`kimibuilt.secdevsolutions.help`) is served by a different server (nginx, Apache, etc.):
+If your frontend (`kimibuilt.demoserver2.buzz`) is served by a different server (nginx, Apache, etc.):
 
 Add a proxy rule to forward `/v1` to the backend:
 
@@ -143,7 +143,7 @@ Add a proxy rule to forward `/v1` to the backend:
 # In your nginx config
 server {
     listen 443 ssl;
-    server_name kimibuilt.secdevsolutions.help;
+    server_name kimibuilt.demoserver2.buzz;
     
     # Frontend files
     location / {

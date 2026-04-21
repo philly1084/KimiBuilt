@@ -3,7 +3,7 @@
 
 echo "Testing chat endpoint..."
 
-curl -X POST https://kimibuilt.secdevsolutions.help/v1/chat/completions \
+curl -X POST https://kimibuilt.demoserver2.buzz/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "gpt-4o",

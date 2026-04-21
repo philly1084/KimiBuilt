@@ -18,10 +18,10 @@ metadata:
 spec:
   tls:
     - hosts:
-        - kimibuilt.secdevsolutions.help
+        - kimibuilt.demoserver2.buzz
       secretName: kimibuilt-tls
   rules:
-    - host: kimibuilt.secdevsolutions.help
+    - host: kimibuilt.demoserver2.buzz
       http:
         paths:
           - path: /
@@ -49,7 +49,7 @@ spec:
     accessControlAllowHeaders:
       - "*"
     accessControlAllowOriginList:
-      - "https://kimibuilt.secdevsolutions.help"
+      - "https://kimibuilt.demoserver2.buzz"
       - "http://localhost:8080"
       - "http://localhost:3000"
     accessControlMaxAge: 100
