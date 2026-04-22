@@ -2173,16 +2173,19 @@ class ChatApp {
                     publicHost,
                 },
             });
-        const progressState = this.buildManagedAppProgressState({
-            phase,
-            summary,
-            app: {
-                id: appId,
-                slug: appSlug,
-                appName: String(project?.title || '').trim(),
-                publicHost,
+        const progressState = this.resolveManagedAppProgressState(
+            project?.progress || project?.managedAppProgressState || null,
+            {
+                phase,
+                summary,
+                app: {
+                    id: appId,
+                    slug: appSlug,
+                    appName: String(project?.title || '').trim(),
+                    publicHost,
+                },
             },
-        });
+        );
 
         if (!normalizedSessionId || !summary || (!appId && !appSlug)) {
             return null;
@@ -2206,6 +2209,7 @@ class ChatApp {
                     managedAppSlug: appSlug,
                 }),
                 nextStep: String(project?.nextStep || '').trim(),
+                openItems: Array.isArray(project?.openItems) ? project.openItems : [],
             },
             managedAppProgressState: progressState,
         };
@@ -2362,7 +2366,22 @@ class ChatApp {
         };
     }
 
+    resolveManagedAppProgressState(rawProgress = null, fallbackEvent = {}) {
+        if (rawProgress && typeof rawProgress === 'object') {
+            return { ...rawProgress };
+        }
+
+        return this.buildManagedAppProgressState(fallbackEvent);
+    }
+
     buildManagedAppProgressStateFromMessage(message = null) {
+        const rawProgress = message?.managedAppProgressState
+            || message?.metadata?.managedAppProgressState
+            || null;
+        if (rawProgress && typeof rawProgress === 'object') {
+            return { ...rawProgress };
+        }
+
         const meta = this.getManagedAppMessageMeta(message);
         return this.buildManagedAppProgressState({
             phase: meta.phase,
@@ -2583,6 +2602,10 @@ class ChatApp {
         const nextSteps = (!lastStep || lastStep.phase !== nextStep.phase || lastStep.summary !== nextStep.summary)
             ? [...existingState.steps, nextStep]
             : existingState.steps;
+        const progressState = this.resolveManagedAppProgressState(
+            event?.progressState || null,
+            event,
+        );
         const nextState = {
             ...existingState,
             appId: String(event?.app?.id || event?.app?.slug || '').trim(),
@@ -2591,7 +2614,7 @@ class ChatApp {
             sessionId: normalizedSessionId,
             phase,
             detail: this.buildManagedAppProgressDetail(event),
-            progressState: this.buildManagedAppProgressState(event),
+            progressState,
             steps: nextSteps.slice(-6),
             terminal: this.isManagedAppTerminalPhase(phase),
         };
@@ -2619,6 +2642,8 @@ class ChatApp {
                 buildRunId: nextState.buildRunId,
                 publicHost: String(event?.app?.publicHost || existingMessage.metadata?.publicHost || '').trim(),
                 managedAppProgressState: nextState.progressState,
+                nextStep: String(nextState.progressState?.nextStep || '').trim(),
+                openItems: Array.isArray(nextState.progressState?.openItems) ? nextState.progressState.openItems : [],
             },
         });
 
@@ -2640,8 +2665,10 @@ class ChatApp {
             appId: nextState.appId,
             appSlug: nextState.appSlug,
             publicHost: String(event?.app?.publicHost || '').trim(),
-            nextStep: '',
+            nextStep: String(nextState.progressState?.nextStep || '').trim(),
+            openItems: Array.isArray(nextState.progressState?.openItems) ? nextState.progressState.openItems : [],
             updatedAt: event?.timestamp || new Date().toISOString(),
+            progress: nextState.progressState,
         });
         if (projectSummaryMessage) {
             this.upsertSessionMessage(normalizedSessionId, projectSummaryMessage);

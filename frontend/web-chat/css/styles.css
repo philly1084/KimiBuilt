@@ -4408,6 +4408,27 @@ body.layout-minimal #input-meta-row {
     color: var(--text-secondary);
 }
 
+.assistant-progress-card__status-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    align-items: baseline;
+    font-size: 0.8rem;
+}
+
+.assistant-progress-card__status-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+
+.assistant-progress-card__status-value {
+    color: var(--text-primary);
+    line-height: 1.45;
+}
+
 .assistant-progress-card__bar {
     position: relative;
     overflow: hidden;
@@ -4495,6 +4516,22 @@ body.layout-minimal #input-meta-row {
 .assistant-progress-card__note {
     font-size: 0.74rem;
     color: var(--text-tertiary);
+}
+
+.assistant-progress-card__open-items {
+    display: grid;
+    gap: 0.35rem;
+}
+
+.assistant-progress-card__open-list {
+    margin: 0;
+    padding-left: 1rem;
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+}
+
+.assistant-progress-card__open-list li + li {
+    margin-top: 0.18rem;
 }
 
 .assistant-reasoning-ribbon {

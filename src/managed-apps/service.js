@@ -620,6 +620,146 @@ function buildManagedAppStatusSummary(app = null, buildRun = null, phase = '', d
     }
 }
 
+function buildManagedAppPhaseLabel(phase = '') {
+    switch (normalizeText(phase).toLowerCase()) {
+        case 'created':
+        case 'updated':
+            return 'Build queued';
+        case 'built':
+            return 'Build complete';
+        case 'deploying':
+            return 'Deploying';
+        case 'tls_ready':
+        case 'pending_https':
+            return 'Verifying public HTTPS';
+        case 'live':
+            return 'Live';
+        case 'build_failed':
+            return 'Build failed';
+        case 'deploy_failed':
+            return 'Deploy failed';
+        default:
+            return 'Updated';
+    }
+}
+
+function buildManagedAppProgressState(app = null, buildRun = null, phase = '', details = {}) {
+    const normalizedPhase = normalizeText(phase).toLowerCase()
+        || normalizeText(app?.status).toLowerCase()
+        || 'updated';
+    const summary = normalizeText(
+        details.summary
+        || buildManagedAppStatusSummary(app, buildRun, normalizedPhase, details.deployment || null),
+    ) || 'Managed app status updated.';
+    const deployRequested = details.deployRequested !== false;
+    const healthy = typeof details.healthy === 'boolean' ? details.healthy : null;
+    const buildError = normalizeText(
+        buildRun?.error?.message
+        || buildRun?.metadata?.payload?.error
+        || buildRun?.metadata?.payload?.message
+        || app?.metadata?.liveDeploy?.lastError
+        || details?.deployment?.rollout?.error
+        || details?.deployment?.https?.error
+        || '',
+    );
+    const steps = [
+        { id: 'prepare', title: 'Prepare app record', status: 'pending' },
+        { id: 'build', title: 'Build and publish image', status: 'pending' },
+        { id: 'deploy', title: 'Roll out deployment', status: 'pending' },
+        { id: 'verify', title: 'Verify public endpoint', status: 'pending' },
+    ];
+    const mark = (stepId, status) => {
+        const step = steps.find((entry) => entry.id === stepId);
+        if (step) {
+            step.status = status;
+        }
+    };
+
+    let detail = '';
+    switch (normalizedPhase) {
+        case 'created':
+        case 'updated':
+            mark('prepare', 'completed');
+            mark('build', 'in_progress');
+            detail = 'Waiting for the remote Gitea build to publish the image.';
+            break;
+        case 'built':
+            mark('prepare', 'completed');
+            mark('build', 'completed');
+            mark('deploy', 'pending');
+            detail = 'The image is ready. Deployment is the next server-side step.';
+            break;
+        case 'deploying':
+            mark('prepare', 'completed');
+            mark('build', 'completed');
+            mark('deploy', 'in_progress');
+            detail = 'Applying rollout, ingress, and TLS changes on the remote cluster.';
+            break;
+        case 'tls_ready':
+        case 'pending_https':
+            mark('prepare', 'completed');
+            mark('build', 'completed');
+            mark('deploy', 'completed');
+            mark('verify', 'in_progress');
+            detail = 'TLS is ready. Waiting for public HTTPS to respond successfully.';
+            break;
+        case 'live':
+            steps.forEach((step) => {
+                step.status = 'completed';
+            });
+            detail = 'Public HTTPS verification succeeded.';
+            break;
+        case 'build_failed':
+            mark('prepare', 'completed');
+            mark('build', 'failed');
+            detail = buildError || 'The remote build failed before an image was published.';
+            break;
+        case 'deploy_failed':
+            mark('prepare', 'completed');
+            mark('build', 'completed');
+            mark('deploy', 'failed');
+            detail = buildError || 'The deployment failed before the public endpoint went live.';
+            break;
+        default:
+            mark('prepare', 'in_progress');
+            detail = summary;
+            break;
+    }
+
+    const terminal = ['live', 'build_failed', 'deploy_failed'].includes(normalizedPhase);
+    const completedSteps = steps.filter((step) => ['completed', 'skipped'].includes(step.status)).length;
+    const nextStep = normalizeText(
+        details.nextStep
+        || deriveNextStepForLifecycle(normalizedPhase, { deployRequested, healthy }),
+    );
+    const openItems = normalizeStringArray(
+        hasOwnInput(details, 'openItems')
+            ? details.openItems
+            : deriveOpenItemsForLifecycle(normalizedPhase, {
+                deployRequested,
+                summary,
+                error: buildError,
+                healthy,
+            }),
+        4,
+    );
+
+    return {
+        phase: normalizedPhase,
+        phaseLabel: buildManagedAppPhaseLabel(normalizedPhase),
+        summary,
+        detail: normalizeText(details.detail || detail),
+        nextStep,
+        openItems,
+        live: terminal !== true,
+        terminal,
+        totalSteps: steps.length,
+        completedSteps,
+        currentStepId: steps.find((step) => step.status === 'in_progress')?.id || '',
+        steps,
+    };
+}
+
 function buildManagedProjectKey(app = null) {
     const appId = normalizeText(app?.id || app?.slug || 'managed-app');
     return `managed-app:${appId}`;
@@ -661,12 +801,14 @@ function buildManagedProjectState(app = null, buildRun = null, phase = '', detai
         details.summary
         || buildManagedAppStatusSummary(normalizedApp, buildRun, normalizedPhase, details.deployment || null),
     );
+    const progress = buildManagedAppProgressState(normalizedApp, buildRun, normalizedPhase, details);
 
     return {
         type: 'managed-app',
         key: buildManagedProjectKey(normalizedApp),
         title,
         summary,
+        progress,
         phase: normalizedPhase,
         status: normalizeText(normalizedApp.status || normalizedPhase).toLowerCase() || normalizedPhase,
         appId: normalizeText(normalizedApp.id),
@@ -687,8 +829,8 @@ function buildManagedProjectState(app = null, buildRun = null, phase = '', detai
         buildStatus: normalizeText(buildRun?.buildStatus).toLowerCase(),
         deployStatus: normalizeText(buildRun?.deployStatus).toLowerCase(),
         verificationStatus: normalizeText(buildRun?.verificationStatus).toLowerCase(),
-        nextStep: normalizeText(project.nextStep),
-        openItems: normalizeStringArray(project.openItems, 8),
+        nextStep: normalizeText(project.nextStep || progress.nextStep),
+        openItems: normalizeStringArray(project.openItems?.length ? project.openItems : progress.openItems, 8),
         decisions: normalizeStringArray(project.decisions, 8),
         lastUserIntent: normalizeText(project.lastUserIntent || normalizedApp.sourcePrompt),
         lastActivityAt: normalizeText(
@@ -2467,6 +2609,10 @@ class ManagedAppService {
         if (!summary) {
             return null;
         }
+        const progressState = buildManagedAppProgressState(app, buildRun, phase, {
+            ...details,
+            summary,
+        });
 
         try {
             return await this.sessionStore.upsertMessage(app.sessionId, {
@@ -2481,6 +2627,7 @@ class ManagedAppService {
                     managedAppSlug: normalizeText(app?.slug),
                     buildRunId: normalizeText(buildRun?.id),
                     publicHost: normalizeText(app?.publicHost),
+                    managedAppProgressState: progressState,
                     ...(details.deployment ? { deployment: details.deployment } : {}),
                 },
             });
@@ -2492,6 +2639,10 @@ class ManagedAppService {
 
     async broadcastLifecycleEvent(app = null, buildRun = null, phase = '', details = {}) {
         const summary = normalizeText(details.summary || buildManagedAppStatusSummary(app, buildRun, phase, details.deployment || null));
+        const progressState = buildManagedAppProgressState(app, buildRun, phase, {
+            ...details,
+            summary,
+        });
         await this.persistLifecycleMessage(app, buildRun, phase, {
             ...details,
             summary,
@@ -2510,6 +2661,7 @@ class ManagedAppService {
             app,
             buildRun,
             summary,
+            progressState,
             ...(details.deployment ? { deployment: details.deployment } : {}),
         };
         broadcastToAdmins(payload);

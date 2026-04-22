@@ -1064,6 +1064,16 @@ describe('ManagedAppService', () => {
 
         await service.broadcastLifecycleEvent(app, buildRun, 'live');
 
+        expect(sessionStore.upsertMessage).toHaveBeenCalledWith('session-1', expect.objectContaining({
+            metadata: expect.objectContaining({
+                managedAppProgressState: expect.objectContaining({
+                    phase: 'live',
+                    phaseLabel: 'Live',
+                    totalSteps: 4,
+                    completedSteps: 4,
+                }),
+            }),
+        }));
         expect(sessionStore.update).toHaveBeenCalledWith('session-1', expect.objectContaining({
             metadata: expect.objectContaining({
                 title: 'Demo App',
@@ -1072,6 +1082,13 @@ describe('ManagedAppService', () => {
                     key: 'managed-app:app-1',
                     title: 'Demo App',
                     phase: 'live',
+                    progress: expect.objectContaining({
+                        phase: 'live',
+                        phaseLabel: 'Live',
+                        nextStep: '',
+                        totalSteps: 4,
+                        completedSteps: 4,
+                    }),
                     appId: 'app-1',
                     appSlug: 'demo-app',
                     publicHost: 'demo-app.demoserver2.buzz',

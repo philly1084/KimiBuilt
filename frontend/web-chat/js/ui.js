@@ -2636,8 +2636,14 @@ class UIHelpers {
         }
 
         const phase = String(rawProgress.phase || '').trim().toLowerCase() || 'updated';
+        const phaseLabel = String(rawProgress.phaseLabel || '').trim();
         const summary = String(rawProgress.summary || '').trim() || 'Managed app status updated.';
         const detail = String(rawProgress.detail || '').trim();
+        const nextStep = String(rawProgress.nextStep || '').trim();
+        const openItems = (Array.isArray(rawProgress.openItems) ? rawProgress.openItems : [])
+            .map((item) => String(item || '').trim())
+            .filter(Boolean)
+            .slice(0, 3);
         const terminal = rawProgress.terminal === true;
         const live = rawProgress.live !== false && terminal !== true;
         const progressUnits = terminal
@@ -2649,8 +2655,11 @@ class UIHelpers {
 
         return {
             phase,
+            phaseLabel,
             summary,
             detail,
+            nextStep,
+            openItems,
             terminal,
             live,
             totalSteps,
@@ -2724,14 +2733,36 @@ class UIHelpers {
         const liveBadge = progressState.terminal
             ? '<span class="assistant-progress-card__badge">Final</span>'
             : '<span class="assistant-progress-card__badge assistant-progress-card__badge--live"><span class="assistant-progress-card__pulse" aria-hidden="true"></span>Live</span>';
-        const noteText = isProjectSummary
-            ? (message?.metadata?.nextStep
-                ? `Next: ${String(message.metadata.nextStep || '').trim()}`
-                : 'This project stays attached to this chat. Ask Lilly to continue when you want the next phase.')
-            : (progressState.terminal
-                ? (['build_failed', 'deploy_failed'].includes(progressState.phase)
-                    ? 'The managed app flow stopped before the site was fully live.'
-                    : 'The managed app flow finished with the latest deployment state.')
+        const phaseMarkup = progressState.phaseLabel
+            ? `<div class="assistant-progress-card__status-line"><span class="assistant-progress-card__status-label">Stage</span><span class="assistant-progress-card__status-value">${this.escapeHtml(progressState.phaseLabel)}</span></div>`
+            : '';
+        const nextStepText = String(
+            progressState.nextStep
+            || message?.metadata?.nextStep
+            || ''
+        ).trim();
+        const nextStepMarkup = nextStepText
+            ? `<div class="assistant-progress-card__status-line"><span class="assistant-progress-card__status-label">Next</span><span class="assistant-progress-card__status-value">${this.escapeHtml(nextStepText)}</span></div>`
+            : '';
+        const openItems = Array.isArray(progressState.openItems)
+            ? progressState.openItems.filter(Boolean).slice(0, 3)
+            : [];
+        const openItemsMarkup = openItems.length > 0
+            ? `
+                <div class="assistant-progress-card__open-items">
+                    <div class="assistant-progress-card__status-label">Open Items</div>
+                    <ul class="assistant-progress-card__open-list">
+                        ${openItems.map((item) => `<li>${this.escapeHtml(item)}</li>`).join('')}
+                    </ul>
+                </div>
+            `
+            : '';
+        const noteText = progressState.terminal
+            ? (['build_failed', 'deploy_failed'].includes(progressState.phase)
+                ? 'The managed app flow stopped before the site was fully live.'
+                : 'The managed app flow finished with the latest deployment state.')
+            : (isProjectSummary
+                ? 'This project stays attached to this chat and will keep this status as the current source of truth.'
                 : 'Live deployment updates replace the previous build status in this bubble.');
         const stepsHtml = progressState.steps.map((step, index) => {
             const isActive = index === progressState.activeStepIndex;
@@ -2763,10 +2794,13 @@ class UIHelpers {
                         ${liveBadge}
                     </div>
                     ${progressState.detail ? `<div class="assistant-progress-card__detail">${this.escapeHtml(progressState.detail)}</div>` : ''}
+                    ${phaseMarkup}
+                    ${nextStepMarkup}
                     <div class="assistant-progress-card__bar" aria-hidden="true">
                         <span style="width:${progressState.percent}%"></span>
                     </div>
                     <ol class="assistant-progress-card__steps">${stepsHtml}</ol>
+                    ${openItemsMarkup}
                     <div class="assistant-progress-card__note">${this.escapeHtml(noteText)}</div>
                 </div>
             </div>
