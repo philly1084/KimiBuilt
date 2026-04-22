@@ -1,0 +1,153 @@
+(function initWorkspaceContext(root, factory) {
+    const exported = factory();
+    if (typeof module === 'object' && module.exports) {
+        module.exports = exported;
+    }
+    if (root && typeof root === 'object') {
+        root.KimiBuiltWebChatWorkspace = exported;
+    }
+})(typeof window !== 'undefined' ? window : globalThis, () => {
+    const DEFAULT_WORKSPACE_KEY = 'workspace-1';
+    const WORKSPACE_QUERY_KEYS = ['workspace', 'workspaceKey', 'workspace_key'];
+    const LABEL_QUERY_KEYS = ['workspaceLabel', 'workspace_label'];
+    const EMBED_QUERY_KEYS = ['embedded', 'embed'];
+    const WORKSPACE_COUNT = 4;
+    const WORKSPACE_LOCAL_STORAGE_KEYS = new Set([
+        'kimibuilt_web_chat_sessions_v4',
+        'kimibuilt_web_chat_current_session',
+        'kimibuilt_message_draft',
+        'kimibuilt_message_draft_time',
+    ]);
+
+    function normalizeWorkspaceKey(value = '') {
+        const normalized = String(value || '')
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9-]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+
+        return normalized || DEFAULT_WORKSPACE_KEY;
+    }
+
+    function resolveWorkspaceLabel(workspaceKey = DEFAULT_WORKSPACE_KEY, explicitLabel = '') {
+        const normalizedLabel = String(explicitLabel || '').trim();
+        if (normalizedLabel) {
+            return normalizedLabel;
+        }
+
+        const match = String(workspaceKey || '').match(/(\d+)$/);
+        const workspaceNumber = match ? Number(match[1]) : 1;
+        if (!Number.isFinite(workspaceNumber) || workspaceNumber < 1) {
+            return 'Workspace 1';
+        }
+
+        return `Workspace ${workspaceNumber}`;
+    }
+
+    function resolveWorkspaceScopeKey(workspaceKey = DEFAULT_WORKSPACE_KEY) {
+        const normalizedKey = normalizeWorkspaceKey(workspaceKey);
+        if (normalizedKey === DEFAULT_WORKSPACE_KEY) {
+            return 'web-chat';
+        }
+
+        return `web-chat-${normalizedKey}`;
+    }
+
+    function isWorkspaceLocalStorageKey(storageKey = '') {
+        return WORKSPACE_LOCAL_STORAGE_KEYS.has(String(storageKey || '').trim());
+    }
+
+    function resolveWorkspaceScopedStorageKey(storageKey = '', workspaceKey = DEFAULT_WORKSPACE_KEY) {
+        const normalizedStorageKey = String(storageKey || '').trim();
+        if (!normalizedStorageKey || !isWorkspaceLocalStorageKey(normalizedStorageKey)) {
+            return normalizedStorageKey;
+        }
+
+        const normalizedWorkspaceKey = normalizeWorkspaceKey(workspaceKey);
+        if (normalizedWorkspaceKey === DEFAULT_WORKSPACE_KEY) {
+            return normalizedStorageKey;
+        }
+
+        return `${normalizedStorageKey}::${normalizedWorkspaceKey}`;
+    }
+
+    function parseBooleanFlag(value = '') {
+        const normalized = String(value || '').trim().toLowerCase();
+        return ['1', 'true', 'yes', 'on'].includes(normalized);
+    }
+
+    function createWorkspaceContext(input = {}) {
+        const workspaceKey = normalizeWorkspaceKey(input.key || input.workspaceKey || DEFAULT_WORKSPACE_KEY);
+        return {
+            key: workspaceKey,
+            label: resolveWorkspaceLabel(workspaceKey, input.label || input.workspaceLabel || ''),
+            scopeKey: resolveWorkspaceScopeKey(workspaceKey),
+            embedded: input.embedded === true,
+        };
+    }
+
+    function getWorkspaceContext(search = null) {
+        if (typeof window !== 'undefined' && window.__kimibuiltWebChatWorkspaceContext) {
+            return window.__kimibuiltWebChatWorkspaceContext;
+        }
+
+        const params = new URLSearchParams(
+            typeof search === 'string'
+                ? search.replace(/^\?/, '')
+                : (typeof window !== 'undefined' ? window.location.search.replace(/^\?/, '') : ''),
+        );
+        const workspaceKey = WORKSPACE_QUERY_KEYS
+            .map((key) => params.get(key))
+            .find((value) => typeof value === 'string' && value.trim());
+        const workspaceLabel = LABEL_QUERY_KEYS
+            .map((key) => params.get(key))
+            .find((value) => typeof value === 'string' && value.trim());
+        const embedded = EMBED_QUERY_KEYS.some((key) => parseBooleanFlag(params.get(key)));
+        const context = createWorkspaceContext({
+            key: workspaceKey,
+            label: workspaceLabel,
+            embedded,
+        });
+
+        if (typeof window !== 'undefined') {
+            window.__kimibuiltWebChatWorkspaceContext = context;
+        }
+
+        return context;
+    }
+
+    function buildWorkspaceScopeMetadata(metadata = {}, workspaceContext = getWorkspaceContext()) {
+        const context = workspaceContext && typeof workspaceContext === 'object'
+            ? workspaceContext
+            : createWorkspaceContext();
+
+        return {
+            ...(metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {}),
+            workspaceKey: context.scopeKey,
+            workspaceId: context.scopeKey,
+            projectScope: context.scopeKey,
+            memoryScope: context.scopeKey,
+        };
+    }
+
+    function listWorkspaceContexts() {
+        return Array.from({ length: WORKSPACE_COUNT }, (_value, index) => {
+            const workspaceKey = `workspace-${index + 1}`;
+            return createWorkspaceContext({ key: workspaceKey });
+        });
+    }
+
+    return {
+        DEFAULT_WORKSPACE_KEY,
+        WORKSPACE_COUNT,
+        buildWorkspaceScopeMetadata,
+        createWorkspaceContext,
+        getWorkspaceContext,
+        isWorkspaceLocalStorageKey,
+        listWorkspaceContexts,
+        normalizeWorkspaceKey,
+        resolveWorkspaceLabel,
+        resolveWorkspaceScopeKey,
+        resolveWorkspaceScopedStorageKey,
+    };
+});

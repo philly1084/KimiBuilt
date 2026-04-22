@@ -18,6 +18,7 @@ const WEB_CHAT_API_CLIENT_SURFACE = 'web-chat';
 const USER_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 const REMOTE_BUILD_AUTONOMY_STORAGE_KEY = 'kimibuilt_remote_build_autonomy';
 const gatewayStreamHelpers = window.KimiBuiltGatewaySSE || {};
+const workspaceApiHelpers = window.KimiBuiltWebChatWorkspace || null;
 const DEFAULT_CHAT_MODEL = gatewayStreamHelpers.DEFAULT_CODEX_MODEL_ID || 'gpt-5.4-mini';
 const buildGatewayHeaders = gatewayStreamHelpers.buildGatewayHeaders || ((headers) => headers);
 const buildGatewayRealtimeUrl = gatewayStreamHelpers.buildGatewayRealtimeUrl
@@ -57,6 +58,24 @@ const resolvePreferredChatModelForWebChat = gatewayStreamHelpers.resolvePreferre
         return String(availableModels[0]?.id || fallbackId).trim() || fallbackId;
     });
 const streamGatewayResponse = gatewayStreamHelpers.streamGatewayResponse || null;
+const WEB_CHAT_WORKSPACE_CONTEXT = typeof workspaceApiHelpers?.getWorkspaceContext === 'function'
+    ? workspaceApiHelpers.getWorkspaceContext()
+    : {
+        key: 'workspace-1',
+        label: 'Workspace 1',
+        scopeKey: WEB_CHAT_API_CLIENT_SURFACE,
+        embedded: false,
+    };
+
+function buildWorkspaceAwareMetadata(metadata = {}) {
+    if (typeof workspaceApiHelpers?.buildWorkspaceScopeMetadata === 'function') {
+        return workspaceApiHelpers.buildWorkspaceScopeMetadata(metadata, WEB_CHAT_WORKSPACE_CONTEXT);
+    }
+
+    return {
+        ...(metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {}),
+    };
+}
 
 function getClientNowIso() {
     return new Date().toISOString();
@@ -877,14 +896,14 @@ class OpenAIAPIClient extends EventTarget {
             enableConversationExecutor: true,
             taskType: WEB_CHAT_API_TASK_TYPE,
             clientSurface: WEB_CHAT_API_CLIENT_SURFACE,
-            metadata: {
+            metadata: buildWorkspaceAwareMetadata({
                 clientSurface: WEB_CHAT_API_CLIENT_SURFACE,
                 enableConversationExecutor: true,
                 ...buildClientClockMetadata(),
                 ...(requestOptions?.metadata && typeof requestOptions.metadata === 'object'
                     ? requestOptions.metadata
                     : {}),
-            },
+            }),
         };
 
         if (isRemoteBuildAutonomyApproved()) {
@@ -1869,10 +1888,10 @@ class OpenAIAPIClient extends EventTarget {
                 model: this.currentModel || null,
                 taskType: WEB_CHAT_API_TASK_TYPE,
                 clientSurface: WEB_CHAT_API_CLIENT_SURFACE,
-                metadata: {
+                metadata: buildWorkspaceAwareMetadata({
                     clientSurface: WEB_CHAT_API_CLIENT_SURFACE,
                     ...buildClientClockMetadata(),
-                },
+                }),
             }),
         });
 

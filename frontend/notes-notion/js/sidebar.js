@@ -2655,14 +2655,14 @@ const Sidebar = (function() {
                 <div class="ai-modal-header">
                     <span>🔍</span>
                     <span>Search Pages</span>
-                    <button class="search-close" style="margin-left: auto; background: transparent; border: none; color: white; cursor: pointer; font-size: 18px;">✕</button>
+                    <button class="search-close">✕</button>
                 </div>
-                <div style="padding: 16px; border-bottom: 1px solid var(--border-color);">
+                <div class="search-toolbar">
                     <input type="text" id="search-input" placeholder="Search page titles and content..." 
-                        style="width: 100%; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: var(--radius-md); font-size: 14px; outline: none;"
+ class="input"
                         autocomplete="off">
                 </div>
-                <div id="search-results" style="overflow-y: auto; flex: 1; padding: 8px 0;">
+                <div id="search-results" class="search-results">
                     <div style="padding: 24px; text-align: center; color: var(--text-muted);">
                         Type to search across all pages...
                     </div>
@@ -2887,3 +2887,4 @@ const Sidebar = (function() {
     
     return window.Sidebar;
 })();
+

@@ -27,6 +27,7 @@ const WEB_CHAT_SYNCED_STORAGE_KEYS = new Set([
 const sessionGatewayHelpers = window.KimiBuiltGatewaySSE || {};
 const SESSION_DEFAULT_MODEL = sessionGatewayHelpers.DEFAULT_CODEX_MODEL_ID || 'gpt-5.4-mini';
 const buildSessionGatewayHeaders = sessionGatewayHelpers.buildGatewayHeaders || ((headers) => headers);
+const sessionWorkspaceHelpers = window.KimiBuiltWebChatWorkspace || null;
 const resolveSessionPreferredModel = sessionGatewayHelpers.resolvePreferredChatModel
     || ((models, preferredModel = '', fallbackModel = SESSION_DEFAULT_MODEL) => {
         const availableModels = Array.isArray(models) ? models : [];
@@ -48,6 +49,37 @@ const resolveSessionPreferredModel = sessionGatewayHelpers.resolvePreferredChatM
 
         return String(availableModels[0]?.id || fallbackId).trim() || fallbackId;
     });
+
+const SESSION_WORKSPACE_CONTEXT = typeof sessionWorkspaceHelpers?.getWorkspaceContext === 'function'
+    ? sessionWorkspaceHelpers.getWorkspaceContext()
+    : {
+        key: 'workspace-1',
+        label: 'Workspace 1',
+        scopeKey: SESSION_MANAGER_CLIENT_SURFACE,
+        embedded: false,
+    };
+
+function buildSessionWorkspaceMetadata(metadata = {}) {
+    if (typeof sessionWorkspaceHelpers?.buildWorkspaceScopeMetadata === 'function') {
+        return sessionWorkspaceHelpers.buildWorkspaceScopeMetadata(metadata, SESSION_WORKSPACE_CONTEXT);
+    }
+
+    return {
+        ...(metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {}),
+    };
+}
+
+function resolveSessionWorkspaceStorageKey(storageKey = '') {
+    const normalizedStorageKey = String(storageKey || '').trim();
+    if (typeof sessionWorkspaceHelpers?.resolveWorkspaceScopedStorageKey === 'function') {
+        return sessionWorkspaceHelpers.resolveWorkspaceScopedStorageKey(
+            normalizedStorageKey,
+            SESSION_WORKSPACE_CONTEXT.key,
+        );
+    }
+
+    return normalizedStorageKey;
+}
 
 function normalizeSessionModel(model, fallbackModel = SESSION_DEFAULT_MODEL) {
     return resolveSessionPreferredModel([], model, fallbackModel);
@@ -181,6 +213,7 @@ class SessionManager extends EventTarget {
         this.apiBaseUrl = window.location.hostname === 'localhost'
             ? 'http://localhost:3000/api'
             : `${window.location.protocol}//${window.location.host}/api`;
+        this.workspaceContext = SESSION_WORKSPACE_CONTEXT;
         this.storageKey = 'kimibuilt_web_chat_sessions_v4';
         this.currentSessionKey = 'kimibuilt_web_chat_current_session';
         this.version = '4.0';
@@ -226,7 +259,7 @@ class SessionManager extends EventTarget {
         }
         if (!this.storageAvailable) return null;
         try {
-            return localStorage.getItem(normalizedKey);
+            return localStorage.getItem(resolveSessionWorkspaceStorageKey(normalizedKey));
         } catch (e) {
             this.setStorageAvailability(false);
             return null;
@@ -251,13 +284,13 @@ class SessionManager extends EventTarget {
 
         if (!this.storageAvailable) return wroteRemote;
         try {
-            localStorage.setItem(normalizedKey, normalizedValue);
+            localStorage.setItem(resolveSessionWorkspaceStorageKey(normalizedKey), normalizedValue);
             return true;
         } catch (e) {
             if (e.name === 'QuotaExceededError') {
                 this.cleanupOldSessions();
                 try {
-                    localStorage.setItem(normalizedKey, normalizedValue);
+                    localStorage.setItem(resolveSessionWorkspaceStorageKey(normalizedKey), normalizedValue);
                     return true;
                 } catch (_quotaError) {
                     this.setStorageAvailability(false);
@@ -286,7 +319,7 @@ class SessionManager extends EventTarget {
 
         if (!this.storageAvailable) return removedRemote;
         try {
-            localStorage.removeItem(normalizedKey);
+            localStorage.removeItem(resolveSessionWorkspaceStorageKey(normalizedKey));
             return true;
         } catch (e) {
             this.setStorageAvailability(false);
@@ -581,6 +614,7 @@ class SessionManager extends EventTarget {
             const params = new URLSearchParams({
                 taskType: SESSION_MANAGER_TASK_TYPE,
                 clientSurface: SESSION_MANAGER_CLIENT_SURFACE,
+                workspaceKey: this.workspaceContext.scopeKey,
             });
             const response = await fetch(`${this.apiBaseUrl}/sessions?${params.toString()}`, {
                 headers: buildSessionGatewayHeaders({
@@ -711,6 +745,7 @@ class SessionManager extends EventTarget {
                     activeSessionId: normalizedSessionId || null,
                     taskType: SESSION_MANAGER_TASK_TYPE,
                     clientSurface: SESSION_MANAGER_CLIENT_SURFACE,
+                    workspaceKey: this.workspaceContext.scopeKey,
                 }),
             });
         } catch (error) {
@@ -908,11 +943,12 @@ class SessionManager extends EventTarget {
                 body: JSON.stringify({
                     taskType: SESSION_MANAGER_TASK_TYPE,
                     clientSurface: SESSION_MANAGER_CLIENT_SURFACE,
-                    metadata: {
+                    workspaceKey: this.workspaceContext.scopeKey,
+                    metadata: buildSessionWorkspaceMetadata({
                         mode,
                         taskType: SESSION_MANAGER_TASK_TYPE,
                         clientSurface: SESSION_MANAGER_CLIENT_SURFACE,
-                    },
+                    }),
                 }),
             });
 
@@ -934,11 +970,11 @@ class SessionManager extends EventTarget {
             title: 'New Chat',
             createdAt,
             updatedAt,
-            metadata: backendSession?.metadata || {
+            metadata: backendSession?.metadata || buildSessionWorkspaceMetadata({
                 mode,
                 taskType: SESSION_MANAGER_TASK_TYPE,
                 clientSurface: SESSION_MANAGER_CLIENT_SURFACE,
-            },
+            }),
             controlState: backendSession?.controlState
                 || backendSession?.metadata?.controlState
                 || {},
