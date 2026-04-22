@@ -793,6 +793,68 @@ describe('AgentWorkloadService', () => {
         }));
     });
 
+    test('schedules follow-up stages from the prior scheduled slot instead of completion time', async () => {
+        jest.useFakeTimers();
+        try {
+            jest.setSystemTime(new Date('2026-04-01T09:25:00.000Z'));
+
+            const workload = {
+                id: 'workload-cadence-1',
+                ownerId: 'phill',
+                sessionId: 'session-1',
+                title: 'Brutal builder cadence',
+                prompt: 'Create the first pass.',
+                trigger: { type: 'manual' },
+                policy: {
+                    executionProfile: 'default',
+                    toolIds: [],
+                    maxRounds: 3,
+                    maxToolCalls: 10,
+                    maxDurationMs: 120000,
+                    allowSideEffects: false,
+                },
+                stages: [
+                    {
+                        when: 'on_success',
+                        delayMs: 10 * 60 * 1000,
+                        prompt: 'Revise the prior pass.',
+                        metadata: {},
+                    },
+                ],
+            };
+            const run = {
+                id: 'run-cadence-1',
+                workload,
+                stageIndex: -1,
+                scheduledFor: '2026-04-01T09:00:00.000Z',
+                prompt: workload.prompt,
+            };
+
+            conversationRunService.runChatTurn.mockResolvedValue({
+                outputText: 'First pass done.',
+                response: { id: 'resp-cadence-1' },
+                execution: { trace: { steps: 1 } },
+            });
+            store.completeRun.mockResolvedValue({ id: 'run-cadence-1', status: 'completed' });
+            store.enqueueRun.mockResolvedValue({
+                id: 'run-cadence-2',
+                workloadId: 'workload-cadence-1',
+                stageIndex: 0,
+                reason: 'followup',
+            });
+
+            await service.executeClaimedRun(run, 'worker-1');
+
+            expect(store.enqueueRun).toHaveBeenCalledWith(expect.objectContaining({
+                reason: 'followup',
+                stageIndex: 0,
+                scheduledFor: new Date('2026-04-01T09:25:00.000Z'),
+            }));
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
     test('passes prior stage output into the next stage and narrows tool usage', async () => {
         const workload = {
             id: 'workload-2',

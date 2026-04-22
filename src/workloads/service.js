@@ -1211,7 +1211,12 @@ class AgentWorkloadService {
             return null;
         }
 
-        const scheduledFor = new Date(Date.now() + Number(stage.delayMs || 0));
+        const delayMs = Number(stage.delayMs || 0);
+        const priorScheduledAt = new Date(run?.scheduledFor || Date.now());
+        const baseTime = Number.isNaN(priorScheduledAt.getTime())
+            ? Date.now()
+            : priorScheduledAt.getTime();
+        const scheduledFor = new Date(Math.max(Date.now(), baseTime + Math.max(0, delayMs)));
         const followupRun = await this.store.enqueueRun({
             workloadId: workload.id,
             ownerId: workload.ownerId,
