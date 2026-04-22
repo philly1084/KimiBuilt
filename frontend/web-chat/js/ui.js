@@ -2440,6 +2440,18 @@ class UIHelpers {
         const displayTitle = String(message?.reasoningDisplayTitle || '').trim();
         const displayIcon = String(message?.reasoningDisplayIcon || '').trim();
         const displayAnimated = message?.reasoningDisplayAnimated === true;
+        const hasManagedAppProgress = Boolean(
+            message?.managedAppProgressState
+            || message?.metadata?.managedAppProgressState,
+        );
+        const isLegacyManagedAppDisplay = hasManagedAppProgress && (
+            ['Build progress', 'Build status'].includes(displayTitle)
+            || ['activity', 'badge-check', 'triangle-alert'].includes(displayIcon)
+        );
+
+        if (isLegacyManagedAppDisplay) {
+            return null;
+        }
 
         if (displayText && (displaySource === 'stream' || displaySource === 'final' || displaySource === 'generated')) {
             const fullText = displayFullText || summary || displayText;
@@ -2555,6 +2567,68 @@ class UIHelpers {
         };
     }
 
+    getManagedAppProgressState(message = null) {
+        const rawProgress = message?.managedAppProgressState
+            || message?.metadata?.managedAppProgressState
+            || null;
+        if (!rawProgress || typeof rawProgress !== 'object') {
+            return null;
+        }
+
+        const steps = (Array.isArray(rawProgress.steps) ? rawProgress.steps : [])
+            .map((step, index) => {
+                const title = String(step?.title || '').trim();
+                if (!title) {
+                    return null;
+                }
+
+                return {
+                    id: String(step?.id || `managed-app-step-${index + 1}`).trim() || `managed-app-step-${index + 1}`,
+                    title,
+                    status: this.normalizeAssistantProgressStepStatus(step?.status),
+                };
+            })
+            .filter(Boolean);
+        if (steps.length === 0) {
+            return null;
+        }
+
+        const totalSteps = Number.isFinite(Number(rawProgress.totalSteps)) && Number(rawProgress.totalSteps) > 0
+            ? Number(rawProgress.totalSteps)
+            : steps.length;
+        const completedSteps = steps.filter((step) => ['completed', 'skipped'].includes(step.status)).length;
+        const resolvedSteps = steps.filter((step) => ['completed', 'failed', 'skipped'].includes(step.status)).length;
+        let activeStepIndex = steps.findIndex((step) => step.status === 'in_progress');
+        if (activeStepIndex < 0 && resolvedSteps < totalSteps) {
+            activeStepIndex = steps.findIndex((step) => step.status === 'pending');
+        }
+
+        const phase = String(rawProgress.phase || '').trim().toLowerCase() || 'updated';
+        const summary = String(rawProgress.summary || '').trim() || 'Managed app status updated.';
+        const detail = String(rawProgress.detail || '').trim();
+        const terminal = rawProgress.terminal === true;
+        const live = rawProgress.live !== false && terminal !== true;
+        const progressUnits = terminal
+            ? totalSteps
+            : Math.min(totalSteps, completedSteps + (activeStepIndex >= 0 ? 0.45 : 0));
+        const percent = totalSteps > 0
+            ? Math.max(8, Math.min(100, Math.round((progressUnits / totalSteps) * 100)))
+            : 0;
+
+        return {
+            phase,
+            summary,
+            detail,
+            terminal,
+            live,
+            totalSteps,
+            completedSteps,
+            activeStepIndex,
+            percent,
+            steps,
+        };
+    }
+
     buildProgressTrackerMarkup(message = null, isStreaming = false) {
         const progressState = this.getAssistantProgressState(message);
         if (!progressState) {
@@ -2592,6 +2666,60 @@ class UIHelpers {
                     <div class="assistant-progress-card__header">
                         <div class="assistant-progress-card__copy">
                             <span class="assistant-progress-card__eyebrow">${progressState.estimated ? 'Estimated Steps' : 'Progress'}</span>
+                            <span class="assistant-progress-card__summary">${this.escapeHtml(progressState.summary)}</span>
+                        </div>
+                        ${liveBadge}
+                    </div>
+                    ${progressState.detail ? `<div class="assistant-progress-card__detail">${this.escapeHtml(progressState.detail)}</div>` : ''}
+                    <div class="assistant-progress-card__bar" aria-hidden="true">
+                        <span style="width:${progressState.percent}%"></span>
+                    </div>
+                    <ol class="assistant-progress-card__steps">${stepsHtml}</ol>
+                    <div class="assistant-progress-card__note">${this.escapeHtml(noteText)}</div>
+                </div>
+            </div>
+        `;
+    }
+
+    buildManagedAppProgressMarkup(message = null, isStreaming = false) {
+        const progressState = this.getManagedAppProgressState(message);
+        if (!progressState) {
+            return '';
+        }
+
+        const liveBadge = progressState.terminal
+            ? '<span class="assistant-progress-card__badge">Final</span>'
+            : '<span class="assistant-progress-card__badge assistant-progress-card__badge--live"><span class="assistant-progress-card__pulse" aria-hidden="true"></span>Live</span>';
+        const noteText = progressState.terminal
+            ? (['build_failed', 'deploy_failed'].includes(progressState.phase)
+                ? 'The managed app flow stopped before the site was fully live.'
+                : 'The managed app flow finished with the latest deployment state.')
+            : 'Live deployment updates replace the previous build status in this bubble.';
+        const stepsHtml = progressState.steps.map((step, index) => {
+            const isActive = index === progressState.activeStepIndex;
+            const stateLabel = ({
+                completed: 'Done',
+                in_progress: 'Working',
+                failed: 'Failed',
+                skipped: 'Skipped',
+                pending: 'Pending',
+            })[step.status] || 'Pending';
+
+            return `
+                <li class="assistant-progress-card__step assistant-progress-card__step--${step.status}${isActive ? ' is-active' : ''}">
+                    <span class="assistant-progress-card__step-dot" aria-hidden="true"></span>
+                    <span class="assistant-progress-card__step-title">${this.escapeHtml(step.title)}</span>
+                    <span class="assistant-progress-card__step-state">${this.escapeHtml(stateLabel)}</span>
+                </li>
+            `;
+        }).join('');
+
+        return `
+            <div class="assistant-progress-card assistant-progress-card--managed-app${progressState.live || isStreaming ? ' is-live' : ''}">
+                <div class="assistant-progress-card__surface" aria-live="polite">
+                    <div class="assistant-progress-card__header">
+                        <div class="assistant-progress-card__copy">
+                            <span class="assistant-progress-card__eyebrow">${progressState.terminal ? 'Build Status' : 'Build Progress'}</span>
                             <span class="assistant-progress-card__summary">${this.escapeHtml(progressState.summary)}</span>
                         </div>
                         ${liveBadge}
@@ -2687,11 +2815,12 @@ class UIHelpers {
             : { content: messageOrContent };
         const effectiveStreaming = isStreaming === true || message?.isStreaming === true;
         const content = this.resolveAssistantVisibleContent(message);
+        const managedAppProgress = this.buildManagedAppProgressMarkup(message, effectiveStreaming);
         const progressTracker = this.buildProgressTrackerMarkup(message, effectiveStreaming);
         const reasoningRibbon = this.buildReasoningRibbonMarkup(message, effectiveStreaming);
         if (!content) {
             return {
-                html: `${progressTracker}${reasoningRibbon || (effectiveStreaming ? this.buildStreamingPlaceholderMarkup(message) : '')}`,
+                html: `${managedAppProgress}${progressTracker}${reasoningRibbon || (effectiveStreaming ? this.buildStreamingPlaceholderMarkup(message) : '')}`,
                 variant: 'default',
             };
         }
@@ -2735,7 +2864,7 @@ class UIHelpers {
             }
 
             return {
-                html: `${progressTracker}${reasoningRibbon}${html}`,
+                html: `${managedAppProgress}${progressTracker}${reasoningRibbon}${html}`,
                 variant: 'agent-brief',
             };
         }
@@ -2748,7 +2877,7 @@ class UIHelpers {
         }
 
         return {
-            html: `${progressTracker}${reasoningRibbon}${html}`,
+            html: `${managedAppProgress}${progressTracker}${reasoningRibbon}${html}`,
             variant: 'default',
         };
     }

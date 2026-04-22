@@ -353,6 +353,7 @@ class ChatApp {
         this.lastResumeSyncAt = 0;
         this.connectionStatus = 'checking';
         this.managedAppProgressByKey = new Map();
+        this.managedAppHostMessageByKey = new Map();
         
         this.init();
     }
@@ -2107,6 +2108,38 @@ class ChatApp {
         return String(phase || '').trim().toLowerCase() || 'updated';
     }
 
+    buildManagedAppProgressKey(value = {}) {
+        if (typeof value === 'string') {
+            const normalized = String(value || '').trim();
+            return normalized ? `managed-app:${normalized}` : 'managed-app:unknown';
+        }
+
+        const appId = String(value?.app?.id || value?.metadata?.managedAppId || value?.managedAppId || '').trim();
+        const appSlug = String(value?.app?.slug || value?.metadata?.managedAppSlug || value?.managedAppSlug || '').trim();
+        return `managed-app:${appId || appSlug || 'unknown'}`;
+    }
+
+    getManagedAppMessageMeta(message = null) {
+        const metadata = message?.metadata && typeof message.metadata === 'object'
+            ? message.metadata
+            : {};
+        const appId = String(metadata.managedAppId || message?.managedAppId || '').trim();
+        const appSlug = String(metadata.managedAppSlug || message?.managedAppSlug || '').trim();
+        const publicHost = String(metadata.publicHost || message?.publicHost || '').trim();
+        const phase = this.normalizeManagedAppPhase(metadata.managedAppPhase || message?.managedAppPhase || '');
+
+        return {
+            appId,
+            appSlug,
+            publicHost,
+            phase,
+            key: this.buildManagedAppProgressKey({
+                managedAppId: appId,
+                managedAppSlug: appSlug,
+            }),
+        };
+    }
+
     isManagedAppTerminalPhase(phase = '') {
         return [
             'live',
@@ -2116,15 +2149,7 @@ class ChatApp {
     }
 
     buildManagedAppEventMessageId(event = {}) {
-        const appId = String(event?.app?.id || event?.app?.slug || 'managed-app').trim();
-        const buildRunId = String(event?.buildRun?.id || '').trim();
-        const phase = this.normalizeManagedAppPhase(event?.phase);
-
-        if (['created', 'updated'].includes(phase)) {
-            return `managed-app:${appId}:provisioning`;
-        }
-
-        return `managed-app:${appId}:${buildRunId || 'lifecycle'}`;
+        return this.buildManagedAppProgressKey(event);
     }
 
     buildManagedAppProgressDetail(event = {}) {
@@ -2173,6 +2198,220 @@ class ChatApp {
         }).filter(Boolean).join('\n');
     }
 
+    buildManagedAppProgressState(event = {}) {
+        const phase = this.normalizeManagedAppPhase(event?.phase);
+        const summary = String(event?.summary || '').trim() || 'Managed app status updated.';
+        const detail = this.buildManagedAppProgressDetail(event);
+        const terminal = this.isManagedAppTerminalPhase(phase);
+        const steps = [
+            { id: 'prepare', title: 'Prepare app record', status: 'pending' },
+            { id: 'build', title: 'Build and publish image', status: 'pending' },
+            { id: 'deploy', title: 'Roll out deployment', status: 'pending' },
+            { id: 'verify', title: 'Verify public endpoint', status: 'pending' },
+        ];
+
+        const mark = (stepId, status) => {
+            const step = steps.find((entry) => entry.id === stepId);
+            if (step) {
+                step.status = status;
+            }
+        };
+
+        switch (phase) {
+            case 'created':
+            case 'updated':
+                mark('prepare', 'completed');
+                mark('build', 'in_progress');
+                break;
+            case 'built':
+                mark('prepare', 'completed');
+                mark('build', 'completed');
+                mark('deploy', 'pending');
+                break;
+            case 'deploying':
+                mark('prepare', 'completed');
+                mark('build', 'completed');
+                mark('deploy', 'in_progress');
+                break;
+            case 'tls_ready':
+            case 'pending_https':
+                mark('prepare', 'completed');
+                mark('build', 'completed');
+                mark('deploy', 'completed');
+                mark('verify', 'in_progress');
+                break;
+            case 'live':
+                steps.forEach((step) => {
+                    step.status = 'completed';
+                });
+                break;
+            case 'build_failed':
+                mark('prepare', 'completed');
+                mark('build', 'failed');
+                mark('deploy', 'skipped');
+                mark('verify', 'skipped');
+                break;
+            case 'deploy_failed':
+                mark('prepare', 'completed');
+                mark('build', 'completed');
+                mark('deploy', 'failed');
+                mark('verify', 'skipped');
+                break;
+            default:
+                mark('prepare', 'in_progress');
+                break;
+        }
+
+        return {
+            phase,
+            summary,
+            detail,
+            estimated: false,
+            live: !terminal,
+            terminal,
+            totalSteps: steps.length,
+            completedSteps: steps.filter((step) => ['completed', 'skipped'].includes(step.status)).length,
+            steps,
+        };
+    }
+
+    buildManagedAppProgressStateFromMessage(message = null) {
+        const meta = this.getManagedAppMessageMeta(message);
+        return this.buildManagedAppProgressState({
+            phase: meta.phase,
+            summary: String(message?.content || '').trim(),
+            app: {
+                id: meta.appId,
+                slug: meta.appSlug,
+                publicHost: meta.publicHost,
+            },
+        });
+    }
+
+    findManagedAppHostMessage(sessionId, progressKey = '') {
+        const normalizedSessionId = String(sessionId || '').trim();
+        const normalizedKey = String(progressKey || '').trim();
+        if (!normalizedSessionId || !normalizedKey) {
+            return null;
+        }
+
+        const mappedMessageId = String(this.managedAppHostMessageByKey.get(normalizedKey) || '').trim();
+        if (mappedMessageId) {
+            const mappedMessage = this.getSessionMessage(normalizedSessionId, mappedMessageId);
+            if (mappedMessage) {
+                return mappedMessage;
+            }
+            this.managedAppHostMessageByKey.delete(normalizedKey);
+        }
+
+        const messages = sessionManager.getMessages(normalizedSessionId);
+        return messages.find((message) => (
+            message?.role === 'assistant'
+            && message?.metadata?.managedAppHost === true
+            && this.getManagedAppMessageMeta(message).key === normalizedKey
+        )) || null;
+    }
+
+    resolveManagedAppHostMessageId(sessionId, event = {}) {
+        const normalizedSessionId = String(sessionId || '').trim();
+        const progressKey = this.buildManagedAppProgressKey(event);
+        const currentSessionId = String(sessionManager.currentSessionId || '').trim();
+        const currentStreamMessageId = String(this.currentStreamingMessageId || '').trim();
+
+        const existingHost = this.findManagedAppHostMessage(normalizedSessionId, progressKey);
+        if (existingHost?.id) {
+            this.managedAppHostMessageByKey.set(progressKey, existingHost.id);
+            return existingHost.id;
+        }
+
+        if (normalizedSessionId && currentSessionId === normalizedSessionId && currentStreamMessageId) {
+            this.managedAppHostMessageByKey.set(progressKey, currentStreamMessageId);
+            return currentStreamMessageId;
+        }
+
+        return '';
+    }
+
+    rebuildManagedAppHostMessageIndex(messages = []) {
+        this.managedAppHostMessageByKey.clear();
+        (Array.isArray(messages) ? messages : []).forEach((message) => {
+            if (message?.role !== 'assistant' || message?.metadata?.managedAppHost !== true) {
+                return;
+            }
+
+            const meta = this.getManagedAppMessageMeta(message);
+            if (meta.key && message.id) {
+                this.managedAppHostMessageByKey.set(meta.key, message.id);
+            }
+        });
+    }
+
+    normalizeManagedAppLifecycleMessages(messages = []) {
+        const sourceMessages = Array.isArray(messages) ? messages : [];
+        if (sourceMessages.length === 0) {
+            this.rebuildManagedAppHostMessageIndex([]);
+            return [];
+        }
+
+        const hostedKeys = new Set(sourceMessages
+            .filter((message) => message?.role === 'assistant' && message?.metadata?.managedAppHost === true)
+            .map((message) => this.getManagedAppMessageMeta(message).key)
+            .filter(Boolean));
+        const lifecycleGroups = new Map();
+
+        sourceMessages.forEach((message, index) => {
+            if (message?.role !== 'assistant' || message?.metadata?.managedAppLifecycle !== true) {
+                return;
+            }
+
+            const meta = this.getManagedAppMessageMeta(message);
+            if (!meta.key) {
+                return;
+            }
+
+            const group = lifecycleGroups.get(meta.key) || {
+                entries: [],
+                latestIndex: index,
+            };
+            group.entries.push(message);
+            group.latestIndex = index;
+            lifecycleGroups.set(meta.key, group);
+        });
+
+        const normalizedMessages = [];
+        sourceMessages.forEach((message, index) => {
+            if (message?.role === 'assistant' && message?.metadata?.managedAppLifecycle === true) {
+                const meta = this.getManagedAppMessageMeta(message);
+                const group = lifecycleGroups.get(meta.key);
+                if (!group || hostedKeys.has(meta.key) || group.latestIndex !== index) {
+                    return;
+                }
+
+                const latestMessage = group.entries[group.entries.length - 1];
+                const progressState = this.buildManagedAppProgressStateFromMessage(latestMessage);
+                normalizedMessages.push({
+                    ...latestMessage,
+                    ...this.clearLegacyManagedAppReasoningDisplay(latestMessage),
+                    id: meta.key,
+                    content: '',
+                    displayContent: '',
+                    isStreaming: progressState.terminal !== true,
+                    managedAppProgressState: progressState,
+                    metadata: {
+                        ...(latestMessage.metadata || {}),
+                        managedAppProgressState: progressState,
+                    },
+                });
+                return;
+            }
+
+            normalizedMessages.push(message);
+        });
+
+        this.rebuildManagedAppHostMessageIndex(normalizedMessages);
+        return normalizedMessages;
+    }
+
     getManagedAppProgressVisuals(phase = '') {
         const normalizedPhase = this.normalizeManagedAppPhase(phase);
         if (['build_failed', 'deploy_failed'].includes(normalizedPhase)) {
@@ -2198,6 +2437,37 @@ class ChatApp {
         };
     }
 
+    isLegacyManagedAppReasoningDisplay(message = null) {
+        const title = String(message?.reasoningDisplayTitle || '').trim().toLowerCase();
+        const icon = String(message?.reasoningDisplayIcon || '').trim().toLowerCase();
+        const source = String(message?.reasoningDisplaySource || '').trim().toLowerCase();
+
+        if (!title && !icon) {
+            return false;
+        }
+
+        const looksLikeBuildProgress = title === 'build progress'
+            || title === 'build status'
+            || ['activity', 'badge-check', 'triangle-alert'].includes(icon);
+
+        return looksLikeBuildProgress && ['stream', 'final'].includes(source);
+    }
+
+    clearLegacyManagedAppReasoningDisplay(message = null) {
+        if (!this.isLegacyManagedAppReasoningDisplay(message)) {
+            return {};
+        }
+
+        return {
+            reasoningDisplaySource: '',
+            reasoningDisplayText: '',
+            reasoningDisplayFullText: '',
+            reasoningDisplayTitle: '',
+            reasoningDisplayIcon: '',
+            reasoningDisplayAnimated: false,
+        };
+    }
+
     applyManagedAppProgressEvent(sessionId, event = {}) {
         const normalizedSessionId = String(sessionId || '').trim();
         if (!normalizedSessionId) {
@@ -2209,9 +2479,11 @@ class ChatApp {
             return null;
         }
 
-        const messageId = this.buildManagedAppEventMessageId(event);
+        const progressKey = this.buildManagedAppProgressKey(event);
+        const hostMessageId = this.resolveManagedAppHostMessageId(normalizedSessionId, event);
+        const messageId = hostMessageId || this.buildManagedAppEventMessageId(event);
         const phase = this.normalizeManagedAppPhase(event?.phase);
-        const stateKey = messageId;
+        const stateKey = progressKey;
         const existingState = this.managedAppProgressByKey.get(stateKey) || {
             steps: [],
         };
@@ -2227,46 +2499,44 @@ class ChatApp {
         const nextState = {
             ...existingState,
             appId: String(event?.app?.id || event?.app?.slug || '').trim(),
+            appSlug: String(event?.app?.slug || '').trim(),
             buildRunId: String(event?.buildRun?.id || '').trim(),
             sessionId: normalizedSessionId,
             phase,
             detail: this.buildManagedAppProgressDetail(event),
+            progressState: this.buildManagedAppProgressState(event),
             steps: nextSteps.slice(-6),
             terminal: this.isManagedAppTerminalPhase(phase),
         };
         this.managedAppProgressByKey.set(stateKey, nextState);
 
         const existingMessage = this.getSessionMessage(normalizedSessionId, messageId) || {};
-        const progressText = this.buildManagedAppProgressText(nextState);
-        const visuals = this.getManagedAppProgressVisuals(phase);
         const nextMessage = this.upsertSessionMessage(normalizedSessionId, {
             ...existingMessage,
+            ...this.clearLegacyManagedAppReasoningDisplay(existingMessage),
             id: messageId,
             role: 'assistant',
-            content: summary,
+            content: hostMessageId ? String(existingMessage.content || '') : '',
+            displayContent: hostMessageId ? existingMessage.displayContent : '',
             isStreaming: nextState.terminal !== true,
-            liveState: nextState.terminal ? null : {
-                phase: 'thinking',
-                detail: nextState.detail,
-            },
-            reasoningDisplaySource: visuals.source,
-            reasoningDisplayText: progressText,
-            reasoningDisplayFullText: progressText,
-            reasoningDisplayTitle: visuals.title,
-            reasoningDisplayIcon: visuals.icon,
-            reasoningDisplayAnimated: nextState.terminal !== true,
+            managedAppProgressState: nextState.progressState,
             timestamp: event?.timestamp || existingMessage.timestamp || new Date().toISOString(),
             metadata: {
                 ...(existingMessage.metadata || {}),
+                managedAppHost: Boolean(hostMessageId),
                 managedAppLifecycle: true,
                 managedAppProgressActive: nextState.terminal !== true,
                 managedAppPhase: phase,
                 managedAppId: nextState.appId,
+                managedAppSlug: nextState.appSlug,
                 buildRunId: nextState.buildRunId,
+                publicHost: String(event?.app?.publicHost || existingMessage.metadata?.publicHost || '').trim(),
+                managedAppProgressState: nextState.progressState,
             },
         });
 
         if (nextMessage) {
+            this.persistSessionMessageIfNeeded(normalizedSessionId, nextMessage);
             this.renderOrReplaceMessage(nextMessage);
             if (nextState.terminal) {
                 uiHelpers.markMessageSettled(nextMessage.id);
@@ -2283,18 +2553,32 @@ class ChatApp {
         }
 
         await this.refreshSessionSummaries();
+        const isCurrentSession = sessionManager.currentSessionId === sessionId;
+        let renderedMessage = null;
 
-        if (sessionManager.currentSessionId === sessionId) {
-            const previousMessages = [...sessionManager.getMessages(sessionId)];
-            await this.loadSessionMessages(sessionId, {
-                notifyNewAssistant: true,
-                previousMessages,
-            });
-            this.applyManagedAppProgressEvent(sessionId, event);
+        if (isCurrentSession) {
+            const progressKey = this.buildManagedAppProgressKey(event);
+            const hasExistingHost = Boolean(this.findManagedAppHostMessage(sessionId, progressKey));
+            if (!this.currentStreamingMessageId && !hasExistingHost) {
+                const previousMessages = [...sessionManager.getMessages(sessionId)];
+                await this.loadSessionMessages(sessionId, {
+                    notifyNewAssistant: true,
+                    previousMessages,
+                });
+            }
+            renderedMessage = this.applyManagedAppProgressEvent(sessionId, event);
         }
 
         const summary = String(event?.summary || '').trim();
-        if (summary) {
+        if (summary && !isCurrentSession) {
+            const toastTitle = String(event?.phase || 'managed-app')
+                .trim()
+                .replace(/[_-]+/g, ' ');
+            const toastTone = ['build_failed', 'deploy_failed'].includes(String(event?.phase || '').trim().toLowerCase())
+                ? 'error'
+                : 'info';
+            uiHelpers.showToast(summary, toastTone, toastTitle || 'managed app');
+        } else if (summary && !renderedMessage) {
             const toastTitle = String(event?.phase || 'managed-app')
                 .trim()
                 .replace(/[_-]+/g, ' ');
@@ -4339,9 +4623,10 @@ class ChatApp {
     syncAnnotatedSurveyStates(sessionId) {
         const messages = this.reconcilePendingCheckpointMessages(sessionId);
         const annotatedMessages = this.annotateSurveyStates(messages);
-        sessionManager.sessionMessages.set(sessionId, annotatedMessages);
+        const normalizedMessages = this.normalizeManagedAppLifecycleMessages(annotatedMessages);
+        sessionManager.sessionMessages.set(sessionId, normalizedMessages);
         sessionManager.saveToStorage();
-        return annotatedMessages;
+        return normalizedMessages;
     }
 
     async recoverPendingSurveyFromBackend(sessionId, parentMessageId = '') {
