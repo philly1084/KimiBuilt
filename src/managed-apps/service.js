@@ -8,6 +8,7 @@ const { broadcastToAdmins, broadcastToSession } = require('../realtime-hub');
 const { createResponse } = require('../openai-client');
 const { extractResponseText } = require('../artifacts/artifact-service');
 const { parseLenientJson } = require('../utils/lenient-json');
+const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 const { sessionStore } = require('../session-store');
 const { managedAppStore } = require('./store');
 const { GiteaClient } = require('./gitea-client');
@@ -496,11 +497,12 @@ function buildManagedAppStatusSummary(app = null, buildRun = null, phase = '', d
     const repoRef = normalizeText(app?.repoOwner) && normalizeText(app?.repoName)
         ? `${normalizeText(app.repoOwner)}/${normalizeText(app.repoName)}`
         : '';
-    const imageRef = normalizeText(app?.metadata?.lastImage || deployment?.image || '');
+    const imageRef = normalizeText(app?.metadata?.liveDeploy?.lastImage || app?.metadata?.lastImage || deployment?.image || '');
     const buildError = normalizeText(
         buildRun?.error?.message
         || buildRun?.metadata?.payload?.error
         || buildRun?.metadata?.payload?.message
+        || app?.metadata?.liveDeploy?.lastError
         || deployment?.rollout?.error
         || deployment?.https?.error,
     );
@@ -529,6 +531,237 @@ function buildManagedAppStatusSummary(app = null, buildRun = null, phase = '', d
         default:
             return `${appName} status changed to ${normalizeText(phase) || 'updated'}.`;
     }
+}
+
+function hasOwnInput(input = {}, key = '') {
+    return Boolean(input && Object.prototype.hasOwnProperty.call(input, key));
+}
+
+function hasAnyOwnInput(input = {}, keys = []) {
+    return (Array.isArray(keys) ? keys : []).some((key) => hasOwnInput(input, key));
+}
+
+function normalizeStringArray(values = [], limit = 8) {
+    const seen = new Set();
+    return (Array.isArray(values) ? values : [])
+        .map((value) => normalizeText(typeof value === 'string' ? value : value?.summary || value?.value || value?.text || ''))
+        .filter((value) => {
+            if (!value || seen.has(value.toLowerCase())) {
+                return false;
+            }
+            seen.add(value.toLowerCase());
+            return true;
+        })
+        .slice(0, Math.max(1, Number(limit) || 8));
+}
+
+function normalizeComparableName(value = '') {
+    return baseSlugify(value || '').replace(/-/g, '');
+}
+
+function valuesLooselyMatch(left = '', right = '') {
+    const normalizedLeft = normalizeComparableName(left);
+    const normalizedRight = normalizeComparableName(right);
+    if (!normalizedLeft || !normalizedRight) {
+        return false;
+    }
+    return normalizedLeft === normalizedRight
+        || normalizedLeft.includes(normalizedRight)
+        || normalizedRight.includes(normalizedLeft);
+}
+
+function mergeMetadataSection(base = {}, updates = {}) {
+    return {
+        ...(base && typeof base === 'object' ? base : {}),
+        ...(updates && typeof updates === 'object' ? updates : {}),
+    };
+}
+
+function normalizeManagedAppMetadata(metadata = {}, app = {}, options = {}) {
+    const source = metadata && typeof metadata === 'object' ? metadata : {};
+    const deployConfig = options.deployConfig && typeof options.deployConfig === 'object'
+        ? options.deployConfig
+        : {};
+    const managedAppsConfig = options.managedAppsConfig && typeof options.managedAppsConfig === 'object'
+        ? options.managedAppsConfig
+        : {};
+    const project = source.project && typeof source.project === 'object' ? source.project : {};
+    const repoState = source.repoState && typeof source.repoState === 'object' ? source.repoState : {};
+    const desiredDeploy = source.desiredDeploy && typeof source.desiredDeploy === 'object' ? source.desiredDeploy : {};
+    const liveDeploy = source.liveDeploy && typeof source.liveDeploy === 'object' ? source.liveDeploy : {};
+    const containerPort = Number(
+        desiredDeploy.containerPort
+        || source.requestedContainerPort
+        || managedAppsConfig.defaultContainerPort
+        || 80
+    );
+    const normalizedContainerPort = Number.isFinite(containerPort) && containerPort > 0 ? containerPort : 80;
+
+    return {
+        ...source,
+        project: {
+            summary: normalizeText(project.summary),
+            currentObjective: normalizeText(project.currentObjective || app?.sourcePrompt),
+            nextStep: normalizeText(project.nextStep),
+            openItems: normalizeStringArray(project.openItems, 8),
+            decisions: normalizeStringArray(project.decisions, 8),
+            lastUserIntent: normalizeText(project.lastUserIntent || app?.sourcePrompt),
+            lastActivityAt: normalizeText(project.lastActivityAt || app?.updatedAt || app?.createdAt),
+        },
+        repoState: {
+            initialized: repoState.initialized === true
+                || Boolean(normalizeText(app?.repoUrl || app?.repoCloneUrl || app?.repoSshUrl || ''))
+                || normalizeStringArray(repoState.lastSeededPaths || source.lastSeededPaths, 24).length > 0,
+            lastSeededPaths: normalizeStringArray(repoState.lastSeededPaths || source.lastSeededPaths, 24),
+            lastCommitSha: normalizeText(repoState.lastCommitSha),
+            lastCommitAt: normalizeText(repoState.lastCommitAt),
+            lastBuildRunId: normalizeText(repoState.lastBuildRunId),
+        },
+        desiredDeploy: {
+            deploymentTarget: 'ssh',
+            namespace: normalizeText(desiredDeploy.namespace || app?.namespace),
+            publicHost: normalizeText(desiredDeploy.publicHost || app?.publicHost),
+            imageRepo: normalizeText(desiredDeploy.imageRepo || app?.imageRepo),
+            defaultBranch: normalizeText(desiredDeploy.defaultBranch || app?.defaultBranch || managedAppsConfig.defaultBranch || 'main'),
+            containerPort: normalizedContainerPort,
+            ingressClassName: normalizeText(desiredDeploy.ingressClassName || deployConfig.ingressClassName),
+            tlsClusterIssuer: normalizeText(desiredDeploy.tlsClusterIssuer || deployConfig.tlsClusterIssuer),
+            registryPullSecretName: normalizeText(desiredDeploy.registryPullSecretName || managedAppsConfig.registryPullSecretName),
+        },
+        liveDeploy: {
+            lastImage: normalizeText(liveDeploy.lastImage || source.lastImage),
+            rollout: liveDeploy.rollout === true,
+            ingress: liveDeploy.ingress === true,
+            tls: liveDeploy.tls === true,
+            https: liveDeploy.https === true,
+            lastVerifiedAt: normalizeText(liveDeploy.lastVerifiedAt),
+            lastError: normalizeText(liveDeploy.lastError),
+            lastDeployResult: liveDeploy.lastDeployResult || source.lastDeployResult || null,
+        },
+        deploymentTarget: 'ssh',
+        requestedContainerPort: normalizedContainerPort,
+        lastSeededPaths: normalizeStringArray(repoState.lastSeededPaths || source.lastSeededPaths, 24),
+        lastImage: normalizeText(liveDeploy.lastImage || source.lastImage),
+        lastDeployResult: liveDeploy.lastDeployResult || source.lastDeployResult || null,
+    };
+}
+
+function buildManagedAppMetadata(existingMetadata = {}, app = {}, options = {}) {
+    const normalized = normalizeManagedAppMetadata(existingMetadata, app, options);
+    const projectPatch = options.project && typeof options.project === 'object' ? options.project : {};
+    const repoStatePatch = options.repoState && typeof options.repoState === 'object' ? options.repoState : {};
+    const desiredDeployPatch = options.desiredDeploy && typeof options.desiredDeploy === 'object' ? options.desiredDeploy : {};
+    const liveDeployPatch = options.liveDeploy && typeof options.liveDeploy === 'object' ? options.liveDeploy : {};
+
+    const merged = {
+        ...normalized,
+        project: {
+            ...normalized.project,
+            ...projectPatch,
+            openItems: normalizeStringArray(
+                hasOwnInput(projectPatch, 'openItems') ? projectPatch.openItems : normalized.project.openItems,
+                8,
+            ),
+            decisions: normalizeStringArray(
+                hasOwnInput(projectPatch, 'decisions') ? projectPatch.decisions : normalized.project.decisions,
+                8,
+            ),
+        },
+        repoState: {
+            ...normalized.repoState,
+            ...repoStatePatch,
+            initialized: repoStatePatch.initialized === true || normalized.repoState.initialized === true,
+            lastSeededPaths: normalizeStringArray(
+                hasOwnInput(repoStatePatch, 'lastSeededPaths') ? repoStatePatch.lastSeededPaths : normalized.repoState.lastSeededPaths,
+                24,
+            ),
+        },
+        desiredDeploy: {
+            ...normalized.desiredDeploy,
+            ...desiredDeployPatch,
+            deploymentTarget: 'ssh',
+        },
+        liveDeploy: {
+            ...normalized.liveDeploy,
+            ...liveDeployPatch,
+        },
+    };
+
+    merged.project.summary = normalizeText(merged.project.summary);
+    merged.project.currentObjective = normalizeText(merged.project.currentObjective);
+    merged.project.nextStep = normalizeText(merged.project.nextStep);
+    merged.project.lastUserIntent = normalizeText(merged.project.lastUserIntent);
+    merged.project.lastActivityAt = normalizeText(merged.project.lastActivityAt);
+    merged.repoState.lastCommitSha = normalizeText(merged.repoState.lastCommitSha);
+    merged.repoState.lastCommitAt = normalizeText(merged.repoState.lastCommitAt);
+    merged.repoState.lastBuildRunId = normalizeText(merged.repoState.lastBuildRunId);
+    merged.desiredDeploy.namespace = normalizeText(merged.desiredDeploy.namespace);
+    merged.desiredDeploy.publicHost = normalizeText(merged.desiredDeploy.publicHost);
+    merged.desiredDeploy.imageRepo = normalizeText(merged.desiredDeploy.imageRepo);
+    merged.desiredDeploy.defaultBranch = normalizeText(merged.desiredDeploy.defaultBranch || 'main') || 'main';
+    merged.desiredDeploy.ingressClassName = normalizeText(merged.desiredDeploy.ingressClassName);
+    merged.desiredDeploy.tlsClusterIssuer = normalizeText(merged.desiredDeploy.tlsClusterIssuer);
+    merged.desiredDeploy.registryPullSecretName = normalizeText(merged.desiredDeploy.registryPullSecretName);
+    merged.liveDeploy.lastImage = normalizeText(merged.liveDeploy.lastImage);
+    merged.liveDeploy.lastVerifiedAt = normalizeText(merged.liveDeploy.lastVerifiedAt);
+    merged.liveDeploy.lastError = normalizeText(merged.liveDeploy.lastError);
+
+    merged.deploymentTarget = 'ssh';
+    merged.requestedContainerPort = Number(merged.desiredDeploy.containerPort || merged.requestedContainerPort || 80) || 80;
+    merged.lastSeededPaths = [...merged.repoState.lastSeededPaths];
+    merged.lastImage = merged.liveDeploy.lastImage;
+    merged.lastDeployResult = merged.liveDeploy.lastDeployResult || null;
+
+    return merged;
+}
+
+function deriveNextStepForLifecycle(phase = '', { deployRequested = false, healthy = null } = {}) {
+    switch (normalizeText(phase).toLowerCase()) {
+        case 'created':
+        case 'updated':
+            return deployRequested
+                ? 'Wait for the remote Gitea build to finish, then continue deployment through the managed-app control plane.'
+                : 'Wait for the remote Gitea build to finish, then inspect or deploy the managed app.';
+        case 'built':
+            return 'Deploy the latest built image when you are ready to publish the changes.';
+        case 'build_failed':
+            return 'Investigate the failed build in Gitea, fix the repository state, and queue another build.';
+        case 'deploying':
+            return 'Wait for rollout, ingress, TLS, and HTTPS verification to finish on the remote cluster.';
+        case 'tls_ready':
+        case 'pending_https':
+            return 'Monitor public HTTPS until the ingress responds successfully.';
+        case 'deploy_failed':
+            return 'Investigate the remote deployment failure and retry the managed-app deploy once the cluster issue is fixed.';
+        case 'live':
+            return '';
+        case 'doctor':
+        case 'reconcile':
+            return healthy === true
+                ? ''
+                : 'Review the managed app platform diagnostics and repair the remote runner or cluster state before queueing more builds.';
+        default:
+            return '';
+    }
+}
+
+function deriveOpenItemsForLifecycle(phase = '', { deployRequested = false, summary = '', error = '', healthy = null } = {}) {
+    const normalizedPhase = normalizeText(phase).toLowerCase();
+    if (normalizedPhase === 'build_failed' || normalizedPhase === 'deploy_failed') {
+        return normalizeStringArray([error || summary], 4);
+    }
+    if (normalizedPhase === 'tls_ready' || normalizedPhase === 'pending_https') {
+        return ['Public HTTPS is not responding yet.'];
+    }
+    if (normalizedPhase === 'created' || normalizedPhase === 'updated') {
+        return deployRequested
+            ? ['Remote build is queued.', 'Deployment will continue after the build webhook succeeds.']
+            : ['Remote build is queued.'];
+    }
+    if ((normalizedPhase === 'doctor' || normalizedPhase === 'reconcile') && healthy === false) {
+        return normalizeStringArray([summary], 4);
+    }
+    return [];
 }
 
 class ManagedAppService {
@@ -589,6 +822,259 @@ class ManagedAppService {
         return `${baseUrl}${endpointPath.startsWith('/') ? endpointPath : `/${endpointPath}`}`;
     }
 
+    normalizeAppRecord(app = null) {
+        if (!app || typeof app !== 'object') {
+            return app;
+        }
+
+        return {
+            ...app,
+            metadata: normalizeManagedAppMetadata(app.metadata || {}, app, {
+                deployConfig: this.getEffectiveDeployConfig(),
+                managedAppsConfig: this.getEffectiveManagedAppsConfig(),
+            }),
+        };
+    }
+
+    normalizeAppList(apps = []) {
+        return (Array.isArray(apps) ? apps : []).map((app) => this.normalizeAppRecord(app));
+    }
+
+    async listOwnerApps(ownerId = null, limit = 50) {
+        if (!ownerId || !this.store?.listApps) {
+            return [];
+        }
+
+        try {
+            return this.normalizeAppList(await this.store.listApps(ownerId, limit));
+        } catch (_error) {
+            return [];
+        }
+    }
+
+    findAppByPublicHost(apps = [], publicHost = '') {
+        const targetHost = normalizeText(publicHost).toLowerCase();
+        if (!targetHost) {
+            return null;
+        }
+        return (Array.isArray(apps) ? apps : []).find((app) => normalizeText(app?.publicHost).toLowerCase() === targetHost) || null;
+    }
+
+    findAppByExactName(apps = [], appName = '') {
+        const targetName = normalizeText(appName).toLowerCase();
+        if (!targetName) {
+            return null;
+        }
+        return (Array.isArray(apps) ? apps : []).find((app) => normalizeText(app?.appName).toLowerCase() === targetName) || null;
+    }
+
+    findAppByFuzzyMatch(apps = [], blueprint = {}) {
+        const targetSlug = normalizeText(blueprint.slug);
+        const targetName = normalizeText(blueprint.appName);
+        const targetHost = normalizeText(blueprint.publicHost);
+        if (!targetSlug && !targetName && !targetHost) {
+            return null;
+        }
+
+        return (Array.isArray(apps) ? apps : []).find((app) => (
+            valuesLooselyMatch(app?.slug, targetSlug)
+            || valuesLooselyMatch(app?.repoName, targetSlug)
+            || valuesLooselyMatch(app?.appName, targetName)
+            || valuesLooselyMatch(app?.publicHost, targetHost)
+        )) || null;
+    }
+
+    async resolveAppForMutation(input = {}, blueprint = {}, ownerId = null) {
+        const explicitRef = normalizeText(input.appRef || input.app || input.id || input.ref || '');
+        if (explicitRef) {
+            const resolved = await this.resolveApp(explicitRef, ownerId);
+            if (resolved) {
+                return {
+                    app: resolved,
+                    reason: 'explicit-ref',
+                };
+            }
+        }
+
+        const explicitSlug = normalizeText(input.slug);
+        if (explicitSlug) {
+            const resolved = await this.resolveApp(explicitSlug, ownerId);
+            if (resolved) {
+                return {
+                    app: resolved,
+                    reason: 'explicit-slug',
+                };
+            }
+        }
+
+        const explicitRepoOwner = normalizeText(input.repoOwner);
+        const explicitRepoName = normalizeText(input.repoName);
+        if (explicitRepoOwner && explicitRepoName && this.store?.getAppByRepo) {
+            const byRepo = this.normalizeAppRecord(await this.store.getAppByRepo(explicitRepoOwner, explicitRepoName));
+            if (byRepo) {
+                return {
+                    app: byRepo,
+                    reason: 'explicit-repo',
+                };
+            }
+        }
+
+        if (blueprint?.slug && this.store?.getAppBySlug) {
+            const byBlueprintSlug = this.normalizeAppRecord(await this.store.getAppBySlug(blueprint.slug, ownerId));
+            if (byBlueprintSlug) {
+                return {
+                    app: byBlueprintSlug,
+                    reason: 'derived-slug',
+                };
+            }
+        }
+
+        const ownerApps = await this.listOwnerApps(ownerId, 50);
+        const byHost = this.findAppByPublicHost(ownerApps, input.publicHost || blueprint.publicHost);
+        if (byHost) {
+            return {
+                app: byHost,
+                reason: 'public-host',
+            };
+        }
+
+        const byExactName = this.findAppByExactName(ownerApps, input.appName || input.name || input.title || blueprint.appName);
+        if (byExactName) {
+            return {
+                app: byExactName,
+                reason: 'app-name',
+            };
+        }
+
+        const byFuzzyMatch = this.findAppByFuzzyMatch(ownerApps, blueprint);
+        if (byFuzzyMatch) {
+            return {
+                app: byFuzzyMatch,
+                reason: 'fuzzy',
+            };
+        }
+
+        return {
+            app: null,
+            reason: 'new',
+        };
+    }
+
+    mergeBlueprintWithExisting(existing = {}, blueprint = {}, input = {}, sessionId = null) {
+        const normalizedExisting = this.normalizeAppRecord(existing);
+        const mergedMetadata = mergeMetadataSection(normalizedExisting?.metadata || {}, blueprint.metadata || {});
+        const derivedRepoOwner = normalizeText(normalizedExisting?.repoOwner || blueprint.repoOwner);
+        const derivedRepoName = normalizeText(normalizedExisting?.repoName || blueprint.repoName || normalizedExisting?.slug || blueprint.slug);
+        const defaultRepoBase = normalizeText(this.getEffectiveGiteaConfig().baseURL).replace(/\/+$/, '');
+
+        return {
+            sessionId: sessionId || normalizedExisting?.sessionId || blueprint.sessionId || null,
+            appName: hasAnyOwnInput(input, ['appName', 'name', 'title'])
+                ? blueprint.appName
+                : normalizeText(normalizedExisting?.appName || blueprint.appName),
+            repoOwner: hasOwnInput(input, 'repoOwner')
+                ? blueprint.repoOwner
+                : derivedRepoOwner,
+            repoName: hasAnyOwnInput(input, ['repoName', 'slug'])
+                ? blueprint.repoName
+                : derivedRepoName,
+            repoUrl: hasOwnInput(input, 'repoUrl')
+                ? blueprint.repoUrl
+                : normalizeText(
+                    normalizedExisting?.repoUrl
+                    || (defaultRepoBase && derivedRepoOwner && derivedRepoName
+                        ? `${defaultRepoBase}/${derivedRepoOwner}/${derivedRepoName}.git`
+                        : blueprint.repoUrl),
+                ),
+            repoCloneUrl: hasOwnInput(input, 'repoCloneUrl')
+                ? blueprint.repoCloneUrl
+                : normalizeText(
+                    normalizedExisting?.repoCloneUrl
+                    || (defaultRepoBase && derivedRepoOwner && derivedRepoName
+                        ? `${defaultRepoBase}/${derivedRepoOwner}/${derivedRepoName}.git`
+                        : blueprint.repoCloneUrl),
+                ),
+            repoSshUrl: hasOwnInput(input, 'repoSshUrl')
+                ? blueprint.repoSshUrl
+                : normalizeText(normalizedExisting?.repoSshUrl || blueprint.repoSshUrl),
+            defaultBranch: hasOwnInput(input, 'defaultBranch')
+                ? blueprint.defaultBranch
+                : normalizeText(normalizedExisting?.defaultBranch || blueprint.defaultBranch || 'main'),
+            imageRepo: hasOwnInput(input, 'imageRepo')
+                ? blueprint.imageRepo
+                : normalizeText(normalizedExisting?.imageRepo || blueprint.imageRepo),
+            namespace: hasOwnInput(input, 'namespace')
+                ? blueprint.namespace
+                : normalizeText(normalizedExisting?.namespace || blueprint.namespace),
+            publicHost: hasOwnInput(input, 'publicHost')
+                ? blueprint.publicHost
+                : normalizeText(normalizedExisting?.publicHost || blueprint.publicHost),
+            sourcePrompt: normalizeText(blueprint.sourcePrompt || normalizedExisting?.sourcePrompt),
+            metadata: mergedMetadata,
+        };
+    }
+
+    shouldSeedRepository(existing = null, input = {}, mergedApp = {}) {
+        const explicitFiles = normalizeFilesInput(input.files);
+        if (explicitFiles.length > 0) {
+            return true;
+        }
+
+        if (!existing) {
+            return true;
+        }
+
+        const nextPrompt = normalizeText(input.sourcePrompt || input.prompt || '');
+        const previousPrompt = normalizeText(existing.sourcePrompt || mergedApp.sourcePrompt || '');
+        return Boolean(nextPrompt && nextPrompt !== previousPrompt);
+    }
+
+    buildLifecycleMetadata(existingApp = null, {
+        input = {},
+        buildRun = null,
+        phase = '',
+        summary = '',
+        desiredDeploy = {},
+        liveDeploy = {},
+        repoState = {},
+        project = {},
+        deployRequested = false,
+        healthy = null,
+    } = {}) {
+        const app = this.normalizeAppRecord(existingApp || {});
+        const computedSummary = normalizeText(summary || buildManagedAppStatusSummary(app, buildRun, phase, liveDeploy.lastDeployResult || null));
+        const buildError = normalizeText(
+            buildRun?.error?.message
+            || liveDeploy?.lastError
+            || app?.metadata?.liveDeploy?.lastError
+            || '',
+        );
+
+        return buildManagedAppMetadata(app.metadata || {}, app, {
+            deployConfig: this.getEffectiveDeployConfig(),
+            managedAppsConfig: this.getEffectiveManagedAppsConfig(),
+            project: {
+                ...project,
+                summary: computedSummary,
+                currentObjective: normalizeText(project.currentObjective || input.sourcePrompt || input.prompt || app.sourcePrompt || app.metadata?.project?.currentObjective),
+                nextStep: normalizeText(project.nextStep || deriveNextStepForLifecycle(phase, { deployRequested, healthy })),
+                openItems: hasOwnInput(project, 'openItems')
+                    ? project.openItems
+                    : deriveOpenItemsForLifecycle(phase, {
+                        deployRequested,
+                        summary: computedSummary,
+                        error: buildError,
+                        healthy,
+                    }),
+                lastUserIntent: normalizeText(project.lastUserIntent || input.sourcePrompt || input.prompt || input.requestedAction || input.action || app.sourcePrompt || ''),
+                lastActivityAt: new Date().toISOString(),
+            },
+            repoState,
+            desiredDeploy,
+            liveDeploy,
+        });
+    }
+
     async resolveApp(ref = '', ownerId = null) {
         const reference = normalizeText(ref);
         if (!reference) {
@@ -596,31 +1082,37 @@ class ManagedAppService {
         }
 
         const repoReference = parseManagedAppRepoReference(reference);
-        if (repoReference) {
+        if (repoReference && this.store?.getAppByRepo) {
             const byRepo = await this.store.getAppByRepo(repoReference.repoOwner, repoReference.repoName);
             if (byRepo) {
-                return byRepo;
+                return this.normalizeAppRecord(byRepo);
             }
         }
 
-        const byId = await this.store.getAppById(reference, ownerId);
-        if (byId) {
-            return byId;
-        }
-
-        const bySlug = await this.store.getAppBySlug(reference, ownerId);
-        if (bySlug) {
-            return bySlug;
-        }
-
-        return repoReference
-            ? this.store.getAppBySlug(repoReference.repoName, ownerId)
+        const byId = this.store?.getAppById
+            ? await this.store.getAppById(reference, ownerId)
             : null;
+        if (byId) {
+            return this.normalizeAppRecord(byId);
+        }
+
+        const bySlug = this.store?.getAppBySlug
+            ? await this.store.getAppBySlug(reference, ownerId)
+            : null;
+        if (bySlug) {
+            return this.normalizeAppRecord(bySlug);
+        }
+
+        if (repoReference && this.store?.getAppBySlug) {
+            return this.normalizeAppRecord(await this.store.getAppBySlug(repoReference.repoName, ownerId));
+        }
+
+        return null;
     }
 
     async listApps(ownerId, limit = 50) {
         await this.store.ensureAvailable();
-        return this.store.listApps(ownerId, limit);
+        return this.normalizeAppList(await this.store.listApps(ownerId, limit));
     }
 
     async listBuildRuns(appRef = '', ownerId = null, limit = 20) {
@@ -641,6 +1133,7 @@ class ManagedAppService {
         return {
             app,
             buildRuns,
+            summary: normalizeText(app.metadata?.project?.summary || buildManagedAppStatusSummary(app, buildRuns[0] || null, app.status || 'updated')),
         };
     }
 
@@ -664,6 +1157,24 @@ class ManagedAppService {
             && isDeploymentReady(getDeploymentStatus(platform, 'act-runner'))
             && normalizeText(platform.runnerTokenState).toLowerCase() === 'present';
         const suggestions = buildPlatformDoctorSuggestions(platform);
+        const message = buildPlatformDoctorMessage(platform, healthy);
+        const app = normalizeText(input.appRef || input.app || input.id || input.slug)
+            ? await this.resolveApp(normalizeText(input.appRef || input.app || input.id || input.slug), ownerId)
+            : null;
+
+        if (app) {
+            await this.store.updateApp(app.id, app.ownerId, {
+                metadata: this.buildLifecycleMetadata(app, {
+                    input,
+                    phase: 'doctor',
+                    summary: message,
+                    healthy,
+                    project: {
+                        openItems: suggestions,
+                    },
+                }),
+            });
+        }
 
         return {
             platform: {
@@ -677,7 +1188,7 @@ class ManagedAppService {
             },
             healthy,
             suggestions,
-            message: buildPlatformDoctorMessage(platform, healthy),
+            message,
         };
     }
 
@@ -762,6 +1273,24 @@ class ManagedAppService {
         if (runnerCatalog.error) {
             suggestions.push(`Runner verification through the Gitea API failed after reconciliation: ${runnerCatalog.error}`);
         }
+        const message = `Managed app platform reconciliation on ${normalizeText(platform.executionHost || reconciliation.executionHost || 'remote ssh target')}: ${reconciliation.actions.join(', ') || 'no changes reported'}; ${healthy ? 'platform healthy' : 'platform still needs attention'}.`;
+        const app = normalizeText(input.appRef || input.app || input.id || input.slug)
+            ? await this.resolveApp(normalizeText(input.appRef || input.app || input.id || input.slug), ownerId)
+            : null;
+
+        if (app) {
+            await this.store.updateApp(app.id, app.ownerId, {
+                metadata: this.buildLifecycleMetadata(app, {
+                    input,
+                    phase: 'reconcile',
+                    summary: message,
+                    healthy,
+                    project: {
+                        openItems: suggestions,
+                    },
+                }),
+            });
+        }
 
         return {
             before: {
@@ -799,7 +1328,7 @@ class ManagedAppService {
             },
             healthy,
             suggestions: Array.from(new Set(suggestions.filter(Boolean))),
-            message: `Managed app platform reconciliation on ${normalizeText(platform.executionHost || reconciliation.executionHost || 'remote ssh target')}: ${reconciliation.actions.join(', ') || 'no changes reported'}; ${healthy ? 'platform healthy' : 'platform still needs attention'}.`,
+            message,
         };
     }
 
@@ -841,8 +1370,10 @@ class ManagedAppService {
         );
         const publicHost = normalizeText(input.publicHost || `${slug}.${managedAppsConfig.appBaseDomain || 'demoserver2.buzz'}`);
         const defaultBranch = normalizeText(input.defaultBranch || managedAppsConfig.defaultBranch || 'main');
+        const deployConfig = this.getEffectiveDeployConfig();
+        const requestedContainerPort = Number(input.containerPort || managedAppsConfig.defaultContainerPort || 80);
 
-        return {
+        const blueprint = {
             ownerId,
             sessionId,
             slug,
@@ -858,13 +1389,29 @@ class ManagedAppService {
             publicHost,
             sourcePrompt: normalizeText(input.sourcePrompt || input.prompt || ''),
             status: normalizeAppStatus(input.status || 'draft'),
-            metadata: {
-                ...(input.metadata || {}),
-                managedBy: 'kimibuilt',
-                requestedContainerPort: Number(input.containerPort || managedAppsConfig.defaultContainerPort || 80),
-                deploymentTarget,
-            },
         };
+
+        blueprint.metadata = buildManagedAppMetadata(input.metadata || {}, blueprint, {
+            deployConfig,
+            managedAppsConfig,
+            desiredDeploy: {
+                deploymentTarget,
+                namespace,
+                publicHost,
+                imageRepo,
+                defaultBranch,
+                containerPort: Number.isFinite(requestedContainerPort) && requestedContainerPort > 0 ? requestedContainerPort : 80,
+                ingressClassName: deployConfig.ingressClassName,
+                tlsClusterIssuer: deployConfig.tlsClusterIssuer,
+                registryPullSecretName: managedAppsConfig.registryPullSecretName,
+            },
+            project: {
+                currentObjective: normalizeText(input.sourcePrompt || input.prompt || ''),
+                lastUserIntent: normalizeText(input.sourcePrompt || input.prompt || ''),
+            },
+        });
+
+        return blueprint;
     }
 
     async buildRepositoryFiles(app = {}, input = {}, context = {}) {
@@ -955,46 +1502,65 @@ class ManagedAppService {
         const requestedAction = normalizeRequestedAction(input.requestedAction || input.action || 'build');
         const deployRequested = inferDeployRequested(requestedAction, input.deployRequested === true);
         const blueprint = this.buildAppBlueprint(input, ownerId, sessionId, context);
-        const existing = await this.store.getAppBySlug(blueprint.slug, ownerId);
+        const resolved = await this.resolveAppForMutation(input, blueprint, ownerId);
+        const existing = resolved.app ? this.normalizeAppRecord(resolved.app) : null;
+        const mergedState = existing
+            ? this.mergeBlueprintWithExisting(existing, blueprint, input, sessionId)
+            : {
+                ...blueprint,
+                sessionId,
+            };
+        const provisioningMetadata = this.buildLifecycleMetadata(existing || {
+            ...blueprint,
+            ...mergedState,
+        }, {
+            input,
+            phase: existing ? 'updated' : 'created',
+            deployRequested,
+            desiredDeploy: {
+                namespace: mergedState.namespace,
+                publicHost: mergedState.publicHost,
+                imageRepo: mergedState.imageRepo,
+                defaultBranch: mergedState.defaultBranch,
+                containerPort: Number(mergedState.metadata?.requestedContainerPort || blueprint.metadata?.requestedContainerPort || 80) || 80,
+            },
+            project: {
+                currentObjective: normalizeText(input.sourcePrompt || input.prompt || blueprint.sourcePrompt),
+                lastUserIntent: normalizeText(input.sourcePrompt || input.prompt || blueprint.sourcePrompt),
+            },
+        });
 
         const app = existing
             ? await this.store.updateApp(existing.id, ownerId, {
-                appName: blueprint.appName,
-                repoOwner: blueprint.repoOwner,
-                repoName: blueprint.repoName,
-                repoUrl: blueprint.repoUrl,
-                repoCloneUrl: blueprint.repoCloneUrl,
-                repoSshUrl: blueprint.repoSshUrl,
-                defaultBranch: blueprint.defaultBranch,
-                imageRepo: blueprint.imageRepo,
-                namespace: blueprint.namespace,
-                publicHost: blueprint.publicHost,
-                sourcePrompt: blueprint.sourcePrompt || existing.sourcePrompt,
-                metadata: {
-                    ...(existing.metadata || {}),
-                    ...(blueprint.metadata || {}),
-                },
+                ...mergedState,
+                metadata: provisioningMetadata,
                 status: 'provisioning',
                 sessionId,
             })
             : await this.store.createApp({
                 ...blueprint,
+                ...mergedState,
+                metadata: provisioningMetadata,
                 status: 'provisioning',
             });
         const persistedApp = await this.ensurePersistedApp(app, {
             ...blueprint,
+            ...mergedState,
+            metadata: provisioningMetadata,
             status: 'provisioning',
         }, ownerId);
+        const normalizedPersistedApp = this.normalizeAppRecord(persistedApp);
 
         let repository = {
-            html_url: persistedApp.repoUrl,
-            clone_url: persistedApp.repoCloneUrl,
-            ssh_url: persistedApp.repoSshUrl,
+            html_url: normalizedPersistedApp.repoUrl,
+            clone_url: normalizedPersistedApp.repoCloneUrl,
+            ssh_url: normalizedPersistedApp.repoSshUrl,
         };
         let commitSha = '';
         let committedPaths = [];
-        const effectiveRepoOwner = normalizeText(persistedApp.repoOwner || blueprint.repoOwner);
-        const effectiveRepoName = normalizeText(persistedApp.repoName || blueprint.repoName);
+        const effectiveRepoOwner = normalizeText(normalizedPersistedApp.repoOwner || blueprint.repoOwner);
+        const effectiveRepoName = normalizeText(normalizedPersistedApp.repoName || blueprint.repoName);
+        const shouldSeedRepository = this.shouldSeedRepository(existing, input, normalizedPersistedApp);
 
         if (this.giteaClient.isConfigured()) {
             await this.giteaClient.ensureOrganization({
@@ -1005,36 +1571,75 @@ class ManagedAppService {
             const ensuredRepo = await this.giteaClient.ensureRepository({
                 owner: effectiveRepoOwner,
                 name: effectiveRepoName,
-                description: `Managed app for ${persistedApp.appName}`,
-                defaultBranch: persistedApp.defaultBranch,
+                description: `Managed app for ${normalizedPersistedApp.appName}`,
+                defaultBranch: normalizedPersistedApp.defaultBranch,
             });
             repository = ensuredRepo.repository || repository;
 
-            const seedResult = await this.giteaClient.upsertFiles({
-                owner: effectiveRepoOwner,
-                repo: effectiveRepoName,
-                branch: persistedApp.defaultBranch,
-                files: await this.buildRepositoryFiles(persistedApp, input, context),
-                commitMessagePrefix: existing ? 'Update managed app' : 'Seed managed app',
-            });
-            commitSha = seedResult.commitSha;
-            committedPaths = seedResult.committedPaths;
+            if (shouldSeedRepository) {
+                const seedResult = await this.giteaClient.upsertFiles({
+                    owner: effectiveRepoOwner,
+                    repo: effectiveRepoName,
+                    branch: normalizedPersistedApp.defaultBranch,
+                    files: await this.buildRepositoryFiles(normalizedPersistedApp, input, context),
+                    commitMessagePrefix: existing ? 'Update managed app' : 'Seed managed app',
+                });
+                commitSha = seedResult.commitSha;
+                committedPaths = seedResult.committedPaths;
+            }
         }
 
+        const nextStatus = commitSha
+            ? 'building'
+            : (existing
+                ? ((normalizeText(existing.status) === 'draft' || normalizeText(existing.status) === 'provisioning') ? 'repo_ready' : existing.status)
+                : 'repo_ready');
         const updatedApp = await this.store.updateApp(persistedApp.id, ownerId, {
             repoOwner: effectiveRepoOwner,
             repoName: effectiveRepoName,
-            repoUrl: normalizeText(repository.clone_url || repository.html_url || persistedApp.repoUrl),
-            repoCloneUrl: normalizeText(repository.clone_url || persistedApp.repoCloneUrl),
-            repoSshUrl: normalizeText(repository.ssh_url || persistedApp.repoSshUrl),
-            status: commitSha ? 'building' : 'repo_ready',
-            metadata: {
-                ...(persistedApp.metadata || {}),
-                deploymentTarget: blueprint.metadata?.deploymentTarget
-                    || persistedApp.metadata?.deploymentTarget
-                    || 'ssh',
-                lastSeededPaths: committedPaths,
-            },
+            repoUrl: normalizeText(repository.clone_url || repository.html_url || normalizedPersistedApp.repoUrl),
+            repoCloneUrl: normalizeText(repository.clone_url || normalizedPersistedApp.repoCloneUrl),
+            repoSshUrl: normalizeText(repository.ssh_url || normalizedPersistedApp.repoSshUrl),
+            status: nextStatus,
+            metadata: this.buildLifecycleMetadata({
+                ...normalizedPersistedApp,
+                repoOwner: effectiveRepoOwner,
+                repoName: effectiveRepoName,
+                repoUrl: normalizeText(repository.clone_url || repository.html_url || normalizedPersistedApp.repoUrl),
+                repoCloneUrl: normalizeText(repository.clone_url || normalizedPersistedApp.repoCloneUrl),
+                repoSshUrl: normalizeText(repository.ssh_url || normalizedPersistedApp.repoSshUrl),
+                status: nextStatus,
+            }, {
+                input,
+                phase: existing ? 'updated' : 'created',
+                deployRequested,
+                summary: existing
+                    ? (commitSha
+                        ? `${normalizedPersistedApp.appName} was resumed and updated in ${effectiveRepoOwner}/${effectiveRepoName}. Build and deploy are queued.`
+                        : `${normalizedPersistedApp.appName} was resumed without repository changes.`)
+                    : (commitSha
+                        ? `${normalizedPersistedApp.appName} was created in ${effectiveRepoOwner}/${effectiveRepoName}. Build and deploy are queued.`
+                        : `${normalizedPersistedApp.appName} was created without repository changes.`),
+                repoState: {
+                    initialized: true,
+                    lastSeededPaths: committedPaths.length > 0
+                        ? committedPaths
+                        : normalizedPersistedApp.metadata?.repoState?.lastSeededPaths,
+                    lastCommitSha: commitSha || normalizedPersistedApp.metadata?.repoState?.lastCommitSha,
+                    lastCommitAt: commitSha ? new Date().toISOString() : normalizedPersistedApp.metadata?.repoState?.lastCommitAt,
+                },
+                desiredDeploy: {
+                    namespace: mergedState.namespace,
+                    publicHost: mergedState.publicHost,
+                    imageRepo: normalizeText(normalizedPersistedApp.imageRepo || blueprint.imageRepo),
+                    defaultBranch: mergedState.defaultBranch,
+                },
+                project: {
+                    nextStep: commitSha
+                        ? deriveNextStepForLifecycle(existing ? 'updated' : 'created', { deployRequested })
+                        : '',
+                },
+            }),
         });
         const finalPersistedApp = (hasPersistedAppId(updatedApp) ? updatedApp : null)
             || (hasPersistedAppId(persistedApp) ? persistedApp : null)
@@ -1061,13 +1666,33 @@ class ManagedAppService {
                 deployStatus: deployRequested ? 'pending' : 'not_requested',
                 verificationStatus: 'pending',
                 metadata: {
-                    trigger: existing ? 'update' : 'create',
+                    trigger: existing ? 'resume' : 'create',
                     committedPaths,
                 },
             })
             : null;
 
-        const finalApp = finalPersistedApp || updatedApp || persistedApp;
+        let finalApp = this.normalizeAppRecord(finalPersistedApp || updatedApp || persistedApp);
+        if (buildRun) {
+            const lifecycleUpdatedApp = await this.store.updateApp(finalApp.id, ownerId, {
+                metadata: this.buildLifecycleMetadata(finalApp, {
+                    input,
+                    buildRun,
+                    phase: existing ? 'updated' : 'created',
+                    deployRequested,
+                    repoState: {
+                        lastBuildRunId: buildRun.id,
+                    },
+                }),
+            });
+            finalApp = this.normalizeAppRecord(lifecycleUpdatedApp
+                ? {
+                    ...finalApp,
+                    ...lifecycleUpdatedApp,
+                    metadata: lifecycleUpdatedApp.metadata || finalApp.metadata,
+                }
+                : finalApp);
+        }
         await this.broadcastLifecycleEvent(finalApp, buildRun, existing ? 'updated' : 'created');
 
         return {
@@ -1081,9 +1706,14 @@ class ManagedAppService {
                 sshUrl: finalApp.repoSshUrl,
             },
             committedPaths,
-            message: commitSha
-                ? `${finalApp.appName} is queued for image build from ${finalApp.repoOwner}/${finalApp.repoName}.`
-                : `${finalApp.appName} was registered without repository changes.`,
+            reusedExistingApp: Boolean(existing),
+            message: existing
+                ? (commitSha
+                    ? `Resumed ${finalApp.appName} and queued an image build from ${finalApp.repoOwner}/${finalApp.repoName}.`
+                    : `Resumed ${finalApp.appName} without repository changes.`)
+                : (commitSha
+                    ? `Created ${finalApp.appName} and queued an image build from ${finalApp.repoOwner}/${finalApp.repoName}.`
+                    : `Created ${finalApp.appName} without repository changes.`),
         };
     }
 
@@ -1095,6 +1725,7 @@ class ManagedAppService {
 
         return this.createApp({
             ...input,
+            appRef: app.id,
             slug: app.slug,
             appName: input.appName || app.appName,
             sourcePrompt: input.sourcePrompt || input.prompt || app.sourcePrompt,
@@ -1105,7 +1736,7 @@ class ManagedAppService {
     }
 
     async deployApp(appRef = '', input = {}, ownerId = null, context = {}) {
-        const app = await this.resolveApp(appRef, ownerId);
+        const app = this.normalizeAppRecord(await this.resolveApp(appRef, ownerId));
         if (!app) {
             return null;
         }
@@ -1120,8 +1751,9 @@ class ManagedAppService {
         const imageTag = normalizeText(input.imageTag || latestBuildRun?.imageTag || 'latest');
         const giteaConfig = this.getEffectiveGiteaConfig();
         const managedAppsConfig = this.getEffectiveManagedAppsConfig();
+        const deployConfig = this.getEffectiveDeployConfig();
         const normalizedNamespace = normalizeManagedAppNamespace(
-            input.namespace || app.namespace,
+            input.namespace || app.metadata?.desiredDeploy?.namespace || app.namespace,
             {
                 slug: app.slug,
                 namespacePrefix: managedAppsConfig.namespacePrefix || 'app-',
@@ -1130,20 +1762,26 @@ class ManagedAppService {
         let deployableApp = app;
 
         if (normalizedNamespace !== normalizeText(app.namespace)) {
-            deployableApp = await this.store.updateApp(app.id, app.ownerId, {
+            deployableApp = this.normalizeAppRecord(await this.store.updateApp(app.id, app.ownerId, {
                 namespace: normalizedNamespace,
-                metadata: {
-                    ...(app.metadata || {}),
-                    deploymentTarget,
-                },
+                metadata: this.buildLifecycleMetadata(app, {
+                    input,
+                    phase: 'deploying',
+                    desiredDeploy: {
+                        namespace: normalizedNamespace,
+                    },
+                }),
             }) || {
                 ...app,
                 namespace: normalizedNamespace,
-                metadata: {
-                    ...(app.metadata || {}),
-                    deploymentTarget,
-                },
-            };
+                metadata: this.buildLifecycleMetadata(app, {
+                    input,
+                    phase: 'deploying',
+                    desiredDeploy: {
+                        namespace: normalizedNamespace,
+                    },
+                }),
+            });
         }
 
         const resolvedImageRepo = resolveManagedAppImageRepo(deployableApp, giteaConfig);
@@ -1154,20 +1792,26 @@ class ManagedAppService {
         }
 
         if (resolvedImageRepo !== normalizeText(deployableApp.imageRepo)) {
-            deployableApp = await this.store.updateApp(app.id, app.ownerId, {
+            deployableApp = this.normalizeAppRecord(await this.store.updateApp(app.id, app.ownerId, {
                 imageRepo: resolvedImageRepo,
-                metadata: {
-                    ...(deployableApp.metadata || {}),
-                    deploymentTarget,
-                },
+                metadata: this.buildLifecycleMetadata(deployableApp, {
+                    input,
+                    phase: 'deploying',
+                    desiredDeploy: {
+                        imageRepo: resolvedImageRepo,
+                    },
+                }),
             }) || {
                 ...deployableApp,
                 imageRepo: resolvedImageRepo,
-                metadata: {
-                    ...(deployableApp.metadata || {}),
-                    deploymentTarget,
-                },
-            };
+                metadata: this.buildLifecycleMetadata(deployableApp, {
+                    input,
+                    phase: 'deploying',
+                    desiredDeploy: {
+                        imageRepo: resolvedImageRepo,
+                    },
+                }),
+            });
         }
 
         const image = `${resolvedImageRepo}:${imageTag}`;
@@ -1181,10 +1825,10 @@ class ManagedAppService {
         const deployResult = await this.kubernetesClient.deployManagedApp({
             slug: deployableApp.slug,
             namespace: deployableApp.namespace,
-            publicHost: deployableApp.publicHost,
+            publicHost: deployableApp.metadata?.desiredDeploy?.publicHost || deployableApp.publicHost,
             image,
-            containerPort: Number(input.containerPort || deployableApp.metadata?.requestedContainerPort || managedAppsConfig.defaultContainerPort || 80),
-            registryPullSecretName: managedAppsConfig.registryPullSecretName,
+            containerPort: Number(input.containerPort || deployableApp.metadata?.desiredDeploy?.containerPort || deployableApp.metadata?.requestedContainerPort || managedAppsConfig.defaultContainerPort || 80),
+            registryPullSecretName: deployableApp.metadata?.desiredDeploy?.registryPullSecretName || managedAppsConfig.registryPullSecretName,
             registryHost: giteaConfig.registryHost,
             registryUsername: giteaConfig.registryUsername,
             registryPassword: giteaConfig.registryPassword,
@@ -1201,16 +1845,41 @@ class ManagedAppService {
             ? 'live'
             : (deployResult.verification.rollout ? 'deployed' : 'deploy_failed');
 
-        const updatedApp = await this.store.updateApp(app.id, app.ownerId, {
+        const updatedApp = this.normalizeAppRecord(await this.store.updateApp(app.id, app.ownerId, {
             namespace: normalizedNamespace,
             status: appStatus,
-            metadata: {
-                ...(deployableApp.metadata || {}),
-                deploymentTarget,
-                lastImage: image,
-                lastDeployResult: deployResult,
-            },
-        });
+            metadata: this.buildLifecycleMetadata(deployableApp, {
+                input,
+                buildRun: latestBuildRun,
+                phase: lifecyclePhase,
+                desiredDeploy: {
+                    deploymentTarget,
+                    namespace: normalizedNamespace,
+                    publicHost: deployableApp.publicHost,
+                    imageRepo: resolvedImageRepo,
+                    defaultBranch: deployableApp.defaultBranch,
+                    containerPort: Number(input.containerPort || deployableApp.metadata?.desiredDeploy?.containerPort || managedAppsConfig.defaultContainerPort || 80),
+                    ingressClassName: deployConfig.ingressClassName,
+                    tlsClusterIssuer: deployConfig.tlsClusterIssuer,
+                    registryPullSecretName: managedAppsConfig.registryPullSecretName,
+                },
+                liveDeploy: {
+                    lastImage: image,
+                    rollout: deployResult.verification?.rollout === true,
+                    ingress: deployResult.verification?.ingress === true,
+                    tls: deployResult.verification?.tls === true,
+                    https: deployResult.verification?.https === true,
+                    lastVerifiedAt: new Date().toISOString(),
+                    lastError: normalizeText(deployResult.rollout?.error || deployResult.https?.error || ''),
+                    lastDeployResult: deployResult,
+                },
+                project: {
+                    nextStep: lifecyclePhase === 'live'
+                        ? ''
+                        : deriveNextStepForLifecycle(lifecyclePhase, { deployRequested: true }),
+                },
+            }),
+        }));
 
         let buildRun = latestBuildRun;
         if (buildRun) {
@@ -1249,6 +1918,8 @@ class ManagedAppService {
             app: updatedApp,
             buildRun,
             deployment: deployResult,
+            desiredDeploy: updatedApp.metadata?.desiredDeploy || null,
+            liveDeploy: updatedApp.metadata?.liveDeploy || null,
             message: buildManagedAppStatusSummary(updatedApp, buildRun, lifecyclePhase, {
                 ...deployResult,
                 image,
@@ -1265,9 +1936,9 @@ class ManagedAppService {
         const imageTag = normalizeText(payload.imageTag || buildImageTagFromCommit(commitSha));
         const buildStatus = normalizeBuildStatus(payload.buildStatus || payload.status);
         const giteaConfig = this.getEffectiveGiteaConfig();
-        const app = repoOwner && repoName
+        const app = this.normalizeAppRecord(repoOwner && repoName
             ? await this.store.getAppByRepo(repoOwner, repoName)
-            : await this.store.getAppBySlug(slug);
+            : await this.store.getAppBySlug(slug));
         if (!app) {
             const error = new Error(`Managed app not found for ${repoOwner || '(unknown-owner)'}/${repoName || slug}.`);
             error.statusCode = 404;
@@ -1324,13 +1995,24 @@ class ManagedAppService {
         }
 
         if (buildStatus !== 'success') {
-            const updatedApp = await this.store.updateApp(app.id, app.ownerId, {
+            const updatedApp = this.normalizeAppRecord(await this.store.updateApp(app.id, app.ownerId, {
                 status: 'build_failed',
                 metadata: {
-                    ...(app.metadata || {}),
+                    ...this.buildLifecycleMetadata(app, {
+                        input: payload,
+                        buildRun,
+                        phase: 'build_failed',
+                        repoState: {
+                            lastCommitSha: commitSha || app.metadata?.repoState?.lastCommitSha,
+                            lastBuildRunId: buildRun.id,
+                        },
+                        liveDeploy: {
+                            lastError: normalizeText(payload.error || payload.message || buildRun.error?.message || 'Build failed.'),
+                        },
+                    }),
                     lastFailedBuild: buildRun,
                 },
-            });
+            }));
             await this.broadcastLifecycleEvent(updatedApp, buildRun, 'build_failed');
             return {
                 app: updatedApp,
@@ -1339,11 +2021,32 @@ class ManagedAppService {
             };
         }
 
-        const updatedApp = await this.store.updateApp(app.id, app.ownerId, {
+        const updatedApp = this.normalizeAppRecord(await this.store.updateApp(app.id, app.ownerId, {
             ...(imageRepo ? { imageRepo } : {}),
             status: buildRun.deployRequested ? 'deploying' : 'built',
             metadata: {
-                ...(app.metadata || {}),
+                ...this.buildLifecycleMetadata(app, {
+                    input: payload,
+                    buildRun,
+                    phase: 'built',
+                    repoState: {
+                        initialized: true,
+                        lastCommitSha: commitSha || app.metadata?.repoState?.lastCommitSha,
+                        lastCommitAt: new Date().toISOString(),
+                        lastBuildRunId: buildRun.id,
+                    },
+                    desiredDeploy: {
+                        imageRepo: imageRepo || app.metadata?.desiredDeploy?.imageRepo,
+                    },
+                    liveDeploy: {
+                        lastError: '',
+                    },
+                    project: {
+                        nextStep: buildRun.deployRequested
+                            ? 'Wait for deployment rollout and HTTPS verification to finish.'
+                            : deriveNextStepForLifecycle('built'),
+                    },
+                }),
                 lastSuccessfulBuild: {
                     commitSha,
                     imageTag,
@@ -1351,7 +2054,7 @@ class ManagedAppService {
                     ...(normalizeText(payload.platforms) ? { platforms: normalizeText(payload.platforms) } : {}),
                 },
             },
-        });
+        }));
 
         if (buildRun.deployRequested) {
             const deployed = await this.deployApp(updatedApp.id, {
@@ -1376,16 +2079,17 @@ class ManagedAppService {
     }
 
     recordClusterDeployment(app = {}, details = {}) {
+        const normalizedApp = this.normalizeAppRecord(app);
         const state = clusterStateRegistry.getState();
-        const deployConfig = this.getEffectiveDeployConfig();
+        const desiredDeploy = normalizedApp?.metadata?.desiredDeploy || {};
         const entry = clusterStateRegistry.ensureDeploymentEntry(state, {
-            namespace: app.namespace,
-            deployment: app.slug,
-            publicDomain: app.publicHost,
-            repositoryUrl: app.repoUrl,
-            ref: app.defaultBranch,
-            ingressClassName: deployConfig.ingressClassName,
-            tlsClusterIssuer: deployConfig.tlsClusterIssuer,
+            namespace: normalizedApp.namespace,
+            deployment: normalizedApp.slug,
+            publicDomain: normalizedApp.publicHost,
+            repositoryUrl: normalizedApp.repoUrl,
+            ref: normalizedApp.defaultBranch,
+            ingressClassName: desiredDeploy.ingressClassName,
+            tlsClusterIssuer: desiredDeploy.tlsClusterIssuer,
         });
 
         if (!entry) {
@@ -1399,7 +2103,7 @@ class ManagedAppService {
         entry.lastSuccessAt = new Date().toISOString();
         entry.lastError = normalizeText(details.error?.message || '');
         entry.lastStdout = normalizeText(details.image || '');
-        entry.lastObjective = normalizeText(app.sourcePrompt || `Managed app ${app.slug}`);
+        entry.lastObjective = normalizeText(normalizedApp.metadata?.project?.currentObjective || normalizedApp.sourcePrompt || `Managed app ${normalizedApp.slug}`);
         entry.verification.rollout = details.deployment?.verification?.rollout === true;
         entry.verification.ingress = details.deployment?.verification?.ingress === true;
         entry.verification.tls = details.deployment?.verification?.tls === true;
@@ -1413,13 +2117,59 @@ class ManagedAppService {
             toolId: 'managed-app',
             action: 'deploy',
             status: entry.lastStatus,
-            namespace: app.namespace,
-            deployment: app.slug,
-            publicDomain: app.publicHost,
-            summary: `managed-app deploy ${entry.lastStatus} for ${app.namespace}/${app.slug}${app.publicHost ? ` on ${app.publicHost}` : ''}.`,
+            namespace: normalizedApp.namespace,
+            deployment: normalizedApp.slug,
+            publicDomain: normalizedApp.publicHost,
+            summary: `managed-app deploy ${entry.lastStatus} for ${normalizedApp.namespace}/${normalizedApp.slug}${normalizedApp.publicHost ? ` on ${normalizedApp.publicHost}` : ''}.`,
             error: entry.lastError,
         });
         clusterStateRegistry.saveState();
+    }
+
+    async persistLifecycleProjectMemory(app = null, buildRun = null, phase = '', details = {}) {
+        if (!app?.sessionId || !this.sessionStore?.update || (!this.sessionStore?.get && !this.sessionStore?.getOwned)) {
+            return null;
+        }
+
+        const normalizedApp = this.normalizeAppRecord(app);
+        const summary = normalizeText(details.summary || buildManagedAppStatusSummary(normalizedApp, buildRun, phase, details.deployment || null));
+        if (!summary) {
+            return null;
+        }
+
+        try {
+            const session = normalizedApp.ownerId && this.sessionStore.getOwned
+                ? await this.sessionStore.getOwned(normalizedApp.sessionId, normalizedApp.ownerId)
+                : await this.sessionStore.get(normalizedApp.sessionId);
+            if (!session) {
+                return null;
+            }
+
+            const assistantText = [
+                summary,
+                normalizeText(normalizedApp.repoUrl),
+                normalizedApp.publicHost ? `https://${normalizedApp.publicHost}` : '',
+                normalizeText(buildRun?.externalRunUrl || ''),
+            ].filter(Boolean).join('\n');
+            const projectMemory = mergeProjectMemory(
+                session?.metadata?.projectMemory || {},
+                buildProjectMemoryUpdate({
+                    userText: normalizeText(normalizedApp.metadata?.project?.lastUserIntent || normalizedApp.sourcePrompt || ''),
+                    assistantText,
+                    toolEvents: [],
+                    artifacts: [],
+                }),
+            );
+
+            return this.sessionStore.update(normalizedApp.sessionId, {
+                metadata: {
+                    projectMemory,
+                },
+            });
+        } catch (error) {
+            console.warn(`[ManagedApp] Failed to persist lifecycle project memory for ${normalizedApp.slug || normalizedApp.id || 'managed-app'}: ${error.message}`);
+            return null;
+        }
     }
 
     async persistLifecycleMessage(app = null, buildRun = null, phase = '', details = {}) {
@@ -1460,6 +2210,10 @@ class ManagedAppService {
             ...details,
             summary,
         });
+        await this.persistLifecycleProjectMemory(app, buildRun, phase, {
+            ...details,
+            summary,
+        });
         const payload = {
             type: 'managed-app',
             phase,
@@ -1482,11 +2236,14 @@ class ManagedAppService {
         const lines = [];
         return Promise.resolve(this.store.listApps(ownerId, maxApps))
             .then((apps) => {
-                if (!Array.isArray(apps) || apps.length === 0) {
+                const normalizedApps = this.normalizeAppList(apps);
+                if (!Array.isArray(normalizedApps) || normalizedApps.length === 0) {
                     return 'Managed app catalog: no managed apps exist yet for this user. If they ask to create, build, or deploy a new managed app, create the first one directly instead of asking them to choose an existing app.';
                 }
-                apps.slice(0, Math.max(1, maxApps)).forEach((app) => {
-                    lines.push(`Managed app ${app.slug}: status ${app.status}, target ${normalizeDeployTarget(app.metadata?.deploymentTarget) || 'unspecified'}, repo ${app.repoOwner}/${app.repoName}, host ${app.publicHost}, namespace ${app.namespace}.`);
+                normalizedApps.slice(0, Math.max(1, maxApps)).forEach((app) => {
+                    const summary = normalizeText(app.metadata?.project?.summary);
+                    const nextStep = normalizeText(app.metadata?.project?.nextStep);
+                    lines.push(`Managed app ${app.slug}: status ${app.status}, target ${normalizeDeployTarget(app.metadata?.desiredDeploy?.deploymentTarget) || 'ssh'}, repo ${app.repoOwner}/${app.repoName}, host ${app.publicHost}, namespace ${app.namespace}.${summary ? ` Summary: ${summary}` : ''}${nextStep ? ` Next: ${nextStep}` : ''}`);
                 });
                 return lines.join('\n');
             })
@@ -1497,7 +2254,7 @@ class ManagedAppService {
         const giteaConfig = this.getEffectiveGiteaConfig();
         const managedAppsConfig = this.getEffectiveManagedAppsConfig();
         const apps = ownerId && this.isAvailable()
-            ? await this.store.listApps(ownerId, 10)
+            ? this.normalizeAppList(await this.store.listApps(ownerId, 10))
             : [];
         return {
             configured: this.giteaClient.isConfigured(),

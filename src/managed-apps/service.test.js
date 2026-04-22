@@ -712,6 +712,244 @@ describe('ManagedAppService', () => {
         expect(getAppByRepo).toHaveBeenCalledWith('agent-apps', 'demo');
     });
 
+    test('createApp reuses an existing app by public host and keeps repo identity stable', async () => {
+        const existingApp = {
+            id: 'app-1',
+            ownerId: 'user-1',
+            sessionId: 'session-1',
+            slug: 'demo-app',
+            appName: 'Demo App',
+            repoOwner: 'agent-apps',
+            repoName: 'demo-app',
+            repoUrl: 'https://gitea.demoserver2.buzz/agent-apps/demo-app.git',
+            repoCloneUrl: 'https://gitea.demoserver2.buzz/agent-apps/demo-app.git',
+            repoSshUrl: 'ssh://git@gitea.demoserver2.buzz/agent-apps/demo-app.git',
+            defaultBranch: 'main',
+            imageRepo: 'gitea.demoserver2.buzz/agent-apps/demo-app',
+            namespace: 'app-demo-app',
+            publicHost: 'demo-app.demoserver2.buzz',
+            sourcePrompt: '',
+            status: 'live',
+            metadata: {},
+        };
+        const updatedApp = {
+            ...existingApp,
+            metadata: {
+                project: {
+                    summary: 'Demo App was resumed without repository changes.',
+                },
+            },
+        };
+        const store = {
+            ensureAvailable: jest.fn(async () => {}),
+            isAvailable: jest.fn(() => true),
+            getAppBySlug: jest.fn(async () => null),
+            getAppByRepo: jest.fn(async () => null),
+            listApps: jest.fn(async () => ([existingApp])),
+            updateApp: jest.fn()
+                .mockResolvedValueOnce(updatedApp)
+                .mockResolvedValueOnce(updatedApp),
+            createApp: jest.fn(),
+        };
+        const giteaClient = {
+            isConfigured: jest.fn(() => true),
+            ensureOrganization: jest.fn(async () => ({ created: false })),
+            ensureRepository: jest.fn(async () => ({
+                repository: {
+                    html_url: 'https://gitea.demoserver2.buzz/agent-apps/demo-app',
+                    clone_url: 'https://gitea.demoserver2.buzz/agent-apps/demo-app.git',
+                    ssh_url: 'ssh://git@gitea.demoserver2.buzz/agent-apps/demo-app.git',
+                },
+            })),
+            upsertFiles: jest.fn(async () => ({
+                commitSha: 'abcdef1234567890',
+                committedPaths: ['public/index.html'],
+            })),
+        };
+        const service = new ManagedAppService({
+            store,
+            giteaClient,
+            kubernetesClient: {
+                isConfigured: () => true,
+            },
+        });
+
+        service.getEffectiveGiteaConfig = () => ({
+            baseURL: 'https://gitea.demoserver2.buzz',
+            org: 'agent-apps',
+            registryHost: 'gitea.demoserver2.buzz',
+        });
+        service.getEffectiveManagedAppsConfig = () => ({
+            appBaseDomain: 'demoserver2.buzz',
+            namespacePrefix: 'app-',
+            defaultBranch: 'main',
+            defaultContainerPort: 80,
+            registryPullSecretName: 'gitea-registry-credentials',
+        });
+
+        const result = await service.createApp({
+            appName: 'Completely New Name',
+            publicHost: 'demo-app.demoserver2.buzz',
+        }, 'user-1', {
+            sessionId: 'session-1',
+        });
+
+        expect(result.reusedExistingApp).toBe(true);
+        expect(result.app.id).toBe('app-1');
+        expect(result.app.repoName).toBe('demo-app');
+        expect(result.app.namespace).toBe('app-demo-app');
+        expect(store.createApp).not.toHaveBeenCalled();
+        expect(giteaClient.upsertFiles).not.toHaveBeenCalled();
+        expect(result.message).toContain('Resumed Demo App');
+    });
+
+    test('updateApp preserves repo coordinates and deployment identity unless explicitly overridden', async () => {
+        const existingApp = {
+            id: 'app-1',
+            ownerId: 'user-1',
+            sessionId: 'session-1',
+            slug: 'demo-app',
+            appName: 'Demo App',
+            repoOwner: 'agent-apps',
+            repoName: 'demo-app',
+            repoUrl: 'https://gitea.demoserver2.buzz/agent-apps/demo-app.git',
+            repoCloneUrl: 'https://gitea.demoserver2.buzz/agent-apps/demo-app.git',
+            repoSshUrl: 'ssh://git@gitea.demoserver2.buzz/agent-apps/demo-app.git',
+            defaultBranch: 'main',
+            imageRepo: 'gitea.demoserver2.buzz/agent-apps/demo-app',
+            namespace: 'app-demo-app',
+            publicHost: 'demo-app.demoserver2.buzz',
+            sourcePrompt: 'Original prompt',
+            status: 'live',
+            metadata: {},
+        };
+        const store = {
+            ensureAvailable: jest.fn(async () => {}),
+            isAvailable: jest.fn(() => true),
+            getAppById: jest.fn(async () => existingApp),
+            getAppBySlug: jest.fn(async () => existingApp),
+            getAppByRepo: jest.fn(async () => existingApp),
+            createBuildRun: jest.fn(async () => ({
+                id: 'build-1',
+                appId: 'app-1',
+                status: 'pending',
+            })),
+            updateApp: jest.fn()
+                .mockResolvedValueOnce(existingApp)
+                .mockResolvedValueOnce({
+                    ...existingApp,
+                    metadata: {
+                        project: {
+                            summary: 'Demo App was resumed without repository changes.',
+                        },
+                    },
+                }),
+        };
+        const giteaClient = {
+            isConfigured: jest.fn(() => true),
+            ensureOrganization: jest.fn(async () => ({ created: false })),
+            ensureRepository: jest.fn(async () => ({
+                repository: {
+                    html_url: 'https://gitea.demoserver2.buzz/agent-apps/demo-app',
+                    clone_url: 'https://gitea.demoserver2.buzz/agent-apps/demo-app.git',
+                    ssh_url: 'ssh://git@gitea.demoserver2.buzz/agent-apps/demo-app.git',
+                },
+            })),
+            upsertFiles: jest.fn(async () => ({
+                commitSha: 'abcdef1234567890',
+                committedPaths: ['public/index.html'],
+            })),
+        };
+        const service = new ManagedAppService({
+            store,
+            giteaClient,
+            kubernetesClient: {
+                isConfigured: () => true,
+            },
+        });
+
+        service.getEffectiveGiteaConfig = () => ({
+            baseURL: 'https://gitea.demoserver2.buzz',
+            org: 'agent-apps',
+            registryHost: 'gitea.demoserver2.buzz',
+        });
+        service.getEffectiveManagedAppsConfig = () => ({
+            appBaseDomain: 'demoserver2.buzz',
+            namespacePrefix: 'app-',
+            defaultBranch: 'main',
+            defaultContainerPort: 80,
+            registryPullSecretName: 'gitea-registry-credentials',
+        });
+
+        await service.updateApp('app-1', {
+            prompt: 'Refresh the copy and polish the page.',
+        }, 'user-1', {
+            sessionId: 'session-1',
+        });
+
+        expect(store.updateApp).toHaveBeenNthCalledWith(1, 'app-1', 'user-1', expect.objectContaining({
+            repoOwner: 'agent-apps',
+            repoName: 'demo-app',
+            repoUrl: 'https://gitea.demoserver2.buzz/agent-apps/demo-app.git',
+            namespace: 'app-demo-app',
+            publicHost: 'demo-app.demoserver2.buzz',
+        }));
+    });
+
+    test('inspectApp returns normalized lifecycle metadata and a summary', async () => {
+        const service = new ManagedAppService({
+            store: {
+                getAppById: jest.fn(async () => null),
+                getAppBySlug: jest.fn(async () => ({
+                    id: 'app-1',
+                    ownerId: 'user-1',
+                    slug: 'demo-app',
+                    appName: 'Demo App',
+                    repoOwner: 'agent-apps',
+                    repoName: 'demo-app',
+                    repoUrl: 'https://gitea.demoserver2.buzz/agent-apps/demo-app.git',
+                    repoCloneUrl: 'https://gitea.demoserver2.buzz/agent-apps/demo-app.git',
+                    repoSshUrl: '',
+                    defaultBranch: 'main',
+                    imageRepo: 'gitea.demoserver2.buzz/agent-apps/demo-app',
+                    namespace: 'app-demo-app',
+                    publicHost: 'demo-app.demoserver2.buzz',
+                    status: 'live',
+                    sourcePrompt: 'Ship the demo app.',
+                    metadata: {
+                        project: {
+                            summary: 'Demo App is live.',
+                            nextStep: '',
+                        },
+                    },
+                })),
+                listBuildRunsForApp: jest.fn(async () => ([{
+                    id: 'run-1',
+                    buildStatus: 'success',
+                    deployStatus: 'succeeded',
+                    verificationStatus: 'live',
+                }])),
+            },
+        });
+
+        service.getEffectiveDeployConfig = () => ({
+            ingressClassName: 'traefik',
+            tlsClusterIssuer: 'letsencrypt-prod',
+        });
+        service.getEffectiveManagedAppsConfig = () => ({
+            defaultBranch: 'main',
+            defaultContainerPort: 80,
+            registryPullSecretName: 'gitea-registry-credentials',
+        });
+
+        const result = await service.inspectApp('demo-app', 'user-1');
+
+        expect(result.summary).toBe('Demo App is live.');
+        expect(result.app.metadata.project.summary).toBe('Demo App is live.');
+        expect(result.app.metadata.desiredDeploy.namespace).toBe('app-demo-app');
+        expect(result.app.metadata.liveDeploy.https).toBe(false);
+    });
+
     test('doctorPlatform summarizes the remote Gitea runner stack through the SSH kubernetes client', async () => {
         const inspectManagedAppPlatform = jest.fn(async () => ({
             deploymentTarget: 'ssh',
@@ -1043,6 +1281,14 @@ describe('ManagedAppService', () => {
             image: 'gitea.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
         }));
         expect(result.message).toContain('HTTPS is responding');
+        expect(result.desiredDeploy).toEqual(expect.objectContaining({
+            namespace: 'app-demo',
+            imageRepo: 'gitea.demoserver2.buzz/agent-apps/demo',
+        }));
+        expect(result.liveDeploy).toEqual(expect.objectContaining({
+            lastImage: 'gitea.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
+            https: true,
+        }));
     });
 
     test('deployApp heals a missing image repo from current Gitea settings before deployment', async () => {

@@ -288,7 +288,10 @@ function buildKubernetesReference({
     imageRepo = '',
     imageTag = 'latest',
 } = {}) {
-    return `apiVersion: apps/v1
+    return `# Reference manifest only.
+# KimiBuilt deploys this managed app through the managed-app control plane over SSH/kubectl.
+# Do not treat this file as the deployment source of truth.
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: ${slug}
