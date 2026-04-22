@@ -11,9 +11,42 @@ jest.mock('../session-store', () => ({
     },
 }));
 
+const settingsController = require('../routes/admin/settings.controller');
 const { ManagedAppService } = require('./service');
 
 describe('ManagedAppService', () => {
+    test('buildBuildEventsUrl strips a trailing /v1 from the configured API base URL', () => {
+        const service = new ManagedAppService();
+        const previousBaseUrl = settingsController.settings.api.baseURL;
+
+        settingsController.settings.api.baseURL = 'https://kimibuilt.example.test/v1';
+        service.getEffectiveManagedAppsConfig = () => ({
+            webhookEndpointPath: '/api/integrations/gitea/build-events',
+        });
+
+        try {
+            expect(service.buildBuildEventsUrl()).toBe('https://kimibuilt.example.test/api/integrations/gitea/build-events');
+        } finally {
+            settingsController.settings.api.baseURL = previousBaseUrl;
+        }
+    });
+
+    test('buildBuildEventsUrl strips trailing /api and /v1 segments before appending the webhook path', () => {
+        const service = new ManagedAppService();
+        const previousBaseUrl = settingsController.settings.api.baseURL;
+
+        settingsController.settings.api.baseURL = 'https://kimibuilt.example.test/control-plane/api/v1';
+        service.getEffectiveManagedAppsConfig = () => ({
+            webhookEndpointPath: '/api/integrations/gitea/build-events',
+        });
+
+        try {
+            expect(service.buildBuildEventsUrl()).toBe('https://kimibuilt.example.test/control-plane/api/integrations/gitea/build-events');
+        } finally {
+            settingsController.settings.api.baseURL = previousBaseUrl;
+        }
+    });
+
     test('remote-build blueprints default managed app deployment target to ssh', () => {
         const service = new ManagedAppService();
 

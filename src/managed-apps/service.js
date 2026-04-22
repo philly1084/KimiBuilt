@@ -23,6 +23,39 @@ function normalizeText(value = '') {
     return String(value || '').trim();
 }
 
+function normalizeManagedAppWebhookBaseUrl(value = '') {
+    const normalized = normalizeText(value).replace(/\/+$/, '');
+    if (!normalized) {
+        return '';
+    }
+
+    try {
+        const parsed = new URL(normalized);
+        const pathnameSegments = String(parsed.pathname || '')
+            .split('/')
+            .filter(Boolean);
+
+        while (pathnameSegments.length > 0) {
+            const tail = String(pathnameSegments[pathnameSegments.length - 1] || '').trim().toLowerCase();
+            if (tail === 'v1' || tail === 'api') {
+                pathnameSegments.pop();
+                continue;
+            }
+            break;
+        }
+
+        parsed.pathname = pathnameSegments.length > 0
+            ? `/${pathnameSegments.join('/')}`
+            : '';
+        parsed.search = '';
+        parsed.hash = '';
+
+        return parsed.toString().replace(/\/+$/, '');
+    } catch (_error) {
+        return normalized;
+    }
+}
+
 const MAX_MANAGED_APP_SLUG_LENGTH = 63;
 const MAX_KUBERNETES_NAME_LENGTH = 63;
 const DEFAULT_GITEA_RUNNER_LABELS = 'ubuntu-latest:host';
@@ -809,7 +842,7 @@ class ManagedAppService {
     }
 
     getPublicApiBaseUrl() {
-        return normalizeText(settingsController.settings?.api?.baseURL || process.env.API_BASE_URL || '').replace(/\/+$/, '');
+        return normalizeManagedAppWebhookBaseUrl(settingsController.settings?.api?.baseURL || process.env.API_BASE_URL || '');
     }
 
     buildBuildEventsUrl() {
