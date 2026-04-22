@@ -2687,14 +2687,20 @@ class UIHelpers {
             return '';
         }
 
+        const isProjectSummary = message?.metadata?.managedAppProjectSummary === true
+            || message?.managedAppProjectSummary === true;
         const liveBadge = progressState.terminal
             ? '<span class="assistant-progress-card__badge">Final</span>'
             : '<span class="assistant-progress-card__badge assistant-progress-card__badge--live"><span class="assistant-progress-card__pulse" aria-hidden="true"></span>Live</span>';
-        const noteText = progressState.terminal
-            ? (['build_failed', 'deploy_failed'].includes(progressState.phase)
-                ? 'The managed app flow stopped before the site was fully live.'
-                : 'The managed app flow finished with the latest deployment state.')
-            : 'Live deployment updates replace the previous build status in this bubble.';
+        const noteText = isProjectSummary
+            ? (message?.metadata?.nextStep
+                ? `Next: ${String(message.metadata.nextStep || '').trim()}`
+                : 'This project stays attached to this chat. Ask Lilly to continue when you want the next phase.')
+            : (progressState.terminal
+                ? (['build_failed', 'deploy_failed'].includes(progressState.phase)
+                    ? 'The managed app flow stopped before the site was fully live.'
+                    : 'The managed app flow finished with the latest deployment state.')
+                : 'Live deployment updates replace the previous build status in this bubble.');
         const stepsHtml = progressState.steps.map((step, index) => {
             const isActive = index === progressState.activeStepIndex;
             const stateLabel = ({
@@ -2719,7 +2725,7 @@ class UIHelpers {
                 <div class="assistant-progress-card__surface" aria-live="polite">
                     <div class="assistant-progress-card__header">
                         <div class="assistant-progress-card__copy">
-                            <span class="assistant-progress-card__eyebrow">${progressState.terminal ? 'Build Status' : 'Build Progress'}</span>
+                            <span class="assistant-progress-card__eyebrow">${isProjectSummary ? 'Project Status' : (progressState.terminal ? 'Build Status' : 'Build Progress')}</span>
                             <span class="assistant-progress-card__summary">${this.escapeHtml(progressState.summary)}</span>
                         </div>
                         ${liveBadge}

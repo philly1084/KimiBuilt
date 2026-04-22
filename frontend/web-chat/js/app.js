@@ -2119,6 +2119,23 @@ class ChatApp {
         return `managed-app:${appId || appSlug || 'unknown'}`;
     }
 
+    getSessionActiveProject(sessionId = '') {
+        const normalizedSessionId = String(sessionId || '').trim();
+        if (!normalizedSessionId) {
+            return null;
+        }
+
+        const session = sessionManager.sessions.find((entry) => entry.id === normalizedSessionId);
+        const activeProject = session?.metadata?.activeProject;
+        if (!activeProject || typeof activeProject !== 'object') {
+            return null;
+        }
+
+        return String(activeProject.type || '').trim().toLowerCase() === 'managed-app'
+            ? activeProject
+            : null;
+    }
+
     getManagedAppMessageMeta(message = null) {
         const metadata = message?.metadata && typeof message.metadata === 'object'
             ? message.metadata
@@ -2138,6 +2155,76 @@ class ChatApp {
                 managedAppSlug: appSlug,
             }),
         };
+    }
+
+    buildManagedProjectSummaryMessage(sessionId = '', project = {}) {
+        const normalizedSessionId = String(sessionId || '').trim();
+        const appId = String(project?.appId || '').trim();
+        const appSlug = String(project?.appSlug || '').trim();
+        const publicHost = String(project?.publicHost || '').trim();
+        const phase = this.normalizeManagedAppPhase(project?.phase || project?.status || '');
+        const summary = String(project?.summary || '').trim()
+            || this.buildManagedAppProgressDetail({
+                phase,
+                app: {
+                    id: appId,
+                    slug: appSlug,
+                    appName: String(project?.title || '').trim(),
+                    publicHost,
+                },
+            });
+        const progressState = this.buildManagedAppProgressState({
+            phase,
+            summary,
+            app: {
+                id: appId,
+                slug: appSlug,
+                appName: String(project?.title || '').trim(),
+                publicHost,
+            },
+        });
+
+        if (!normalizedSessionId || !summary || (!appId && !appSlug)) {
+            return null;
+        }
+
+        return {
+            id: `managed-project:${appId || appSlug}`,
+            role: 'assistant',
+            content: summary,
+            timestamp: String(project?.updatedAt || project?.lastActivityAt || new Date().toISOString()).trim() || new Date().toISOString(),
+            clientOnly: true,
+            metadata: {
+                managedAppProjectSummary: true,
+                managedAppId: appId,
+                managedAppSlug: appSlug,
+                managedAppPhase: phase,
+                publicHost,
+                managedAppProgressState: progressState,
+                managedAppProjectKey: String(project?.key || '').trim() || this.buildManagedAppProgressKey({
+                    managedAppId: appId,
+                    managedAppSlug: appSlug,
+                }),
+                nextStep: String(project?.nextStep || '').trim(),
+            },
+            managedAppProgressState: progressState,
+        };
+    }
+
+    injectSessionProjectMessages(sessionId, messages = []) {
+        const normalizedMessages = (Array.isArray(messages) ? messages : [])
+            .filter((message) => message?.metadata?.managedAppProjectSummary !== true);
+        const activeProject = this.getSessionActiveProject(sessionId);
+        if (!activeProject) {
+            return normalizedMessages;
+        }
+
+        const summaryMessage = this.buildManagedProjectSummaryMessage(sessionId, activeProject);
+        if (!summaryMessage) {
+            return normalizedMessages;
+        }
+
+        return [summaryMessage, ...normalizedMessages];
     }
 
     isManagedAppTerminalPhase(phase = '') {
@@ -2541,6 +2628,24 @@ class ChatApp {
             if (nextState.terminal) {
                 uiHelpers.markMessageSettled(nextMessage.id);
             }
+        }
+
+        const projectSummaryMessage = this.buildManagedProjectSummaryMessage(normalizedSessionId, {
+            type: 'managed-app',
+            key: progressKey,
+            title: String(event?.app?.appName || event?.app?.slug || 'Project').trim(),
+            summary,
+            phase,
+            status: phase,
+            appId: nextState.appId,
+            appSlug: nextState.appSlug,
+            publicHost: String(event?.app?.publicHost || '').trim(),
+            nextStep: '',
+            updatedAt: event?.timestamp || new Date().toISOString(),
+        });
+        if (projectSummaryMessage) {
+            this.upsertSessionMessage(normalizedSessionId, projectSummaryMessage);
+            this.renderOrReplaceMessage(projectSummaryMessage);
         }
 
         return nextMessage;
@@ -4623,7 +4728,10 @@ class ChatApp {
     syncAnnotatedSurveyStates(sessionId) {
         const messages = this.reconcilePendingCheckpointMessages(sessionId);
         const annotatedMessages = this.annotateSurveyStates(messages);
-        const normalizedMessages = this.normalizeManagedAppLifecycleMessages(annotatedMessages);
+        const normalizedMessages = this.injectSessionProjectMessages(
+            sessionId,
+            this.normalizeManagedAppLifecycleMessages(annotatedMessages),
+        );
         sessionManager.sessionMessages.set(sessionId, normalizedMessages);
         sessionManager.saveToStorage();
         return normalizedMessages;

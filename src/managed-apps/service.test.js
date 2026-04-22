@@ -960,6 +960,126 @@ describe('ManagedAppService', () => {
         expect(result.message).toContain('Resumed Demo App');
     });
 
+    test('resolveRecentSessionManagedApp reuses the session active project before transcript history', async () => {
+        const existingApp = {
+            id: 'app-1',
+            ownerId: 'user-1',
+            sessionId: 'session-1',
+            slug: 'demo-app',
+            appName: 'Demo App',
+            repoOwner: 'agent-apps',
+            repoName: 'demo-app',
+            repoUrl: 'https://gitea.demoserver2.buzz/agent-apps/demo-app.git',
+            repoCloneUrl: 'https://gitea.demoserver2.buzz/agent-apps/demo-app.git',
+            repoSshUrl: 'ssh://git@gitea.demoserver2.buzz/agent-apps/demo-app.git',
+            defaultBranch: 'main',
+            imageRepo: 'gitea.demoserver2.buzz/agent-apps/demo-app',
+            namespace: 'app-demo-app',
+            publicHost: 'demo-app.demoserver2.buzz',
+            status: 'live',
+            metadata: {},
+        };
+        const sessionStore = {
+            getOwned: jest.fn(async () => ({
+                id: 'session-1',
+                metadata: {
+                    activeProject: {
+                        type: 'managed-app',
+                        appId: 'app-1',
+                        appSlug: 'demo-app',
+                    },
+                },
+            })),
+        };
+        const store = {
+            getAppById: jest.fn(async (id) => (id === 'app-1' ? existingApp : null)),
+            getAppBySlug: jest.fn(async (slug) => (slug === 'demo-app' ? existingApp : null)),
+            getAppByRepo: jest.fn(async () => null),
+        };
+        const service = new ManagedAppService({
+            store,
+            sessionStore,
+        });
+
+        const result = await service.resolveRecentSessionManagedApp('session-1', 'user-1');
+
+        expect(result?.id).toBe('app-1');
+        expect(sessionStore.getOwned).toHaveBeenCalledWith('session-1', 'user-1');
+        expect(store.getAppById).toHaveBeenCalledWith('app-1', 'user-1');
+    });
+
+    test('broadcastLifecycleEvent persists the active project snapshot into the session metadata', async () => {
+        const app = {
+            id: 'app-1',
+            ownerId: 'user-1',
+            sessionId: 'session-1',
+            slug: 'demo-app',
+            appName: 'Demo App',
+            repoOwner: 'agent-apps',
+            repoName: 'demo-app',
+            repoUrl: 'https://gitea.demoserver2.buzz/agent-apps/demo-app.git',
+            repoCloneUrl: 'https://gitea.demoserver2.buzz/agent-apps/demo-app.git',
+            repoSshUrl: 'ssh://git@gitea.demoserver2.buzz/agent-apps/demo-app.git',
+            defaultBranch: 'main',
+            namespace: 'app-demo-app',
+            publicHost: 'demo-app.demoserver2.buzz',
+            status: 'live',
+            metadata: {
+                project: {
+                    nextStep: '',
+                    openItems: [],
+                    decisions: [],
+                    lastUserIntent: 'Continue the demo app.',
+                },
+                desiredDeploy: {
+                    deploymentTarget: 'ssh',
+                    namespace: 'app-demo-app',
+                    publicHost: 'demo-app.demoserver2.buzz',
+                    defaultBranch: 'main',
+                },
+                liveDeploy: {
+                    lastVerifiedAt: '2026-04-22T12:00:00.000Z',
+                },
+            },
+        };
+        const buildRun = {
+            id: 'build-1',
+            buildStatus: 'success',
+            deployStatus: 'succeeded',
+            verificationStatus: 'live',
+        };
+        const sessionStore = {
+            upsertMessage: jest.fn(async () => null),
+            getOwned: jest.fn(async () => ({
+                id: 'session-1',
+                metadata: {
+                    title: 'New Chat',
+                },
+            })),
+            update: jest.fn(async () => null),
+        };
+        const service = new ManagedAppService({
+            sessionStore,
+        });
+
+        await service.broadcastLifecycleEvent(app, buildRun, 'live');
+
+        expect(sessionStore.update).toHaveBeenCalledWith('session-1', expect.objectContaining({
+            metadata: expect.objectContaining({
+                title: 'Demo App',
+                activeProject: expect.objectContaining({
+                    type: 'managed-app',
+                    key: 'managed-app:app-1',
+                    title: 'Demo App',
+                    phase: 'live',
+                    appId: 'app-1',
+                    appSlug: 'demo-app',
+                    publicHost: 'demo-app.demoserver2.buzz',
+                }),
+            }),
+        }));
+    });
+
     test('createApp still creates a separate repo when the prompt explicitly asks for a new app', async () => {
         const existingApp = {
             id: 'app-1',

@@ -164,7 +164,7 @@ app.get('/', (_req, res) => {
 <!DOCTYPE html>
 <html>
 <head>
-    <title>LillyBuilt AI</title>
+    <title>Lilly</title>
     <meta charset="UTF-8">
     <style>
         body {
@@ -203,7 +203,7 @@ app.get('/', (_req, res) => {
     </style>
 </head>
 <body>
-    <h1>LillyBuilt AI Platform</h1>
+    <h1>Lilly</h1>
     <p>Choose your interface:</p>
     <div class="grid">
         <a href="/web-chat/" class="card">
@@ -393,7 +393,7 @@ async function start() {
     }
 
     server.listen(config.port, '0.0.0.0', () => {
-        console.log(`LillyBuilt AI backend listening on http://0.0.0.0:${config.port}`);
+        console.log(`Lilly backend listening on http://0.0.0.0:${config.port}`);
     });
 }
 

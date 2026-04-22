@@ -283,7 +283,7 @@ class ImportExportManager {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${this.escapeHtml(session?.title || 'Conversation')} - LillyBuilt AI</title>
+    <title>${this.escapeHtml(session?.title || 'Conversation')} - Lilly</title>
     <style>
         :root {
             --bg-primary: #0d0d0d;
@@ -428,7 +428,7 @@ class ImportExportManager {
         ${messagesHtml}
     </div>
     <div class="footer">
-        Exported from LillyBuilt AI
+        Exported from Lilly
     </div>
 </body>
 </html>`;
@@ -966,7 +966,7 @@ class ImportExportManager {
             };
         }
         
-        throw new Error('Unrecognized JSON format. Expected LillyBuilt export, OpenAI format, or an array of messages.');
+        throw new Error('Unrecognized JSON format. Expected Lilly export, OpenAI format, or an array of messages.');
     }
 
     // ============================================

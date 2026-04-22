@@ -620,6 +620,88 @@ function buildManagedAppStatusSummary(app = null, buildRun = null, phase = '', d
     }
 }
 
+function buildManagedProjectKey(app = null) {
+    const appId = normalizeText(app?.id || app?.slug || 'managed-app');
+    return `managed-app:${appId}`;
+}
+
+function shouldPromoteManagedProjectTitle(currentTitle = '', previousProjectTitle = '') {
+    const normalizedCurrentTitle = normalizeText(currentTitle);
+    const normalizedPreviousProjectTitle = normalizeText(previousProjectTitle);
+
+    return !normalizedCurrentTitle
+        || /^new chat$/i.test(normalizedCurrentTitle)
+        || (normalizedPreviousProjectTitle && normalizedCurrentTitle === normalizedPreviousProjectTitle);
+}
+
+function buildManagedProjectState(app = null, buildRun = null, phase = '', details = {}) {
+    const normalizedApp = app && typeof app === 'object' ? app : {};
+    const normalizedPhase = normalizeText(phase).toLowerCase()
+        || normalizeText(normalizedApp?.status).toLowerCase()
+        || 'updated';
+    const metadata = normalizedApp?.metadata && typeof normalizedApp.metadata === 'object'
+        ? normalizedApp.metadata
+        : {};
+    const project = metadata.project && typeof metadata.project === 'object'
+        ? metadata.project
+        : {};
+    const desiredDeploy = metadata.desiredDeploy && typeof metadata.desiredDeploy === 'object'
+        ? metadata.desiredDeploy
+        : {};
+    const liveDeploy = metadata.liveDeploy && typeof metadata.liveDeploy === 'object'
+        ? metadata.liveDeploy
+        : {};
+    const publicHost = normalizeText(normalizedApp.publicHost || desiredDeploy.publicHost);
+    const title = normalizeText(
+        normalizedApp.appName
+        || titleizeSlug(normalizedApp.slug)
+        || 'Managed App',
+    );
+    const summary = normalizeText(
+        details.summary
+        || buildManagedAppStatusSummary(normalizedApp, buildRun, normalizedPhase, details.deployment || null),
+    );
+
+    return {
+        type: 'managed-app',
+        key: buildManagedProjectKey(normalizedApp),
+        title,
+        summary,
+        phase: normalizedPhase,
+        status: normalizeText(normalizedApp.status || normalizedPhase).toLowerCase() || normalizedPhase,
+        appId: normalizeText(normalizedApp.id),
+        appSlug: normalizeText(normalizedApp.slug),
+        sessionId: normalizeText(normalizedApp.sessionId),
+        ownerId: normalizeText(normalizedApp.ownerId),
+        repoOwner: normalizeText(normalizedApp.repoOwner),
+        repoName: normalizeText(normalizedApp.repoName),
+        repoUrl: normalizeText(normalizedApp.repoUrl || normalizedApp.repoCloneUrl),
+        repoCloneUrl: normalizeText(normalizedApp.repoCloneUrl),
+        repoSshUrl: normalizeText(normalizedApp.repoSshUrl),
+        defaultBranch: normalizeText(normalizedApp.defaultBranch || desiredDeploy.defaultBranch || 'main'),
+        namespace: normalizeText(normalizedApp.namespace || desiredDeploy.namespace),
+        publicHost,
+        publicUrl: publicHost ? `https://${publicHost}` : '',
+        deploymentTarget: normalizeText(metadata.deploymentTarget || desiredDeploy.deploymentTarget || 'ssh') || 'ssh',
+        buildRunId: normalizeText(buildRun?.id),
+        buildStatus: normalizeText(buildRun?.buildStatus).toLowerCase(),
+        deployStatus: normalizeText(buildRun?.deployStatus).toLowerCase(),
+        verificationStatus: normalizeText(buildRun?.verificationStatus).toLowerCase(),
+        nextStep: normalizeText(project.nextStep),
+        openItems: normalizeStringArray(project.openItems, 8),
+        decisions: normalizeStringArray(project.decisions, 8),
+        lastUserIntent: normalizeText(project.lastUserIntent || normalizedApp.sourcePrompt),
+        lastActivityAt: normalizeText(
+            project.lastActivityAt
+            || liveDeploy.lastVerifiedAt
+            || normalizedApp.updatedAt
+            || normalizedApp.createdAt
+            || new Date().toISOString(),
+        ),
+        updatedAt: new Date().toISOString(),
+    };
+}
+
 function hasOwnInput(input = {}, key = '') {
     return Boolean(input && Object.prototype.hasOwnProperty.call(input, key));
 }
@@ -973,11 +1055,32 @@ class ManagedAppService {
 
     async resolveRecentSessionManagedApp(sessionId = null, ownerId = null) {
         const normalizedSessionId = normalizeText(sessionId);
-        if (!normalizedSessionId || !this.sessionStore?.listMessages) {
+        if (!normalizedSessionId) {
             return null;
         }
 
         try {
+            if (this.sessionStore?.getOwned || this.sessionStore?.get) {
+                const session = ownerId && this.sessionStore.getOwned
+                    ? await this.sessionStore.getOwned(normalizedSessionId, ownerId)
+                    : await this.sessionStore.get(normalizedSessionId);
+                const activeProject = session?.metadata?.activeProject;
+                const activeProjectType = normalizeText(activeProject?.type).toLowerCase();
+                const activeProjectAppId = normalizeText(activeProject?.appId);
+                const activeProjectAppSlug = normalizeText(activeProject?.appSlug);
+
+                if (activeProjectType === 'managed-app' && (activeProjectAppId || activeProjectAppSlug)) {
+                    const app = await this.resolveApp(activeProjectAppId || activeProjectAppSlug, ownerId);
+                    if (app) {
+                        return this.normalizeAppRecord(app);
+                    }
+                }
+            }
+
+            if (!this.sessionStore?.listMessages) {
+                return null;
+            }
+
             const messages = await this.sessionStore.listMessages(normalizedSessionId, 100, ownerId);
             for (let index = messages.length - 1; index >= 0; index -= 1) {
                 const metadata = messages[index]?.metadata || {};
@@ -2311,6 +2414,50 @@ class ManagedAppService {
         }
     }
 
+    async persistLifecycleSessionProject(app = null, buildRun = null, phase = '', details = {}) {
+        if (!app?.sessionId || !this.sessionStore?.update || (!this.sessionStore?.get && !this.sessionStore?.getOwned)) {
+            return null;
+        }
+
+        const normalizedApp = this.normalizeAppRecord(app);
+        const summary = normalizeText(details.summary || buildManagedAppStatusSummary(normalizedApp, buildRun, phase, details.deployment || null));
+        if (!summary) {
+            return null;
+        }
+
+        try {
+            const session = normalizedApp.ownerId && this.sessionStore.getOwned
+                ? await this.sessionStore.getOwned(normalizedApp.sessionId, normalizedApp.ownerId)
+                : await this.sessionStore.get(normalizedApp.sessionId);
+            if (!session) {
+                return null;
+            }
+
+            const currentMetadata = session?.metadata && typeof session.metadata === 'object'
+                ? session.metadata
+                : {};
+            const previousProjectTitle = normalizeText(currentMetadata?.activeProject?.title);
+            const activeProject = buildManagedProjectState(normalizedApp, buildRun, phase, {
+                ...details,
+                summary,
+            });
+            const metadataPatch = {
+                activeProject,
+            };
+
+            if (shouldPromoteManagedProjectTitle(currentMetadata?.title, previousProjectTitle)) {
+                metadataPatch.title = activeProject.title;
+            }
+
+            return this.sessionStore.update(normalizedApp.sessionId, {
+                metadata: metadataPatch,
+            });
+        } catch (error) {
+            console.warn(`[ManagedApp] Failed to persist lifecycle session project for ${normalizedApp.slug || normalizedApp.id || 'managed-app'}: ${error.message}`);
+            return null;
+        }
+    }
+
     async persistLifecycleMessage(app = null, buildRun = null, phase = '', details = {}) {
         if (!app?.sessionId || !this.sessionStore?.upsertMessage) {
             return null;
@@ -2346,6 +2493,10 @@ class ManagedAppService {
     async broadcastLifecycleEvent(app = null, buildRun = null, phase = '', details = {}) {
         const summary = normalizeText(details.summary || buildManagedAppStatusSummary(app, buildRun, phase, details.deployment || null));
         await this.persistLifecycleMessage(app, buildRun, phase, {
+            ...details,
+            summary,
+        });
+        await this.persistLifecycleSessionProject(app, buildRun, phase, {
             ...details,
             summary,
         });

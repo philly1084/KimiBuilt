@@ -542,6 +542,14 @@ class SessionManager extends EventTarget {
             storedSession?.title || storedSession?.metadata?.title || '',
             '',
         );
+        const backendProjectTitle = this.normalizeSessionTitle(
+            session?.metadata?.activeProject?.title || '',
+            '',
+        );
+        const storedProjectTitle = this.normalizeSessionTitle(
+            storedSession?.metadata?.activeProject?.title || '',
+            '',
+        );
         const backendTimestamp = new Date(session?.updatedAt || session?.createdAt || 0).getTime();
         const storedTimestamp = new Date(storedSession?.updatedAt || storedSession?.createdAt || 0).getTime();
 
@@ -551,6 +559,14 @@ class SessionManager extends EventTarget {
 
         if (storedTitle) {
             return storedTitle;
+        }
+
+        if (backendProjectTitle && (!storedProjectTitle || (Number.isFinite(backendTimestamp) && Number.isFinite(storedTimestamp) && backendTimestamp >= storedTimestamp))) {
+            return backendProjectTitle;
+        }
+
+        if (storedProjectTitle) {
+            return storedProjectTitle;
         }
 
         return 'New Chat';
@@ -1263,7 +1279,10 @@ class SessionManager extends EventTarget {
         
         // Update session title from first user message if it's still default
         const session = this.sessions.find(s => s.id === sessionId);
-        if (session && (session.title === 'New Chat' || !session.title) && message.role === 'user') {
+        if (session
+            && !session?.metadata?.activeProject?.title
+            && (session.title === 'New Chat' || !session.title)
+            && message.role === 'user') {
             const generatedTitle = this.generateTitleFromMessage(message.content);
             this.updateSessionTitleLocally(sessionId, generatedTitle);
             if (!this.isLocalSession(sessionId)) {

@@ -1778,7 +1778,7 @@ class ArtifactService {
             : '';
         const researchBackedRequest = isResearchBackedArtifactRequest(requestPrompt, normalizedFormat);
         const baseContext = [
-            'You are the LillyBuilt Business Agent.',
+            'You are the Lilly Business Agent.',
             'Produce business-ready output only, with no surrounding commentary.',
             allowToolOrchestration
                 ? 'Use available tools when they materially improve factual grounding, research coverage, or delegated page planning. Do not mention tool invocation syntax or process notes in the final artifact output.'
