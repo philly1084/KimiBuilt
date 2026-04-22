@@ -66,7 +66,8 @@ const PROMPT_NAME_STOPWORDS = new Set([
     'like', 'make', 'managed', 'me', 'my', 'named', 'need', 'on', 'our', 'ours', 'page', 'please', 'project',
     'put', 'really', 'remote', 'repo', 'repository', 'server', 'servers', 'service', 'should', 'simple',
     'site', 'something', 'stuff', 'that', 'the', 'this', 'to', 'tool', 'too', 'use', 'using', 'us', 'want',
-    'we', 'website', 'will', 'with', 'would', 'you', 'your',
+    'we', 'website', 'will', 'with', 'would', 'you', 'your', 'another', 'brand', 'current', 'different',
+    'existing', 'fresh', 'instead', 'new', 'old', 'same', 'scratch',
 ]);
 
 function baseSlugify(value = '') {
@@ -130,6 +131,58 @@ function extractExplicitAppName(value = '') {
     return '';
 }
 
+function extractImplicitSubjectAppName(value = '') {
+    const normalized = normalizeText(value);
+    if (!normalized) {
+        return '';
+    }
+
+    const patterns = [
+        /\b(?:build|create|deploy|launch|make|ship|start)\s+(?:me\s+|us\s+|a\s+|an\s+|the\s+)?([^.,!?;:\n]{1,80}?)\s+(?:app|application|site|website|service|game)\b/i,
+        /\b(?:an?|the)\s+([^.,!?;:\n]{1,80}?)\s+(?:app|application|site|website|service|game)\b/i,
+    ];
+
+    for (const pattern of patterns) {
+        const match = normalized.match(pattern);
+        const candidate = summarizePromptName(match?.[1] || '');
+        if (candidate) {
+            return candidate;
+        }
+    }
+
+    return '';
+}
+
+function hasExplicitPromptAppName(value = '') {
+    return Boolean(extractExplicitAppName(value));
+}
+
+function hasExplicitManagedAppIdentityInput(input = {}) {
+    const prompt = input.prompt || input.sourcePrompt || '';
+    return Boolean(
+        normalizeText(input.appRef || input.app || input.id || input.ref || '')
+        || normalizeText(input.slug)
+        || normalizeText(input.repoOwner)
+        || normalizeText(input.repoName)
+        || normalizeText(input.publicHost)
+        || normalizeText(input.appName || input.name || input.title)
+        || hasExplicitPromptAppName(prompt)
+    );
+}
+
+function hasExplicitNewManagedAppIntent(input = {}) {
+    const prompt = normalizeText(input.prompt || input.sourcePrompt || '').toLowerCase();
+    if (!prompt) {
+        return false;
+    }
+
+    return [
+        /\b(?:brand new|from scratch|fresh|different|another)\b[\s\S]{0,30}\b(?:app|application|site|website|service|game)\b/,
+        /\bnew\b[\s\S]{0,20}\b(?:managed app|app|application|site|website|service|game)\b/,
+        /\b(?:create|build|make|start)\b[\s\S]{0,20}\banother\b/,
+    ].some((pattern) => pattern.test(prompt));
+}
+
 function summarizePromptName(value = '') {
     const normalized = normalizeText(value);
     if (!normalized) {
@@ -161,6 +214,7 @@ function deriveRequestedAppName(input = {}) {
         || input.slug
         || input.repoName
         || extractExplicitAppName(input.prompt || input.sourcePrompt || '')
+        || extractImplicitSubjectAppName(input.prompt || input.sourcePrompt || '')
         || summarizePromptName(input.prompt || input.sourcePrompt || ''),
     );
 }
@@ -917,8 +971,44 @@ class ManagedAppService {
         )) || null;
     }
 
+    async resolveRecentSessionManagedApp(sessionId = null, ownerId = null) {
+        const normalizedSessionId = normalizeText(sessionId);
+        if (!normalizedSessionId || !this.sessionStore?.listMessages) {
+            return null;
+        }
+
+        try {
+            const messages = await this.sessionStore.listMessages(normalizedSessionId, 100, ownerId);
+            for (let index = messages.length - 1; index >= 0; index -= 1) {
+                const metadata = messages[index]?.metadata || {};
+                const managedAppId = normalizeText(metadata.managedAppId);
+                const managedAppSlug = normalizeText(metadata.managedAppSlug);
+                if (managedAppId) {
+                    const app = await this.resolveApp(managedAppId, ownerId);
+                    if (app) {
+                        return this.normalizeAppRecord(app);
+                    }
+                }
+                if (managedAppSlug) {
+                    const app = await this.resolveApp(managedAppSlug, ownerId);
+                    if (app) {
+                        return this.normalizeAppRecord(app);
+                    }
+                }
+            }
+        } catch (_error) {
+            return null;
+        }
+
+        return null;
+    }
+
     async resolveAppForMutation(input = {}, blueprint = {}, ownerId = null) {
         const explicitRef = normalizeText(input.appRef || input.app || input.id || input.ref || '');
+        const prompt = input.prompt || input.sourcePrompt || '';
+        const explicitPromptName = extractExplicitAppName(prompt);
+        const hasExplicitIdentity = hasExplicitManagedAppIdentityInput(input);
+        const explicitNewAppIntent = hasExplicitNewManagedAppIntent(input);
         if (explicitRef) {
             const resolved = await this.resolveApp(explicitRef, ownerId);
             if (resolved) {
@@ -952,7 +1042,17 @@ class ManagedAppService {
             }
         }
 
-        if (blueprint?.slug && this.store?.getAppBySlug) {
+        if (!hasExplicitIdentity && !explicitNewAppIntent) {
+            const sessionLinkedApp = await this.resolveRecentSessionManagedApp(input.sessionId, ownerId);
+            if (sessionLinkedApp) {
+                return {
+                    app: sessionLinkedApp,
+                    reason: 'session-linked',
+                };
+            }
+        }
+
+        if ((normalizeText(input.slug) || explicitPromptName) && blueprint?.slug && this.store?.getAppBySlug) {
             const byBlueprintSlug = this.normalizeAppRecord(await this.store.getAppBySlug(blueprint.slug, ownerId));
             if (byBlueprintSlug) {
                 return {
@@ -963,7 +1063,9 @@ class ManagedAppService {
         }
 
         const ownerApps = await this.listOwnerApps(ownerId, 50);
-        const byHost = this.findAppByPublicHost(ownerApps, input.publicHost || blueprint.publicHost);
+        const byHost = normalizeText(input.publicHost)
+            ? this.findAppByPublicHost(ownerApps, input.publicHost || blueprint.publicHost)
+            : null;
         if (byHost) {
             return {
                 app: byHost,
@@ -971,7 +1073,9 @@ class ManagedAppService {
             };
         }
 
-        const byExactName = this.findAppByExactName(ownerApps, input.appName || input.name || input.title || blueprint.appName);
+        const byExactName = hasExplicitIdentity
+            ? this.findAppByExactName(ownerApps, input.appName || input.name || input.title || explicitPromptName || blueprint.appName)
+            : null;
         if (byExactName) {
             return {
                 app: byExactName,
@@ -979,7 +1083,9 @@ class ManagedAppService {
             };
         }
 
-        const byFuzzyMatch = this.findAppByFuzzyMatch(ownerApps, blueprint);
+        const byFuzzyMatch = (normalizeText(input.slug) || explicitPromptName)
+            ? this.findAppByFuzzyMatch(ownerApps, blueprint)
+            : null;
         if (byFuzzyMatch) {
             return {
                 app: byFuzzyMatch,
