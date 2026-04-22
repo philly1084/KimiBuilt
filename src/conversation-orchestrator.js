@@ -119,6 +119,10 @@ const REMOTE_BLOCKING_ERROR_PATTERNS = [
     /operation timed out/i,
     /connection closed by remote host/i,
 ];
+const MANAGED_APP_RECOVERABLE_ERROR_PATTERNS = [
+    /managed app not found/i,
+    /managed app catalog entry was not found/i,
+];
 
 function readLocalGuidanceFile(filePath = '') {
     try {
@@ -3778,6 +3782,27 @@ function cleanManagedAppReference(candidate = '') {
         return '';
     }
 
+    const genericReference = normalized.toLowerCase();
+    if ([
+        'those steps',
+        'these steps',
+        'that step',
+        'this step',
+        'that app',
+        'this app',
+        'the app',
+        'that site',
+        'this site',
+        'the site',
+        'that website',
+        'this website',
+        'the website',
+        'the managed app',
+        'managed app',
+    ].includes(genericReference)) {
+        return '';
+    }
+
     const wordCount = normalized.split(/\s+/).filter(Boolean).length;
     if (wordCount > 5) {
         return '';
@@ -3794,6 +3819,8 @@ function extractManagedAppReference(text = '') {
 
     const patterns = [
         /\b(?:fix|update|modify|change|edit|refresh|rebuild|deploy|redeploy|publish|inspect|show|check|verify|diagnose|debug|troubleshoot|status|describe|review|build|create|make)\s+([a-z0-9][a-z0-9-]{1,63})\s+(?:app|website|site|frontend|service|game)\b/i,
+        /\bmanaged app\s+([a-z0-9]+-[a-z0-9-]{1,63})\b/i,
+        /\b(?:for|on|with)\s+(?:the\s+)?([^"',.\n]+?)(?=\s+(?:to\s+(?:get|bring|take)\s+it\s+(?:online|live)|online|live|deployed|published)\b)/i,
         /\b(?:managed app|app|website|site|frontend|service|game)\s+(?:called|named)\s+["'`]?([^"',.\n]+?)["'`]?(?=$|[,.!?]|\s+(?:make|that|which|with|using)\b)/i,
         /\b(?:called|named)\s+["'`]?([^"',.\n]+?)["'`]?(?=$|[,.!?]|\s+(?:make|that|which|with|using)\b)/i,
         /\b(?:managed app|app|website|site|frontend|service|game)\s+["'`]([^"'`\n]{1,64})["'`]/i,
@@ -3810,9 +3837,87 @@ function extractManagedAppReference(text = '') {
     return '';
 }
 
+function extractManagedAppReferenceFromRecentMessages(recentMessages = []) {
+    const messages = Array.isArray(recentMessages) ? recentMessages : [];
+    const patterns = [
+        /\binspected\s+([^"',.\n]+?)\s+in the managed app system\b/i,
+        /\b(?:repo to work on is|work on is|target(?: app| repo)? is)\s+([^"',.\n]+?)(?=$|[,.!?]|\s+(?:and|so|to)\b)/i,
+        /\bmanaged app\s+([^"',.\n]+?)\s*:/i,
+    ];
+
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const text = normalizeMessageText(messages[index]?.content || '');
+        if (!text) {
+            continue;
+        }
+
+        const extracted = extractManagedAppReference(text);
+        if (extracted) {
+            return extracted;
+        }
+
+        for (const pattern of patterns) {
+            const candidate = cleanManagedAppReference(text.match(pattern)?.[1] || '');
+            if (candidate) {
+                return candidate;
+            }
+        }
+    }
+
+    return '';
+}
+
+function extractManagedAppPromptFromRecentMessages(recentMessages = []) {
+    const messages = Array.isArray(recentMessages) ? recentMessages : [];
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (String(message?.role || '').trim().toLowerCase() !== 'user') {
+            continue;
+        }
+
+        const text = normalizeMessageText(message?.content || '').trim();
+        if (!text) {
+            continue;
+        }
+
+        if (hasManagedAppIntentText(text) || /\b(?:repo to work on is|work on is|target(?: app| repo)? is)\b/i.test(text)) {
+            return text;
+        }
+    }
+
+    return '';
+}
+
+function inferManagedAppRecoveryActionFromRecentMessages(recentMessages = []) {
+    const messages = Array.isArray(recentMessages) ? recentMessages : [];
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const text = normalizeMessageText(messages[index]?.content || '');
+        if (!text) {
+            continue;
+        }
+
+        if (/\b(?:next move is to|should)\s+create(?: or reinitialize)?\b/i.test(text)
+            || /\bcreate or reinitialize the managed app\b/i.test(text)
+            || /\breinitialize the managed app\b/i.test(text)) {
+            return 'create';
+        }
+
+        if ((/\b(?:status|state)\s+is\s+draft\b/i.test(text) || /\bcurrent state is draft\b/i.test(text))
+            && /\b(?:no repo clone url|no ssh url|no creation\/update timestamps|no latest build run|no latest build run attached|no usable managed-app repo\/build record)\b/i.test(text)) {
+            return 'create';
+        }
+
+        if (MANAGED_APP_RECOVERABLE_ERROR_PATTERNS.some((pattern) => pattern.test(text))) {
+            return 'create';
+        }
+    }
+
+    return '';
+}
+
 function inferManagedAppRequestedAction(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
-    if (/\b(deploy|redeploy|publish|launch|ship|go live|live)\b/.test(normalized)) {
+    if (/\b(deploy|redeploy|publish|launch|ship|go live|live|online)\b/.test(normalized)) {
         return 'deploy';
     }
 
@@ -3823,7 +3928,18 @@ function buildManagedAppDirectAction(objective = '', options = {}) {
     const normalized = String(objective || '').trim();
     const executionProfile = String(options.executionProfile || '').trim() || DEFAULT_EXECUTION_PROFILE;
     const workflowLane = String(options.workflow?.lane || '').trim();
-    const reference = extractManagedAppReference(normalized);
+    const recentMessages = Array.isArray(options.recentMessages) ? options.recentMessages : [];
+    const continuationIntent = isLikelyTranscriptDependentTurn(normalized)
+        || /\b(?:go ahead|continue|proceed|from there|those steps|next step|next steps|get it online|get it live|get it deployed)\b/i.test(normalized);
+    const reference = extractManagedAppReference(normalized)
+        || (continuationIntent ? extractManagedAppReferenceFromRecentMessages(recentMessages) : '');
+    const recoveryAction = continuationIntent ? inferManagedAppRecoveryActionFromRecentMessages(recentMessages) : '';
+    const recoveryCreate = recoveryAction === 'create';
+    const continuationPrompt = recoveryCreate ? extractManagedAppPromptFromRecentMessages(recentMessages) : '';
+    const effectivePrompt = [normalized, continuationPrompt]
+        .filter((entry, index, array) => entry && array.indexOf(entry) === index)
+        .join('\n\n')
+        .trim() || normalized;
     const requestedAction = inferManagedAppRequestedAction(normalized);
     const hasCreateIntent = /\b(create|build|make|generate|new)\b/i.test(normalized);
     const hasUpdateIntent = /\b(update|modify|change|edit|refresh|rebuild)\b/i.test(normalized);
@@ -3870,7 +3986,7 @@ function buildManagedAppDirectAction(objective = '', options = {}) {
         };
     }
 
-    if (hasInspectIntent && reference) {
+    if (hasInspectIntent && reference && !recoveryCreate) {
         return {
             tool: 'managed-app',
             reason: 'Managed app inspection requests should use the dedicated control-plane tool.',
@@ -3881,7 +3997,7 @@ function buildManagedAppDirectAction(objective = '', options = {}) {
         };
     }
 
-    if (hasDeployIntent && !hasCreateIntent && !hasUpdateIntent && reference) {
+    if (hasDeployIntent && !hasCreateIntent && !hasUpdateIntent && reference && !recoveryCreate) {
         return {
             tool: 'managed-app',
             reason: 'Managed app deployment requests should use the dedicated control-plane tool.',
@@ -3895,15 +4011,15 @@ function buildManagedAppDirectAction(objective = '', options = {}) {
         };
     }
 
-    if ((hasUpdateIntent && reference) || (hasAuthoringWorkflow && reference && !hasCreateIntent)) {
+    if (((hasUpdateIntent && reference) || (hasAuthoringWorkflow && reference && !hasCreateIntent)) && !recoveryCreate) {
         return {
             tool: 'managed-app',
             reason: 'Managed app update requests should use the dedicated control-plane tool.',
             params: applyManagedAppDeploymentTargetDefaults({
                 action: 'update',
                 appRef: reference,
-                prompt: normalized,
-                sourcePrompt: normalized,
+                prompt: effectivePrompt,
+                sourcePrompt: effectivePrompt,
                 requestedAction: workflowRequestedAction,
             }, {
                 objective: normalized,
@@ -3914,11 +4030,13 @@ function buildManagedAppDirectAction(objective = '', options = {}) {
 
     return {
         tool: 'managed-app',
-        reason: 'Managed app creation and deployment requests should use the dedicated control-plane tool.',
+        reason: recoveryCreate
+            ? 'Managed app recovery should reinitialize the catalog record and repo/build lane before deployment continues.'
+            : 'Managed app creation and deployment requests should use the dedicated control-plane tool.',
         params: applyManagedAppDeploymentTargetDefaults({
             action: 'create',
-            prompt: normalized,
-            sourcePrompt: normalized,
+            prompt: effectivePrompt,
+            sourcePrompt: effectivePrompt,
             requestedAction: workflowRequestedAction,
             ...(reference
                 ? (isSlugLikeReference
@@ -4190,6 +4308,17 @@ function classifyToolFailure(event = {}, executionProfile = DEFAULT_EXECUTION_PR
     const isRemoteFailure = isRemoteCommandToolId(toolId);
 
     if (!isRemoteFailure) {
+        if (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
+            && toolId === 'managed-app'
+            && MANAGED_APP_RECOVERABLE_ERROR_PATTERNS.some((pattern) => pattern.test(error))) {
+            return {
+                toolId,
+                error,
+                blocking: false,
+                category: 'managed-app-recoverable',
+            };
+        }
+
         if (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
             && toolId === 'file-read'
             && /\b(enoent|no such file or directory)\b/i.test(error)) {
@@ -6777,6 +6906,12 @@ class ConversationOrchestrator extends EventEmitter {
         const hasManagedAppAuthoringRequest = hasManagedAppAuthoringIntent(prompt, {
             executionProfile,
         });
+        const hasManagedAppContinuationRecovery = (
+            isLikelyTranscriptDependentTurn(objective)
+            || /\b(?:go ahead|continue|proceed|from there|those steps|next step|next steps|get it online|get it live|get it deployed)\b/i.test(objective)
+        )
+            && Boolean(inferManagedAppRecoveryActionFromRecentMessages(recentMessages))
+            && Boolean(extractManagedAppReferenceFromRecentMessages(recentMessages));
         const explicitGitIntent = /\b(git|github)\b[\s\S]{0,80}\b(status|diff|branch|stage|add|commit|push|save and push|save-and-push)\b/.test(prompt);
         const explicitK3sDeployIntent = /\b(deploy|rollout|apply|set image|update image|sync)\b[\s\S]{0,60}\b(k3s|k8s|kubernetes|kubectl|manifest|deployment|helm)\b/.test(prompt)
             || /\b(add|install|put)\b[\s\S]{0,40}\b(to|on|into|in)\b[\s\S]{0,20}\b(k3s|k8s|kubernetes|cluster)\b/.test(prompt);
@@ -6822,7 +6957,7 @@ class ConversationOrchestrator extends EventEmitter {
             || '',
         ).trim();
         const shouldBypassEndToEndWorkflow = allowedToolIds.includes('managed-app')
-            && (hasManagedAppIntent || hasManagedAppAuthoringRequest);
+            && (hasManagedAppIntent || hasManagedAppAuthoringRequest || hasManagedAppContinuationRecovery);
         const inferredWorkflowSeed = executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
             && !shouldBypassEndToEndWorkflow
             ? inferEndToEndBuilderWorkflow({
@@ -6953,7 +7088,7 @@ class ConversationOrchestrator extends EventEmitter {
             if ((explicitGitIntent || workflowNeedsDeployLane) && allowedToolIds.includes('git-safe')) {
                 candidates.add('git-safe');
             }
-            if ((hasManagedAppIntent || hasManagedAppAuthoringRequest || workflowNeedsRepoLane || workflowNeedsDeployLane) && allowedToolIds.includes('managed-app')) {
+            if ((hasManagedAppIntent || hasManagedAppAuthoringRequest || hasManagedAppContinuationRecovery || workflowNeedsRepoLane || workflowNeedsDeployLane) && allowedToolIds.includes('managed-app')) {
                 candidates.add('managed-app');
             }
             if ((explicitK3sDeployIntent || workflowNeedsDeployLane) && allowedToolIds.includes('k3s-deploy')) {
@@ -7082,7 +7217,7 @@ class ConversationOrchestrator extends EventEmitter {
             if ((hasOpencodeIntent || workflowNeedsRepoLane) && opencodeTargetReady && allowedToolIds.includes('opencode-run')) {
                 candidates.add('opencode-run');
             }
-            if ((hasManagedAppIntent || hasManagedAppAuthoringRequest || (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE && (workflowNeedsRepoLane || workflowNeedsDeployLane))) && allowedToolIds.includes('managed-app')) {
+            if ((hasManagedAppIntent || hasManagedAppAuthoringRequest || hasManagedAppContinuationRecovery || (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE && (workflowNeedsRepoLane || workflowNeedsDeployLane))) && allowedToolIds.includes('managed-app')) {
                 candidates.add('managed-app');
             }
             if (/\b(git|github)\b[\s\S]{0,80}\b(status|diff|branch|stage|add|commit|push|save and push|save-and-push)\b/.test(prompt)
@@ -7318,6 +7453,14 @@ class ConversationOrchestrator extends EventEmitter {
                     executionProfile: toolPolicy.executionProfile,
                 })
                 || (
+                    (
+                        isLikelyTranscriptDependentTurn(objective)
+                        || /\b(?:go ahead|continue|proceed|from there|those steps|next step|next steps|get it online|get it live|get it deployed)\b/i.test(objective)
+                    )
+                    && inferManagedAppRecoveryActionFromRecentMessages(recentMessages)
+                    && extractManagedAppReferenceFromRecentMessages(recentMessages)
+                )
+                || (
                     toolPolicy.executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
                     && ['repo-only', 'repo-then-deploy'].includes(String(toolPolicy.workflow?.lane || '').trim())
                     && hasManagedAppAuthoringIntent(objective, {
@@ -7329,6 +7472,7 @@ class ConversationOrchestrator extends EventEmitter {
             return finalizeAction(buildManagedAppDirectAction(objective, {
                 executionProfile: toolPolicy.executionProfile,
                 workflow: toolPolicy.workflow,
+                recentMessages,
             }));
         }
 
@@ -7821,6 +7965,8 @@ class ConversationOrchestrator extends EventEmitter {
             'Every `remote-command` step must include a non-empty `params.command` string.',
             'Use `managed-app` for agent-owned app implementation, software changes, Gitea builds, and remote k3s deployments when the request is about creating or updating an app on the remote server.',
             'Every `managed-app` step must include a valid `params.action`. For `create` or `update`, include a non-empty `params.prompt` string. For remote app work, include `params.deployTarget` set to `ssh`.',
+            'If `managed-app` reports "Managed app not found" but the transcript still identifies the target app, treat that as recoverable: continue with `managed-app create` to reconcile the catalog entry or use `managed-app inspect`/`list` only when the app reference is genuinely ambiguous.',
+            'If a managed-app inspection shows draft state with no repo clone URL, no SSH URL, or no latest build run, note the gap briefly and continue with `managed-app create` or `managed-app update` instead of stopping for a restatement.',
             'Keep `remote-command` for kubectl, host inspection, package installs, logs, restarts, deployments, DNS, TLS, and other infrastructure operations.',
             'Every `agent-workload` step must use the deferred workload schema only: `{"tool":"agent-workload","reason":"why","params":{"action":"create_from_scenario","request":"the full original user request","timezone":"IANA/Zone"}}`.',
             'Do not parse the schedule, cron, or remote command yourself for `agent-workload`; pass the full original request and let the runtime canonicalize it.',
@@ -8621,6 +8767,7 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('Prefer `managed-app` over raw `git-safe`, `remote-command`, or `k3s-deploy` when the request is to create software, change app code, inspect, build, publish, or redeploy an app tracked by the managed app catalog.');
             parts.push('For new app requests, let `managed-app create` allocate the repo, image repo, namespace, and host instead of improvising those names in chat.');
             parts.push('For remote app software changes, use `managed-app update` when the app reference is known; otherwise use `managed-app create` with the app prompt so the control plane can reconcile the app record and remote build pipeline.');
+            parts.push('If a managed-app inspect result shows a draft app with no repo/build metadata, or a managed-app step says the app was not found, treat that as a recoverable catalog issue. Acknowledge it briefly, then continue with the create/reinitialize path unless a real user decision is missing.');
             parts.push('When the request says SSH, remote server, Gitea, or remote k3s deployment, include `deployTarget: "ssh"` in `managed-app` params so the control plane deploys through the remote host instead of the in-cluster Kubernetes API.');
         }
 

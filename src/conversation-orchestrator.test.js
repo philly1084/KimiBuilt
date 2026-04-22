@@ -3174,6 +3174,116 @@ describe('ConversationOrchestrator', () => {
         }));
     });
 
+    test('continues autonomous remote-build work after a recoverable managed-app catalog miss', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Reinitialized the managed app record and queued the build.', 'resp_managed_app_recoverable')),
+            complete: jest.fn()
+                .mockResolvedValueOnce(JSON.stringify({
+                    steps: [{
+                        tool: 'managed-app',
+                        reason: 'Recover by recreating the managed app control-plane record',
+                        params: {
+                            action: 'create',
+                            name: 'Dog App',
+                            prompt: 'Create and deploy the Dog App managed app.',
+                            sourcePrompt: 'Create and deploy the Dog App managed app.',
+                            requestedAction: 'deploy',
+                            deployTarget: 'ssh',
+                        },
+                    }],
+                }))
+                .mockResolvedValueOnce(JSON.stringify({ steps: [] })),
+        };
+
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['managed-app', 'remote-command', 'tool-doc-read']
+                    .includes(toolId)
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn()
+                .mockResolvedValueOnce({
+                    success: false,
+                    toolId: 'managed-app',
+                    error: 'Managed app not found.',
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'managed-app',
+                    data: {
+                        app: {
+                            id: 'app-dog',
+                            slug: 'dog-app',
+                            status: 'building',
+                        },
+                        buildRun: {
+                            id: 'run-dog',
+                            buildStatus: 'queued',
+                        },
+                    },
+                }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-managed-app-recoverable', metadata: {} }),
+            getOrCreate: jest.fn().mockResolvedValue({ id: 'session-managed-app-recoverable', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'Use remote-build to deploy the managed app dog-app and keep going through the obvious next steps.',
+            sessionId: 'session-managed-app-recoverable',
+            executionProfile: 'remote-build',
+            stream: false,
+        });
+
+        expect(toolManager.executeTool.mock.calls.length).toBeGreaterThanOrEqual(2);
+        expect(toolManager.executeTool.mock.calls[0]).toEqual([
+            'managed-app',
+            expect.objectContaining({
+                action: 'create',
+                deployTarget: 'ssh',
+                requestedAction: 'deploy',
+                slug: 'dog-app',
+            }),
+            expect.objectContaining({ executionProfile: 'remote-build' }),
+        ]);
+        expect(toolManager.executeTool.mock.calls).toEqual(expect.arrayContaining([[
+            'managed-app',
+            expect.objectContaining({
+                action: 'create',
+                name: 'Dog App',
+                deployTarget: 'ssh',
+                requestedAction: 'deploy',
+            }),
+            expect.objectContaining({ executionProfile: 'remote-build' }),
+        ]]));
+        expect(result.response.metadata.executionTrace.map((entry) => entry.name)).toContain('Recoverable remote failure after round 1');
+    });
+
     test('allows re-running the same remote verification command after an intervening fix', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
@@ -4062,6 +4172,16 @@ describe('ConversationOrchestrator', () => {
             objective,
             executionProfile: 'remote-build',
             toolManager: orchestrator.toolManager,
+            recentMessages: [
+                {
+                    role: 'user',
+                    content: 'the repo to work on is K3s Cluster Dog Webiste Frontend',
+                },
+                {
+                    role: 'assistant',
+                    content: 'I inspected K3s Cluster Dog Webiste Frontend in the managed app system. Its current state is draft, with no repo clone URL, no SSH URL, and no latest build run attached. The next move is to create or reinitialize the managed app for K3s Cluster Dog Webiste Frontend, then push the app code and start a fresh build/deploy from that record.',
+                },
+            ],
         });
         const directAction = orchestrator.buildDirectAction({
             objective,
@@ -4082,6 +4202,66 @@ describe('ConversationOrchestrator', () => {
                 requestedAction: 'deploy',
                 prompt: objective,
                 sourcePrompt: objective,
+            }),
+        });
+    });
+
+    test('continues managed-app recovery from recent transcript context instead of retrying deployment on a draft app', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['managed-app', 'remote-command', 'k3s-deploy']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'yes go ahead with those steps for the managed app K3s Cluster Dog Webiste Frontend to get it online';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+            recentMessages: [
+                {
+                    role: 'user',
+                    content: 'the repo to work on is K3s Cluster Dog Webiste Frontend',
+                },
+                {
+                    role: 'assistant',
+                    content: 'I inspected K3s Cluster Dog Webiste Frontend in the managed app system. Its current state is draft, with no repo clone URL, no SSH URL, and no latest build run attached. The next move is to create or reinitialize the managed app for K3s Cluster Dog Webiste Frontend, then push the app code and start a fresh build/deploy from that record.',
+                },
+            ],
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            toolPolicy,
+            recentMessages: [
+                {
+                    role: 'user',
+                    content: 'the repo to work on is K3s Cluster Dog Webiste Frontend',
+                },
+                {
+                    role: 'assistant',
+                    content: 'I inspected K3s Cluster Dog Webiste Frontend in the managed app system. Its current state is draft, with no repo clone URL, no SSH URL, and no latest build run attached. The next move is to create or reinitialize the managed app for K3s Cluster Dog Webiste Frontend, then push the app code and start a fresh build/deploy from that record.',
+                },
+            ],
+        });
+
+        expect(toolPolicy.candidateToolIds).toContain('managed-app');
+        expect(directAction).toEqual({
+            tool: 'managed-app',
+            reason: 'Managed app recovery should reinitialize the catalog record and repo/build lane before deployment continues.',
+            params: expect.objectContaining({
+                action: 'create',
+                deployTarget: 'ssh',
+                name: 'K3s Cluster Dog Webiste Frontend',
+                requestedAction: 'deploy',
             }),
         });
     });
