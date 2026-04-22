@@ -4456,3 +4456,75 @@ pre {
     overflow: auto;
   }
 }
+
+.btn-primary {
+  --btn-bg: linear-gradient(180deg, color-mix(in oklab, var(--nb-accent) 82%, white 18%), var(--nb-accent));
+  --btn-color: #fff;
+  --btn-border: color-mix(in oklab, var(--nb-accent-strong), transparent 16%);
+  --btn-hover-bg: linear-gradient(180deg, color-mix(in oklab, var(--nb-accent-strong) 86%, white 14%), var(--nb-accent-strong));
+  --btn-active-bg: var(--nb-accent-strong);
+  box-shadow: 0 14px 28px -22px color-mix(in oklab, var(--nb-accent) 78%, transparent);
+}
+
+.export-all-modal {
+  background: var(--nb-bg-overlay);
+  backdrop-filter: blur(8px);
+}
+
+.export-all-content {
+  width: min(100%, 420px);
+  background: var(--nb-bg-elevated);
+  border: 1px solid var(--nb-border-soft);
+  border-radius: var(--nb-radius-lg);
+  box-shadow: var(--nb-shadow-raised);
+}
+
+.export-all-header {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--nb-border-soft);
+}
+
+.export-all-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: var(--nb-text-primary);
+}
+
+.export-all-body {
+  padding: 18px;
+}
+
+.export-all-footer {
+  padding: 16px 18px 18px;
+  border-top: 1px solid var(--nb-border-soft);
+  gap: 12px;
+}
+
+.export-all-option {
+  padding: 14px;
+  background: color-mix(in oklab, var(--nb-bg-surface), transparent 8%);
+  border: 1px solid var(--nb-border-soft);
+  border-radius: var(--nb-radius-md);
+  transition: transform var(--nb-motion-fast) var(--nb-ease), border-color var(--nb-motion-fast) var(--nb-ease), background-color var(--nb-motion-fast) var(--nb-ease), box-shadow var(--nb-motion-fast) var(--nb-ease);
+}
+
+.export-all-option:hover {
+  transform: translateY(-1px);
+  border-color: var(--nb-border-strong);
+  background: color-mix(in oklab, var(--nb-bg-primary-soft), transparent 28%);
+  box-shadow: var(--nb-shadow-subtle);
+}
+
+.export-all-option-title {
+  font-size: var(--nb-font-size-sm);
+  font-weight: 650;
+  color: var(--nb-text-primary);
+}
+
+.export-all-option-desc {
+  font-size: var(--nb-font-size-xs);
+  line-height: 1.45;
+  color: var(--nb-text-muted);
+}

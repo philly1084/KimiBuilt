@@ -649,74 +649,65 @@ const Blocks = (function() {
     function renderMathBlock(block, isEditable = true) {
         const wrapper = document.createElement('div');
         wrapper.className = 'block-content';
-        
+
         const content = typeof block.content === 'object' ? block.content : { text: block.content || '', displayMode: true };
-        
-        if (isEditable && (!content.text || content.text.trim() === '')) {
-            // Show input form for new equation
+
+        if (isEditable && (!content.text || !String(content.text).trim())) {
             const input = document.createElement('textarea');
-            input.className = 'math-input';
+            input.className = 'math-input input';
             input.placeholder = 'Type LaTeX equation... (e.g., E = mc^2)';
             input.value = content.text || '';
-            input.style.cssText = 'width: 100%; min-height: 60px; padding: 12px; font-family: monospace; font-size: 14px; border: 1px solid var(--border-color); border-radius: var(--radius-md); resize: vertical;';
-            
+
             const renderBtn = document.createElement('button');
-            renderBtn.className = 'ai-image-btn primary';
+            renderBtn.className = 'btn btn-primary math-action-btn';
             renderBtn.textContent = 'Render Equation';
-            renderBtn.style.marginTop = '8px';
-            
             renderBtn.addEventListener('click', () => {
                 const latex = input.value.trim();
-                if (latex) {
-                    block.content = { text: latex, displayMode: true };
-                    wrapper.innerHTML = '';
-                    wrapper.appendChild(renderMathBlock(block, isEditable));
-                    if (window.Editor) window.Editor.savePage();
-                }
+                if (!latex) return;
+                block.content = { text: latex, displayMode: true };
+                wrapper.innerHTML = '';
+                wrapper.appendChild(renderMathBlock(block, isEditable));
+                if (window.Editor) window.Editor.savePage();
             });
-            
+
             wrapper.appendChild(input);
             wrapper.appendChild(renderBtn);
             setTimeout(() => input.focus(), 0);
-        } else {
-            // Render the equation
-            const mathContainer = document.createElement('div');
-            mathContainer.className = 'math-container';
-            
-            // Check if KaTeX is available
-            if (typeof katex !== 'undefined') {
-                try {
-                    katex.render(content.text || '', mathContainer, {
-                        displayMode: content.displayMode !== false,
-                        throwOnError: false
-                    });
-                } catch (err) {
-                    mathContainer.innerHTML = `<span style="color: red;">Error: ${err.message}</span>`;
-                }
-            } else {
-                // Fallback: show LaTeX code
-                mathContainer.innerHTML = `<code style="font-family: monospace; background: var(--bg-secondary); padding: 8px; border-radius: 4px;">${escapeHtml(content.text || '')}</code>`;
-            }
-            
-            wrapper.appendChild(mathContainer);
-            
-            if (isEditable) {
-                const editBtn = document.createElement('button');
-                editBtn.className = 'ai-image-btn';
-                editBtn.textContent = 'Edit';
-                editBtn.style.marginTop = '8px';
-                editBtn.addEventListener('click', () => {
-                    block.content = { ...content, text: '' };
-                    wrapper.innerHTML = '';
-                    wrapper.appendChild(renderMathBlock(block, isEditable));
-                });
-                wrapper.appendChild(editBtn);
-            }
+            return wrapper;
         }
-        
+
+        const mathContainer = document.createElement('div');
+        mathContainer.className = 'math-container';
+
+        if (typeof katex !== 'undefined') {
+            try {
+                katex.render(content.text || '', mathContainer, {
+                    displayMode: content.displayMode !== false,
+                    throwOnError: false
+                });
+            } catch (err) {
+                mathContainer.innerHTML = `<span class="math-error">Error: ${escapeHtml(err.message)}</span>`;
+            }
+        } else {
+            mathContainer.innerHTML = `<code class="math-preview math-code">${escapeHtml(content.text || '')}</code>`;
+        }
+
+        wrapper.appendChild(mathContainer);
+
+        if (isEditable) {
+            const editBtn = document.createElement('button');
+            editBtn.className = 'btn btn-ghost math-action-btn';
+            editBtn.textContent = 'Edit';
+            editBtn.addEventListener('click', () => {
+                block.content = { ...content, text: '' };
+                wrapper.innerHTML = '';
+                wrapper.appendChild(renderMathBlock(block, isEditable));
+            });
+            wrapper.appendChild(editBtn);
+        }
+
         return wrapper;
     }
-    
     /**
      * Render a Mermaid diagram block with AI integration
      */
@@ -2508,19 +2499,19 @@ const Blocks = (function() {
         const content = normalizeMermaidContentV2(block.content);
         block.content = content;
 
-        const isEditing = isEditable && (content._showEditor || !content.text.trim());
+        const diagramText = String(content.text || '');
+        const isEditing = isEditable && (content._showEditor || !diagramText.trim());
 
         if (isEditing) {
             const editorCard = document.createElement('div');
-            editorCard.className = 'mermaid-empty-state';
-            editorCard.style.cssText = 'border: 2px dashed var(--border-color); border-radius: var(--radius-lg); padding: 20px; background: var(--bg-secondary);';
+            editorCard.className = 'mermaid-card mermaid-empty-state';
 
             const header = document.createElement('div');
-            header.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px;';
+            header.className = 'mermaid-editor-header';
             header.innerHTML = '<strong>Create Mermaid Diagram</strong>';
 
             const typeSelect = document.createElement('select');
-            typeSelect.className = 'mermaid-type-select';
+            typeSelect.className = 'mermaid-type-select mermaid-editor-type input';
             typeSelect.innerHTML = `
                 <option value="flowchart">Flowchart</option>
                 <option value="sequence">Sequence Diagram</option>
@@ -2532,23 +2523,22 @@ const Blocks = (function() {
                 <option value="mindmap">Mindmap</option>
                 <option value="gitgraph">Git Graph</option>
             `;
-            typeSelect.value = content.diagramType;
+            typeSelect.value = content.diagramType || 'flowchart';
             header.appendChild(typeSelect);
             editorCard.appendChild(header);
 
             const input = document.createElement('textarea');
-            input.className = 'mermaid-input';
-            input.value = content.text || '';
-            input.rows = Math.max(8, Math.min(18, (content.text || '').split('\n').length + 2));
-            input.placeholder = `Describe your ${content.diagramType} or paste Mermaid code here.\n\nTip: Ask AI to generate Mermaid code directly for this block.`;
-            input.style.cssText = 'width: 100%; min-height: 180px; resize: vertical;';
+            input.className = 'mermaid-input mermaid-editor input';
+            input.value = diagramText;
+            input.rows = Math.max(8, Math.min(18, diagramText.split('\n').length + 2));
+            input.placeholder = `Describe your ${typeSelect.value} or paste Mermaid code here.\n\nTip: Ask AI to generate Mermaid code directly for this block.`;
             editorCard.appendChild(input);
 
             const actions = document.createElement('div');
-            actions.style.cssText = 'display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px;';
+            actions.className = 'mermaid-editor-row';
 
             const aiBtn = document.createElement('button');
-            aiBtn.className = 'mermaid-ai-btn';
+            aiBtn.className = 'btn btn-primary mermaid-cta mermaid-ai-btn';
             aiBtn.textContent = 'AI Generate';
             aiBtn.addEventListener('click', async () => {
                 const description = prompt('Describe the diagram you want to generate:', '');
@@ -2562,7 +2552,7 @@ const Blocks = (function() {
             });
 
             const templateBtn = document.createElement('button');
-            templateBtn.className = 'mermaid-action-btn';
+            templateBtn.className = 'btn btn-ghost mermaid-action mermaid-action-btn';
             templateBtn.textContent = 'Use Template';
             templateBtn.addEventListener('click', () => {
                 input.value = getMermaidTemplate(typeSelect.value);
@@ -2570,7 +2560,7 @@ const Blocks = (function() {
             });
 
             const saveBtn = document.createElement('button');
-            saveBtn.className = 'mermaid-action-btn';
+            saveBtn.className = 'btn btn-primary mermaid-action-btn';
             saveBtn.textContent = 'Save Diagram';
             saveBtn.addEventListener('click', () => {
                 block.content = {
@@ -2583,7 +2573,7 @@ const Blocks = (function() {
             });
 
             const cancelBtn = document.createElement('button');
-            cancelBtn.className = 'mermaid-action-btn';
+            cancelBtn.className = 'btn btn-ghost mermaid-action mermaid-action-btn';
             cancelBtn.textContent = 'Cancel';
             cancelBtn.addEventListener('click', () => {
                 block.content = {
@@ -2605,98 +2595,74 @@ const Blocks = (function() {
             return wrapper;
         }
 
+        const makeToolbarButton = (label, handler) => {
+            const button = document.createElement('button');
+            button.className = 'btn btn-ghost mermaid-action mermaid-action-btn';
+            button.textContent = label;
+            button.addEventListener('click', handler);
+            return button;
+        };
+
         const toolbar = document.createElement('div');
-        toolbar.className = 'mermaid-toolbar';
-        toolbar.style.cssText = 'display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;';
+        toolbar.className = 'mermaid-toolbar mermaid-editor-toolbar';
 
         const diagramLabel = document.createElement('span');
-        diagramLabel.className = 'mermaid-action-btn';
+        diagramLabel.className = 'chip';
         diagramLabel.textContent = `${content.diagramType} diagram`;
         toolbar.appendChild(diagramLabel);
 
-        const improveBtn = document.createElement('button');
-        improveBtn.className = 'mermaid-action-btn';
-        improveBtn.textContent = 'Improve';
-        improveBtn.addEventListener('click', async () => {
+        toolbar.appendChild(makeToolbarButton('Improve', async () => {
             await requestMermaidDiagramV2(block, wrapper, isEditable, {
                 diagramType: content.diagramType,
                 currentCode: content.text,
                 request: 'Improve this Mermaid diagram so it is clearer, cleaner, and more professional.'
             });
-        });
+        }));
 
-        const fixBtn = document.createElement('button');
-        fixBtn.className = 'mermaid-action-btn';
-        fixBtn.textContent = 'Fix';
-        fixBtn.addEventListener('click', async () => {
+        toolbar.appendChild(makeToolbarButton('Fix', async () => {
             await requestMermaidDiagramV2(block, wrapper, isEditable, {
                 diagramType: content.diagramType,
                 currentCode: content.text,
                 request: 'Fix any Mermaid syntax or structural issues in this diagram.'
             });
-        });
+        }));
 
-        const expandBtn = document.createElement('button');
-        expandBtn.className = 'mermaid-action-btn';
-        expandBtn.textContent = 'Expand';
-        expandBtn.addEventListener('click', async () => {
+        toolbar.appendChild(makeToolbarButton('Expand', async () => {
             await requestMermaidDiagramV2(block, wrapper, isEditable, {
                 diagramType: content.diagramType,
                 currentCode: content.text,
                 request: 'Expand this Mermaid diagram with more detail while keeping it valid and readable.'
             });
-        });
+        }));
 
-        const explainBtn = document.createElement('button');
-        explainBtn.className = 'mermaid-action-btn';
-        explainBtn.textContent = 'Explain';
-        explainBtn.addEventListener('click', async () => {
+        toolbar.appendChild(makeToolbarButton('Explain', async () => {
             await askAIFromDiagram(
                 block,
                 content.diagramType,
                 content.text,
                 'Explain what this Mermaid diagram shows and how the flow is structured.'
             );
-        });
+        }));
 
-        toolbar.appendChild(improveBtn);
-        toolbar.appendChild(fixBtn);
-        toolbar.appendChild(expandBtn);
-        toolbar.appendChild(explainBtn);
-
-        const downloadSourceBtn = document.createElement('button');
-        downloadSourceBtn.className = 'mermaid-action-btn';
-        downloadSourceBtn.textContent = 'Download .mmd';
-        downloadSourceBtn.addEventListener('click', async () => {
+        toolbar.appendChild(makeToolbarButton('Download .mmd', async () => {
             await downloadMermaidSourceV2(content.text, `${content.diagramType}-diagram-${Date.now()}`);
-        });
+        }));
 
-        const downloadPdfBtn = document.createElement('button');
-        downloadPdfBtn.className = 'mermaid-action-btn';
-        downloadPdfBtn.textContent = 'Download PDF';
-        downloadPdfBtn.addEventListener('click', async () => {
+        toolbar.appendChild(makeToolbarButton('Download PDF', async () => {
             await downloadMermaidPdfV2(content.text, `${content.diagramType}-diagram-${Date.now()}`);
-        });
-
-        toolbar.appendChild(downloadSourceBtn);
-        toolbar.appendChild(downloadPdfBtn);
+        }));
 
         if (isEditable) {
-            const editBtn = document.createElement('button');
-            editBtn.className = 'mermaid-action-btn';
-            editBtn.textContent = 'Edit';
-            editBtn.addEventListener('click', () => {
+            toolbar.appendChild(makeToolbarButton('Edit', () => {
                 block.content = { ...content, _showEditor: true };
                 replaceMermaidWrapperV2(wrapper, block, isEditable);
-            });
-            toolbar.appendChild(editBtn);
+            }));
         }
 
         wrapper.appendChild(toolbar);
 
         const diagramContainer = document.createElement('div');
-        diagramContainer.className = 'mermaid-diagram-container';
-        diagramContainer.style.cssText = 'background: var(--bg-secondary); padding: 16px; border-radius: var(--radius-md); overflow-x: auto;';
+        diagramContainer.className = 'mermaid-diagram-container mermaid-preview';
         diagramContainer.innerHTML = '<div class="ai-block-loading"><div class="spinner"></div><span>Rendering diagram...</span></div>';
         wrapper.appendChild(diagramContainer);
 
@@ -2706,7 +2672,6 @@ const Blocks = (function() {
 
         return wrapper;
     }
-
     async function persistAIImageSelection(content = {}, sourceUrl = '') {
         const normalizedSourceUrl = String(sourceUrl || '').trim();
         if (!normalizedSourceUrl) {

@@ -1718,6 +1718,7 @@ describe('ManagedAppService', () => {
             deployment: 'demo',
             verification: {
                 rollout: true,
+                ingress: true,
                 tls: false,
                 https: true,
             },
@@ -1780,6 +1781,140 @@ describe('ManagedAppService', () => {
             lastImage: 'gitea.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
             https: true,
         }));
+    });
+
+    test('deployApp stores concrete deploy diagnostics when HTTPS verification fails after rollout', async () => {
+        const app = {
+            id: 'app-1',
+            ownerId: 'user-1',
+            sessionId: 'session-1',
+            slug: 'demo',
+            appName: 'Demo',
+            imageRepo: 'gitea.demoserver2.buzz/agent-apps/demo',
+            namespace: 'app-demo',
+            publicHost: 'demo.demoserver2.buzz',
+            status: 'built',
+            metadata: {
+                deploymentTarget: 'ssh',
+                requestedContainerPort: 80,
+            },
+        };
+        const buildRun = {
+            id: 'run-1',
+            buildStatus: 'success',
+            deployStatus: 'pending',
+            imageTag: 'sha-abcdef123456',
+            metadata: {},
+        };
+        const deployManagedApp = jest.fn(async () => ({
+            namespace: 'app-demo',
+            deployment: 'demo',
+            tlsSecretName: 'demo-tls',
+            verification: {
+                rollout: true,
+                ingress: true,
+                tls: true,
+                https: false,
+            },
+            rollout: {
+                ok: true,
+            },
+            https: {
+                ok: false,
+                status: 404,
+                attemptsCompleted: true,
+            },
+            diagnostics: {
+                expectedHost: 'demo.demoserver2.buzz',
+                expectedService: 'demo',
+                expectedServicePort: 80,
+                expectedContainerPort: 80,
+                deploymentPresent: true,
+                servicePresent: true,
+                ingressPresent: true,
+                ingressHost: 'demo.demoserver2.buzz',
+                ingressBackendService: 'demo',
+                ingressBackendPort: 80,
+                ingressHostMatches: true,
+                ingressBackendMatches: true,
+                serviceTargetMatches: true,
+                tlsSecretPresent: true,
+                certificateName: 'demo-cert',
+                certificateReady: true,
+                certificateReadyValue: 'true',
+                certificateStatus: 'True',
+                certificateMessage: '',
+                challengeSummary: [],
+                ingressEvents: [],
+                traefikReady: true,
+                traefikLogExcerpt: [],
+                appProbe: {
+                    attempted: true,
+                    ok: true,
+                    status: 200,
+                    error: '',
+                    bodyPreview: '',
+                },
+                httpsStatus: 404,
+                httpsOk: false,
+                httpsError: '',
+            },
+        }));
+
+        const store = {
+            isAvailable: () => true,
+            listBuildRunsForApp: jest.fn(async () => ([buildRun])),
+            updateApp: jest.fn(async (_id, _ownerId, updates) => ({
+                ...app,
+                ...updates,
+                metadata: updates.metadata,
+            })),
+            updateBuildRun: jest.fn(async (_id, updates) => ({
+                ...buildRun,
+                ...updates,
+            })),
+        };
+
+        const service = new ManagedAppService({
+            store,
+            kubernetesClient: {
+                isConfigured: jest.fn((target) => target === 'ssh'),
+                deployManagedApp,
+            },
+        });
+
+        service.resolveApp = jest.fn(async () => app);
+        service.getEffectiveGiteaConfig = () => ({
+            registryHost: 'gitea.demoserver2.buzz',
+            registryUsername: 'builder',
+            registryPassword: 'secret',
+        });
+        service.getEffectiveManagedAppsConfig = () => ({
+            defaultContainerPort: 80,
+            registryPullSecretName: 'gitea-registry-credentials',
+        });
+        service.recordClusterDeployment = jest.fn();
+        service.broadcastLifecycleEvent = jest.fn();
+
+        const result = await service.deployApp('demo', {}, 'user-1', {
+            executionProfile: 'remote-build',
+            sessionId: 'session-1',
+        });
+
+        expect(result.message).toContain('404');
+        expect(result.app.status).toBe('deploy_failed');
+        expect(result.liveDeploy.lastError).toContain('404');
+        expect(result.liveDeploy.lastDeployResult).toEqual(expect.objectContaining({
+            diagnostics: expect.objectContaining({
+                expectedHost: 'demo.demoserver2.buzz',
+                httpsStatus: 404,
+            }),
+        }));
+        expect(result.app.metadata.project.nextStep).toContain('Traefik ingress routing');
+        expect(result.app.metadata.project.openItems).toEqual(expect.arrayContaining([
+            expect.stringContaining('404'),
+        ]));
+        expect(result.buildRun.verificationStatus).toBe('failed');
     });
 
     test('deployApp heals a missing image repo from current Gitea settings before deployment', async () => {

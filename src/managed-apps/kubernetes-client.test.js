@@ -2,16 +2,111 @@
 
 const { KubernetesClient } = require('./kubernetes-client');
 
+function createDeploySshTool({
+    applyStdout = '',
+    inspectionStdout = '',
+    applyExitCode = 0,
+    inspectionExitCode = 0,
+    host = 'deploy.example:22',
+} = {}) {
+    return {
+        handler: jest.fn()
+            .mockResolvedValueOnce({
+                stdout: applyStdout,
+                stderr: '',
+                exitCode: applyExitCode,
+                host,
+            })
+            .mockResolvedValueOnce({
+                stdout: inspectionStdout,
+                stderr: '',
+                exitCode: inspectionExitCode,
+                host,
+            }),
+    };
+}
+
+function buildInspectionStdout(overrides = {}) {
+    const values = {
+        expectedHost: 'demo.demoserver2.buzz',
+        expectedService: 'demo',
+        expectedServicePort: '80',
+        expectedContainerPort: '80',
+        deploymentPresent: 'true',
+        servicePresent: 'true',
+        ingressPresent: 'true',
+        deploymentContainerPort: '80',
+        servicePort: '80',
+        serviceTargetPort: '80',
+        ingressHost: 'demo.demoserver2.buzz',
+        ingressBackendService: 'demo',
+        ingressBackendPort: '80',
+        ingressClass: 'traefik',
+        ingressAddress: '10.0.0.10',
+        ingressHostMatches: 'true',
+        ingressBackendMatches: 'true',
+        serviceTargetMatches: 'true',
+        tlsSecret: 'true',
+        certificateName: 'demo-cert',
+        certificateReady: 'true',
+        certificateStatus: 'True',
+        certificateMessage: '',
+        traefikReady: 'true',
+        appProbeAttempted: 'true',
+        appProbeOk: 'true',
+        appProbeStatus: '200',
+        appProbeError: '',
+        appProbeBody: '',
+        ...overrides,
+    };
+    const lines = [
+        `__KIMIBUILT_EXPECTED_HOST__=${values.expectedHost}`,
+        `__KIMIBUILT_EXPECTED_SERVICE__=${values.expectedService}`,
+        `__KIMIBUILT_EXPECTED_SERVICE_PORT__=${values.expectedServicePort}`,
+        `__KIMIBUILT_EXPECTED_CONTAINER_PORT__=${values.expectedContainerPort}`,
+        `__KIMIBUILT_DEPLOYMENT_PRESENT__=${values.deploymentPresent}`,
+        `__KIMIBUILT_SERVICE_PRESENT__=${values.servicePresent}`,
+        `__KIMIBUILT_INGRESS_PRESENT__=${values.ingressPresent}`,
+        `__KIMIBUILT_DEPLOYMENT_CONTAINER_PORT__=${values.deploymentContainerPort}`,
+        `__KIMIBUILT_SERVICE_PORT__=${values.servicePort}`,
+        `__KIMIBUILT_SERVICE_TARGET_PORT__=${values.serviceTargetPort}`,
+        `__KIMIBUILT_INGRESS_HOST__=${values.ingressHost}`,
+        `__KIMIBUILT_INGRESS_BACKEND_SERVICE__=${values.ingressBackendService}`,
+        `__KIMIBUILT_INGRESS_BACKEND_PORT__=${values.ingressBackendPort}`,
+        `__KIMIBUILT_INGRESS_CLASS__=${values.ingressClass}`,
+        `__KIMIBUILT_INGRESS_ADDRESS__=${values.ingressAddress}`,
+        `__KIMIBUILT_INGRESS_HOST_MATCHES__=${values.ingressHostMatches}`,
+        `__KIMIBUILT_INGRESS_BACKEND_MATCHES__=${values.ingressBackendMatches}`,
+        `__KIMIBUILT_SERVICE_TARGET_MATCHES__=${values.serviceTargetMatches}`,
+        `__KIMIBUILT_TLS_SECRET__=${values.tlsSecret}`,
+        `__KIMIBUILT_CERTIFICATE_NAME__=${values.certificateName}`,
+        `__KIMIBUILT_CERTIFICATE_READY__=${values.certificateReady}`,
+        `__KIMIBUILT_CERTIFICATE_STATUS__=${values.certificateStatus}`,
+        `__KIMIBUILT_CERTIFICATE_MESSAGE__=${values.certificateMessage}`,
+        `__KIMIBUILT_TRAEFIK_READY__=${values.traefikReady}`,
+        `__KIMIBUILT_APP_PROBE_ATTEMPTED__=${values.appProbeAttempted}`,
+        `__KIMIBUILT_APP_PROBE_OK__=${values.appProbeOk}`,
+        `__KIMIBUILT_APP_PROBE_STATUS__=${values.appProbeStatus}`,
+        `__KIMIBUILT_APP_PROBE_ERROR__=${values.appProbeError}`,
+        `__KIMIBUILT_APP_PROBE_BODY__=${values.appProbeBody}`,
+    ];
+    for (const item of Array.isArray(values.challengeSummary) ? values.challengeSummary : []) {
+        lines.push(`__KIMIBUILT_CHALLENGE__=${item}`);
+    }
+    for (const item of Array.isArray(values.ingressEvents) ? values.ingressEvents : []) {
+        lines.push(`__KIMIBUILT_INGRESS_EVENT__=${item}`);
+    }
+    for (const item of Array.isArray(values.traefikLogExcerpt) ? values.traefikLogExcerpt : []) {
+        lines.push(`__KIMIBUILT_TRAEFIK_LOG__=${item}`);
+    }
+    return lines.join('\n');
+}
+
 describe('KubernetesClient', () => {
     test('deployManagedApp uses SSH when the deployment target is ssh', async () => {
-        const sshTool = {
-            handler: jest.fn(async () => ({
-                stdout: '__KIMIBUILT_TLS_SECRET__=true\n',
-                stderr: '',
-                exitCode: 0,
-                host: 'deploy.example:22',
-            })),
-        };
+        const sshTool = createDeploySshTool({
+            inspectionStdout: buildInspectionStdout(),
+        });
         const client = new KubernetesClient({
             managedAppsConfig: {
                 deployTarget: 'ssh',
@@ -24,9 +119,10 @@ describe('KubernetesClient', () => {
             }),
         });
 
-        client.verifyHttps = jest.fn(async () => ({
+        client.waitForHttps = jest.fn(async () => ({
             ok: true,
             status: 200,
+            attemptsCompleted: true,
         }));
         client.isSshConfigured = jest.fn(() => true);
 
@@ -43,25 +139,24 @@ describe('KubernetesClient', () => {
             deploymentTarget: 'ssh',
         });
 
-        expect(sshTool.handler).toHaveBeenCalledWith(expect.objectContaining({
+        expect(sshTool.handler).toHaveBeenNthCalledWith(1, expect.objectContaining({
             command: expect.stringContaining('kubectl_cmd apply -f -'),
             timeout: 180000,
         }), {}, expect.any(Object));
+        expect(sshTool.handler).toHaveBeenNthCalledWith(2, expect.objectContaining({
+            command: expect.stringContaining('__KIMIBUILT_EXPECTED_HOST__'),
+        }), {}, expect.any(Object));
         expect(result.rollout.ok).toBe(true);
+        expect(result.verification.ingress).toBe(true);
         expect(result.verification.tls).toBe(true);
         expect(result.verification.https).toBe(true);
         expect(result.executionHost).toBe('deploy.example:22');
     });
 
     test('deployManagedApp normalizes legacy namespaces to the managed app namespace prefix', async () => {
-        const sshTool = {
-            handler: jest.fn(async () => ({
-                stdout: '__KIMIBUILT_TLS_SECRET__=true\n',
-                stderr: '',
-                exitCode: 0,
-                host: 'deploy.example:22',
-            })),
-        };
+        const sshTool = createDeploySshTool({
+            inspectionStdout: buildInspectionStdout(),
+        });
         const client = new KubernetesClient({
             managedAppsConfig: {
                 deployTarget: 'ssh',
@@ -75,9 +170,10 @@ describe('KubernetesClient', () => {
             }),
         });
 
-        client.verifyHttps = jest.fn(async () => ({
+        client.waitForHttps = jest.fn(async () => ({
             ok: true,
             status: 200,
+            attemptsCompleted: true,
         }));
         client.isSshConfigured = jest.fn(() => true);
 
@@ -94,21 +190,16 @@ describe('KubernetesClient', () => {
             deploymentTarget: 'ssh',
         });
 
-        expect(sshTool.handler).toHaveBeenCalledWith(expect.objectContaining({
+        expect(sshTool.handler).toHaveBeenNthCalledWith(1, expect.objectContaining({
             command: expect.stringContaining('"name": "app-demo"'),
         }), {}, expect.any(Object));
         expect(result.namespace).toBe('app-demo');
     });
 
     test('deployManagedApp ignores legacy in-cluster targets and still uses SSH', async () => {
-        const sshTool = {
-            handler: jest.fn(async () => ({
-                stdout: '__KIMIBUILT_TLS_SECRET__=true\n',
-                stderr: '',
-                exitCode: 0,
-                host: 'deploy.example:22',
-            })),
-        };
+        const sshTool = createDeploySshTool({
+            inspectionStdout: buildInspectionStdout(),
+        });
         const client = new KubernetesClient({
             managedAppsConfig: {
                 deployTarget: 'in-cluster',
@@ -121,9 +212,10 @@ describe('KubernetesClient', () => {
             }),
         });
 
-        client.verifyHttps = jest.fn(async () => ({
+        client.waitForHttps = jest.fn(async () => ({
             ok: true,
             status: 200,
+            attemptsCompleted: true,
         }));
         client.isSshConfigured = jest.fn(() => true);
 
@@ -137,9 +229,133 @@ describe('KubernetesClient', () => {
 
         expect(sshTool.handler).toHaveBeenCalledTimes(2);
         expect(sshTool.handler).toHaveBeenNthCalledWith(2, expect.objectContaining({
-            command: expect.stringContaining('__KIMIBUILT_TLS_SECRET__'),
+            command: expect.stringContaining('__KIMIBUILT_TRAEFIK_READY__'),
         }), {}, expect.any(Object));
         expect(result.rollout.ok).toBe(true);
+    });
+
+    test('deployManagedApp treats public HTTPS 404 as a failed verification with diagnostics', async () => {
+        const sshTool = createDeploySshTool({
+            inspectionStdout: buildInspectionStdout({
+                tlsSecret: 'true',
+                certificateReady: 'true',
+                appProbeOk: 'true',
+                appProbeStatus: '200',
+            }),
+        });
+        const client = new KubernetesClient({
+            managedAppsConfig: {
+                deployTarget: 'ssh',
+            },
+            sshTool,
+        });
+
+        client.waitForHttps = jest.fn(async () => ({
+            ok: false,
+            status: 404,
+            bodyPreview: 'not found',
+            attemptsCompleted: true,
+        }));
+        client.isSshConfigured = jest.fn(() => true);
+
+        const result = await client.deployManagedApp({
+            slug: 'demo',
+            namespace: 'app-demo',
+            publicHost: 'demo.demoserver2.buzz',
+            image: 'gitea.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
+            deploymentTarget: 'ssh',
+        });
+
+        expect(result.verification.rollout).toBe(true);
+        expect(result.verification.ingress).toBe(true);
+        expect(result.verification.tls).toBe(true);
+        expect(result.verification.https).toBe(false);
+        expect(result.diagnostics.httpsStatus).toBe(404);
+        expect(result.diagnostics.appProbe.ok).toBe(true);
+        expect(result.diagnostics.ingressHostMatches).toBe(true);
+    });
+
+    test('deployManagedApp surfaces missing TLS secret and cert-manager diagnostics', async () => {
+        const sshTool = createDeploySshTool({
+            inspectionStdout: buildInspectionStdout({
+                tlsSecret: 'false',
+                certificateReady: 'false',
+                certificateStatus: 'False',
+                certificateMessage: 'Waiting for DNS-01 challenge propagation',
+                challengeSummary: ['demo-tls|pending|Waiting for DNS propagation'],
+                ingressEvents: ['Warning PresentError challenge not yet valid'],
+            }),
+        });
+        const client = new KubernetesClient({
+            managedAppsConfig: {
+                deployTarget: 'ssh',
+            },
+            sshTool,
+        });
+
+        client.waitForHttps = jest.fn(async () => ({
+            ok: false,
+            error: 'certificate not available',
+            attemptsCompleted: true,
+        }));
+        client.isSshConfigured = jest.fn(() => true);
+
+        const result = await client.deployManagedApp({
+            slug: 'demo',
+            namespace: 'app-demo',
+            publicHost: 'demo.demoserver2.buzz',
+            image: 'gitea.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
+            deploymentTarget: 'ssh',
+        });
+
+        expect(result.verification.tls).toBe(false);
+        expect(result.tlsStatus.certificateReady).toBe(false);
+        expect(result.tlsStatus.challengeSummary).toEqual(expect.arrayContaining([
+            expect.stringContaining('pending'),
+        ]));
+        expect(result.tlsStatus.ingressEvents).toEqual(expect.arrayContaining([
+            expect.stringContaining('PresentError'),
+        ]));
+    });
+
+    test('deployManagedApp marks ingress verification false when host or backend mismatches', async () => {
+        const sshTool = createDeploySshTool({
+            inspectionStdout: buildInspectionStdout({
+                ingressHost: 'wrong.demoserver2.buzz',
+                ingressBackendService: 'other-service',
+                ingressHostMatches: 'false',
+                ingressBackendMatches: 'false',
+                appProbeOk: 'false',
+                appProbeStatus: '404',
+            }),
+        });
+        const client = new KubernetesClient({
+            managedAppsConfig: {
+                deployTarget: 'ssh',
+            },
+            sshTool,
+        });
+
+        client.waitForHttps = jest.fn(async () => ({
+            ok: false,
+            status: 404,
+            attemptsCompleted: true,
+        }));
+        client.isSshConfigured = jest.fn(() => true);
+
+        const result = await client.deployManagedApp({
+            slug: 'demo',
+            namespace: 'app-demo',
+            publicHost: 'demo.demoserver2.buzz',
+            image: 'gitea.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
+            deploymentTarget: 'ssh',
+        });
+
+        expect(result.verification.ingress).toBe(false);
+        expect(result.diagnostics.ingressHost).toBe('wrong.demoserver2.buzz');
+        expect(result.diagnostics.ingressBackendService).toBe('other-service');
+        expect(result.diagnostics.ingressHostMatches).toBe(false);
+        expect(result.diagnostics.ingressBackendMatches).toBe(false);
     });
 
     test('inspectManagedAppPlatform reads remote Gitea runner health from the SSH target', async () => {

@@ -578,6 +578,194 @@ function buildLifecycleMessageKey(app = null, buildRun = null, phase = '') {
     return `managed-app:${appId}:${buildRunId || 'lifecycle'}`;
 }
 
+function getManagedAppDeployDiagnostics(app = null, deployment = null) {
+    const deployResult = deployment && typeof deployment === 'object'
+        ? deployment
+        : (app?.metadata?.liveDeploy?.lastDeployResult || null);
+    const diagnostics = deployResult?.diagnostics && typeof deployResult.diagnostics === 'object'
+        ? deployResult.diagnostics
+        : {};
+    const verification = deployResult?.verification && typeof deployResult.verification === 'object'
+        ? deployResult.verification
+        : {};
+    const https = deployResult?.https && typeof deployResult.https === 'object'
+        ? deployResult.https
+        : {};
+    const expectedHost = normalizeText(
+        diagnostics.expectedHost
+        || app?.publicHost
+        || app?.metadata?.desiredDeploy?.publicHost,
+    );
+    const expectedService = normalizeText(diagnostics.expectedService || app?.slug);
+    const expectedServicePort = Number(diagnostics.expectedServicePort || 80) || 80;
+    const expectedContainerPort = Number(
+        diagnostics.expectedContainerPort
+        || app?.metadata?.desiredDeploy?.containerPort
+        || app?.metadata?.requestedContainerPort
+        || 80
+    ) || 80;
+    const httpsStatusCode = Number(https.status || diagnostics.httpsStatus || 0) || 0;
+    const httpsError = normalizeText(https.error || diagnostics.httpsError);
+    const httpsLocation = normalizeText(https.location || diagnostics.httpsLocation);
+    const certificateName = normalizeText(diagnostics.certificateName);
+    const certificateMessage = normalizeText(diagnostics.certificateMessage);
+    const challengeSummary = normalizeStringArray(diagnostics.challengeSummary, 4);
+    const ingressEvents = normalizeStringArray(diagnostics.ingressEvents, 4);
+    const traefikLogExcerpt = normalizeStringArray(diagnostics.traefikLogExcerpt, 4);
+    const appProbeAttempted = diagnostics?.appProbe?.attempted === true;
+    const appProbeOk = diagnostics?.appProbe?.ok === true;
+    const appProbeStatus = Number(diagnostics?.appProbe?.status || 0) || 0;
+    const appProbeError = normalizeText(diagnostics?.appProbe?.error);
+    const appProbeBody = normalizeText(diagnostics?.appProbe?.bodyPreview);
+    const rolloutError = normalizeText(deployResult?.rollout?.error);
+
+    let ingressIssue = '';
+    if (deployResult) {
+        if (diagnostics.deploymentPresent === false) {
+            ingressIssue = 'Deployment was not found in the target namespace after rollout.';
+        } else if (diagnostics.servicePresent === false) {
+            ingressIssue = 'Service was not found in the target namespace after rollout.';
+        } else if (diagnostics.ingressPresent === false) {
+            ingressIssue = 'Ingress was not found in the target namespace after rollout.';
+        } else if (diagnostics.ingressHostMatches === false) {
+            ingressIssue = `Ingress host is ${normalizeText(diagnostics.ingressHost) || 'missing'}, expected ${expectedHost || 'the public host'}.`;
+        } else if (diagnostics.ingressBackendMatches === false) {
+            const actualService = normalizeText(diagnostics.ingressBackendService) || 'missing';
+            const actualPort = Number(diagnostics.ingressBackendPort || 0) || 0;
+            ingressIssue = `Ingress routes to ${actualService}:${actualPort || '?'}, expected ${expectedService || 'service'}:${expectedServicePort}.`;
+        } else if (diagnostics.serviceTargetMatches === false) {
+            const actualTarget = Number(diagnostics.serviceTargetPort || 0) || 0;
+            ingressIssue = `Service target port is ${actualTarget || 'missing'}, expected container port ${expectedContainerPort}.`;
+        } else if (diagnostics.traefikReady === false) {
+            ingressIssue = 'Traefik is not ready on the remote cluster.';
+        }
+    }
+
+    const ingressStatus = !deployResult
+        ? ''
+        : (verification.ingress === true
+            ? `Ingress is routing ${expectedHost || 'the public host'} to ${expectedService || 'the managed app service'}:${expectedServicePort}.`
+            : (ingressIssue
+                || 'Ingress routing has not been verified successfully yet.'));
+
+    let tlsIssue = '';
+    if (deployResult && verification.tls !== true) {
+        if (diagnostics.tlsSecretPresent === false) {
+            const certificateHint = certificateMessage || challengeSummary[0] || ingressEvents[0] || '';
+            tlsIssue = `TLS secret ${normalizeText(deployResult?.tlsSecretName) || 'for this host'} has not been issued yet${certificateHint ? `: ${certificateHint}` : '.'}`;
+        } else if (diagnostics.certificateReady === false) {
+            tlsIssue = `Certificate ${certificateName || 'for this host'} is not ready${certificateMessage ? `: ${certificateMessage}` : '.'}`;
+        } else if (diagnostics.certificateReadyValue === 'unknown') {
+            tlsIssue = 'Certificate readiness is still unknown.';
+        }
+    }
+
+    const tlsStatus = !deployResult
+        ? ''
+        : (verification.tls === true
+            ? `TLS is ready${certificateName ? ` with certificate ${certificateName}` : ''}.`
+            : (tlsIssue || 'TLS verification has not succeeded yet.'));
+
+    let httpsIssue = '';
+    if (deployResult && verification.https !== true) {
+        if (httpsStatusCode === 404) {
+            if (appProbeAttempted && appProbeOk) {
+                httpsIssue = 'Public HTTPS returned 404 while the internal service probe succeeded.';
+            } else if (appProbeAttempted && appProbeStatus === 404) {
+                httpsIssue = 'Public HTTPS returned 404 and the internal service probe also returned 404.';
+            } else {
+                httpsIssue = 'Public HTTPS returned 404.';
+            }
+        } else if (httpsStatusCode > 0) {
+            httpsIssue = `Public HTTPS returned ${httpsStatusCode}.`;
+        } else if (httpsError) {
+            httpsIssue = `Public HTTPS probe failed: ${httpsError}`;
+        } else {
+            httpsIssue = 'Public HTTPS is not responding successfully yet.';
+        }
+    }
+
+    const httpsStatus = !deployResult
+        ? ''
+        : (verification.https === true
+            ? `HTTPS returned ${httpsStatusCode || 200}${httpsLocation ? ` and redirected to ${httpsLocation}` : ''}.`
+            : httpsIssue);
+
+    const appProbeStatusSummary = !deployResult || appProbeAttempted !== true
+        ? ''
+        : (appProbeOk
+            ? `Internal service probe returned ${appProbeStatus || 200}.`
+            : (appProbeStatus > 0
+                ? `Internal service probe returned ${appProbeStatus}.`
+                : (appProbeError
+                    ? `Internal service probe failed: ${appProbeError}`
+                    : (appProbeBody ? `Internal service probe response: ${appProbeBody}` : 'Internal service probe did not confirm a healthy response.'))));
+
+    let failureCategory = '';
+    let failureReason = '';
+    if (rolloutError || verification.rollout === false) {
+        failureCategory = 'rollout';
+        failureReason = rolloutError || 'Deployment rollout failed on the remote cluster.';
+    } else if (ingressIssue) {
+        failureCategory = 'ingress';
+        failureReason = ingressIssue;
+    } else if (tlsIssue) {
+        failureCategory = 'tls';
+        failureReason = tlsIssue;
+    } else if (httpsIssue) {
+        failureCategory = httpsStatusCode === 404 && appProbeOk
+            ? 'ingress'
+            : (httpsStatusCode === 404 && appProbeAttempted && appProbeStatus === 404
+                ? 'app'
+                : 'https');
+        failureReason = httpsIssue;
+    }
+
+    const shouldFailClosed = ['rollout', 'ingress', 'tls', 'https', 'app'].includes(failureCategory)
+        && (httpsStatusCode > 0 || ['rollout', 'ingress', 'tls', 'app'].includes(failureCategory));
+    const nextStep = (() => {
+        switch (failureCategory) {
+            case 'rollout':
+                return 'Inspect the remote rollout error, fix the cluster state, and redeploy the managed app.';
+            case 'ingress':
+                if (httpsStatusCode === 404 && appProbeOk) {
+                    return 'Inspect Traefik ingress routing for this host because the service is reachable but the public endpoint returns 404.';
+                }
+                return 'Inspect the managed-app Ingress and Service wiring on the remote cluster, then redeploy.';
+            case 'tls':
+                return 'Inspect cert-manager certificate issuance for this host and wait for or repair the TLS secret before retrying verification.';
+            case 'app':
+                return 'Inspect the application root route or published static content because both the public endpoint and the internal service probe returned 404.';
+            case 'https':
+                return 'Inspect public DNS and ingress reachability until HTTPS returns a success or redirect.';
+            default:
+                return '';
+        }
+    })();
+
+    return {
+        expectedHost,
+        ingressStatus,
+        tlsStatus,
+        httpsStatus,
+        appProbeStatus: appProbeStatusSummary,
+        failureCategory,
+        failureReason,
+        shouldFailClosed,
+        nextStep,
+        openItems: normalizeStringArray([
+            failureReason,
+            ingressStatus && verification.ingress !== true ? ingressStatus : '',
+            tlsStatus && verification.tls !== true ? tlsStatus : '',
+            httpsStatus && verification.https !== true ? httpsStatus : '',
+            appProbeStatusSummary && !appProbeOk ? appProbeStatusSummary : '',
+            challengeSummary[0] || '',
+            ingressEvents[0] || '',
+            traefikLogExcerpt[0] || '',
+        ], 4),
+    };
+}
+
 function buildManagedAppStatusSummary(app = null, buildRun = null, phase = '', deployment = null) {
     const appName = normalizeText(app?.appName || app?.slug || 'Managed app');
     const publicUrl = normalizeText(app?.publicHost) ? `https://${normalizeText(app.publicHost)}` : '';
@@ -593,6 +781,8 @@ function buildManagedAppStatusSummary(app = null, buildRun = null, phase = '', d
         || deployment?.rollout?.error
         || deployment?.https?.error,
     );
+    const deployDiagnostics = getManagedAppDeployDiagnostics(app, deployment);
+    const failureReason = normalizeText(deployDiagnostics.failureReason || buildError);
 
     switch (normalizeText(phase).toLowerCase()) {
         case 'created':
@@ -604,15 +794,15 @@ function buildManagedAppStatusSummary(app = null, buildRun = null, phase = '', d
         case 'build_failed':
             return `${appName} build failed${buildError ? `: ${buildError}` : '.'}`;
         case 'deploying':
-            return `${appName} is deploying${publicUrl ? ` to ${publicUrl}` : ''}. Waiting for rollout and TLS.`;
+            return `${appName} is deploying${publicUrl ? ` to ${publicUrl}` : ''}. Waiting for rollout, ingress, TLS, and HTTPS verification.`;
         case 'live':
             return `${appName} is live${publicUrl ? ` at ${publicUrl}` : ''}. HTTPS is responding.`;
         case 'tls_ready':
-            return `${appName} is deployed${publicUrl ? ` at ${publicUrl}` : ''}. TLS is ready; waiting for public HTTPS to respond.`;
+            return `${appName} is deployed${publicUrl ? ` at ${publicUrl}` : ''}. ${deployDiagnostics.httpsStatus || 'TLS is ready; waiting for public HTTPS to respond.'}`;
         case 'pending_https':
-            return `${appName} rollout succeeded${publicUrl ? ` at ${publicUrl}` : ''}, but public HTTPS is not ready yet.`;
+            return `${appName} rollout succeeded${publicUrl ? ` at ${publicUrl}` : ''}, but verification is still incomplete${failureReason ? `: ${failureReason}` : '.'}`;
         case 'deploy_failed':
-            return `${appName} deployment failed${buildError ? `: ${buildError}` : '.'}`;
+            return `${appName} deployment failed${failureReason ? `: ${failureReason}` : '.'}`;
         case 'deployed':
             return `${appName} was deployed${publicUrl ? ` to ${publicUrl}` : ''}.`;
         default:
@@ -653,11 +843,13 @@ function buildManagedAppProgressState(app = null, buildRun = null, phase = '', d
     ) || 'Managed app status updated.';
     const deployRequested = details.deployRequested !== false;
     const healthy = typeof details.healthy === 'boolean' ? details.healthy : null;
+    const deployDiagnostics = getManagedAppDeployDiagnostics(app, details.deployment || null);
     const buildError = normalizeText(
         buildRun?.error?.message
         || buildRun?.metadata?.payload?.error
         || buildRun?.metadata?.payload?.message
         || app?.metadata?.liveDeploy?.lastError
+        || deployDiagnostics.failureReason
         || details?.deployment?.rollout?.error
         || details?.deployment?.https?.error
         || '',
@@ -701,7 +893,9 @@ function buildManagedAppProgressState(app = null, buildRun = null, phase = '', d
             mark('build', 'completed');
             mark('deploy', 'completed');
             mark('verify', 'in_progress');
-            detail = 'TLS is ready. Waiting for public HTTPS to respond successfully.';
+            detail = deployDiagnostics.failureReason
+                || deployDiagnostics.httpsStatus
+                || 'TLS is ready. Waiting for public HTTPS to respond successfully.';
             break;
         case 'live':
             steps.forEach((step) => {
@@ -718,7 +912,7 @@ function buildManagedAppProgressState(app = null, buildRun = null, phase = '', d
             mark('prepare', 'completed');
             mark('build', 'completed');
             mark('deploy', 'failed');
-            detail = buildError || 'The deployment failed before the public endpoint went live.';
+            detail = deployDiagnostics.failureReason || buildError || 'The deployment failed before the public endpoint went live.';
             break;
         default:
             mark('prepare', 'in_progress');
@@ -730,7 +924,11 @@ function buildManagedAppProgressState(app = null, buildRun = null, phase = '', d
     const completedSteps = steps.filter((step) => ['completed', 'skipped'].includes(step.status)).length;
     const nextStep = normalizeText(
         details.nextStep
-        || deriveNextStepForLifecycle(normalizedPhase, { deployRequested, healthy }),
+        || deriveNextStepForLifecycle(normalizedPhase, {
+            deployRequested,
+            healthy,
+            diagnostics: deployDiagnostics,
+        }),
     );
     const openItems = normalizeStringArray(
         hasOwnInput(details, 'openItems')
@@ -740,6 +938,7 @@ function buildManagedAppProgressState(app = null, buildRun = null, phase = '', d
                 summary,
                 error: buildError,
                 healthy,
+                diagnostics: deployDiagnostics,
             }),
         4,
     );
@@ -751,6 +950,11 @@ function buildManagedAppProgressState(app = null, buildRun = null, phase = '', d
         detail: normalizeText(details.detail || detail),
         nextStep,
         openItems,
+        expectedHost: normalizeText(deployDiagnostics.expectedHost),
+        ingressStatus: normalizeText(deployDiagnostics.ingressStatus),
+        tlsStatus: normalizeText(deployDiagnostics.tlsStatus),
+        httpsStatus: normalizeText(deployDiagnostics.httpsStatus),
+        appProbeStatus: normalizeText(deployDiagnostics.appProbeStatus),
         live: terminal !== true,
         terminal,
         totalSteps: steps.length,
@@ -1026,7 +1230,7 @@ function buildManagedAppMetadata(existingMetadata = {}, app = {}, options = {}) 
     return merged;
 }
 
-function deriveNextStepForLifecycle(phase = '', { deployRequested = false, healthy = null } = {}) {
+function deriveNextStepForLifecycle(phase = '', { deployRequested = false, healthy = null, diagnostics = null } = {}) {
     switch (normalizeText(phase).toLowerCase()) {
         case 'created':
         case 'updated':
@@ -1041,9 +1245,9 @@ function deriveNextStepForLifecycle(phase = '', { deployRequested = false, healt
             return 'Wait for rollout, ingress, TLS, and HTTPS verification to finish on the remote cluster.';
         case 'tls_ready':
         case 'pending_https':
-            return 'Monitor public HTTPS until the ingress responds successfully.';
+            return normalizeText(diagnostics?.nextStep) || 'Monitor public HTTPS until the ingress responds successfully.';
         case 'deploy_failed':
-            return 'Investigate the remote deployment failure and retry the managed-app deploy once the cluster issue is fixed.';
+            return normalizeText(diagnostics?.nextStep) || 'Investigate the remote deployment failure and retry the managed-app deploy once the cluster issue is fixed.';
         case 'live':
             return '';
         case 'doctor':
@@ -1056,13 +1260,22 @@ function deriveNextStepForLifecycle(phase = '', { deployRequested = false, healt
     }
 }
 
-function deriveOpenItemsForLifecycle(phase = '', { deployRequested = false, summary = '', error = '', healthy = null } = {}) {
+function deriveOpenItemsForLifecycle(phase = '', {
+    deployRequested = false,
+    summary = '',
+    error = '',
+    healthy = null,
+    diagnostics = null,
+} = {}) {
     const normalizedPhase = normalizeText(phase).toLowerCase();
     if (normalizedPhase === 'build_failed' || normalizedPhase === 'deploy_failed') {
-        return normalizeStringArray([error || summary], 4);
+        return normalizeStringArray(diagnostics?.openItems?.length ? diagnostics.openItems : [error || summary], 4);
     }
     if (normalizedPhase === 'tls_ready' || normalizedPhase === 'pending_https') {
-        return ['Public HTTPS is not responding yet.'];
+        return normalizeStringArray(
+            diagnostics?.openItems?.length ? diagnostics.openItems : ['Public HTTPS is not responding yet.'],
+            4,
+        );
     }
     if (normalizedPhase === 'created' || normalizedPhase === 'updated') {
         return deployRequested
@@ -2278,15 +2491,49 @@ class ManagedAppService {
             deploymentTarget,
         });
 
-        const verificationStatus = deployResult.verification.https
-            ? 'live'
-            : (deployResult.verification.tls ? 'tls_ready' : 'pending_https');
+        const deployDiagnostics = getManagedAppDeployDiagnostics(deployableApp, deployResult);
         const lifecyclePhase = deployResult.verification.https
             ? 'live'
-            : (deployResult.verification.tls ? 'tls_ready' : (deployResult.rollout.ok ? 'pending_https' : 'deploy_failed'));
+            : (deployDiagnostics.shouldFailClosed
+                ? 'deploy_failed'
+                : (deployResult.verification.tls ? 'tls_ready' : (deployResult.rollout.ok ? 'pending_https' : 'deploy_failed')));
+        const verificationStatus = deployResult.verification.https
+            ? 'live'
+            : (lifecyclePhase === 'deploy_failed'
+                ? 'failed'
+                : (deployResult.verification.tls ? 'tls_ready' : 'pending_https'));
         const appStatus = deployResult.verification.https
             ? 'live'
-            : (deployResult.verification.rollout ? 'deployed' : 'deploy_failed');
+            : (lifecyclePhase === 'deploy_failed'
+                ? 'deploy_failed'
+                : (deployResult.verification.rollout ? 'deployed' : 'deploy_failed'));
+        const lastError = normalizeText(
+            deployDiagnostics.failureReason
+            || deployResult.rollout?.error
+            || deployResult.https?.error
+            || '',
+        );
+        const projectNextStep = lifecyclePhase === 'live'
+            ? ''
+            : normalizeText(
+                deployDiagnostics.nextStep
+                || deriveNextStepForLifecycle(lifecyclePhase, {
+                    deployRequested: true,
+                    diagnostics: deployDiagnostics,
+                }),
+            );
+        const projectOpenItems = lifecyclePhase === 'live'
+            ? []
+            : normalizeStringArray(
+                deployDiagnostics.openItems?.length
+                    ? deployDiagnostics.openItems
+                    : deriveOpenItemsForLifecycle(lifecyclePhase, {
+                        deployRequested: true,
+                        error: lastError,
+                        diagnostics: deployDiagnostics,
+                    }),
+                8,
+            );
 
         const updatedApp = this.normalizeAppRecord(await this.store.updateApp(app.id, app.ownerId, {
             namespace: normalizedNamespace,
@@ -2313,13 +2560,12 @@ class ManagedAppService {
                     tls: deployResult.verification?.tls === true,
                     https: deployResult.verification?.https === true,
                     lastVerifiedAt: new Date().toISOString(),
-                    lastError: normalizeText(deployResult.rollout?.error || deployResult.https?.error || ''),
+                    lastError,
                     lastDeployResult: deployResult,
                 },
                 project: {
-                    nextStep: lifecyclePhase === 'live'
-                        ? ''
-                        : deriveNextStepForLifecycle(lifecyclePhase, { deployRequested: true }),
+                    nextStep: projectNextStep,
+                    openItems: projectOpenItems,
                 },
             }),
         }));
@@ -2329,13 +2575,19 @@ class ManagedAppService {
             buildRun = await this.store.updateBuildRun(buildRun.id, {
                 buildStatus: buildRun.buildStatus || 'success',
                 deployRequested: true,
-                deployStatus: deployResult.rollout.ok ? 'succeeded' : 'failed',
+                deployStatus: lifecyclePhase === 'live'
+                    ? 'succeeded'
+                    : (lifecyclePhase === 'deploy_failed'
+                        ? 'failed'
+                        : 'pending_verification'),
                 verificationStatus,
                 metadata: {
                     ...(buildRun.metadata || {}),
                     deployment: deployResult,
                 },
-                error: deployResult.rollout.ok ? {} : { message: deployResult.rollout.error || 'Deployment failed.' },
+                error: lifecyclePhase === 'deploy_failed'
+                    ? { message: lastError || 'Deployment failed.' }
+                    : {},
                 finishedAt: new Date().toISOString(),
             });
         }
@@ -2345,12 +2597,15 @@ class ManagedAppService {
             deployStatus: buildRun?.deployStatus || 'succeeded',
             verificationStatus,
             deployment: deployResult,
+            error: lastError ? { message: lastError } : null,
         });
         await this.broadcastLifecycleEvent(updatedApp, buildRun, lifecyclePhase, {
             deployment: {
                 ...deployResult,
                 image,
             },
+            nextStep: projectNextStep,
+            openItems: projectOpenItems,
             summary: buildManagedAppStatusSummary(updatedApp, buildRun, lifecyclePhase, {
                 ...deployResult,
                 image,

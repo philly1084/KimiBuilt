@@ -108,6 +108,28 @@ function parseBooleanMarkerValue(text = '', marker = '') {
     return /^true$/i.test(readMarkerValue(text, marker));
 }
 
+function normalizeMarkerBoolean(value = '') {
+    const normalized = normalizeText(value).toLowerCase();
+    if (normalized === 'true') {
+        return true;
+    }
+    if (normalized === 'false') {
+        return false;
+    }
+    return null;
+}
+
+function summarizeShellPreview(value = '', maxLength = 200) {
+    const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!normalized) {
+        return '';
+    }
+    if (normalized.length <= maxLength) {
+        return normalized;
+    }
+    return `${normalized.slice(0, Math.max(32, maxLength - 1)).trimEnd()}…`;
+}
+
 class KubernetesClient {
     constructor(options = {}) {
         this.config = options.config || config.kubernetes;
@@ -388,11 +410,14 @@ class KubernetesClient {
                 namespace,
                 labels: appLabels,
                 annotations: {
+                    'kubernetes.io/ingress.class': ingressClassName || 'traefik',
+                    'traefik.ingress.kubernetes.io/router.entrypoints': 'web,websecure',
+                    'traefik.ingress.kubernetes.io/router.tls': 'true',
                     ...(tlsClusterIssuer ? { 'cert-manager.io/cluster-issuer': tlsClusterIssuer } : {}),
                 },
             },
             spec: {
-                ...(ingressClassName ? { ingressClassName } : {}),
+                ingressClassName: ingressClassName || 'traefik',
                 rules: [{
                     host: publicHost,
                     http: {
@@ -474,9 +499,18 @@ class KubernetesClient {
                 redirect: 'manual',
                 signal: AbortSignal.timeout(timeoutMs),
             });
+            const location = normalizeText(response.headers?.get('location') || '');
+            let bodyPreview = '';
+            try {
+                bodyPreview = summarizeShellPreview(await response.text(), 180);
+            } catch (_error) {
+                bodyPreview = '';
+            }
             return {
                 ok: response.ok || [301, 302, 307, 308].includes(response.status),
                 status: response.status,
+                location,
+                bodyPreview,
             };
         } catch (error) {
             return {
@@ -512,6 +546,222 @@ class KubernetesClient {
         return {
             ...lastResult,
             attemptsCompleted: true,
+        };
+    }
+
+    buildRemoteDeployInspectionCommand({
+        namespace = '',
+        deploymentName = '',
+        serviceName = '',
+        ingressName = '',
+        publicHost = '',
+        servicePort = 80,
+        containerPort = 80,
+        tlsSecretName = '',
+        timeoutSeconds = 300,
+        pollIntervalSeconds = 5,
+    } = {}) {
+        const traefikPattern = ['404', 'error', 'Error', escapeRegExp(publicHost), escapeRegExp(ingressName)]
+            .filter(Boolean)
+            .join('|');
+        return [
+            'set -e',
+            'kubectl_cmd() {',
+            '  if command -v kubectl >/dev/null 2>&1; then kubectl "$@"; return; fi',
+            '  if command -v k3s >/dev/null 2>&1; then k3s kubectl "$@"; return; fi',
+            '  echo "kubectl or k3s is required on the remote host" >&2',
+            '  exit 1',
+            '}',
+            'if [ -f /etc/rancher/k3s/k3s.yaml ] && [ -z "${KUBECONFIG:-}" ]; then export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; fi',
+            `namespace=${this.quoteShellArg(namespace)}`,
+            `deployment_name=${this.quoteShellArg(deploymentName)}`,
+            `service_name=${this.quoteShellArg(serviceName)}`,
+            `ingress_name=${this.quoteShellArg(ingressName)}`,
+            `expected_host=${this.quoteShellArg(publicHost)}`,
+            `expected_service_port=${this.quoteShellArg(String(Math.max(1, Number(servicePort) || 80)))}`,
+            `expected_container_port=${this.quoteShellArg(String(Math.max(1, Number(containerPort) || 80)))}`,
+            `tls_secret_name=${this.quoteShellArg(tlsSecretName)}`,
+            `timeout_seconds=${this.quoteShellArg(String(Math.max(30, Number(timeoutSeconds) || 300)))}`,
+            `poll_interval_seconds=${this.quoteShellArg(String(Math.max(1, Number(pollIntervalSeconds) || 5)))}`,
+            'echo "__KIMIBUILT_EXPECTED_HOST__=${expected_host}"',
+            'echo "__KIMIBUILT_EXPECTED_SERVICE__=${service_name}"',
+            'echo "__KIMIBUILT_EXPECTED_SERVICE_PORT__=${expected_service_port}"',
+            'echo "__KIMIBUILT_EXPECTED_CONTAINER_PORT__=${expected_container_port}"',
+            'deployment_present=false',
+            'service_present=false',
+            'ingress_present=false',
+            'if kubectl_cmd get deployment "$deployment_name" -n "$namespace" >/dev/null 2>&1; then deployment_present=true; fi',
+            'if kubectl_cmd get service "$service_name" -n "$namespace" >/dev/null 2>&1; then service_present=true; fi',
+            'if kubectl_cmd get ingress "$ingress_name" -n "$namespace" >/dev/null 2>&1; then ingress_present=true; fi',
+            'echo "__KIMIBUILT_DEPLOYMENT_PRESENT__=${deployment_present}"',
+            'echo "__KIMIBUILT_SERVICE_PRESENT__=${service_present}"',
+            'echo "__KIMIBUILT_INGRESS_PRESENT__=${ingress_present}"',
+            'deployment_container_port=$(kubectl_cmd get deployment "$deployment_name" -n "$namespace" -o jsonpath=\'{.spec.template.spec.containers[0].ports[0].containerPort}\' 2>/dev/null || true)',
+            'if [ -n "${deployment_container_port:-}" ]; then echo "__KIMIBUILT_DEPLOYMENT_CONTAINER_PORT__=${deployment_container_port}"; fi',
+            'service_port=$(kubectl_cmd get service "$service_name" -n "$namespace" -o jsonpath=\'{.spec.ports[0].port}\' 2>/dev/null || true)',
+            'service_target_port=$(kubectl_cmd get service "$service_name" -n "$namespace" -o jsonpath=\'{.spec.ports[0].targetPort}\' 2>/dev/null || true)',
+            'if [ -n "${service_port:-}" ]; then echo "__KIMIBUILT_SERVICE_PORT__=${service_port}"; fi',
+            'if [ -n "${service_target_port:-}" ]; then echo "__KIMIBUILT_SERVICE_TARGET_PORT__=${service_target_port}"; fi',
+            'ingress_host=$(kubectl_cmd get ingress "$ingress_name" -n "$namespace" -o jsonpath=\'{.spec.rules[0].host}\' 2>/dev/null || true)',
+            'ingress_backend_service=$(kubectl_cmd get ingress "$ingress_name" -n "$namespace" -o jsonpath=\'{.spec.rules[0].http.paths[0].backend.service.name}\' 2>/dev/null || true)',
+            'ingress_backend_port=$(kubectl_cmd get ingress "$ingress_name" -n "$namespace" -o jsonpath=\'{.spec.rules[0].http.paths[0].backend.service.port.number}\' 2>/dev/null || true)',
+            'ingress_class=$(kubectl_cmd get ingress "$ingress_name" -n "$namespace" -o jsonpath=\'{.spec.ingressClassName}\' 2>/dev/null || true)',
+            'if [ -z "${ingress_class:-}" ]; then ingress_class=$(kubectl_cmd get ingress "$ingress_name" -n "$namespace" -o jsonpath=\'{.metadata.annotations.kubernetes\\.io/ingress\\.class}\' 2>/dev/null || true); fi',
+            'ingress_address=$(kubectl_cmd get ingress "$ingress_name" -n "$namespace" -o jsonpath=\'{range .status.loadBalancer.ingress[*]}{.ip}{.hostname}{" "}{end}\' 2>/dev/null || true)',
+            'echo "__KIMIBUILT_INGRESS_HOST__=${ingress_host}"',
+            'echo "__KIMIBUILT_INGRESS_BACKEND_SERVICE__=${ingress_backend_service}"',
+            'echo "__KIMIBUILT_INGRESS_BACKEND_PORT__=${ingress_backend_port}"',
+            'echo "__KIMIBUILT_INGRESS_CLASS__=${ingress_class}"',
+            'echo "__KIMIBUILT_INGRESS_ADDRESS__=${ingress_address}"',
+            'host_matches=false',
+            'if [ -n "${expected_host:-}" ] && [ "${ingress_host:-}" = "${expected_host:-}" ]; then host_matches=true; fi',
+            'backend_matches=false',
+            'if [ "${ingress_backend_service:-}" = "${service_name:-}" ] && [ "${ingress_backend_port:-}" = "${expected_service_port:-}" ]; then backend_matches=true; fi',
+            'service_target_matches=false',
+            'if [ "${service_target_port:-}" = "${expected_container_port:-}" ]; then service_target_matches=true; fi',
+            'echo "__KIMIBUILT_INGRESS_HOST_MATCHES__=${host_matches}"',
+            'echo "__KIMIBUILT_INGRESS_BACKEND_MATCHES__=${backend_matches}"',
+            'echo "__KIMIBUILT_SERVICE_TARGET_MATCHES__=${service_target_matches}"',
+            'deadline=$(( $(date +%s) + timeout_seconds ))',
+            'tls_ready=false',
+            'while [ "$(date +%s)" -le "$deadline" ]; do',
+            '  if kubectl_cmd get secret "$tls_secret_name" -n "$namespace" >/dev/null 2>&1; then',
+            '    tls_ready=true',
+            '    break',
+            '  fi',
+            '  sleep "$poll_interval_seconds"',
+            'done',
+            'echo "__KIMIBUILT_TLS_SECRET__=${tls_ready}"',
+            'certificate_name=""',
+            'certificate_ready=unknown',
+            'certificate_message=""',
+            'certificate_status=""',
+            'certificate_lines=$(kubectl_cmd get certificate -n "$namespace" -o jsonpath=\'{range .items[*]}{.metadata.name}{"|"}{.spec.secretName}{"|"}{range .status.conditions[*]}{.type}{":"}{.status}{":"}{.message}{";"}{end}{"\\n"}{end}\' 2>/dev/null || true)',
+            'matching_certificate=$(printf "%s\\n" "$certificate_lines" | awk -F"|" -v secret="$tls_secret_name" \'$2 == secret { print; exit }\')',
+            'if [ -n "${matching_certificate:-}" ]; then',
+            '  certificate_name=$(printf "%s" "$matching_certificate" | cut -d"|" -f1)',
+            '  certificate_conditions=$(printf "%s" "$matching_certificate" | cut -d"|" -f3-)',
+            '  certificate_status=$(printf "%s" "$certificate_conditions" | tr ";" "\\n" | grep "^Ready:" | head -n 1 | cut -d":" -f2 || true)',
+            '  certificate_message=$(printf "%s" "$certificate_conditions" | tr ";" "\\n" | grep "^Ready:" | head -n 1 | cut -d":" -f3- || true)',
+            '  if [ "${certificate_status:-}" = "True" ]; then certificate_ready=true; else certificate_ready=false; fi',
+            'fi',
+            'echo "__KIMIBUILT_CERTIFICATE_NAME__=${certificate_name}"',
+            'echo "__KIMIBUILT_CERTIFICATE_READY__=${certificate_ready}"',
+            'echo "__KIMIBUILT_CERTIFICATE_STATUS__=${certificate_status}"',
+            'echo "__KIMIBUILT_CERTIFICATE_MESSAGE__=${certificate_message}"',
+            'kubectl_cmd get challenge -n "$namespace" -o jsonpath=\'{range .items[*]}{.metadata.name}{"|"}{.status.state}{"|"}{.status.reason}{"\\n"}{end}\' 2>/dev/null | sed \'s/^/__KIMIBUILT_CHALLENGE__=/\' || true',
+            'kubectl_cmd describe ingress "$ingress_name" -n "$namespace" 2>/dev/null | grep -E "cert-manager|Challenge|Issuer|TLS|Warning|Error" | tail -n 12 | sed \'s/^/__KIMIBUILT_INGRESS_EVENT__=/\' || true',
+            'traefik_ready=false',
+            'traefik_pods=$(kubectl_cmd get pods -n kube-system -l app.kubernetes.io/name=traefik -o jsonpath=\'{range .items[*]}{range .status.containerStatuses[*]}{.ready}{"\\n"}{end}{end}\' 2>/dev/null || true)',
+            'if printf "%s\\n" "$traefik_pods" | grep -q "^true$"; then traefik_ready=true; fi',
+            'echo "__KIMIBUILT_TRAEFIK_READY__=${traefik_ready}"',
+            `kubectl_cmd logs -n kube-system deployment/traefik --tail=40 2>/dev/null | grep -E ${this.quoteShellArg(traefikPattern)} | tail -n 10 | sed 's/^/__KIMIBUILT_TRAEFIK_LOG__=/' || true`,
+            'app_probe_attempted=false',
+            'app_probe_ok=false',
+            'app_probe_status=""',
+            'app_probe_error=""',
+            'app_probe_body=""',
+            'pf_pid=""',
+            'cleanup_pf() {',
+            '  if [ -n "${pf_pid:-}" ]; then',
+            '    kill "$pf_pid" >/dev/null 2>&1 || true',
+            '    wait "$pf_pid" >/dev/null 2>&1 || true',
+            '    pf_pid=""',
+            '  fi',
+            '}',
+            'trap cleanup_pf EXIT',
+            'if [ "$service_present" = "true" ]; then',
+            '  app_probe_attempted=true',
+            '  kubectl_cmd port-forward "svc/$service_name" -n "$namespace" 18080:"$expected_service_port" >/tmp/kimibuilt-app-port-forward.log 2>&1 &',
+            '  pf_pid=$!',
+            '  sleep 2',
+            '  if command -v curl >/dev/null 2>&1; then',
+            '    app_probe_status=$(curl -sS -o /tmp/kimibuilt-app-probe-body.txt -w "%{http_code}" --max-time 10 http://127.0.0.1:18080/ 2>/tmp/kimibuilt-app-probe.err || true)',
+            '    app_probe_error=$(cat /tmp/kimibuilt-app-probe.err 2>/dev/null || true)',
+            '    app_probe_body=$(head -c 160 /tmp/kimibuilt-app-probe-body.txt 2>/dev/null | tr "\\n" " " || true)',
+            '  else',
+            '    app_probe_error="curl is required for the internal service probe."',
+            '  fi',
+            '  if [ "${app_probe_status:-}" = "200" ] || [ "${app_probe_status:-}" = "301" ] || [ "${app_probe_status:-}" = "302" ] || [ "${app_probe_status:-}" = "307" ] || [ "${app_probe_status:-}" = "308" ]; then app_probe_ok=true; fi',
+            '  cleanup_pf',
+            'fi',
+            'echo "__KIMIBUILT_APP_PROBE_ATTEMPTED__=${app_probe_attempted}"',
+            'echo "__KIMIBUILT_APP_PROBE_OK__=${app_probe_ok}"',
+            'echo "__KIMIBUILT_APP_PROBE_STATUS__=${app_probe_status}"',
+            'echo "__KIMIBUILT_APP_PROBE_ERROR__=${app_probe_error}"',
+            'echo "__KIMIBUILT_APP_PROBE_BODY__=${app_probe_body}"',
+        ].join('\n');
+    }
+
+    async inspectRemoteManagedAppDeployment({
+        namespace = '',
+        deploymentName = '',
+        serviceName = '',
+        ingressName = '',
+        publicHost = '',
+        servicePort = 80,
+        containerPort = 80,
+        tlsSecretName = '',
+        timeoutMs = 300000,
+    } = {}) {
+        const command = this.buildRemoteDeployInspectionCommand({
+            namespace,
+            deploymentName,
+            serviceName,
+            ingressName,
+            publicHost,
+            servicePort,
+            containerPort,
+            tlsSecretName,
+            timeoutSeconds: Math.ceil(Math.max(1000, Number(timeoutMs) || 300000) / 1000),
+        });
+        const result = await this.sshTool.handler({
+            command,
+            timeout: Math.max(60000, Number(timeoutMs) || 300000),
+        }, {}, createNoopTracker());
+        const stdout = String(result.stdout || '');
+        const certificateReadyValue = readMarkerValue(stdout, '__KIMIBUILT_CERTIFICATE_READY__');
+
+        return {
+            expectedHost: readMarkerValue(stdout, '__KIMIBUILT_EXPECTED_HOST__') || normalizeText(publicHost),
+            expectedService: readMarkerValue(stdout, '__KIMIBUILT_EXPECTED_SERVICE__') || normalizeText(serviceName),
+            expectedServicePort: parseInteger(readMarkerValue(stdout, '__KIMIBUILT_EXPECTED_SERVICE_PORT__'), Math.max(1, Number(servicePort) || 80)),
+            expectedContainerPort: parseInteger(readMarkerValue(stdout, '__KIMIBUILT_EXPECTED_CONTAINER_PORT__'), Math.max(1, Number(containerPort) || 80)),
+            deploymentPresent: parseBooleanMarkerValue(stdout, '__KIMIBUILT_DEPLOYMENT_PRESENT__'),
+            servicePresent: parseBooleanMarkerValue(stdout, '__KIMIBUILT_SERVICE_PRESENT__'),
+            ingressPresent: parseBooleanMarkerValue(stdout, '__KIMIBUILT_INGRESS_PRESENT__'),
+            deploymentContainerPort: parseInteger(readMarkerValue(stdout, '__KIMIBUILT_DEPLOYMENT_CONTAINER_PORT__'), 0),
+            servicePort: parseInteger(readMarkerValue(stdout, '__KIMIBUILT_SERVICE_PORT__'), 0),
+            serviceTargetPort: parseInteger(readMarkerValue(stdout, '__KIMIBUILT_SERVICE_TARGET_PORT__'), 0),
+            ingressHost: readMarkerValue(stdout, '__KIMIBUILT_INGRESS_HOST__'),
+            ingressBackendService: readMarkerValue(stdout, '__KIMIBUILT_INGRESS_BACKEND_SERVICE__'),
+            ingressBackendPort: parseInteger(readMarkerValue(stdout, '__KIMIBUILT_INGRESS_BACKEND_PORT__'), 0),
+            ingressClassName: readMarkerValue(stdout, '__KIMIBUILT_INGRESS_CLASS__'),
+            ingressAddress: readMarkerValue(stdout, '__KIMIBUILT_INGRESS_ADDRESS__'),
+            ingressHostMatches: parseBooleanMarkerValue(stdout, '__KIMIBUILT_INGRESS_HOST_MATCHES__'),
+            ingressBackendMatches: parseBooleanMarkerValue(stdout, '__KIMIBUILT_INGRESS_BACKEND_MATCHES__'),
+            serviceTargetMatches: parseBooleanMarkerValue(stdout, '__KIMIBUILT_SERVICE_TARGET_MATCHES__'),
+            tlsSecretPresent: parseBooleanMarkerValue(stdout, '__KIMIBUILT_TLS_SECRET__'),
+            certificateName: readMarkerValue(stdout, '__KIMIBUILT_CERTIFICATE_NAME__'),
+            certificateReady: normalizeMarkerBoolean(certificateReadyValue),
+            certificateReadyValue,
+            certificateStatus: readMarkerValue(stdout, '__KIMIBUILT_CERTIFICATE_STATUS__'),
+            certificateMessage: summarizeShellPreview(readMarkerValue(stdout, '__KIMIBUILT_CERTIFICATE_MESSAGE__')),
+            challengeSummary: readMarkerValues(stdout, '__KIMIBUILT_CHALLENGE__').map((entry) => summarizeShellPreview(entry, 220)),
+            ingressEvents: readMarkerValues(stdout, '__KIMIBUILT_INGRESS_EVENT__').map((entry) => summarizeShellPreview(entry, 220)),
+            traefikReady: parseBooleanMarkerValue(stdout, '__KIMIBUILT_TRAEFIK_READY__'),
+            traefikLogExcerpt: readMarkerValues(stdout, '__KIMIBUILT_TRAEFIK_LOG__').map((entry) => summarizeShellPreview(entry, 220)),
+            appProbe: {
+                attempted: parseBooleanMarkerValue(stdout, '__KIMIBUILT_APP_PROBE_ATTEMPTED__'),
+                ok: parseBooleanMarkerValue(stdout, '__KIMIBUILT_APP_PROBE_OK__'),
+                status: parseInteger(readMarkerValue(stdout, '__KIMIBUILT_APP_PROBE_STATUS__'), 0),
+                error: summarizeShellPreview(readMarkerValue(stdout, '__KIMIBUILT_APP_PROBE_ERROR__')),
+                bodyPreview: summarizeShellPreview(readMarkerValue(stdout, '__KIMIBUILT_APP_PROBE_BODY__')),
+            },
+            stdout,
+            stderr: String(result.stderr || ''),
+            exitCode: Number(result.exitCode || 0),
+            host: result.host,
         };
     }
 
@@ -1004,6 +1254,7 @@ class KubernetesClient {
             'kimibuilt.io/managed-app': 'true',
         };
         const tlsSecretName = sanitizeKubernetesName(`${appName}-tls`, `${appName}-tls`);
+        const normalizedContainerPort = Math.max(1, Number(containerPort) || 80);
         const manifests = [
             this.buildNamespaceManifest(appNamespace),
             this.buildRegistryPullSecretManifest({
@@ -1017,14 +1268,14 @@ class KubernetesClient {
                 namespace: appNamespace,
                 deploymentName: appName,
                 image,
-                containerPort,
+                containerPort: normalizedContainerPort,
                 registryPullSecretName,
                 appLabels,
             }),
             this.buildServiceManifest({
                 namespace: appNamespace,
                 serviceName: appName,
-                containerPort,
+                containerPort: normalizedContainerPort,
                 appLabels,
             }),
             this.buildIngressManifest({
@@ -1050,18 +1301,54 @@ class KubernetesClient {
             timeout: 180000,
         }, {}, createNoopTracker());
         const rolloutOk = Number(result.exitCode || 0) === 0;
-        const tlsStatus = rolloutOk
-            ? await this.waitForRemoteTlsSecret({
+        const deploymentInspection = rolloutOk
+            ? await this.inspectRemoteManagedAppDeployment({
                 namespace: appNamespace,
+                deploymentName: appName,
+                serviceName: appName,
                 ingressName: appName,
+                publicHost: host,
+                servicePort: 80,
+                containerPort: normalizedContainerPort,
                 tlsSecretName,
                 timeoutMs: this.managedAppsConfig.tlsReadyTimeoutMs || 300000,
             })
             : {
-                ok: false,
-                certificateReady: false,
-                ingressHost: host,
+                expectedHost: host,
+                expectedService: appName,
+                expectedServicePort: 80,
+                expectedContainerPort: normalizedContainerPort,
+                deploymentPresent: false,
+                servicePresent: false,
+                ingressPresent: false,
+                deploymentContainerPort: normalizedContainerPort,
+                servicePort: 0,
+                serviceTargetPort: 0,
+                ingressHost: '',
+                ingressBackendService: '',
+                ingressBackendPort: 0,
+                ingressClassName: '',
                 ingressAddress: '',
+                ingressHostMatches: false,
+                ingressBackendMatches: false,
+                serviceTargetMatches: false,
+                tlsSecretPresent: false,
+                certificateName: '',
+                certificateReady: false,
+                certificateReadyValue: 'false',
+                certificateStatus: '',
+                certificateMessage: '',
+                challengeSummary: [],
+                ingressEvents: [],
+                traefikReady: false,
+                traefikLogExcerpt: [],
+                appProbe: {
+                    attempted: false,
+                    ok: false,
+                    status: 0,
+                    error: '',
+                    bodyPreview: '',
+                },
                 stdout: '',
                 stderr: '',
                 exitCode: Number(result.exitCode || 0),
@@ -1078,6 +1365,48 @@ class KubernetesClient {
                 error: 'Rollout failed before HTTPS verification started.',
                 attemptsCompleted: false,
             };
+        const verificationIngress = Boolean(
+            rolloutOk
+            && deploymentInspection.deploymentPresent
+            && deploymentInspection.servicePresent
+            && deploymentInspection.ingressPresent
+            && deploymentInspection.ingressHostMatches
+            && deploymentInspection.ingressBackendMatches
+            && deploymentInspection.serviceTargetMatches
+            && deploymentInspection.traefikReady,
+        );
+        const verificationTls = Boolean(
+            rolloutOk
+            && deploymentInspection.tlsSecretPresent
+            && deploymentInspection.certificateReady === true,
+        );
+        const verificationHttps = https.ok === true;
+        const tlsStatus = {
+            ok: verificationTls,
+            certificateReady: deploymentInspection.certificateReady === true,
+            certificateReadyValue: deploymentInspection.certificateReadyValue,
+            ingressHost: deploymentInspection.ingressHost || host,
+            ingressAddress: deploymentInspection.ingressAddress,
+            certificateName: deploymentInspection.certificateName,
+            certificateStatus: deploymentInspection.certificateStatus,
+            certificateMessage: deploymentInspection.certificateMessage,
+            challengeSummary: deploymentInspection.challengeSummary,
+            ingressEvents: deploymentInspection.ingressEvents,
+            traefikReady: deploymentInspection.traefikReady,
+            traefikLogExcerpt: deploymentInspection.traefikLogExcerpt,
+            stdout: deploymentInspection.stdout,
+            stderr: deploymentInspection.stderr,
+            exitCode: deploymentInspection.exitCode,
+            host: deploymentInspection.host,
+        };
+        const diagnostics = {
+            ...deploymentInspection,
+            httpsStatus: Number(https.status || 0),
+            httpsOk: verificationHttps,
+            httpsError: summarizeShellPreview(https.error || ''),
+            httpsLocation: normalizeText(https.location || ''),
+            httpsBodyPreview: summarizeShellPreview(https.bodyPreview || ''),
+        };
 
         return {
             namespace: appNamespace,
@@ -1094,12 +1423,13 @@ class KubernetesClient {
             },
             verification: {
                 rollout: rolloutOk,
-                ingress: true,
-                tls: tlsStatus.ok === true,
-                https: https.ok === true,
+                ingress: verificationIngress,
+                tls: verificationTls,
+                https: verificationHttps,
             },
             tlsStatus,
             https,
+            diagnostics,
             executionHost: result.host,
         };
     }

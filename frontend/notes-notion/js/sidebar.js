@@ -2162,7 +2162,7 @@ const Sidebar = (function() {
         modal.innerHTML = `
             <div class="export-all-content">
                 <div class="export-all-header">
-                    <h3 style="margin: 0; font-size: 18px;">📤 Export All Pages</h3>
+                    <h3 class="export-all-title">&#128228; Export All Pages</h3>
                 </div>
                 <div class="export-all-body">
                     <div class="export-all-options">
@@ -2318,15 +2318,17 @@ const Sidebar = (function() {
             color: #666;
         }
         ul, ol { padding-left: 24px; }
+        .print-markdown { background: none; padding: 0; white-space: pre-wrap; word-wrap: break-word; }
+        .print-meta { color: #999; font-size: 12px; }
         @media print {
             body { margin: 0; }
         }
     </style>
 </head>
 <body>
-    <pre style="background: none; padding: 0; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(markdown)}</pre>
+    <pre class="print-markdown">${escapeHtml(markdown)}</pre>
     <hr>
-    <p style="color: #999; font-size: 12px;">Exported from Notes - ${new Date().toLocaleString()}</p>
+    <p class="print-meta">Exported from Notes - ${new Date().toLocaleString()}</p>
     <script>
         // Auto-print
         setTimeout(() => print(), 500);
@@ -2345,88 +2347,86 @@ const Sidebar = (function() {
      */
     function showStorageInfo() {
         const status = Storage.getStorageStatus();
-        
+
         const modal = document.createElement('div');
-        modal.className = 'ai-modal';
-        modal.style.display = 'flex';
+        modal.id = 'storage-status-modal';
+        modal.className = 'ai-modal is-open';
         modal.innerHTML = `
-            <div class="ai-modal-content" style="max-width: 400px;">
-                <div class="ai-modal-header">
-                    <span>💿</span>
+            <div class="ai-modal-content storage-status-content">
+                <div class="ai-modal-header storage-status-header">
+                    <span>&#128190;</span>
                     <span>Storage Information</span>
-                    <button class="close-btn" style="margin-left: auto; background: transparent; border: none; color: white; cursor: pointer; font-size: 18px;">✕</button>
+                    <button class="close-btn storage-status-close" aria-label="Close storage information">&times;</button>
                 </div>
-                <div style="padding: 20px;">
-                    <div style="margin-bottom: 16px;">
-                        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 4px;">Storage Status</div>
-                        <div style="font-size: 16px; color: ${status.available ? '#22c55e' : '#ef4444'};">
-                            ${status.available ? '✅ Available' : '⚠️ Using Memory Fallback'}
+                <div class="storage-status-body">
+                    <section class="storage-status-section">
+                        <div class="storage-status-label">Storage Status</div>
+                        <div class="storage-status-value ${status.available ? 'is-success' : 'is-error'}">
+                            ${status.available ? 'Available' : 'Using Memory Fallback'}
                         </div>
-                    </div>
+                    </section>
                     ${status.error ? `
-                    <div style="margin-bottom: 16px;">
-                        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 4px;">Error</div>
-                        <div style="font-size: 13px; color: #ef4444;">${status.error.message}</div>
-                    </div>
+                    <section class="storage-status-section">
+                        <div class="storage-status-label">Error</div>
+                        <div class="storage-status-value is-error">${escapeHtml(status.error.message)}</div>
+                    </section>
                     ` : ''}
-                    <div style="margin-bottom: 16px;">
-                        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 4px;">Memory Fallback</div>
-                        <div style="font-size: 14px;">${status.memoryFallback ? 'Active' : 'Not needed'}</div>
-                    </div>
+                    <section class="storage-status-section">
+                        <div class="storage-status-label">Memory Fallback</div>
+                        <div class="storage-status-value">${status.memoryFallback ? 'Active' : 'Not needed'}</div>
+                    </section>
                     ${status.usage ? `
-                    <div style="margin-bottom: 16px;">
-                        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 4px;">Storage Usage</div>
-                        <div style="font-size: 14px;">${(status.usage / 1024 / 1024).toFixed(2)} MB</div>
-                    </div>
+                    <section class="storage-status-section">
+                        <div class="storage-status-label">Storage Usage</div>
+                        <div class="storage-status-value">${(status.usage / 1024 / 1024).toFixed(2)} MB</div>
+                    </section>
                     ` : ''}
                     ${status.quota ? `
-                    <div style="margin-bottom: 16px;">
-                        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 4px;">Storage Quota</div>
-                        <div style="font-size: 14px;">${(status.quota / 1024 / 1024).toFixed(2)} MB</div>
-                    </div>
+                    <section class="storage-status-section">
+                        <div class="storage-status-label">Storage Quota</div>
+                        <div class="storage-status-value">${(status.quota / 1024 / 1024).toFixed(2)} MB</div>
+                    </section>
                     ` : ''}
-                    <div style="font-size: 13px; color: var(--text-muted); margin-top: 20px; padding: 12px; background: var(--bg-secondary); border-radius: var(--radius-md);">
-                        💡 Tip: If localStorage is unavailable (due to Tracking Prevention), your data is saved in memory. Use "Backup all data" to save your work.
+                    <div class="storage-status-note">
+                        Tip: If localStorage is unavailable, your data is saved in memory. Use "Backup all data" to save your work.
                     </div>
                 </div>
             </div>
         `;
-        
+
         modal.querySelector('.close-btn').addEventListener('click', () => modal.remove());
         modal.addEventListener('click', (e) => {
             if (e.target === modal) modal.remove();
         });
-        
+
         document.body.appendChild(modal);
     }
-    
+
     /**
      * Import from Markdown
      */
     function importFromMarkdown() {
-        const input = document.createElement('textarea');
-        input.placeholder = 'Paste Markdown here...';
-        input.style.cssText = 'width: 100%; height: 200px; padding: 12px; font-family: inherit;';
-        
         const modal = document.createElement('div');
-        modal.className = 'ai-modal';
-        modal.style.display = 'flex';
+        modal.id = 'import-modal';
+        modal.className = 'ai-modal is-open';
         modal.innerHTML = `
-            <div class="ai-modal-content" style="max-width: 500px;">
-                <div class="ai-modal-header">
-                    <span>📥</span>
+            <div class="ai-modal-content import-modal-content import-markdown-content">
+                <div class="ai-modal-header import-modal-header">
+                    <span>&#128229;</span>
                     <span>Import from Markdown</span>
+                    <button class="import-close" aria-label="Close markdown import">&times;</button>
                 </div>
-                <div style="padding: 20px;">
-                    <textarea id="import-text" style="width: 100%; height: 200px; padding: 12px; font-family: inherit; border: 1px solid var(--border-color); border-radius: var(--radius-md); resize: vertical;"></textarea>
+                <div class="import-modal-body import-markdown-body">
+                    <textarea id="import-text" class="input import-markdown-textarea" placeholder="Paste Markdown here..."></textarea>
                 </div>
-                <div style="padding: 0 20px 20px; display: flex; gap: 10px; justify-content: flex-end;">
-                    <button class="ai-btn cancel">Cancel</button>
-                    <button class="ai-btn primary import">Import</button>
+                <div class="import-modal-footer modal-actions import-markdown-actions">
+                    <button class="btn btn-ghost cancel">Cancel</button>
+                    <button class="btn btn-primary import">Import</button>
                 </div>
             </div>
         `;
-        
+
+        modal.querySelector('.import-close').addEventListener('click', () => modal.remove());
         modal.querySelector('.cancel').addEventListener('click', () => modal.remove());
         modal.querySelector('.import').addEventListener('click', () => {
             const text = modal.querySelector('#import-text').value;
@@ -2439,13 +2439,13 @@ const Sidebar = (function() {
                 showToast('Imported successfully', 'success');
             }
         });
-        
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) modal.remove();
+        });
+
         document.body.appendChild(modal);
+        setTimeout(() => modal.querySelector('#import-text')?.focus(), 0);
     }
-    
-    /**
-     * Parse Markdown to page
-     */
     function parseMarkdownToPage(markdown) {
         const page = Storage.createPage();
         const lines = markdown.split('\n');
@@ -2529,55 +2529,35 @@ const Sidebar = (function() {
     function showToast(message, type = 'info', options = {}) {
         const container = document.getElementById('toast-container');
         if (!container) return;
-        
-        const { 
-            duration = TOAST_DURATION, 
-            action = null,  // { label: string, callback: function }
-            onClose = null 
+
+        const {
+            duration = TOAST_DURATION,
+            action = null,
+            onClose = null
         } = options;
-        
-        // Remove oldest toast if at max
+
         if (toastQueue.length >= MAX_TOASTS) {
             const oldest = toastQueue.shift();
             if (oldest && oldest.element) {
+                if (oldest.timeout) {
+                    clearTimeout(oldest.timeout);
+                }
                 oldest.element.remove();
             }
         }
-        
+
         const toast = document.createElement('div');
-        toast.className = `toast ${type}`;
+        toast.className = `toast ${type} toast-${type}${action ? ' toast--actionable' : ''}`;
         toast.setAttribute('role', 'status');
         toast.setAttribute('aria-live', 'polite');
-        
-        // Build toast content
-        let content = `<span>${escapeHtml(message)}</span>`;
-        
+
+        let content = `<span class="toast-message">${escapeHtml(message)}</span>`;
         if (action) {
-            content += `<button class="toast-action" style="margin-left: auto; background: transparent; border: none; color: var(--accent-color); cursor: pointer; font-weight: 500; padding: 4px 8px; border-radius: var(--radius-sm);">${escapeHtml(action.label)}</button>`;
+            content += `<button type="button" class="toast-action">${escapeHtml(action.label)}</button>`;
         }
-        
-        content += `<button class="toast-close" aria-label="Close notification" style="background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; margin-left: ${action ? '8px' : 'auto'}; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center;">✕</button>`;
-        
+        content += `<button type="button" class="toast-close${action ? '' : ' toast-close--solo'}" aria-label="Close notification">&times;</button>`;
         toast.innerHTML = content;
-        
-        // Add close button handler
-        const closeBtn = toast.querySelector('.toast-close');
-        closeBtn.addEventListener('click', () => {
-            removeToast(toastItem);
-            if (onClose) onClose();
-        });
-        
-        // Add action button handler
-        if (action) {
-            const actionBtn = toast.querySelector('.toast-action');
-            actionBtn.addEventListener('click', () => {
-                action.callback();
-                removeToast(toastItem);
-            });
-        }
-        
-        container.appendChild(toast);
-        
+
         const toastItem = {
             element: toast,
             timeout: setTimeout(() => {
@@ -2585,15 +2565,23 @@ const Sidebar = (function() {
                 if (onClose) onClose();
             }, duration)
         };
-        
-        toastQueue.push(toastItem);
-        
-        // Animate in
-        requestAnimationFrame(() => {
-            toast.style.animation = 'slideIn 0.3s ease';
+
+        toast.querySelector('.toast-close').addEventListener('click', () => {
+            removeToast(toastItem);
+            if (onClose) onClose();
         });
+
+        if (action) {
+            toast.querySelector('.toast-action').addEventListener('click', () => {
+                action.callback();
+                removeToast(toastItem);
+            });
+        }
+
+        container.appendChild(toast);
+        toastQueue.push(toastItem);
     }
-    
+
     /**
      * Remove a toast from the queue and DOM
      */
@@ -2602,24 +2590,18 @@ const Sidebar = (function() {
         if (index > -1) {
             toastQueue.splice(index, 1);
         }
-        
+
         if (toastItem.element) {
-            toastItem.element.style.opacity = '0';
-            toastItem.element.style.transform = 'translateX(100%)';
-            toastItem.element.style.transition = 'all 0.3s ease';
+            toastItem.element.classList.add('is-removing');
             setTimeout(() => {
                 toastItem.element.remove();
-            }, 300);
+            }, 220);
         }
-        
+
         if (toastItem.timeout) {
             clearTimeout(toastItem.timeout);
         }
     }
-    
-    /**
-     * Show undo toast for block deletion
-     */
     function showUndoToast(message, undoCallback) {
         let undoPerformed = false;
         
@@ -2646,78 +2628,107 @@ const Sidebar = (function() {
      */
     function showSearchModal() {
         const pages = Storage.getPages();
-        
+
         const modal = document.createElement('div');
-        modal.className = 'ai-modal';
-        modal.style.display = 'flex';
+        modal.id = 'search-modal';
+        modal.className = 'ai-modal is-open';
         modal.innerHTML = `
-            <div class="ai-modal-content" style="max-width: 500px; max-height: 70vh; display: flex; flex-direction: column;">
-                <div class="ai-modal-header">
-                    <span>🔍</span>
+            <div class="ai-modal-content search-content search-modal-content">
+                <div class="ai-modal-header search-header">
+                    <span>&#128269;</span>
                     <span>Search Pages</span>
-                    <button class="search-close">✕</button>
+                    <button class="search-close" aria-label="Close search">&times;</button>
                 </div>
                 <div class="search-toolbar">
-                    <input type="text" id="search-input" placeholder="Search page titles and content..." 
- class="input"
-                        autocomplete="off">
+                    <input type="text" id="search-input" placeholder="Search page titles and content..." class="input" autocomplete="off">
                 </div>
                 <div id="search-results" class="search-results">
-                    <div style="padding: 24px; text-align: center; color: var(--text-muted);">
+                    <div class="search-results-empty search-results-placeholder">
                         Type to search across all pages...
                     </div>
                 </div>
-                <div style="padding: 12px 16px; border-top: 1px solid var(--border-color); font-size: 12px; color: var(--text-muted);">
+                <div class="search-results-footer">
                     Press Enter to open selected page • Esc to close
                 </div>
             </div>
         `;
-        
+
         const searchInput = modal.querySelector('#search-input');
         const searchResults = modal.querySelector('#search-results');
-        
-        // Close handlers
+
         modal.querySelector('.search-close').addEventListener('click', () => modal.remove());
         modal.addEventListener('click', (e) => {
             if (e.target === modal) modal.remove();
         });
-        
-        // Search functionality
+
         let selectedIndex = -1;
         let currentResults = [];
-        
+
+        const renderEmptyState = (message, isPlaceholder = false) => {
+            searchResults.innerHTML = `
+                <div class="search-results-empty${isPlaceholder ? ' search-results-placeholder' : ''}">
+                    ${message}
+                </div>
+            `;
+        };
+
+        const openResult = (result) => {
+            loadPage(result.page.id);
+            showToast(`Opened: ${result.page.title || 'Untitled'}`, 'success');
+        };
+
+        const renderResults = () => {
+            searchResults.innerHTML = currentResults.map((result, index) => `
+                <div class="search-result-item ${index === selectedIndex ? 'selected' : ''}" data-index="${index}">
+                    <div class="search-result-row">
+                        <span class="search-result-icon">${result.page.icon || '&#128196;'}</span>
+                        <span class="search-result-title">${escapeHtml(result.page.title || 'Untitled')}</span>
+                        ${result.type === 'content' ? `<span class="search-result-chip chip">${escapeHtml(result.blockType)}</span>` : ''}
+                    </div>
+                    <div class="search-result-preview">${escapeHtml(result.preview)}</div>
+                </div>
+            `).join('');
+
+            searchResults.querySelectorAll('.search-result-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const index = parseInt(item.dataset.index, 10);
+                    openResult(currentResults[index]);
+                    modal.remove();
+                });
+                item.addEventListener('mouseenter', () => {
+                    selectedIndex = parseInt(item.dataset.index, 10);
+                    renderResults();
+                });
+            });
+
+            const selected = searchResults.querySelector('.search-result-item.selected');
+            if (selected) {
+                selected.scrollIntoView({ block: 'nearest' });
+            }
+        };
+
         const performSearch = (query) => {
             if (!query.trim()) {
-                searchResults.innerHTML = `
-                    <div style="padding: 24px; text-align: center; color: var(--text-muted);">
-                        Type to search across all pages...
-                    </div>
-                `;
                 currentResults = [];
                 selectedIndex = -1;
+                renderEmptyState('Type to search across all pages...', true);
                 return;
             }
-            
+
             const lowerQuery = query.toLowerCase();
             const results = [];
-            
+
             pages.forEach(page => {
-                // Search in title
                 if (page.title?.toLowerCase().includes(lowerQuery)) {
-                    results.push({
-                        page,
-                        type: 'title',
-                        preview: page.title
-                    });
+                    results.push({ page, type: 'title', preview: page.title });
                 }
-                
-                // Search in blocks
+
                 if (page.blocks) {
                     page.blocks.forEach((block, index) => {
-                        const content = typeof block.content === 'object' 
+                        const content = typeof block.content === 'object'
                             ? block.content.text || block.content.prompt || JSON.stringify(block.content)
                             : block.content;
-                        
+
                         if (content?.toLowerCase().includes(lowerQuery)) {
                             const preview = content.substring(0, 100) + (content.length > 100 ? '...' : '');
                             results.push({
@@ -2731,75 +2742,24 @@ const Sidebar = (function() {
                     });
                 }
             });
-            
+
             currentResults = results;
             selectedIndex = results.length > 0 ? 0 : -1;
-            
+
             if (results.length === 0) {
-                searchResults.innerHTML = `
-                    <div style="padding: 24px; text-align: center; color: var(--text-muted);">
-                        No results found for "${escapeHtml(query)}"
-                    </div>
-                `;
-            } else {
-                renderResults();
+                renderEmptyState(`No results found for "${escapeHtml(query)}"`);
+                return;
             }
+
+            renderResults();
         };
-        
-        const renderResults = () => {
-            searchResults.innerHTML = currentResults.map((result, index) => `
-                <div class="search-result-item ${index === selectedIndex ? 'selected' : ''}" data-index="${index}" style="
-                    padding: 12px 16px;
-                    cursor: pointer;
-                    border-bottom: 1px solid var(--border-color);
-                    background: ${index === selectedIndex ? 'var(--bg-hover)' : 'transparent'};
-                    transition: background 0.15s;
-                ">
-                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
-                        <span style="font-size: 16px;">${result.page.icon || '📄'}</span>
-                        <span style="font-weight: 500; color: var(--text-primary);">${escapeHtml(result.page.title || 'Untitled')}</span>
-                        ${result.type === 'content' ? `<span style="font-size: 12px; color: var(--text-muted); text-transform: capitalize;">${result.blockType}</span>` : ''}
-                    </div>
-                    <div style="font-size: 13px; color: var(--text-secondary); margin-left: 26px;">
-                        ${escapeHtml(result.preview)}
-                    </div>
-                </div>
-            `).join('');
-            
-            // Add click handlers
-            searchResults.querySelectorAll('.search-result-item').forEach(item => {
-                item.addEventListener('click', () => {
-                    const index = parseInt(item.dataset.index);
-                    openResult(currentResults[index]);
-                    modal.remove();
-                });
-                
-                item.addEventListener('mouseenter', () => {
-                    selectedIndex = parseInt(item.dataset.index);
-                    renderResults();
-                });
-            });
-            
-            // Scroll selected into view
-            const selected = searchResults.querySelector('.search-result-item.selected');
-            if (selected) {
-                selected.scrollIntoView({ block: 'nearest' });
-            }
-        };
-        
-        const openResult = (result) => {
-            loadPage(result.page.id);
-            showToast(`Opened: ${result.page.title || 'Untitled'}`, 'success');
-        };
-        
-        // Input handler with debounce
+
         let debounceTimer;
         searchInput.addEventListener('input', () => {
             clearTimeout(debounceTimer);
             debounceTimer = setTimeout(() => performSearch(searchInput.value), 200);
         });
-        
-        // Keyboard navigation
+
         searchInput.addEventListener('keydown', (e) => {
             switch (e.key) {
                 case 'ArrowDown':
@@ -2809,7 +2769,6 @@ const Sidebar = (function() {
                         renderResults();
                     }
                     break;
-                    
                 case 'ArrowUp':
                     e.preventDefault();
                     if (currentResults.length > 0) {
@@ -2817,7 +2776,6 @@ const Sidebar = (function() {
                         renderResults();
                     }
                     break;
-                    
                 case 'Enter':
                     e.preventDefault();
                     if (selectedIndex >= 0 && currentResults[selectedIndex]) {
@@ -2825,21 +2783,16 @@ const Sidebar = (function() {
                         modal.remove();
                     }
                     break;
-                    
                 case 'Escape':
                     e.preventDefault();
                     modal.remove();
                     break;
             }
         });
-        
+
         document.body.appendChild(modal);
         searchInput.focus();
     }
-    
-    /**
-     * Escape HTML special characters
-     */
     function escapeHtml(text) {
         if (!text) return '';
         return text

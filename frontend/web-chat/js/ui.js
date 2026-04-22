@@ -2640,6 +2640,11 @@ class UIHelpers {
         const summary = String(rawProgress.summary || '').trim() || 'Managed app status updated.';
         const detail = String(rawProgress.detail || '').trim();
         const nextStep = String(rawProgress.nextStep || '').trim();
+        const expectedHost = String(rawProgress.expectedHost || '').trim();
+        const ingressStatus = String(rawProgress.ingressStatus || '').trim();
+        const tlsStatus = String(rawProgress.tlsStatus || '').trim();
+        const httpsStatus = String(rawProgress.httpsStatus || '').trim();
+        const appProbeStatus = String(rawProgress.appProbeStatus || '').trim();
         const openItems = (Array.isArray(rawProgress.openItems) ? rawProgress.openItems : [])
             .map((item) => String(item || '').trim())
             .filter(Boolean)
@@ -2659,6 +2664,11 @@ class UIHelpers {
             summary,
             detail,
             nextStep,
+            expectedHost,
+            ingressStatus,
+            tlsStatus,
+            httpsStatus,
+            appProbeStatus,
             openItems,
             terminal,
             live,
@@ -2756,6 +2766,21 @@ class UIHelpers {
         const lastSuccessfulMarkup = lastSuccessfulStep
             ? `<div class="assistant-progress-card__status-line"><span class="assistant-progress-card__status-label">Last Done</span><span class="assistant-progress-card__status-value">${this.escapeHtml(lastSuccessfulStep.title)}</span></div>`
             : '';
+        const expectedHostMarkup = progressState.expectedHost
+            ? `<div class="assistant-progress-card__status-line"><span class="assistant-progress-card__status-label">Host</span><span class="assistant-progress-card__status-value">${this.escapeHtml(progressState.expectedHost)}</span></div>`
+            : '';
+        const ingressStatusMarkup = progressState.ingressStatus
+            ? `<div class="assistant-progress-card__status-line"><span class="assistant-progress-card__status-label">Ingress</span><span class="assistant-progress-card__status-value">${this.escapeHtml(progressState.ingressStatus)}</span></div>`
+            : '';
+        const tlsStatusMarkup = progressState.tlsStatus
+            ? `<div class="assistant-progress-card__status-line"><span class="assistant-progress-card__status-label">TLS</span><span class="assistant-progress-card__status-value">${this.escapeHtml(progressState.tlsStatus)}</span></div>`
+            : '';
+        const httpsStatusMarkup = progressState.httpsStatus
+            ? `<div class="assistant-progress-card__status-line"><span class="assistant-progress-card__status-label">HTTPS</span><span class="assistant-progress-card__status-value">${this.escapeHtml(progressState.httpsStatus)}</span></div>`
+            : '';
+        const appProbeStatusMarkup = progressState.appProbeStatus
+            ? `<div class="assistant-progress-card__status-line"><span class="assistant-progress-card__status-label">App Probe</span><span class="assistant-progress-card__status-value">${this.escapeHtml(progressState.appProbeStatus)}</span></div>`
+            : '';
         const nextStepText = String(
             progressState.nextStep
             || message?.metadata?.nextStep
@@ -2840,6 +2865,11 @@ class UIHelpers {
                     ${progressState.detail ? `<div class="assistant-progress-card__detail">${this.escapeHtml(progressState.detail)}</div>` : ''}
                     ${phaseMarkup}
                     ${lastSuccessfulMarkup}
+                    ${expectedHostMarkup}
+                    ${ingressStatusMarkup}
+                    ${tlsStatusMarkup}
+                    ${httpsStatusMarkup}
+                    ${appProbeStatusMarkup}
                     ${pausedMarkup}
                     ${resumeMarkup}
                     ${nextStepMarkup}
