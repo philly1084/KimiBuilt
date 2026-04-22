@@ -194,4 +194,85 @@ describe('workload request builder', () => {
             },
         }));
     });
+
+    test('builds a brutal builder workload with chained improvement passes', () => {
+        const canonical = buildCanonicalWorkloadAction({
+            request: 'Use brutal builder to make a PDF product spec for the new onboarding flow and take a couple passes quickly.',
+        }, {
+            now: '2026-04-02T09:00:00.000Z',
+            timezone: 'UTC',
+        });
+
+        expect(canonical).toEqual(expect.objectContaining({
+            action: 'create',
+            trigger: {
+                type: 'once',
+                runAt: '2026-04-02T09:00:00.000Z',
+            },
+            metadata: expect.objectContaining({
+                brutalBuilderEnabled: true,
+                defaultOutputFormat: 'pdf',
+                brutalBuilder: expect.objectContaining({
+                    totalRuns: 4,
+                    intervalMs: 10 * 60 * 1000,
+                }),
+            }),
+        }));
+        expect(canonical.prompt).toContain('This is pass 1 of 4.');
+        expect(canonical.stages).toHaveLength(3);
+        expect(canonical.stages[0]).toEqual(expect.objectContaining({
+            when: 'on_success',
+            delayMs: 10 * 60 * 1000,
+            outputFormat: 'pdf',
+        }));
+        expect(canonical.stages[0].prompt).toContain('This is pass 2 of 4.');
+    });
+
+    test('builds a brutal builder workload from duration and count language', () => {
+        const canonical = buildCanonicalWorkloadAction({
+            request: 'Use brutal builder to draft a design brief, take 4 hours and do it 8 times in that 4 hours.',
+        }, {
+            now: '2026-04-02T09:00:00.000Z',
+            timezone: 'UTC',
+        });
+
+        expect(canonical).toEqual(expect.objectContaining({
+            action: 'create',
+            trigger: {
+                type: 'once',
+                runAt: '2026-04-02T09:00:00.000Z',
+            },
+            metadata: expect.objectContaining({
+                brutalBuilderEnabled: true,
+                brutalBuilder: expect.objectContaining({
+                    totalRuns: 8,
+                    intervalMs: 30 * 60 * 1000,
+                }),
+            }),
+        }));
+        expect(canonical.stages).toHaveLength(7);
+    });
+
+    test('downgrades brutal builder docx requests to pdf with a warning', () => {
+        const canonical = buildCanonicalWorkloadAction({
+            request: 'Use brutal builder to make a DOCX executive brief for the launch plan and take a couple passes quickly.',
+        }, {
+            now: '2026-04-02T09:00:00.000Z',
+            timezone: 'UTC',
+        });
+
+        expect(canonical).toEqual(expect.objectContaining({
+            action: 'create',
+            metadata: expect.objectContaining({
+                brutalBuilderEnabled: true,
+                requestedOutputFormat: 'docx',
+                resolvedOutputFormat: 'pdf',
+                defaultOutputFormat: 'pdf',
+                outputFormatWarnings: [expect.stringContaining('downgraded it to PDF')],
+            }),
+        }));
+        expect(canonical.stages[0]).toEqual(expect.objectContaining({
+            outputFormat: 'pdf',
+        }));
+    });
 });

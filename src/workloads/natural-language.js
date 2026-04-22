@@ -67,6 +67,22 @@ function buildRelativeDelayPattern(flags = 'i') {
     );
 }
 
+function convertAmountAndUnitToMs(amount = null, unit = '') {
+    if (!Number.isFinite(amount) || amount <= 0) {
+        return null;
+    }
+
+    const normalizedUnit = String(unit || '').trim().toLowerCase();
+    if (normalizedUnit.startsWith('h')) {
+        return amount * 60 * 60 * 1000;
+    }
+    if (normalizedUnit.startsWith('m')) {
+        return amount * 60 * 1000;
+    }
+
+    return null;
+}
+
 function parseRelativeAmountToken(value = '') {
     const normalized = String(value || '')
         .trim()
@@ -113,12 +129,7 @@ function extractRelativeDelayMs(input = '') {
         return null;
     }
 
-    const unit = String(match[2] || match[4] || '').toLowerCase();
-    if (unit.startsWith('h')) {
-        return amount * 60 * 60 * 1000;
-    }
-
-    return amount * 60 * 1000;
+    return convertAmountAndUnitToMs(amount, match[2] || match[4] || '');
 }
 
 function extractScenarioTime(input = '') {
@@ -305,6 +316,187 @@ function createCronExpression(timeInfo = DEFAULT_TIME_INFO, cadence = 'daily') {
     return `${minute} ${hour} * * *`;
 }
 
+function hasDocumentBuildIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return (
+        /\b(document|doc|docs|report|brief|proposal|guide|summary|one-pager|whitepaper|slides|presentation|deck|pptx|docx|pdf|html(?:\s+document|\s+page)?|web\s+page|spec|plan)\b/.test(normalized)
+        && /\b(create|make|generate|build|prepare|draft|write|assemble|compile|organize|turn|convert|export)\b/.test(normalized)
+    ) || /\bmultiple documents\b/.test(normalized);
+}
+
+function isBrutalBuilderMetaDiscussion(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(i want a feature|feature called|can be asked for|goal being|that means|should mean|if i say)\b/.test(normalized);
+}
+
+function extractRunCount(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return null;
+    }
+
+    const match = normalized.match(new RegExp(`\\b(${RELATIVE_DELAY_AMOUNT_FRAGMENT}|couple|few|several|multiple)\\s+(?:runs?|passes?|reviews?|times?)\\b`, 'i'))
+        || normalized.match(new RegExp(`\\bdo\\s+it\\s+(${RELATIVE_DELAY_AMOUNT_FRAGMENT}|couple|few|several|multiple)\\s+times?\\b`, 'i'));
+    if (!match) {
+        return null;
+    }
+
+    const token = String(match[1] || '').trim().toLowerCase();
+    if (token === 'couple') {
+        return 4;
+    }
+    if (token === 'few' || token === 'several') {
+        return 4;
+    }
+    if (token === 'multiple') {
+        return 4;
+    }
+
+    return parseRelativeAmountToken(token);
+}
+
+function extractDurationWindowMs(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return null;
+    }
+
+    const directApartMatch = normalized.match(new RegExp(`\\b(${RELATIVE_DELAY_AMOUNT_FRAGMENT})\\s*(minute|minutes|min|mins|hour|hours|hr|hrs)\\s+apart\\b`, 'i'));
+    if (directApartMatch) {
+        const amount = parseRelativeAmountToken(directApartMatch[1]);
+        return convertAmountAndUnitToMs(amount, directApartMatch[2]);
+    }
+
+    const windowMatch = normalized.match(new RegExp(`\\b(?:take|over|across|within|in)\\s+(${RELATIVE_DELAY_AMOUNT_FRAGMENT})\\s*(minute|minutes|min|mins|hour|hours|hr|hrs)\\b`, 'i'))
+        || normalized.match(new RegExp(`\\b(${RELATIVE_DELAY_AMOUNT_FRAGMENT})\\s*(minute|minutes|min|mins|hour|hours|hr|hrs)\\s+(?:total|window)\\b`, 'i'));
+    if (!windowMatch) {
+        return null;
+    }
+
+    const amount = parseRelativeAmountToken(windowMatch[1]);
+    return convertAmountAndUnitToMs(amount, windowMatch[2]);
+}
+
+function extractBrutalBuilderPlan(input = '') {
+    const text = String(input || '').trim();
+    const normalized = text.toLowerCase();
+    if (!text || isBrutalBuilderMetaDiscussion(normalized)) {
+        return null;
+    }
+
+    const hasBuilderCue = /\bbrutal builder\b/.test(normalized);
+    const hasPassCue = /\b(?:pass|passes|run|runs|review|reviews)\b/.test(normalized)
+        || /\bdo it\b[\s\S]{0,20}\btimes?\b/.test(normalized);
+    const hasFastCue = /\b(quick|quickly|fast)\b/.test(normalized);
+    const hasSlowCue = /\b(take your time|improve this|improve it|polish this|polish it)\b/.test(normalized);
+
+    if (!hasBuilderCue && !hasPassCue && !hasSlowCue) {
+        return null;
+    }
+    if (!hasDocumentBuildIntent(normalized)) {
+        return null;
+    }
+
+    const explicitRunCount = extractRunCount(normalized);
+    const explicitWindowMs = extractDurationWindowMs(normalized);
+    const explicitApartMatch = normalized.match(/\b(?:runs?|passes?|reviews?)\b[\s\S]{0,40}\bapart\b/)
+        || normalized.match(/\bapart\b/);
+
+    if (explicitRunCount && explicitWindowMs && !explicitApartMatch) {
+        const intervalMs = Math.max(5 * 60 * 1000, Math.round(explicitWindowMs / explicitRunCount));
+        return {
+            enabled: true,
+            totalRuns: Math.max(1, explicitRunCount),
+            intervalMs,
+            windowMs: explicitWindowMs,
+            requestedStyle: 'windowed',
+        };
+    }
+
+    if (explicitRunCount && explicitWindowMs && explicitApartMatch) {
+        return {
+            enabled: true,
+            totalRuns: Math.max(1, explicitRunCount),
+            intervalMs: explicitWindowMs,
+            windowMs: explicitWindowMs * Math.max(1, explicitRunCount),
+            requestedStyle: 'fixed-interval',
+        };
+    }
+
+    if (hasFastCue && /\bcouple\b/.test(normalized) && hasPassCue) {
+        return {
+            enabled: true,
+            totalRuns: 4,
+            intervalMs: 10 * 60 * 1000,
+            windowMs: 40 * 60 * 1000,
+            requestedStyle: 'quick',
+        };
+    }
+
+    if (hasSlowCue) {
+        const totalRuns = explicitRunCount || 8;
+        const windowMs = explicitWindowMs || (4 * 60 * 60 * 1000);
+        return {
+            enabled: true,
+            totalRuns,
+            intervalMs: Math.max(5 * 60 * 1000, Math.round(windowMs / totalRuns)),
+            windowMs,
+            requestedStyle: 'slow',
+        };
+    }
+
+    if (hasBuilderCue && explicitRunCount && explicitWindowMs) {
+        return {
+            enabled: true,
+            totalRuns: Math.max(1, explicitRunCount),
+            intervalMs: Math.max(5 * 60 * 1000, Math.round(explicitWindowMs / explicitRunCount)),
+            windowMs: explicitWindowMs,
+            requestedStyle: 'windowed',
+        };
+    }
+
+    if (hasBuilderCue && explicitRunCount && explicitApartMatch && explicitWindowMs) {
+        return {
+            enabled: true,
+            totalRuns: Math.max(1, explicitRunCount),
+            intervalMs: explicitWindowMs,
+            windowMs: explicitWindowMs * Math.max(1, explicitRunCount),
+            requestedStyle: 'fixed-interval',
+        };
+    }
+
+    return null;
+}
+
+function stripBrutalBuilderDirectiveText(text = '') {
+    let result = String(text || '').trim();
+    if (!result) {
+        return result;
+    }
+
+    result = result.replace(/\b(?:use\s+)?brutal builder\b[:,-]?\s*/gi, '');
+    result = result.replace(/\b(?:and\s+)?take a couple passes(?: at this)? quickly\b/gi, '');
+    result = result.replace(/\b(?:and\s+)?take your time(?: and)? improve (?:this|it)\b/gi, '');
+    result = result.replace(new RegExp(`\\b(?:and\\s+)?take\\s+${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)\\s+and\\s+do\\s+it\\s+${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s+times?(?:\\s+in\\s+that\\s+${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?))?\\b`, 'gi'), '');
+    result = result.replace(new RegExp(`\\b(?:and\\s+)?do\\s+it\\s+${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s+times?\\s+in\\s+(?:that\\s+)?${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)\\b`, 'gi'), '');
+    result = result.replace(new RegExp(`\\b(?:and\\s+)?(?:take|do)\\s+${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s+(?:runs?|passes?|reviews?)\\s+${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)\\s+apart\\b`, 'gi'), '');
+
+    return result
+        .replace(/^\s*to\s+/i, '')
+        .replace(/\s{2,}/g, ' ')
+        .replace(/\s+([,.!?])/g, '$1')
+        .replace(/[,\s-]+$/, '')
+        .trim();
+}
+
 function extractTaskPromptFromScenario(scenario = '') {
     const timeFragment = '(?:\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?|morning|afternoon|evening|night)';
     const relativeDelayFragment = `(?:(?:in|after)\\s+${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)(?:\\s+from\\s+now)?|${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)\\s+from\\s+now)`;
@@ -358,6 +550,7 @@ function extractTaskPromptFromScenario(scenario = '') {
     );
     taskPrompt = taskPrompt.replace(/^(?:have|let)\s+(?:the\s+)?(?:agent|assistant)\s+/i, '');
     taskPrompt = taskPrompt.replace(/\bcron\b/gi, ' ');
+    taskPrompt = stripBrutalBuilderDirectiveText(taskPrompt);
 
     return taskPrompt
         .trim()
@@ -399,6 +592,10 @@ function hasSchedulingCue(text = '') {
         return false;
     }
 
+    if (extractBrutalBuilderPlan(normalized)) {
+        return true;
+    }
+
     return [
         /\bevery hour\b/,
         /\bhourly\b/,
@@ -431,6 +628,10 @@ function hasWorkloadIntent(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
         return false;
+    }
+
+    if (extractBrutalBuilderPlan(normalized)) {
+        return true;
     }
 
     const scheduleIntentFragment = `(?:every|daily|hourly|weekdays?|tomorrow|later today|later|once|at\\s+(?:1[0-2]|0?\\d)(?::[0-5]\\d)?\\s*(?:am|pm)|at\\s+(?:[01]?\\d|2[0-3]):[0-5]\\d|(?:(?:in|after)\\s+${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)(?:\\s+from\\s+now)?|${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)\\s+from\\s+now))`;
@@ -479,7 +680,33 @@ function hasImplicitRecurringJobIntent(text = '') {
 
 function inferDefaultRecurringTrigger(scenario = '', timezone = 'UTC') {
     const normalized = String(scenario || '').trim().toLowerCase();
-    if (!normalized || !hasImplicitRecurringJobIntent(normalized) || hasSchedulingCue(normalized)) {
+    const hasConcreteTimingCue = [
+        /\bevery hour\b/,
+        /\bhourly\b/,
+        /\bweekday\b/,
+        /\bweekdays\b/,
+        /\bevery workday\b/,
+        /\beach workday\b/,
+        /\bdaily\b/,
+        /\bevery day\b/,
+        /\beveryday\b/,
+        /\beach day\b/,
+        /\bnightly\b/,
+        /\bevery night\b/,
+        /\bevery morning\b/,
+        /\bevery evening\b/,
+        /\b(?:every|each)\s+(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)s?\b/,
+        /\btomorrow\b/,
+        new RegExp(`\\b${TODAY_SCHEDULE_FRAGMENT}`, 'i'),
+        /\blater today\b/,
+        buildRelativeDelayPattern(),
+        /\bone[- ]time\b/,
+        /\bonce\b/,
+        /\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/,
+        /\b([01]?\d|2[0-3]):([0-5]\d)\b/,
+    ].some((pattern) => pattern.test(normalized));
+
+    if (!normalized || !hasImplicitRecurringJobIntent(normalized) || hasConcreteTimingCue) {
         return null;
     }
 
@@ -575,6 +802,7 @@ function parseWorkloadScenario(scenario = '', options = {}) {
     const lowerScenario = normalizedScenario.toLowerCase();
     const resolvedTimezone = normalizeTimezone(options.timezone || getDefaultTimezone());
     const now = options.now instanceof Date ? options.now : new Date(options.now || Date.now());
+    const brutalBuilder = extractBrutalBuilderPlan(normalizedScenario);
     const timeInfo = extractScenarioTime(normalizedScenario);
     const prompt = extractTaskPromptFromScenario(normalizedScenario) || normalizedScenario;
     const title = deriveWorkloadTitle(prompt);
@@ -622,11 +850,19 @@ function parseWorkloadScenario(scenario = '', options = {}) {
         }
     }
 
+    if (trigger.type === 'manual' && brutalBuilder) {
+        trigger = {
+            type: 'once',
+            runAt: now.toISOString(),
+        };
+    }
+
     return {
         title,
         prompt,
         callableSlug: slugifyWorkloadValue(title) || null,
         trigger,
+        brutalBuilder,
         policy: inferWorkloadPolicy(prompt),
         summary: summarizeTrigger(trigger),
         scheduleDetected: trigger.type !== 'manual',
@@ -637,6 +873,7 @@ module.exports = {
     buildOneTimeRunAt,
     createCronExpression,
     deriveWorkloadTitle,
+    extractBrutalBuilderPlan,
     extractRelativeDelayMs,
     extractScenarioTime,
     extractTaskPromptFromScenario,
@@ -646,6 +883,7 @@ module.exports = {
     inferWorkloadPolicy,
     parseWorkloadScenario,
     slugifyWorkloadValue,
+    stripBrutalBuilderDirectiveText,
     summarizeTrigger,
     translateCronExpression,
 };

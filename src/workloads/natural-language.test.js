@@ -1,6 +1,7 @@
 'use strict';
 
 const {
+    extractBrutalBuilderPlan,
     hasWorkloadIntent,
     inferWorkloadPolicy,
     parseWorkloadScenario,
@@ -144,5 +145,43 @@ describe('workload natural language parsing', () => {
     test('translates simple cron expressions into readable labels', () => {
         expect(translateCronExpression('5 23 * * *', 'America/Halifax')).toBe('Every day at 11:05 PM');
         expect(translateCronExpression('0 9 * * 1-5', 'America/Halifax')).toBe('Every weekday at 9:00 AM');
+    });
+
+    test('detects a brutal builder quick-pass plan and schedules it immediately', () => {
+        const now = new Date('2026-04-01T12:00:00.000Z');
+        const plan = extractBrutalBuilderPlan('Use brutal builder to make a PDF product spec for this feature and take a couple passes quickly.');
+        const scenario = parseWorkloadScenario(
+            'Use brutal builder to make a PDF product spec for this feature and take a couple passes quickly.',
+            {
+                timezone: 'UTC',
+                now,
+            },
+        );
+
+        expect(plan).toEqual(expect.objectContaining({
+            totalRuns: 4,
+            intervalMs: 10 * 60 * 1000,
+            requestedStyle: 'quick',
+        }));
+        expect(scenario.prompt).toBe('make a PDF product spec for this feature.');
+        expect(scenario.trigger).toEqual({
+            type: 'once',
+            runAt: '2026-04-01T12:00:00.000Z',
+        });
+        expect(hasWorkloadIntent('Use brutal builder to make a PDF product spec for this feature and take a couple passes quickly.')).toBe(true);
+    });
+
+    test('detects a brutal builder time-boxed plan from count and duration language', () => {
+        const plan = extractBrutalBuilderPlan('Use brutal builder to draft a design brief, take 4 hours and do it 8 times in that 4 hours.');
+
+        expect(plan).toEqual(expect.objectContaining({
+            totalRuns: 8,
+            intervalMs: 30 * 60 * 1000,
+            windowMs: 4 * 60 * 60 * 1000,
+        }));
+    });
+
+    test('does not treat brutal builder feature discussion as an executable workload request', () => {
+        expect(extractBrutalBuilderPlan('I want a feature called brutal builder that can be asked for to make a document and take a couple passes quickly.')).toBeNull();
     });
 });

@@ -857,7 +857,10 @@ class AgentWorkloadService {
         const execution = stage?.execution || workload.execution || null;
         const stageInputs = await this.resolveStageInputs(run, stage);
         const message = this.buildStageMessage(prompt, stageInputs, stage, workload);
-        const stageOutputFormat = String(stage?.outputFormat || '').trim().toLowerCase() || null;
+        const defaultOutputFormat = !stage
+            ? String(workload?.metadata?.defaultOutputFormat || '').trim().toLowerCase()
+            : '';
+        const stageOutputFormat = String(stage?.outputFormat || defaultOutputFormat || '').trim().toLowerCase() || null;
         const stageToolIds = Array.isArray(stage?.toolIds) && stage.toolIds.length > 0
             ? stage.toolIds
             : (workload.policy?.toolIds || []);

@@ -581,6 +581,66 @@ describe('AgentWorkloadService', () => {
         }));
     });
 
+    test('uses the workload default output format for the initial brutal builder pass', async () => {
+        const workload = {
+            id: 'workload-brutal-1',
+            ownerId: 'phill',
+            sessionId: 'session-1',
+            title: 'Product Spec',
+            prompt: 'Write the initial product spec.',
+            trigger: { type: 'manual' },
+            policy: {
+                executionProfile: 'default',
+                toolIds: [],
+                maxRounds: 3,
+                maxToolCalls: 10,
+                maxDurationMs: 120000,
+                allowSideEffects: false,
+            },
+            stages: [{
+                when: 'on_success',
+                delayMs: 600000,
+                prompt: '[Brutal builder pass instructions]\nThis is pass 2 of 4.',
+                outputFormat: 'pdf',
+                metadata: {},
+            }],
+            metadata: {
+                defaultOutputFormat: 'pdf',
+                brutalBuilderEnabled: true,
+            },
+        };
+        const run = {
+            id: 'run-brutal-1',
+            workload,
+            stageIndex: -1,
+            scheduledFor: '2026-04-01T09:00:00.000Z',
+            prompt: workload.prompt,
+            metadata: {},
+        };
+
+        conversationRunService.runChatTurn.mockResolvedValue({
+            outputText: 'Initial spec created.',
+            response: { id: 'resp-brutal-1' },
+            execution: { trace: { steps: 1 } },
+            artifacts: [{ id: 'artifact-1', filename: 'spec.pdf', mimeType: 'application/pdf' }],
+        });
+        store.completeRun.mockResolvedValue({ id: 'run-brutal-1', status: 'completed' });
+        store.enqueueRun.mockResolvedValue({
+            id: 'run-brutal-2',
+            workloadId: 'workload-brutal-1',
+            stageIndex: 0,
+            reason: 'followup',
+        });
+
+        await service.executeClaimedRun(run, 'worker-1');
+
+        expect(conversationRunService.runChatTurn).toHaveBeenCalledWith(expect.objectContaining({
+            metadata: expect.objectContaining({
+                outputFormat: 'pdf',
+            }),
+        }));
+    });
+
     test('injects project plan context into long-running project runs and records a review snapshot', async () => {
         const workload = {
             id: 'workload-project-1',

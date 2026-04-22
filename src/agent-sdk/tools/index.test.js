@@ -1578,6 +1578,41 @@ describe('ToolManager image tools', () => {
     }), 'user-1');
   });
 
+  test('includes a warning when brutal builder downgrades docx output', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const createWorkload = jest.fn(async (payload) => ({
+      id: 'workload-brutal-docx-1',
+      ...payload,
+    }));
+
+    const result = await toolManager.executeTool('agent-workload', {
+      action: 'create',
+      prompt: 'Use brutal builder to make a DOCX executive brief for the launch plan and take a couple passes quickly.',
+    }, {
+      ownerId: 'user-1',
+      sessionId: 'session-1',
+      timezone: 'UTC',
+      now: '2026-04-02T09:00:00.000Z',
+      workloadService: {
+        isAvailable: () => true,
+        createWorkload,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(createWorkload).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({
+        requestedOutputFormat: 'docx',
+        resolvedOutputFormat: 'pdf',
+        defaultOutputFormat: 'pdf',
+        outputFormatWarnings: [expect.stringContaining('downgraded it to PDF')],
+      }),
+    }), 'user-1');
+    expect(result.data.message).toContain('Warning: DOCX output was requested');
+  });
+
   test('reconstructs a fragmented scheduled workload request from recent transcript context', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();

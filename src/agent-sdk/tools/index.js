@@ -531,6 +531,18 @@ function applyWorkloadExecutionPreferences(payload = {}, params = {}, context = 
   };
 }
 
+function buildWorkloadWarningSuffix(workload = {}) {
+  const warnings = Array.isArray(workload?.metadata?.outputFormatWarnings)
+    ? workload.metadata.outputFormatWarnings.filter((warning) => String(warning || '').trim())
+    : [];
+
+  if (warnings.length === 0) {
+    return '';
+  }
+
+  return ` Warning: ${warnings[0]}`;
+}
+
 function resolveDocumentService(context = {}) {
   const service = context?.documentService || null;
   if (!service?.recommendDocumentWorkflow
@@ -2920,7 +2932,7 @@ class ToolManager {
                 sessionId,
                 workload,
                 scenario: normalized.scenario,
-                message: `${workload.title} created. ${summarizeTrigger(workload.trigger || {})}.`,
+                message: `${workload.title} created. ${summarizeTrigger(workload.trigger || {})}.${buildWorkloadWarningSuffix(workload)}`,
               };
             }
 
@@ -2939,7 +2951,7 @@ class ToolManager {
                 action,
                 sessionId,
                 workload,
-                message: `${workload.title} created. ${summarizeTrigger(workload.trigger || {})}.`,
+                message: `${workload.title} created. ${summarizeTrigger(workload.trigger || {})}.${buildWorkloadWarningSuffix(workload)}`,
               };
             }
 

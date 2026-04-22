@@ -6,6 +6,7 @@ const {
     deriveWorkloadTitle,
     inferWorkloadPolicy,
     parseWorkloadScenario,
+    stripBrutalBuilderDirectiveText,
 } = require('./natural-language');
 
 function sanitizeText(value = '') {
@@ -313,6 +314,93 @@ function buildDeferredArtifactStages(outputFormat = '') {
     }];
 }
 
+function resolveDocxFallbackFormat(prompt = '') {
+    const normalized = sanitizeText(prompt).toLowerCase();
+    if (/\b(html|website|web page|webpage|landing page|homepage|site)\b/.test(normalized)) {
+        return 'html';
+    }
+
+    return 'pdf';
+}
+
+function resolveBrutalBuilderArtifactPlan(prompt = '', requestedOutputFormat = '') {
+    const requested = sanitizeText(requestedOutputFormat).toLowerCase();
+    if (!requested) {
+        return {
+            requestedOutputFormat: '',
+            effectiveOutputFormat: '',
+            warnings: [],
+        };
+    }
+
+    if (requested !== 'docx') {
+        return {
+            requestedOutputFormat: requested,
+            effectiveOutputFormat: requested,
+            warnings: [],
+        };
+    }
+
+    const fallbackFormat = resolveDocxFallbackFormat(prompt);
+    return {
+        requestedOutputFormat: requested,
+        effectiveOutputFormat: fallbackFormat,
+        warnings: [
+            `DOCX output was requested, but brutal builder downgraded it to ${fallbackFormat.toUpperCase()} because DOCX downloads are unstable in this workflow.`,
+        ],
+    };
+}
+
+function buildBrutalBuilderInitialPrompt(prompt = '', plan = {}) {
+    const basePrompt = stripBrutalBuilderDirectiveText(prompt) || sanitizeText(prompt);
+    const totalRuns = Math.max(1, Number(plan.totalRuns || 1));
+
+    return [
+        basePrompt,
+        '',
+        '[Brutal builder pass instructions]',
+        `This is pass 1 of ${totalRuns}.`,
+        'Produce a complete first version of the requested deliverable.',
+        'If the user asked for multiple documents, output the full document set for this pass.',
+        'Focus on strong structure, hierarchy, clarity, and design quality from the start.',
+        'Return the deliverable itself, not commentary about what you plan to improve later.',
+    ].filter(Boolean).join('\n');
+}
+
+function buildBrutalBuilderRevisionPrompt(plan = {}, passNumber = 2) {
+    const totalRuns = Math.max(1, Number(plan.totalRuns || passNumber));
+
+    return [
+        '[Brutal builder pass instructions]',
+        `This is pass ${passNumber} of ${totalRuns}.`,
+        'Review the previous pass and produce a full revised replacement.',
+        'Improve structure, design quality, hierarchy, readability, polish, and usefulness.',
+        'Preserve the original request and keep the output concrete.',
+        'If the user asked for multiple documents, return the full updated document set again.',
+        'Return only the revised deliverable, not notes or a diff.',
+    ].join('\n');
+}
+
+function buildBrutalBuilderStages(plan = {}, outputFormat = '') {
+    const totalRuns = Math.max(1, Number(plan.totalRuns || 1));
+    const intervalMs = Math.max(0, Number(plan.intervalMs || 0));
+    if (totalRuns <= 1) {
+        return [];
+    }
+
+    return Array.from({ length: totalRuns - 1 }, (_entry, index) => ({
+        when: 'on_success',
+        delayMs: intervalMs,
+        prompt: buildBrutalBuilderRevisionPrompt(plan, index + 2),
+        ...(outputFormat ? { outputFormat } : {}),
+        metadata: {
+            brutalBuilder: true,
+            brutalBuilderPass: index + 2,
+            brutalBuilderTotalRuns: totalRuns,
+        },
+    }));
+}
+
 function scoreCanonicalCandidate(candidate = {}) {
     const payload = candidate?.payload || null;
     if (!payload?.prompt || !payload?.title || !payload?.trigger) {
@@ -400,8 +488,16 @@ function buildCanonicalWorkloadPayloadForSource(params = {}, options = {}, scena
     }
 
     const prompt = explicitPrompt || scenario?.prompt || '';
-    const inferredDeferredArtifactFormat = explicitStages ? null : inferDeferredArtifactOutputFormat(prompt);
-    const effectivePrompt = inferredDeferredArtifactFormat
+    const brutalBuilder = explicitStages ? null : (scenario?.brutalBuilder || null);
+    const inferredArtifactFormat = explicitStages ? null : inferDeferredArtifactOutputFormat(prompt);
+    const brutalBuilderArtifactPlan = brutalBuilder
+        ? resolveBrutalBuilderArtifactPlan(prompt, inferredArtifactFormat)
+        : null;
+    const inferredDeferredArtifactFormat = brutalBuilder ? null : inferredArtifactFormat;
+    const brutalBuilderOutputFormat = brutalBuilderArtifactPlan?.effectiveOutputFormat || '';
+    const effectivePrompt = brutalBuilder
+        ? buildBrutalBuilderInitialPrompt(prompt, brutalBuilder)
+        : inferredDeferredArtifactFormat
         ? buildDeferredArtifactContentPrompt(prompt, inferredDeferredArtifactFormat)
         : prompt;
     const title = explicitTitle || scenario?.title || (prompt ? deriveWorkloadTitle(prompt) : '');
@@ -426,6 +522,8 @@ function buildCanonicalWorkloadPayloadForSource(params = {}, options = {}, scena
             ...(policy ? { policy } : {}),
             ...(explicitStages
                 ? { stages: explicitStages }
+                : brutalBuilder
+                    ? { stages: buildBrutalBuilderStages(brutalBuilder, brutalBuilderOutputFormat) }
                 : (inferredDeferredArtifactFormat
                     ? { stages: buildDeferredArtifactStages(inferredDeferredArtifactFormat) }
                     : {})),
@@ -433,6 +531,26 @@ function buildCanonicalWorkloadPayloadForSource(params = {}, options = {}, scena
                 ...metadata,
                 ...(inferredDeferredArtifactFormat
                     ? { requestedOutputFormat: inferredDeferredArtifactFormat }
+                    : {}),
+                ...(brutalBuilder
+                    ? {
+                        brutalBuilder: {
+                            ...brutalBuilder,
+                        },
+                        brutalBuilderEnabled: true,
+                        ...(brutalBuilderArtifactPlan?.requestedOutputFormat
+                            ? { requestedOutputFormat: brutalBuilderArtifactPlan.requestedOutputFormat }
+                            : {}),
+                        ...(brutalBuilderOutputFormat
+                            ? { defaultOutputFormat: brutalBuilderOutputFormat }
+                            : {}),
+                        ...(brutalBuilderArtifactPlan?.requestedOutputFormat
+                            ? { resolvedOutputFormat: brutalBuilderOutputFormat || brutalBuilderArtifactPlan.requestedOutputFormat }
+                            : {}),
+                        ...(Array.isArray(brutalBuilderArtifactPlan?.warnings) && brutalBuilderArtifactPlan.warnings.length > 0
+                            ? { outputFormatWarnings: brutalBuilderArtifactPlan.warnings }
+                            : {}),
+                    }
                     : {}),
                 ...(scenarioRequest
                     ? {
