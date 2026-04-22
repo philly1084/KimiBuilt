@@ -4534,6 +4534,30 @@ body.layout-minimal #input-meta-row {
     margin-top: 0.18rem;
 }
 
+.assistant-progress-card__checkpoint {
+    margin-top: 0.2rem;
+}
+
+.assistant-progress-card__checkpoint .agent-survey-card {
+    padding: 0.85rem 0.95rem;
+    border-style: dashed;
+    border-color: rgba(88, 166, 255, 0.18);
+    background: rgba(255, 255, 255, 0.03);
+    box-shadow: none;
+}
+
+.assistant-progress-card__checkpoint .agent-survey-card__eyebrow {
+    color: var(--text-tertiary);
+}
+
+.assistant-progress-card__checkpoint .agent-survey-card__title {
+    font-size: 1rem;
+}
+
+.assistant-progress-card__checkpoint .agent-survey-card__preamble {
+    margin-top: -0.1rem;
+}
+
 .assistant-reasoning-ribbon {
     display: flex;
     flex-direction: column;

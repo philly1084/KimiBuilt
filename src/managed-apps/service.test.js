@@ -1386,9 +1386,59 @@ describe('ManagedAppService', () => {
         const result = await service.inspectApp('demo-app', 'user-1');
 
         expect(result.summary).toBe('Demo App is live.');
+        expect(result.project).toEqual(expect.objectContaining({
+            key: 'managed-app:app-1',
+            phase: 'live',
+            nextStep: '',
+        }));
+        expect(result.progress).toEqual(expect.objectContaining({
+            phase: 'live',
+            phaseLabel: 'Live',
+            totalSteps: 4,
+            completedSteps: 4,
+        }));
         expect(result.app.metadata.project.summary).toBe('Demo App is live.');
         expect(result.app.metadata.desiredDeploy.namespace).toBe('app-demo-app');
         expect(result.app.metadata.liveDeploy.https).toBe(false);
+    });
+
+    test('listApps returns canonical summary and progress fields', async () => {
+        const service = new ManagedAppService({
+            store: {
+                ensureAvailable: jest.fn(async () => undefined),
+                listApps: jest.fn(async () => ([{
+                    id: 'app-1',
+                    ownerId: 'user-1',
+                    slug: 'demo-app',
+                    appName: 'Demo App',
+                    repoOwner: 'agent-apps',
+                    repoName: 'demo-app',
+                    publicHost: 'demo-app.demoserver2.buzz',
+                    status: 'updated',
+                    metadata: {
+                        project: {
+                            summary: 'Demo App was updated. Build and deploy are queued.',
+                            nextStep: 'Wait for the remote Gitea build to finish, then continue deployment through the managed-app control plane.',
+                            openItems: ['Remote build is queued.'],
+                        },
+                    },
+                }])),
+            },
+        });
+
+        const result = await service.listApps('user-1', 50);
+
+        expect(result).toHaveLength(1);
+        expect(result[0]).toEqual(expect.objectContaining({
+            summary: 'Demo App was updated. Build and deploy are queued.',
+            nextStep: expect.stringContaining('Wait for the remote Gitea build to finish'),
+            openItems: expect.arrayContaining(['Remote build is queued.']),
+            progress: expect.objectContaining({
+                phase: 'updated',
+                phaseLabel: 'Build queued',
+                totalSteps: 4,
+            }),
+        }));
     });
 
     test('doctorPlatform summarizes the remote Gitea runner stack through the SSH kubernetes client', async () => {

@@ -2670,6 +2670,14 @@ class UIHelpers {
         };
     }
 
+    getManagedAppCheckpoint(message = null) {
+        return this.normalizeSurveyDefinition(
+            message?.managedAppCheckpoint
+            || message?.metadata?.managedAppCheckpoint
+            || null,
+        );
+    }
+
     buildProgressTrackerMarkup(message = null, isStreaming = false) {
         const progressState = this.getAssistantProgressState(message);
         if (!progressState) {
@@ -2730,19 +2738,43 @@ class UIHelpers {
 
         const isProjectSummary = message?.metadata?.managedAppProjectSummary === true
             || message?.managedAppProjectSummary === true;
+        const checkpoint = this.getManagedAppCheckpoint(message);
+        const checkpointState = message?.surveyState?.checkpointId === checkpoint?.id
+            ? message.surveyState
+            : null;
+        const checkpointPending = checkpoint && checkpointState?.status !== 'answered';
+        const lastSuccessfulStep = [...progressState.steps]
+            .reverse()
+            .find((step) => step.status === 'completed')
+            || null;
         const liveBadge = progressState.terminal
             ? '<span class="assistant-progress-card__badge">Final</span>'
             : '<span class="assistant-progress-card__badge assistant-progress-card__badge--live"><span class="assistant-progress-card__pulse" aria-hidden="true"></span>Live</span>';
         const phaseMarkup = progressState.phaseLabel
             ? `<div class="assistant-progress-card__status-line"><span class="assistant-progress-card__status-label">Stage</span><span class="assistant-progress-card__status-value">${this.escapeHtml(progressState.phaseLabel)}</span></div>`
             : '';
+        const lastSuccessfulMarkup = lastSuccessfulStep
+            ? `<div class="assistant-progress-card__status-line"><span class="assistant-progress-card__status-label">Last Done</span><span class="assistant-progress-card__status-value">${this.escapeHtml(lastSuccessfulStep.title)}</span></div>`
+            : '';
         const nextStepText = String(
             progressState.nextStep
             || message?.metadata?.nextStep
             || ''
         ).trim();
-        const nextStepMarkup = nextStepText
+        const nextStepMarkup = nextStepText && !checkpointPending
             ? `<div class="assistant-progress-card__status-line"><span class="assistant-progress-card__status-label">Next</span><span class="assistant-progress-card__status-value">${this.escapeHtml(nextStepText)}</span></div>`
+            : '';
+        const pauseSummary = checkpointPending
+            ? String(checkpoint?.preamble || '').trim()
+            : '';
+        const pausedMarkup = pauseSummary
+            ? `<div class="assistant-progress-card__status-line"><span class="assistant-progress-card__status-label">Paused</span><span class="assistant-progress-card__status-value">${this.escapeHtml(pauseSummary)}</span></div>`
+            : '';
+        const resumeText = checkpointPending
+            ? String(nextStepText || checkpoint?.question || '').trim()
+            : '';
+        const resumeMarkup = resumeText
+            ? `<div class="assistant-progress-card__status-line"><span class="assistant-progress-card__status-label">Resume</span><span class="assistant-progress-card__status-value">${this.escapeHtml(resumeText)}</span></div>`
             : '';
         const openItems = Array.isArray(progressState.openItems)
             ? progressState.openItems.filter(Boolean).slice(0, 3)
@@ -2757,12 +2789,24 @@ class UIHelpers {
                 </div>
             `
             : '';
+        const checkpointMarkup = checkpoint
+            ? `
+                <div class="assistant-progress-card__checkpoint">
+                    ${this.renderSurveyBlock(checkpoint, {
+                        ...message,
+                        surveyState: checkpointState,
+                    })}
+                </div>
+            `
+            : '';
         const noteText = progressState.terminal
             ? (['build_failed', 'deploy_failed'].includes(progressState.phase)
                 ? 'The managed app flow stopped before the site was fully live.'
                 : 'The managed app flow finished with the latest deployment state.')
             : (isProjectSummary
-                ? 'This project stays attached to this chat and will keep this status as the current source of truth.'
+                ? (checkpointPending
+                    ? 'This project stays attached to this chat. Answer the checkpoint here to keep the same deployment flow moving.'
+                    : 'This project stays attached to this chat and will keep this status as the current source of truth.')
                 : 'Live deployment updates replace the previous build status in this bubble.');
         const stepsHtml = progressState.steps.map((step, index) => {
             const isActive = index === progressState.activeStepIndex;
@@ -2795,12 +2839,16 @@ class UIHelpers {
                     </div>
                     ${progressState.detail ? `<div class="assistant-progress-card__detail">${this.escapeHtml(progressState.detail)}</div>` : ''}
                     ${phaseMarkup}
+                    ${lastSuccessfulMarkup}
+                    ${pausedMarkup}
+                    ${resumeMarkup}
                     ${nextStepMarkup}
                     <div class="assistant-progress-card__bar" aria-hidden="true">
                         <span style="width:${progressState.percent}%"></span>
                     </div>
                     <ol class="assistant-progress-card__steps">${stepsHtml}</ol>
                     ${openItemsMarkup}
+                    ${checkpointMarkup}
                     <div class="assistant-progress-card__note">${this.escapeHtml(noteText)}</div>
                 </div>
             </div>
@@ -2890,10 +2938,18 @@ class UIHelpers {
         const managedAppProgress = this.buildManagedAppProgressMarkup(message, effectiveStreaming);
         const progressTracker = this.buildProgressTrackerMarkup(message, effectiveStreaming);
         const reasoningRibbon = this.buildReasoningRibbonMarkup(message, effectiveStreaming);
+        const isManagedAppProjectSummary = message?.metadata?.managedAppProjectSummary === true
+            || message?.managedAppProjectSummary === true;
         const shouldShowStreamingPlaceholder = effectiveStreaming
             && !managedAppProgress
             && !progressTracker
             && !reasoningRibbon;
+        if (isManagedAppProjectSummary && managedAppProgress) {
+            return {
+                html: `${managedAppProgress}${progressTracker}${reasoningRibbon}`,
+                variant: 'default',
+            };
+        }
         if (!content) {
             return {
                 html: `${managedAppProgress}${progressTracker}${reasoningRibbon || (shouldShowStreamingPlaceholder ? this.buildStreamingPlaceholderMarkup(message) : '')}`,

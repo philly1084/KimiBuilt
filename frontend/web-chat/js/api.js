@@ -1911,6 +1911,29 @@ class OpenAIAPIClient extends EventTarget {
         };
     }
 
+    async getManagedAppProgress(appRef) {
+        const normalizedAppRef = String(appRef || '').trim();
+        if (!normalizedAppRef) {
+            return null;
+        }
+
+        const response = await fetch(`${BASE_URL_WITHOUT_API}/api/managed-apps/${encodeURIComponent(normalizedAppRef)}/progress`, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+            credentials: 'same-origin',
+        });
+
+        if (response.status === 404 || response.status === 503) {
+            return null;
+        }
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error?.error?.message || `Failed to load managed app progress: HTTP ${response.status}`);
+        }
+
+        return response.json();
+    }
+
     async createSessionWorkload(sessionId, payload = {}) {
         const response = await fetch(`${BASE_URL_WITHOUT_API}/api/sessions/${encodeURIComponent(sessionId)}/workloads`, {
             method: 'POST',

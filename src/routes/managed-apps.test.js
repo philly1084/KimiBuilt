@@ -83,4 +83,40 @@ describe('/api managed app routes', () => {
             expect.objectContaining({ sessionId: null }),
         );
     });
+
+    test('returns canonical managed app progress', async () => {
+        const service = {
+            isAvailable: jest.fn(() => true),
+            getAppProgress: jest.fn(async () => ({
+                app: { id: 'app-1', slug: 'arcade-demo' },
+                latestBuildRun: { id: 'build-1' },
+                project: {
+                    key: 'managed-app:app-1',
+                    summary: 'Arcade Demo is deploying.',
+                    progress: {
+                        phase: 'deploying',
+                        phaseLabel: 'Deploying',
+                    },
+                },
+                progress: {
+                    phase: 'deploying',
+                    phaseLabel: 'Deploying',
+                },
+                summary: 'Arcade Demo is deploying.',
+            })),
+        };
+        const app = buildApp(service);
+
+        const response = await request(app).get('/api/managed-apps/arcade-demo/progress');
+
+        expect(response.status).toBe(200);
+        expect(service.getAppProgress).toHaveBeenCalledWith('arcade-demo', null);
+        expect(response.body.progress).toEqual(expect.objectContaining({
+            phase: 'deploying',
+            phaseLabel: 'Deploying',
+        }));
+        expect(response.body.project).toEqual(expect.objectContaining({
+            key: 'managed-app:app-1',
+        }));
+    });
 });

@@ -214,6 +214,24 @@ router.get('/managed-apps/:id', async (req, res, next) => {
   }
 });
 
+router.get('/managed-apps/:id/progress', async (req, res, next) => {
+  try {
+    const service = req.app.locals.managedAppService;
+    if (!service?.isAvailable()) {
+      return res.status(503).json({ success: false, error: 'Managed apps require Postgres persistence' });
+    }
+
+    const result = await service.getAppProgress(req.params.id, String(req.user?.username || '').trim() || null);
+    if (!result) {
+      return res.status(404).json({ success: false, error: 'Managed app not found' });
+    }
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/runs', async (req, res, next) => {
   try {
     const service = req.app.locals.agentWorkloadService;

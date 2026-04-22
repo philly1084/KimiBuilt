@@ -74,6 +74,24 @@ router.get('/managed-apps/:ref', async (req, res, next) => {
     }
 });
 
+router.get('/managed-apps/:ref/progress', async (req, res, next) => {
+    try {
+        const service = getService(req);
+        if (!service?.isAvailable()) {
+            return handleUnavailable(res);
+        }
+
+        const result = await service.getAppProgress(req.params.ref, getOwnerId(req));
+        if (!result) {
+            return res.status(404).json({ error: { message: 'Managed app not found' } });
+        }
+
+        res.json(result);
+    } catch (error) {
+        next(error);
+    }
+});
+
 router.patch('/managed-apps/:ref', async (req, res, next) => {
     try {
         const service = getService(req);

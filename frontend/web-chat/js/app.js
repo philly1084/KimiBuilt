@@ -870,6 +870,7 @@ class ChatApp {
     async loadSessionMessages(sessionId, options = {}) {
         uiHelpers.stopSpeechPlayback();
         await sessionManager.loadSessionMessagesFromBackend(sessionId);
+        await this.refreshManagedAppProgressForSession(sessionId);
         let messages = this.syncAnnotatedSurveyStates(sessionId);
         const resumedBackgroundStream = this.resumePersistedBackgroundStream(sessionId, messages);
         if (resumedBackgroundStream) {
@@ -2157,6 +2158,180 @@ class ChatApp {
         };
     }
 
+    getMessageSurveyDefinition(message = null) {
+        const embeddedSurvey = uiHelpers.normalizeSurveyDefinition(
+            message?.managedAppCheckpoint
+            || message?.metadata?.managedAppCheckpoint
+            || null,
+        );
+        if (embeddedSurvey) {
+            return embeddedSurvey;
+        }
+
+        return this.extractSurveyDefinition(message?.displayContent ?? message?.content ?? '');
+    }
+
+    findLatestSurveyMessageEntry(sessionId = '', checkpointId = '') {
+        const normalizedSessionId = String(sessionId || '').trim();
+        if (!normalizedSessionId) {
+            return null;
+        }
+
+        const normalizedCheckpointId = String(checkpointId || '').trim();
+        const messages = sessionManager.getMessages(normalizedSessionId);
+
+        for (let index = messages.length - 1; index >= 0; index -= 1) {
+            const message = messages[index];
+            if (message?.role !== 'assistant') {
+                continue;
+            }
+
+            const survey = this.getMessageSurveyDefinition(message);
+            if (!survey?.id) {
+                continue;
+            }
+            if (normalizedCheckpointId && survey.id !== normalizedCheckpointId) {
+                continue;
+            }
+
+            return { message, survey };
+        }
+
+        return null;
+    }
+
+    getManagedAppCheckpointState(sessionId = '', project = {}) {
+        const normalizedSessionId = String(sessionId || '').trim();
+        if (!normalizedSessionId) {
+            return {
+                checkpoint: null,
+                surveyState: null,
+                pending: false,
+            };
+        }
+
+        const session = this.getSessionRecord(normalizedSessionId);
+        const pendingCheckpoint = uiHelpers.normalizeSurveyDefinition(
+            session?.controlState?.userCheckpoint?.pending || null,
+        );
+        const lastResponse = session?.controlState?.userCheckpoint?.lastResponse
+            && typeof session.controlState.userCheckpoint.lastResponse === 'object'
+            ? session.controlState.userCheckpoint.lastResponse
+            : null;
+        const preferredCheckpointId = String(
+            pendingCheckpoint?.id
+            || lastResponse?.checkpointId
+            || '',
+        ).trim();
+        const matchedEntry = this.findLatestSurveyMessageEntry(normalizedSessionId, preferredCheckpointId)
+            || this.findLatestSurveyMessageEntry(normalizedSessionId, '');
+        const checkpoint = matchedEntry?.survey || pendingCheckpoint || null;
+
+        if (!checkpoint?.id) {
+            return {
+                checkpoint: null,
+                surveyState: null,
+                pending: false,
+            };
+        }
+
+        let surveyState = matchedEntry?.message?.surveyState?.checkpointId === checkpoint.id
+            ? { ...matchedEntry.message.surveyState }
+            : null;
+
+        if (!surveyState && String(lastResponse?.checkpointId || '').trim() === checkpoint.id) {
+            surveyState = {
+                status: 'answered',
+                checkpointId: checkpoint.id,
+                summary: String(lastResponse?.summary || '').trim(),
+            };
+        }
+
+        return {
+            checkpoint,
+            surveyState,
+            pending: Boolean(pendingCheckpoint?.id && pendingCheckpoint.id === checkpoint.id),
+        };
+    }
+
+    resolveSessionManagedAppIdentity(sessionId = '') {
+        const activeProject = this.getSessionActiveProject(sessionId);
+        const appId = String(activeProject?.appId || '').trim();
+        const appSlug = String(activeProject?.appSlug || '').trim();
+        if (appId || appSlug) {
+            return {
+                appRef: appId || appSlug,
+                appId,
+                appSlug,
+                activeProject,
+            };
+        }
+
+        const messages = sessionManager.getMessages(sessionId);
+        for (let index = messages.length - 1; index >= 0; index -= 1) {
+            const meta = this.getManagedAppMessageMeta(messages[index]);
+            if (meta.appId || meta.appSlug) {
+                return {
+                    appRef: meta.appId || meta.appSlug,
+                    appId: meta.appId,
+                    appSlug: meta.appSlug,
+                    activeProject: null,
+                };
+            }
+        }
+
+        return null;
+    }
+
+    async refreshManagedAppProgressForSession(sessionId = '') {
+        const normalizedSessionId = String(sessionId || '').trim();
+        if (!normalizedSessionId || window.sessionManager?.isLocalSession?.(normalizedSessionId)) {
+            return null;
+        }
+
+        const identity = this.resolveSessionManagedAppIdentity(normalizedSessionId);
+        if (!identity?.appRef) {
+            return null;
+        }
+
+        try {
+            const result = await apiClient.getManagedAppProgress(identity.appRef);
+            const project = result?.project;
+            if (!project || typeof project !== 'object') {
+                return null;
+            }
+
+            const mergedProject = {
+                ...(identity.activeProject || {}),
+                ...project,
+                appId: String(project?.appId || identity.appId || '').trim(),
+                appSlug: String(project?.appSlug || identity.appSlug || '').trim(),
+                progress: this.resolveManagedAppProgressState(
+                    result?.progress || project?.progress || null,
+                    {
+                        phase: project?.phase || project?.status || '',
+                        summary: project?.summary || result?.summary || '',
+                        app: {
+                            id: String(project?.appId || identity.appId || '').trim(),
+                            slug: String(project?.appSlug || identity.appSlug || '').trim(),
+                            appName: String(project?.title || '').trim(),
+                            publicHost: String(project?.publicHost || '').trim(),
+                        },
+                    },
+                ),
+            };
+
+            sessionManager.mergeSessionMetadataLocally(normalizedSessionId, {
+                activeProject: mergedProject,
+                title: String(mergedProject.title || '').trim(),
+            });
+            return mergedProject;
+        } catch (error) {
+            console.warn('Failed to refresh managed app progress:', error);
+            return null;
+        }
+    }
+
     buildManagedProjectSummaryMessage(sessionId = '', project = {}) {
         const normalizedSessionId = String(sessionId || '').trim();
         const appId = String(project?.appId || '').trim();
@@ -2186,6 +2361,7 @@ class ChatApp {
                 },
             },
         );
+        const checkpointState = this.getManagedAppCheckpointState(normalizedSessionId, project);
 
         if (!normalizedSessionId || !summary || (!appId && !appSlug)) {
             return null;
@@ -2210,13 +2386,17 @@ class ChatApp {
                 }),
                 nextStep: String(project?.nextStep || '').trim(),
                 openItems: Array.isArray(project?.openItems) ? project.openItems : [],
+                managedAppCheckpoint: checkpointState.checkpoint,
+                managedAppCheckpointPending: checkpointState.pending === true,
             },
             managedAppProgressState: progressState,
+            surveyState: checkpointState.surveyState,
+            managedAppCheckpoint: checkpointState.checkpoint,
         };
     }
 
     injectSessionProjectMessages(sessionId, messages = []) {
-        const normalizedMessages = (Array.isArray(messages) ? messages : [])
+        let normalizedMessages = (Array.isArray(messages) ? messages : [])
             .filter((message) => message?.metadata?.managedAppProjectSummary !== true);
         const activeProject = this.getSessionActiveProject(sessionId);
         if (!activeProject) {
@@ -2227,6 +2407,22 @@ class ChatApp {
         if (!summaryMessage) {
             return normalizedMessages;
         }
+
+        const activeProjectKey = String(summaryMessage?.metadata?.managedAppProjectKey || '').trim();
+        const embeddedCheckpointId = String(summaryMessage?.managedAppCheckpoint?.id || '').trim();
+        normalizedMessages = normalizedMessages.filter((message) => {
+            if (message?.role === 'assistant' && message?.metadata?.managedAppLifecycle === true) {
+                const meta = this.getManagedAppMessageMeta(message);
+                return !activeProjectKey || meta.key !== activeProjectKey;
+            }
+
+            const survey = this.getMessageSurveyDefinition(message);
+            if (!embeddedCheckpointId || !survey?.id) {
+                return true;
+            }
+
+            return survey.id !== embeddedCheckpointId;
+        });
 
         return [summaryMessage, ...normalizedMessages];
     }
@@ -3390,7 +3586,7 @@ class ChatApp {
         const surveyId = String(card.dataset.surveyId || '').trim();
         const sessionId = sessionManager.currentSessionId;
         const surveyMessage = this.getSessionMessage(sessionId, messageId);
-        const survey = this.extractSurveyDefinition(surveyMessage?.displayContent ?? surveyMessage?.content ?? '');
+        const survey = this.getMessageSurveyDefinition(surveyMessage);
         if (!survey || survey.id !== surveyId) {
             uiHelpers.showToast('Unable to load that questionnaire right now.', 'error');
             return;
@@ -3502,7 +3698,7 @@ class ChatApp {
         const surveyId = String(card.dataset.surveyId || '').trim();
         const sessionId = sessionManager.currentSessionId;
         const surveyMessage = this.getSessionMessage(sessionId, messageId);
-        const survey = this.extractSurveyDefinition(surveyMessage?.displayContent ?? surveyMessage?.content ?? '');
+        const survey = this.getMessageSurveyDefinition(surveyMessage);
         if (!survey || survey.id !== surveyId) {
             return;
         }
@@ -4562,6 +4758,7 @@ class ChatApp {
     reconcilePendingCheckpointMessages(sessionId) {
         const messages = sessionManager.getMessages(sessionId);
         const session = this.getSessionRecord(sessionId);
+        const managedProjectActive = Boolean(this.getSessionActiveProject(sessionId));
         const pendingCheckpoint = uiHelpers.normalizeSurveyDefinition(
             session?.controlState?.userCheckpoint?.pending || null,
         );
@@ -4579,7 +4776,7 @@ class ChatApp {
                 return null;
             }
 
-            const survey = this.extractSurveyDefinition(message.displayContent ?? message.content ?? '');
+            const survey = this.getMessageSurveyDefinition(message);
             return survey?.id
                 ? { survey, synthetic: isSyntheticCheckpointMessage(message) }
                 : null;
@@ -4610,7 +4807,7 @@ class ChatApp {
             }
         }
 
-        if (!pendingCheckpoint) {
+        if (!pendingCheckpoint || managedProjectActive) {
             const filteredMessages = nextMessages.filter((message) => (
                 !isSyntheticCheckpointMessage(message)
                 || message?.surveyState?.status === 'answered'
@@ -4771,7 +4968,7 @@ class ChatApp {
                 return message;
             }
 
-            const survey = this.extractSurveyDefinition(message.displayContent ?? message.content ?? '');
+            const survey = this.getMessageSurveyDefinition(message);
             if (!survey) {
                 return message;
             }
@@ -4839,17 +5036,19 @@ class ChatApp {
             }
 
             const messages = this.syncAnnotatedSurveyStates(sessionId);
+            const projectMessage = messages.find((message) => message?.metadata?.managedAppProjectSummary === true);
             const surveyMessage = messages.find((message) => (
                 message?.role === 'assistant'
-                && Boolean(this.extractSurveyDefinition(message?.displayContent ?? message?.content ?? ''))
+                && Boolean(this.getMessageSurveyDefinition(message))
             ));
+            const focusMessage = projectMessage || surveyMessage;
 
-            if (!surveyMessage) {
+            if (!focusMessage) {
                 return;
             }
 
             this.renderMessages(messages);
-            this.presentAssistantMessage(surveyMessage, []);
+            this.presentAssistantMessage(focusMessage, []);
             this.updateSessionInfo();
             uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
         } catch (error) {
@@ -4869,7 +5068,7 @@ class ChatApp {
             return 'survey';
         }
 
-        const survey = this.extractSurveyDefinition(message?.displayContent ?? message?.content ?? '');
+        const survey = this.getMessageSurveyDefinition(message);
         return survey ? 'survey' : 'response';
     }
 
@@ -5941,11 +6140,11 @@ class ChatApp {
         const newlyInsertedMessages = messages.filter((message) => !previousMessageIds.has(message.id));
         const insertedSurveyMessage = newlyInsertedMessages.find((message) =>
             message?.syntheticUserCheckpoint === true
-            || this.extractSurveyDefinition(message?.displayContent ?? message?.content ?? ''),
+            || this.getMessageSurveyDefinition(message),
         );
         const hasVisibleSurveyMessage = messages.some((message) => (
             message?.role === 'assistant'
-            && Boolean(this.extractSurveyDefinition(message?.displayContent ?? message?.content ?? ''))
+            && Boolean(this.getMessageSurveyDefinition(message))
         ));
         const persistedAssistantMessage = this.getSessionMessage(sessionId, parentMessageId)
             || finalizedStreamingMessage

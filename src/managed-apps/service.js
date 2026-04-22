@@ -1151,6 +1151,50 @@ class ManagedAppService {
         return (Array.isArray(apps) ? apps : []).map((app) => this.normalizeAppRecord(app));
     }
 
+    buildAppProjectView(app = null, buildRun = null, details = {}) {
+        const normalizedApp = this.normalizeAppRecord(app);
+        if (!normalizedApp || typeof normalizedApp !== 'object') {
+            return null;
+        }
+
+        const phase = normalizeText(details.phase || normalizedApp.status || '').toLowerCase() || 'updated';
+        const summary = normalizeText(
+            details.summary
+            || normalizedApp.metadata?.project?.summary
+            || buildManagedAppStatusSummary(normalizedApp, buildRun, phase, details.deployment || null),
+        );
+
+        return buildManagedProjectState(normalizedApp, buildRun, phase, {
+            ...details,
+            summary,
+            nextStep: normalizeText(details.nextStep || normalizedApp.metadata?.project?.nextStep || ''),
+            openItems: hasOwnInput(details, 'openItems')
+                ? details.openItems
+                : (normalizedApp.metadata?.project?.openItems || []),
+        });
+    }
+
+    async getAppProgress(appRef = '', ownerId = null) {
+        const app = await this.resolveApp(appRef, ownerId);
+        if (!app) {
+            return null;
+        }
+
+        const normalizedApp = this.normalizeAppRecord(app);
+        const latestBuildRun = this.store?.listBuildRunsForApp
+            ? (await this.store.listBuildRunsForApp(normalizedApp.id, ownerId, 1))[0] || null
+            : null;
+        const project = this.buildAppProjectView(normalizedApp, latestBuildRun);
+
+        return {
+            app: normalizedApp,
+            latestBuildRun,
+            project,
+            progress: project?.progress || null,
+            summary: normalizeText(project?.summary || ''),
+        };
+    }
+
     async listOwnerApps(ownerId = null, limit = 50) {
         if (!ownerId || !this.store?.listApps) {
             return [];
@@ -1496,7 +1540,18 @@ class ManagedAppService {
 
     async listApps(ownerId, limit = 50) {
         await this.store.ensureAvailable();
-        return this.normalizeAppList(await this.store.listApps(ownerId, limit));
+        const apps = this.normalizeAppList(await this.store.listApps(ownerId, limit));
+        return apps.map((app) => {
+            const project = this.buildAppProjectView(app, null);
+            return {
+                ...app,
+                project,
+                progress: project?.progress || null,
+                summary: normalizeText(project?.summary || app.metadata?.project?.summary || ''),
+                nextStep: normalizeText(project?.nextStep || ''),
+                openItems: normalizeStringArray(project?.openItems || [], 8),
+            };
+        });
     }
 
     async listBuildRuns(appRef = '', ownerId = null, limit = 20) {
@@ -1514,10 +1569,14 @@ class ManagedAppService {
         }
 
         const buildRuns = await this.store.listBuildRunsForApp(app.id, ownerId, 10);
+        const latestBuildRun = buildRuns[0] || null;
+        const project = this.buildAppProjectView(app, latestBuildRun);
         return {
             app,
             buildRuns,
-            summary: normalizeText(app.metadata?.project?.summary || buildManagedAppStatusSummary(app, buildRuns[0] || null, app.status || 'updated')),
+            project,
+            progress: project?.progress || null,
+            summary: normalizeText(project?.summary || app.metadata?.project?.summary || buildManagedAppStatusSummary(app, latestBuildRun, app.status || 'updated')),
         };
     }
 

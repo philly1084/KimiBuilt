@@ -1222,6 +1222,37 @@ class SessionManager extends EventTarget {
         }
     }
 
+    mergeSessionMetadataLocally(sessionId, metadataPatch = {}) {
+        const targetSession = this.sessions.find((entry) => entry.id === sessionId);
+        if (!targetSession || !metadataPatch || typeof metadataPatch !== 'object' || Array.isArray(metadataPatch)) {
+            return null;
+        }
+
+        const nextMetadata = {
+            ...(targetSession.metadata || {}),
+            ...metadataPatch,
+        };
+
+        if (metadataPatch.activeProject && typeof metadataPatch.activeProject === 'object' && !Array.isArray(metadataPatch.activeProject)) {
+            nextMetadata.activeProject = {
+                ...(targetSession.metadata?.activeProject || {}),
+                ...metadataPatch.activeProject,
+            };
+        }
+
+        targetSession.metadata = nextMetadata;
+        targetSession.updatedAt = new Date().toISOString();
+        targetSession.title = this.resolveSessionTitle({
+            ...targetSession,
+            metadata: nextMetadata,
+        }, targetSession);
+        this.saveToStorage();
+        this.dispatchEvent(new CustomEvent('sessionsChanged', {
+            detail: { sessions: this.sessions },
+        }));
+        return targetSession;
+    }
+
     async renameSession(sessionId, title) {
         const session = this.updateSessionTitleLocally(sessionId, title);
         if (!session) {
