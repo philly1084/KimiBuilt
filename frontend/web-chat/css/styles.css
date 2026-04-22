@@ -4836,6 +4836,10 @@ body.layout-minimal #input-meta-row {
         rgba(11, 18, 28, 0.72);
 }
 
+.agent-survey-card--compact {
+    padding: 0.85rem 1rem;
+}
+
 .agent-survey-card__eyebrow {
     font-size: 0.68rem;
     font-weight: 700;
@@ -4897,9 +4901,17 @@ body.layout-minimal #input-meta-row {
     transition: width var(--transition-fast);
 }
 
+.agent-survey-card__preamble,
 .agent-survey-card__question,
 .agent-survey-card__context {
     margin: 0;
+}
+
+.agent-survey-card__preamble {
+    margin: 0.15rem 0 0.75rem;
+    color: var(--text-secondary);
+    font-size: 0.92rem;
+    line-height: 1.5;
 }
 
 .agent-survey-card__step-title {

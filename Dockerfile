@@ -54,7 +54,31 @@ RUN mkdir -p /app/data/piper/voices && \
     --output /app/data/piper/voices/en_US-kathleen-low.onnx && \
   curl --fail --show-error --silent --location --retry 3 \
     "${PIPER_VOICES_BASE_URL}/${PIPER_VOICES_REF}/en/en_US/kathleen/low/en_US-kathleen-low.onnx.json" \
-    --output /app/data/piper/voices/en_US-kathleen-low.onnx.json
+    --output /app/data/piper/voices/en_US-kathleen-low.onnx.json && \
+  curl --fail --show-error --silent --location --retry 3 \
+    "${PIPER_VOICES_BASE_URL}/${PIPER_VOICES_REF}/en/en_US/lessac/high/en_US-lessac-high.onnx" \
+    --output /app/data/piper/voices/en_US-lessac-high.onnx && \
+  curl --fail --show-error --silent --location --retry 3 \
+    "${PIPER_VOICES_BASE_URL}/${PIPER_VOICES_REF}/en/en_US/lessac/high/en_US-lessac-high.onnx.json" \
+    --output /app/data/piper/voices/en_US-lessac-high.onnx.json && \
+  curl --fail --show-error --silent --location --retry 3 \
+    "${PIPER_VOICES_BASE_URL}/${PIPER_VOICES_REF}/en/en_US/ljspeech/high/en_US-ljspeech-high.onnx" \
+    --output /app/data/piper/voices/en_US-ljspeech-high.onnx && \
+  curl --fail --show-error --silent --location --retry 3 \
+    "${PIPER_VOICES_BASE_URL}/${PIPER_VOICES_REF}/en/en_US/ljspeech/high/en_US-ljspeech-high.onnx.json" \
+    --output /app/data/piper/voices/en_US-ljspeech-high.onnx.json && \
+  curl --fail --show-error --silent --location --retry 3 \
+    "${PIPER_VOICES_BASE_URL}/${PIPER_VOICES_REF}/en/en_US/ryan/high/en_US-ryan-high.onnx" \
+    --output /app/data/piper/voices/en_US-ryan-high.onnx && \
+  curl --fail --show-error --silent --location --retry 3 \
+    "${PIPER_VOICES_BASE_URL}/${PIPER_VOICES_REF}/en/en_US/ryan/high/en_US-ryan-high.onnx.json" \
+    --output /app/data/piper/voices/en_US-ryan-high.onnx.json && \
+  curl --fail --show-error --silent --location --retry 3 \
+    "${PIPER_VOICES_BASE_URL}/${PIPER_VOICES_REF}/en/en_GB/cori/high/en_GB-cori-high.onnx" \
+    --output /app/data/piper/voices/en_GB-cori-high.onnx && \
+  curl --fail --show-error --silent --location --retry 3 \
+    "${PIPER_VOICES_BASE_URL}/${PIPER_VOICES_REF}/en/en_GB/cori/high/en_GB-cori-high.onnx.json" \
+    --output /app/data/piper/voices/en_GB-cori-high.onnx.json
 
 RUN mkdir -p /home/kimibuilt/.kimibuilt && \
   chown -R kimibuilt:kimibuilt /home/kimibuilt /app

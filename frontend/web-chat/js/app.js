@@ -3057,6 +3057,7 @@ class ChatApp {
             && options.userMessage
             && String(options.userMessage.id || '').trim()
             && String(options.userMessage.role || '').trim() === 'user';
+        const reuseAssistantMessageId = String(options.reuseAssistantMessageId || '').trim();
         const normalizedContent = String(content || '').trim();
         if (!normalizedContent) {
             return false;
@@ -3072,6 +3073,10 @@ class ChatApp {
 
         const sessionId = sessionManager.currentSessionId;
         const previousMessages = sessionManager.getMessages(sessionId).slice();
+        const existingAssistantMessage = reuseAssistantMessageId
+            ? this.getSessionMessage(sessionId, reuseAssistantMessageId)
+            : null;
+        const shouldReuseAssistantMessage = existingAssistantMessage?.role === 'assistant';
 
         // Hide welcome message
         uiHelpers.hideWelcomeMessage();
@@ -3119,16 +3124,43 @@ class ChatApp {
             },
             model: model // Track which model generated this response
         };
-        
-        this.currentStreamingMessageId = uiHelpers.generateMessageId();
-        assistantMessage.id = this.currentStreamingMessageId;
-        assistantMessage.metadata.foregroundRequestId = assistantMessage.id;
 
-        const storedAssistantMessage = sessionManager.addMessage(sessionId, assistantMessage);
-        const assistantMessageEl = uiHelpers.renderMessage(storedAssistantMessage, true);
-        this.messagesContainer.appendChild(assistantMessageEl);
-        uiHelpers.reinitializeIcons(assistantMessageEl);
-        uiHelpers.scrollToBottom();
+        let storedAssistantMessage = null;
+        if (shouldReuseAssistantMessage) {
+            this.currentStreamingMessageId = reuseAssistantMessageId;
+            assistantMessage.id = reuseAssistantMessageId;
+            assistantMessage.metadata.foregroundRequestId = String(
+                existingAssistantMessage?.metadata?.foregroundRequestId
+                || reuseAssistantMessageId
+            ).trim() || reuseAssistantMessageId;
+
+            storedAssistantMessage = this.upsertSessionMessage(sessionId, {
+                ...existingAssistantMessage,
+                ...assistantMessage,
+                metadata: {
+                    ...(existingAssistantMessage?.metadata || {}),
+                    ...(assistantMessage.metadata || {}),
+                },
+            }) || existingAssistantMessage;
+            storedAssistantMessage = this.moveSessionMessageToEnd(sessionId, reuseAssistantMessageId) || storedAssistantMessage;
+
+            const assistantMessageEl = this.renderOrReplaceMessage(storedAssistantMessage);
+            if (assistantMessageEl) {
+                this.messagesContainer.appendChild(assistantMessageEl);
+            }
+            uiHelpers.scrollToBottom();
+        } else {
+            this.currentStreamingMessageId = uiHelpers.generateMessageId();
+            assistantMessage.id = this.currentStreamingMessageId;
+            assistantMessage.metadata.foregroundRequestId = assistantMessage.id;
+
+            storedAssistantMessage = sessionManager.addMessage(sessionId, assistantMessage);
+            const assistantMessageEl = uiHelpers.renderMessage(storedAssistantMessage, true);
+            this.messagesContainer.appendChild(assistantMessageEl);
+            uiHelpers.reinitializeIcons(assistantMessageEl);
+            uiHelpers.scrollToBottom();
+        }
+
         this.persistSessionMessagesIfNeeded(sessionId, [
             storedUserMessage,
             storedAssistantMessage,
@@ -3411,7 +3443,9 @@ class ChatApp {
             button.disabled = true;
         }
 
-        const sendSucceeded = await this.sendPreparedMessage(responseContent);
+        const sendSucceeded = await this.sendPreparedMessage(responseContent, {
+            reuseAssistantMessageId: surveyMessage?.id || '',
+        });
         if (!sendSucceeded) {
             if (surveyMessage) {
                 surveyMessage.surveyState = this.buildSurveyStatePayload({
@@ -4124,6 +4158,25 @@ class ChatApp {
         };
         sessionManager.saveToStorage();
         return messages[index];
+    }
+
+    moveSessionMessageToEnd(sessionId, messageId) {
+        const normalizedSessionId = String(sessionId || '').trim();
+        const normalizedMessageId = String(messageId || '').trim();
+        if (!normalizedSessionId || !normalizedMessageId) {
+            return null;
+        }
+
+        const messages = sessionManager.getMessages(normalizedSessionId);
+        const index = messages.findIndex((entry) => entry?.id === normalizedMessageId);
+        if (index < 0 || index === (messages.length - 1)) {
+            return index >= 0 ? messages[index] : null;
+        }
+
+        const [message] = messages.splice(index, 1);
+        messages.push(message);
+        sessionManager.saveToStorage();
+        return message;
     }
 
     persistSessionMessageIfNeeded(sessionId, message) {

@@ -1441,6 +1441,7 @@ class UIHelpers {
             id: String(value.id || fallbackId || `survey-${Date.now().toString(36)}`).trim(),
             title: String(value.title || 'Choose a direction').trim() || 'Choose a direction',
             whyThisMatters: String(value.whyThisMatters || value.context || value.rationale || '').trim(),
+            preamble: String(value.preamble || value.message || '').trim(),
             steps,
             ...this.buildLegacySurveyFields(steps),
         };
@@ -1878,6 +1879,30 @@ class UIHelpers {
         const submitLabel = isLastStep
             ? 'Continue with these answers'
             : 'Next question';
+        const preamble = String(survey.preamble || '').trim();
+        const compactAnswered = isAnswered;
+
+        if (compactAnswered) {
+            return [
+                '<div class="agent-survey-card agent-survey-card--compact is-answered"',
+                ` data-message-id="${this.escapeHtmlAttr(messageId)}"`,
+                ` data-survey-id="${this.escapeHtmlAttr(survey.id)}"`,
+                '>',
+                '<div class="agent-survey-card__eyebrow">Decision checkpoint</div>',
+                '<div class="agent-survey-card__title-row">',
+                `<h4 class="agent-survey-card__title">${this.escapeHtml(survey.title)}</h4>`,
+                '<span class="agent-survey-card__meta">Answered</span>',
+                '</div>',
+                preamble ? `<p class="agent-survey-card__preamble">${this.escapeHtml(preamble)}</p>` : '',
+                '<div class="agent-survey-card__footer">',
+                '<div class="agent-survey-card__answered">',
+                '<span class="agent-survey-card__answered-badge">Answered</span>',
+                `<span class="agent-survey-card__answered-text">${this.escapeHtml(answeredSummary || 'Response sent back to the agent.')}</span>`,
+                '</div>',
+                '</div>',
+                '</div>',
+            ].filter(Boolean).join('');
+        }
 
         return [
             `<div class="agent-survey-card ${isAnswered ? 'is-answered' : ''}"`,
@@ -1903,6 +1928,7 @@ class UIHelpers {
                     '</div>',
                 ].join('')
                 : '',
+            preamble ? `<p class="agent-survey-card__preamble">${this.escapeHtml(preamble)}</p>` : '',
             (!isAnswered && currentStep?.title) ? `<p class="agent-survey-card__step-title">${this.escapeHtml(currentStep.title)}</p>` : '',
             !isAnswered ? `<p class="agent-survey-card__question">${this.escapeHtml(currentStep?.question || survey.question)}</p>` : '',
             survey.whyThisMatters ? `<p class="agent-survey-card__context">${this.escapeHtml(survey.whyThisMatters)}</p>` : '',
@@ -2448,8 +2474,14 @@ class UIHelpers {
             ['Build progress', 'Build status'].includes(displayTitle)
             || ['activity', 'badge-check', 'triangle-alert'].includes(displayIcon)
         );
+        const visibleAssistantContent = String(message?.displayContent ?? message?.content ?? '').trim();
+        const hasSurveyDisplay = Boolean(this.extractSurveyDefinitionFromContent(visibleAssistantContent, message?.id || ''));
 
         if (isLegacyManagedAppDisplay) {
+            return null;
+        }
+
+        if (displaySource === 'generated' && (hasManagedAppProgress || hasSurveyDisplay)) {
             return null;
         }
 
@@ -2824,9 +2856,13 @@ class UIHelpers {
         const managedAppProgress = this.buildManagedAppProgressMarkup(message, effectiveStreaming);
         const progressTracker = this.buildProgressTrackerMarkup(message, effectiveStreaming);
         const reasoningRibbon = this.buildReasoningRibbonMarkup(message, effectiveStreaming);
+        const shouldShowStreamingPlaceholder = effectiveStreaming
+            && !managedAppProgress
+            && !progressTracker
+            && !reasoningRibbon;
         if (!content) {
             return {
-                html: `${managedAppProgress}${progressTracker}${reasoningRibbon || (effectiveStreaming ? this.buildStreamingPlaceholderMarkup(message) : '')}`,
+                html: `${managedAppProgress}${progressTracker}${reasoningRibbon || (shouldShowStreamingPlaceholder ? this.buildStreamingPlaceholderMarkup(message) : '')}`,
                 variant: 'default',
             };
         }

@@ -64,5 +64,71 @@
     "noiseScale": 0.34,
     "noiseW": 0.64,
     "sentenceSilence": 0.32
+  },
+  {
+    "id": "lessac-high",
+    "label": "Lessac Studio",
+    "description": "High-fidelity U.S. English voice with crisp articulation and a polished narration tone.",
+    "modelPath": "data/piper/voices/en_US-lessac-high.onnx",
+    "configPath": "data/piper/voices/en_US-lessac-high.onnx.json",
+    "lengthScale": 1,
+    "noiseScale": 0.34,
+    "noiseW": 0.66,
+    "sentenceSilence": 0.27
+  },
+  {
+    "id": "lessac-bright",
+    "label": "Lessac Bright",
+    "description": "Brighter Lessac variant tuned for conversational pacing and cleaner emphasis on host handoffs.",
+    "modelPath": "data/piper/voices/en_US-lessac-high.onnx",
+    "configPath": "data/piper/voices/en_US-lessac-high.onnx.json",
+    "lengthScale": 0.97,
+    "noiseScale": 0.4,
+    "noiseW": 0.72,
+    "sentenceSilence": 0.24
+  },
+  {
+    "id": "ljspeech-high",
+    "label": "LJ Narrator",
+    "description": "High-quality U.S. English narrator voice with very clear diction for polished long-form segments.",
+    "modelPath": "data/piper/voices/en_US-ljspeech-high.onnx",
+    "configPath": "data/piper/voices/en_US-ljspeech-high.onnx.json",
+    "lengthScale": 1.01,
+    "noiseScale": 0.33,
+    "noiseW": 0.64,
+    "sentenceSilence": 0.28
+  },
+  {
+    "id": "ryan-high",
+    "label": "Ryan Deep",
+    "description": "High-quality U.S. English male voice with fuller body and steady delivery for co-host roles.",
+    "modelPath": "data/piper/voices/en_US-ryan-high.onnx",
+    "configPath": "data/piper/voices/en_US-ryan-high.onnx.json",
+    "lengthScale": 1.02,
+    "noiseScale": 0.35,
+    "noiseW": 0.7,
+    "sentenceSilence": 0.29
+  },
+  {
+    "id": "ryan-direct",
+    "label": "Ryan Direct",
+    "description": "Tighter Ryan variant tuned for faster analytical passages and cleaner punch-in responses.",
+    "modelPath": "data/piper/voices/en_US-ryan-high.onnx",
+    "configPath": "data/piper/voices/en_US-ryan-high.onnx.json",
+    "lengthScale": 0.98,
+    "noiseScale": 0.39,
+    "noiseW": 0.74,
+    "sentenceSilence": 0.24
+  },
+  {
+    "id": "cori-high",
+    "label": "Cori British",
+    "description": "High-quality British English voice with clean presence for premium editorial or documentary-style podcasts.",
+    "modelPath": "data/piper/voices/en_GB-cori-high.onnx",
+    "configPath": "data/piper/voices/en_GB-cori-high.onnx.json",
+    "lengthScale": 1,
+    "noiseScale": 0.34,
+    "noiseW": 0.66,
+    "sentenceSilence": 0.28
   }
 ]

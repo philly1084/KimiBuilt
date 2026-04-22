@@ -565,12 +565,13 @@ function buildAutonomyBudgetPauseUpdate({ toolEvents = [], workflow = null, proj
         projectPlan,
         completedEvents,
     });
+    const pauseReason = 'Paused because this autonomous remote run hit its current runtime budget.';
 
     if (latestReason) {
-        return truncateText(`${statusSummary} Last completed: ${latestReason}. Paused here.`, 220);
+        return truncateText(`${pauseReason} ${statusSummary} Last completed: ${latestReason}.`, 220);
     }
 
-    return `${statusSummary} Paused here.`;
+    return truncateText(`${pauseReason} ${statusSummary}`, 220);
 }
 
 function buildAutonomyContinuationReason({ toolEvents = [], workflow = null, projectPlan = null } = {}) {
@@ -592,6 +593,7 @@ function buildAutonomyContinuationReason({ toolEvents = [], workflow = null, pro
         parts.push(`Current blocker: ${truncateText(blocker, 96)}.`);
     }
 
+    parts.push('This is a runtime-budget pause, not a restart or a lost draft.');
     parts.push('It will keep the current progress instead of starting over.');
     return truncateText(parts.join(' '), 220);
 }
