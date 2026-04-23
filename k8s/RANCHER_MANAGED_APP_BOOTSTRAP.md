@@ -7,15 +7,23 @@ This setup uses two separate clusters:
 
 ## 1. External Gitea Cluster
 
-In Rancher, open the external cluster and import:
-
-- [rancher-agent-platform-test-env.yaml](/C:/Users/phill/KimiBuilt/k8s/rancher-agent-platform-test-env.yaml)
-
-Or bootstrap it directly on the build host with:
+For automated setup, run the bootstrap helper on the build host:
 
 ```bash
 ./k8s/bootstrap-managed-app-platform.sh
 ```
+
+For manual Rancher-only setup, open the external cluster and import:
+
+- [rancher-agent-platform-test-env.yaml](/C:/Users/phill/KimiBuilt/k8s/rancher-agent-platform-test-env.yaml)
+
+The helper is idempotent. It first runs a health check against the
+`agent-platform` namespace, the Gitea/BuildKit/runner deployments, saved
+Secrets, and registry auth. If the platform is already healthy it exits without
+re-applying setup. On a new or broken cluster it creates the namespace, generates
+missing passwords/secrets, saves them into Kubernetes Secrets, applies only the
+non-secret platform manifests, generates a fresh runner token from the live
+Gitea pod, and restarts `act-runner`.
 
 This boots:
 
@@ -27,16 +35,20 @@ This boots:
 
 ### After Gitea Is Up
 
-1. Sign in to `https://gitea.demoserver2.buzz` with:
-   - user: `admin`
-   - password: `TestOnly-Gitea-Admin-2026!`
-2. Create a personal access token for the Gitea user you want the runner to use for container registry pushes.
-   - In a test environment, `admin` is fine.
-   - Give it repo/org/packages access.
-   - Use that same Gitea username plus PAT for container registry auth on the runner and in KimiBuilt.
-3. Run the bootstrap helper so it generates a fresh runner registration token from the Gitea pod, stores it in `gitea-actions`, updates runtime secrets, and scales `act-runner` to `1`.
+The generated values are saved in:
 
-If you want a one-command update on the build cluster instead of clicking through Rancher, run:
+- `agent-platform/gitea-admin`
+- `agent-platform/gitea-actions`
+- `agent-platform/agent-platform-runtime`
+
+To inspect the generated admin password:
+
+```bash
+kubectl get secret gitea-admin -n agent-platform -o jsonpath='{.data.password}' | base64 -d
+```
+
+If you already have a dedicated Gitea registry PAT, pass it to the helper. The
+helper preserves existing non-placeholder values on later runs:
 
 ```bash
 export GITEA_REGISTRY_USERNAME=admin
@@ -48,6 +60,13 @@ For a true clean rebuild, delete the old namespace and PVC-backed state first:
 
 ```bash
 export FRESH_INSTALL=1
+./k8s/bootstrap-managed-app-platform.sh
+```
+
+To force a re-apply even when the health check passes:
+
+```bash
+export FORCE_SETUP=1
 ./k8s/bootstrap-managed-app-platform.sh
 ```
 

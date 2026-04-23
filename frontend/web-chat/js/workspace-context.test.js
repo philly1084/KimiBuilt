@@ -18,7 +18,7 @@ describe('workspace-context', () => {
         }));
     });
 
-    test('creates isolated scope keys and session-local memory for secondary workspaces', () => {
+    test('creates isolated durable scope keys for secondary workspaces', () => {
         expect(resolveWorkspaceScopeKey('workspace-3')).toBe('web-chat-workspace-3');
         expect(buildWorkspaceScopeMetadata(
             { clientSurface: 'web-chat', taskType: 'chat' },
@@ -28,17 +28,22 @@ describe('workspace-context', () => {
             workspaceId: 'web-chat-workspace-3',
             projectScope: 'web-chat-workspace-3',
             memoryScope: 'web-chat-workspace-3',
-            sessionIsolation: true,
+            sessionIsolation: false,
         }));
     });
 
-    test('keeps long-term memory enabled only for workspace-1 metadata', () => {
+    test('keeps durable memory enabled for all workspace metadata', () => {
         expect(buildWorkspaceScopeMetadata(
             { clientSurface: 'web-chat', taskType: 'chat' },
             createWorkspaceContext({ key: 'workspace-1' }),
         )).toEqual(expect.objectContaining({
             memoryScope: 'web-chat',
             sessionIsolation: false,
+        }));
+        expect(createWorkspaceContext({ key: 'workspace-4' })).toEqual(expect.objectContaining({
+            scopeKey: 'web-chat-workspace-4',
+            longTermMemoryEnabled: true,
+            persistentMemoryEnabled: true,
         }));
     });
 

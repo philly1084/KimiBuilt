@@ -23,6 +23,13 @@
     --workspace-host-toggle-icon: var(--workspace-host-muted);
     --workspace-host-toggle-icon-active: var(--workspace-host-text);
     --workspace-host-toggle-shadow: var(--shadow-md);
+    --workspace-host-sheet: var(--theme-mobile-sheet-background, var(--workspace-host-panel));
+    --workspace-host-sheet-border: var(--theme-mobile-sheet-border, var(--workspace-host-panel-border));
+    --workspace-host-sheet-header: var(--theme-dialog-header-background, transparent);
+    --workspace-host-tab-fill: var(--theme-mobile-action-background, var(--workspace-host-panel-fill));
+    --workspace-host-tab-fill-hover: var(--theme-mobile-action-hover-background, var(--workspace-host-panel-fill-hover));
+    --workspace-host-tab-border: var(--theme-mobile-action-border, color-mix(in srgb, var(--workspace-host-panel-border) 84%, transparent));
+    --workspace-host-tab-border-hover: var(--theme-mobile-action-hover-border, color-mix(in srgb, var(--workspace-host-accent) 34%, var(--workspace-host-panel-border)));
 }
 
 :root[data-theme="light"] {
@@ -169,10 +176,11 @@ body.workspace-host-page {
     right: calc(env(safe-area-inset-right, 0px) + 0.9rem);
     z-index: 30;
     width: min(20rem, calc(100vw - 1.5rem));
-    padding: 1rem;
-    border: 1px solid var(--workspace-host-panel-border);
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid var(--workspace-host-sheet-border);
     border-radius: 1.2rem;
-    background: var(--workspace-host-panel);
+    background: var(--workspace-host-sheet);
     box-shadow: var(--workspace-host-shadow);
     backdrop-filter: blur(18px);
 }
@@ -182,7 +190,10 @@ body.workspace-host-page {
     align-items: flex-start;
     justify-content: space-between;
     gap: 1rem;
-    margin-bottom: 0.9rem;
+    margin-bottom: 0;
+    padding: 1rem;
+    background: var(--workspace-host-sheet-header);
+    border-bottom: 1px solid color-mix(in srgb, var(--workspace-host-sheet-border) 88%, transparent);
 }
 
 .workspace-switcher-popover__eyebrow {
@@ -191,7 +202,7 @@ body.workspace-host-page {
     font-weight: 700;
     letter-spacing: 0.14em;
     text-transform: uppercase;
-    color: var(--workspace-host-accent);
+    color: var(--text-tertiary);
 }
 
 .workspace-switcher-popover__title {
@@ -206,8 +217,8 @@ body.workspace-host-page {
     margin: 0;
     padding: 0.45rem 0.7rem;
     border-radius: 999px;
-    border: 1px solid color-mix(in srgb, var(--workspace-host-panel-border) 88%, transparent);
-    background: color-mix(in srgb, var(--theme-dialog-header-background, var(--bg-tertiary)) 84%, transparent);
+    border: 1px solid var(--workspace-host-tab-border);
+    background: var(--workspace-host-tab-fill);
     color: var(--workspace-host-muted);
     font-size: 0.78rem;
     white-space: nowrap;
@@ -216,6 +227,7 @@ body.workspace-host-page {
 .workspace-tabs {
     display: grid;
     gap: 0.65rem;
+    padding: 0.95rem 1rem 1rem;
 }
 
 .workspace-tab {
@@ -224,10 +236,10 @@ body.workspace-host-page {
     gap: 0.8rem;
     width: 100%;
     padding: 0.85rem 0.9rem;
-    border: 1px solid color-mix(in srgb, var(--workspace-host-panel-border) 84%, transparent);
+    border: 1px solid var(--workspace-host-tab-border);
     border-radius: 0.95rem;
-    background: var(--workspace-host-panel-fill);
-    color: inherit;
+    background: var(--workspace-host-tab-fill);
+    color: var(--workspace-host-text);
     cursor: pointer;
     text-align: left;
     transition: transform 160ms ease, border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
@@ -235,14 +247,14 @@ body.workspace-host-page {
 
 .workspace-tab:hover {
     transform: translateY(-1px);
-    border-color: color-mix(in srgb, var(--workspace-host-accent) 34%, var(--workspace-host-panel-border));
-    background: var(--workspace-host-panel-fill-hover);
+    border-color: var(--workspace-host-tab-border-hover);
+    background: var(--workspace-host-tab-fill-hover);
 }
 
 .workspace-tab.is-active {
-    border-color: color-mix(in srgb, var(--workspace-host-accent) 48%, var(--workspace-host-panel-border));
-    background: var(--workspace-host-panel-fill-hover);
-    box-shadow: 0 14px 26px color-mix(in srgb, var(--workspace-host-accent) 12%, transparent);
+    border-color: var(--workspace-host-tab-border-hover);
+    background: var(--workspace-host-tab-fill-hover);
+    box-shadow: 0 14px 26px color-mix(in srgb, var(--workspace-host-accent) 10%, transparent);
 }
 
 .workspace-tab__badge {
@@ -277,6 +289,7 @@ body.workspace-host-page {
     font-size: 0.98rem;
     font-weight: 700;
     letter-spacing: -0.02em;
+    color: var(--workspace-host-text);
 }
 
 .workspace-tab__scope {
@@ -310,7 +323,7 @@ body.workspace-host-page {
         left: 0.75rem;
         right: 0.75rem;
         width: auto;
-        padding: 0.95rem;
+        padding: 0;
         border-radius: 1rem;
     }
 

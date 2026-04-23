@@ -244,7 +244,7 @@
                 <span class="workspace-tab__badge">${workspaceNumber}</span>
                 <span class="workspace-tab__copy">
                     <span class="workspace-tab__title">${workspace.label}</span>
-                    <span class="workspace-tab__scope">${workspace.key === workspaceHelpers.DEFAULT_WORKSPACE_KEY ? 'Default chat history' : 'Isolated project space'}</span>
+                    <span class="workspace-tab__scope">${workspace.key === workspaceHelpers.DEFAULT_WORKSPACE_KEY ? 'Default chat history' : 'Persistent project memory'}</span>
                 </span>
             `;
             tab.addEventListener('click', () => activateWorkspace(workspace.key));

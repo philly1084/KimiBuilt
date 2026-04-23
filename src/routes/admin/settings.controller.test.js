@@ -46,6 +46,7 @@ jest.mock('../../config', () => ({
       appBaseDomain: 'demoserver2.buzz',
       namespacePrefix: 'app-',
       platformNamespace: 'agent-platform',
+      platformRuntimeSecretName: 'agent-platform-runtime',
       defaultBranch: 'main',
       defaultContainerPort: 80,
       registryPullSecretName: 'gitea-registry-credentials',
@@ -255,6 +256,7 @@ describe('settings.controller personality support', () => {
       appBaseDomain: 'apps.alt.example',
       namespacePrefix: 'edge-',
       platformNamespace: 'agent-platform',
+      platformRuntimeSecretName: 'agent-platform-runtime',
     }));
   });
 

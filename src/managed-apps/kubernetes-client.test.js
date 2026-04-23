@@ -208,6 +208,47 @@ describe('KubernetesClient', () => {
         expect(result.namespace).toBe('app-demo');
     });
 
+    test('deployManagedApp builds the pull secret from the remote platform runtime secret', async () => {
+        const sshTool = createDeploySshTool({
+            inspectionStdout: buildInspectionStdout(),
+        });
+        const client = new KubernetesClient({
+            managedAppsConfig: {
+                platformNamespace: 'agent-platform',
+                httpsVerifyTimeoutMs: 5000,
+            },
+            sshTool,
+        });
+
+        client.waitForHttps = jest.fn(async () => ({
+            ok: true,
+            status: 200,
+            attemptsCompleted: true,
+        }));
+        client.isSshConfigured = jest.fn(() => true);
+
+        await client.deployManagedApp({
+            slug: 'demo',
+            namespace: 'app-demo',
+            publicHost: 'demo.demoserver2.buzz',
+            image: 'gitea.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
+            registryPullSecretName: 'gitea-registry-credentials',
+            registryHost: 'gitea.demoserver2.buzz',
+            registryUsername: 'stale-user',
+            registryPassword: 'stale-password',
+            deploymentTarget: 'ssh',
+        });
+
+        const applyCommand = sshTool.handler.mock.calls[0][0].command;
+        expect(applyCommand).toContain('runtime_secret_name=\'agent-platform-runtime\'');
+        expect(applyCommand).toContain('secret_value gitea-registry-password');
+        expect(applyCommand).toContain('kubectl_cmd create secret docker-registry "$registry_secret_name"');
+        expect(applyCommand.indexOf('kubectl_cmd create secret docker-registry "$registry_secret_name"')).toBeLessThan(
+            applyCommand.indexOf('"kind": "Deployment"'),
+        );
+        expect(applyCommand).not.toContain('.dockerconfigjson');
+    });
+
     test('deployManagedApp ignores legacy in-cluster targets and still uses SSH', async () => {
         const sshTool = createDeploySshTool({
             inspectionStdout: buildInspectionStdout(),

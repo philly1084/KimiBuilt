@@ -25,6 +25,7 @@ function buildWorkflowYaml({
     giteaOrg = '',
     imageRepo = '',
     registryHost = '',
+    buildEventsUrl = '',
 } = {}) {
     return `name: build-and-publish
 
@@ -40,8 +41,10 @@ jobs:
     env:
       APP_NAME: ${appName}
       APP_SLUG: ${slug}
+      GITEA_ORG: ${giteaOrg}
       IMAGE_REPO: ${imageRepo}
       REGISTRY_HOST: ${registryHost}
+      BUILD_EVENTS_URL: ${buildEventsUrl}
       DEFAULT_TARGET_PLATFORMS: linux/amd64,linux/arm64
     steps:
       - name: Materialize repository
@@ -171,6 +174,53 @@ jobs:
             --output "type=image,name=$IMAGE_REPO:$IMAGE_TAG,push=true" \\
             --export-cache type=inline \\
             --import-cache "type=registry,ref=$IMAGE_REPO:latest"
+
+      - name: Notify KimiBuilt
+        if: always()
+        shell: bash
+        env:
+          JOB_STATUS: \${{ job.status }}
+        run: |
+          set -euo pipefail
+          target_url="\${KIMIBUILT_BUILD_EVENTS_URL:-$BUILD_EVENTS_URL}"
+          if [ -z "\${target_url:-}" ]; then
+            echo "No KimiBuilt build events URL configured; skipping notification."
+            exit 0
+          fi
+          build_status="success"
+          if [ "\${JOB_STATUS:-success}" != "success" ]; then
+            build_status="failed"
+          fi
+          run_url="\${GITHUB_SERVER_URL:-\${GITEA_INSTANCE_URL:-}}"
+          if [ -n "\${run_url:-}" ] && [ -n "\${GITHUB_REPOSITORY:-}" ] && [ -n "\${GITHUB_RUN_ID:-}" ]; then
+            run_url="\${run_url%/}/\${GITHUB_REPOSITORY}/actions/runs/\${GITHUB_RUN_ID}"
+          fi
+          payload_file="$(mktemp)"
+          cat > "$payload_file" <<EOF
+          {"repoOwner":"$GITEA_ORG","repoName":"$APP_SLUG","slug":"$APP_SLUG","commitSha":"\${GITHUB_SHA:-}","imageTag":"\${IMAGE_TAG:-}","imageRepo":"$IMAGE_REPO","buildStatus":"$build_status","requestedAction":"deploy","deployRequested":true,"runId":"\${GITHUB_RUN_ID:-}","runUrl":"$run_url","platforms":"\${TARGET_PLATFORMS:-}"}
+          EOF
+          header_secret="\${KIMIBUILT_BUILD_EVENTS_SECRET:-}"
+          curl_flags=(-fsS -X POST -H "Content-Type: application/json" --data-binary "@$payload_file")
+          if [ -n "\${header_secret:-}" ]; then
+            curl_flags+=(-H "X-KimiBuilt-Webhook-Secret: $header_secret")
+          fi
+          if [ "\${KIMIBUILT_BUILD_EVENTS_INSECURE:-0}" = "1" ] || [ "\${KIMIBUILT_BUILD_EVENTS_INSECURE:-0}" = "true" ]; then
+            curl_flags+=(-k)
+          fi
+          if command -v curl >/dev/null 2>&1; then
+            curl "\${curl_flags[@]}" "$target_url"
+            exit 0
+          fi
+          if command -v wget >/dev/null 2>&1; then
+            wget_headers=(--header "Content-Type: application/json")
+            if [ -n "\${header_secret:-}" ]; then
+              wget_headers+=(--header "X-KimiBuilt-Webhook-Secret: $header_secret")
+            fi
+            wget -qO- --method=POST "\${wget_headers[@]}" --body-file="$payload_file" "$target_url" >/dev/null
+            exit 0
+          fi
+          echo "curl or wget is required to notify KimiBuilt." >&2
+          exit 1
 `;
 }
 

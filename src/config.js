@@ -518,6 +518,7 @@ const config = {
         appBaseDomain: process.env.MANAGED_APPS_BASE_DOMAIN || 'demoserver2.buzz',
         namespacePrefix: process.env.MANAGED_APPS_NAMESPACE_PREFIX || 'app-',
         platformNamespace: process.env.MANAGED_APPS_PLATFORM_NAMESPACE || 'agent-platform',
+        platformRuntimeSecretName: process.env.MANAGED_APPS_PLATFORM_RUNTIME_SECRET || 'agent-platform-runtime',
         defaultBranch: process.env.MANAGED_APPS_DEFAULT_BRANCH || 'main',
         defaultContainerPort: Math.max(
             1,

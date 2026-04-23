@@ -48,6 +48,22 @@ describe('session scope memory routing', () => {
     }));
   });
 
+  test('routes parallel web-chat workspaces as durable project-scoped memory', () => {
+    expect(buildScopedMemoryMetadata({
+      ownerId: 'phill',
+      memoryScope: 'web-chat-workspace-3',
+      sourceSurface: 'web-chat',
+      memoryClass: 'conversation',
+      sessionIsolation: false,
+    })).toEqual(expect.objectContaining({
+      memoryScope: 'web-chat-workspace-3',
+      projectKey: 'web-chat-workspace-3',
+      memoryNamespace: SURFACE_LOCAL_MEMORY_NAMESPACE,
+      shareAcrossSurfaces: false,
+      sessionIsolation: false,
+    }));
+  });
+
   test('routes memory into session-local namespace when no project key exists', () => {
     expect(buildScopedMemoryMetadata({
       ownerId: 'phill',

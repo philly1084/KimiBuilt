@@ -112,6 +112,7 @@ function buildRuntimeSummary(toolManager, options = {}) {
       appBaseDomain: managedApps.appBaseDomain || '',
       namespacePrefix: managedApps.namespacePrefix || '',
       platformNamespace: managedApps.platformNamespace || '',
+      platformRuntimeSecretName: managedApps.platformRuntimeSecretName || '',
     },
     clusterRegistry: clusterStateRegistry.getRuntimeSummary(),
     managedApps: {
@@ -122,6 +123,7 @@ function buildRuntimeSummary(toolManager, options = {}) {
       appBaseDomain: managedApps.appBaseDomain || '',
       namespacePrefix: managedApps.namespacePrefix || '',
       platformNamespace: managedApps.platformNamespace || '',
+      platformRuntimeSecretName: managedApps.platformRuntimeSecretName || '',
       defaultBranch: managedApps.defaultBranch || '',
     },
   };
@@ -201,6 +203,7 @@ function buildToolRuntime(toolId, options = {}) {
       appBaseDomain: managedApps.appBaseDomain || '',
       namespacePrefix: managedApps.namespacePrefix || '',
       platformNamespace: managedApps.platformNamespace || '',
+      platformRuntimeSecretName: managedApps.platformRuntimeSecretName || '',
       deployTarget,
       kubernetesConfigured: Boolean(options.managedAppService?.kubernetesClient?.isConfigured?.(deployTarget)),
       persistenceAvailable: Boolean(options.managedAppService?.isAvailable?.()),

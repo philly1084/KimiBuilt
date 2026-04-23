@@ -876,6 +876,8 @@ class KubernetesClient {
         registryHost = '',
         registryUsername = '',
         registryPassword = '',
+        platformNamespace = '',
+        platformRuntimeSecretName = '',
         deploymentTarget = '',
     } = {}) {
         return this.deployManagedAppViaSsh({
@@ -888,6 +890,8 @@ class KubernetesClient {
             registryHost,
             registryUsername,
             registryPassword,
+            platformNamespace,
+            platformRuntimeSecretName,
         });
     }
 
@@ -958,6 +962,59 @@ class KubernetesClient {
                     .filter(([key]) => Boolean(key)),
             ),
         };
+    }
+
+    buildRemoteRegistryPullSecretCommand({
+        namespace = '',
+        secretName = '',
+        platformNamespace = '',
+        runtimeSecretName = '',
+        registryHost = '',
+        registryUsername = '',
+        registryPassword = '',
+    } = {}) {
+        const normalizedSecretName = sanitizeKubernetesName(secretName || 'gitea-registry-credentials', 'gitea-registry-credentials');
+        const normalizedNamespace = sanitizeKubernetesName(namespace, 'managed-apps');
+        const normalizedPlatformNamespace = sanitizeKubernetesName(
+            platformNamespace || this.managedAppsConfig.platformNamespace || 'agent-platform',
+            'agent-platform',
+        );
+        const normalizedRuntimeSecretName = sanitizeKubernetesName(runtimeSecretName || 'agent-platform-runtime', 'agent-platform-runtime');
+
+        return [
+            `registry_secret_name=${this.quoteShellArg(normalizedSecretName)}`,
+            `app_namespace=${this.quoteShellArg(normalizedNamespace)}`,
+            `platform_namespace=${this.quoteShellArg(normalizedPlatformNamespace)}`,
+            `runtime_secret_name=${this.quoteShellArg(normalizedRuntimeSecretName)}`,
+            `fallback_registry_host=${this.quoteShellArg(normalizeText(registryHost))}`,
+            `fallback_registry_username=${this.quoteShellArg(normalizeText(registryUsername))}`,
+            `fallback_registry_password=${this.quoteShellArg(normalizeText(registryPassword))}`,
+            'secret_value() {',
+            '  key="$1"',
+            '  raw="$(kubectl_cmd get secret "$runtime_secret_name" -n "$platform_namespace" -o "jsonpath={.data.${key}}" 2>/dev/null || true)"',
+            '  if [ -n "${raw:-}" ]; then printf "%s" "$raw" | base64 -d 2>/dev/null || true; fi',
+            '}',
+            'resolved_registry_host="$(secret_value gitea-registry-host)"',
+            'resolved_registry_username="$(secret_value gitea-registry-username)"',
+            'resolved_registry_password="$(secret_value gitea-registry-password)"',
+            'is_placeholder_value() { case "${1:-}" in ""|change-me|replace-me|replace-after-gitea-boot) return 0 ;; *) return 1 ;; esac; }',
+            'if is_placeholder_value "$resolved_registry_host"; then resolved_registry_host="$fallback_registry_host"; fi',
+            'if is_placeholder_value "$resolved_registry_username"; then resolved_registry_username="$fallback_registry_username"; fi',
+            'if is_placeholder_value "$resolved_registry_password"; then resolved_registry_password="$fallback_registry_password"; fi',
+            'if is_placeholder_value "$resolved_registry_host" || is_placeholder_value "$resolved_registry_username" || is_placeholder_value "$resolved_registry_password"; then',
+            '  echo "__KIMIBUILT_REGISTRY_PULL_SECRET__=missing-credentials"',
+            '  echo "Managed app deployment requires registry credentials in ${platform_namespace}/${runtime_secret_name} or configured fallback credentials." >&2',
+            '  exit 1',
+            'fi',
+            'kubectl_cmd create secret docker-registry "$registry_secret_name" \\',
+            '  --namespace "$app_namespace" \\',
+            '  --docker-server "$resolved_registry_host" \\',
+            '  --docker-username "$resolved_registry_username" \\',
+            '  --docker-password "$resolved_registry_password" \\',
+            '  --dry-run=client -o yaml | kubectl_cmd apply -f -',
+            'kubectl_cmd label secret "$registry_secret_name" -n "$app_namespace" kimibuilt.io/managed-app=true --overwrite >/dev/null 2>&1 || true',
+            'echo "__KIMIBUILT_REGISTRY_PULL_SECRET__=${registry_secret_name}|${resolved_registry_host}|${resolved_registry_username}"',
+        ].join('\n');
     }
 
     quoteShellArg(value) {
@@ -1263,8 +1320,14 @@ class KubernetesClient {
         };
     }
 
-    buildRemoteManifestApplyCommand(manifests = [], { namespace = '', deploymentName = '', tlsSecretName = '', timeoutSeconds = 120 } = {}) {
-        const applyBlocks = manifests
+    buildRemoteManifestApplyCommand(manifests = [], {
+        namespace = '',
+        deploymentName = '',
+        tlsSecretName = '',
+        timeoutSeconds = 120,
+        registrySecret = null,
+    } = {}) {
+        const buildApplyBlocks = (items = []) => items
             .filter(Boolean)
             .map((manifest) => [
                 'cat <<\'EOF\' | kubectl_cmd apply -f -',
@@ -1272,6 +1335,16 @@ class KubernetesClient {
                 'EOF',
             ].join('\n'))
             .join('\n');
+        const namespaceManifests = manifests.filter((manifest) => manifest?.kind === 'Namespace');
+        const resourceManifests = manifests.filter((manifest) => manifest?.kind !== 'Namespace');
+        const namespaceApplyBlocks = buildApplyBlocks(namespaceManifests);
+        const resourceApplyBlocks = buildApplyBlocks(resourceManifests);
+        const registrySecretBlock = registrySecret
+            ? this.buildRemoteRegistryPullSecretCommand({
+                namespace,
+                ...registrySecret,
+            })
+            : '';
 
         return [
             'set -e',
@@ -1282,7 +1355,9 @@ class KubernetesClient {
             '  exit 1',
             '}',
             'if [ -f /etc/rancher/k3s/k3s.yaml ] && [ -z "${KUBECONFIG:-}" ]; then export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; fi',
-            applyBlocks,
+            namespaceApplyBlocks,
+            registrySecretBlock,
+            resourceApplyBlocks,
             `kubectl_cmd rollout status deployment/${this.quoteShellArg(deploymentName)} -n ${this.quoteShellArg(namespace)} --timeout=${Math.max(30, Number(timeoutSeconds) || 120)}s`,
             `if kubectl_cmd get secret ${this.quoteShellArg(tlsSecretName)} -n ${this.quoteShellArg(namespace)} >/dev/null 2>&1; then echo "__KIMIBUILT_TLS_SECRET__=true"; else echo "__KIMIBUILT_TLS_SECRET__=false"; fi`,
         ].filter(Boolean).join('\n');
@@ -1298,6 +1373,8 @@ class KubernetesClient {
         registryHost = '',
         registryUsername = '',
         registryPassword = '',
+        platformNamespace = '',
+        platformRuntimeSecretName = '',
     } = {}) {
         if (!this.isSshConfigured()) {
             throw new Error('Managed app deployment requires SSH access to the remote deploy host.');
@@ -1318,15 +1395,16 @@ class KubernetesClient {
         };
         const tlsSecretName = sanitizeKubernetesName(`${appName}-tls`, `${appName}-tls`);
         const normalizedContainerPort = Math.max(1, Number(containerPort) || 80);
+        const resolvedPlatformNamespace = sanitizeKubernetesName(
+            platformNamespace || this.managedAppsConfig.platformNamespace || 'agent-platform',
+            'agent-platform',
+        );
+        const resolvedPlatformRuntimeSecretName = sanitizeKubernetesName(
+            platformRuntimeSecretName || this.managedAppsConfig.platformRuntimeSecretName || 'agent-platform-runtime',
+            'agent-platform-runtime',
+        );
         const manifests = [
             this.buildNamespaceManifest(appNamespace),
-            this.buildRegistryPullSecretManifest({
-                namespace: appNamespace,
-                name: registryPullSecretName,
-                registryHost,
-                username: registryUsername,
-                password: registryPassword,
-            }),
             this.buildDeploymentManifest({
                 namespace: appNamespace,
                 deploymentName: appName,
@@ -1358,6 +1436,16 @@ class KubernetesClient {
             deploymentName: appName,
             tlsSecretName,
             timeoutSeconds: 120,
+            registrySecret: registryPullSecretName
+                ? {
+                    secretName: registryPullSecretName,
+                    platformNamespace: resolvedPlatformNamespace,
+                    runtimeSecretName: resolvedPlatformRuntimeSecretName,
+                    registryHost,
+                    registryUsername,
+                    registryPassword,
+                }
+                : null,
         });
         const result = await this.sshTool.handler({
             command,

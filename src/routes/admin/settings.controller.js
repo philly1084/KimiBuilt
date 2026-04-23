@@ -134,6 +134,7 @@ class SettingsController {
           appBaseDomain: config.managedApps.appBaseDomain || 'demoserver2.buzz',
           namespacePrefix: config.managedApps.namespacePrefix || 'app-',
           platformNamespace: config.managedApps.platformNamespace || 'agent-platform',
+          platformRuntimeSecretName: config.managedApps.platformRuntimeSecretName || 'agent-platform-runtime',
           defaultBranch: config.managedApps.defaultBranch || 'main',
           defaultContainerPort: config.managedApps.defaultContainerPort || 80,
           registryPullSecretName: config.managedApps.registryPullSecretName || 'gitea-registry-credentials',
@@ -506,6 +507,7 @@ class SettingsController {
         'appBaseDomain',
         'namespacePrefix',
         'platformNamespace',
+        'platformRuntimeSecretName',
         'defaultBranch',
         'registryPullSecretName',
         'webhookEndpointPath',
@@ -722,6 +724,7 @@ class SettingsController {
       appBaseDomain: String(stored.appBaseDomain || config.managedApps.appBaseDomain || 'demoserver2.buzz').trim() || 'demoserver2.buzz',
       namespacePrefix: String(stored.namespacePrefix || config.managedApps.namespacePrefix || 'app-').trim() || 'app-',
       platformNamespace: String(stored.platformNamespace || config.managedApps.platformNamespace || 'agent-platform').trim() || 'agent-platform',
+      platformRuntimeSecretName: String(stored.platformRuntimeSecretName || config.managedApps.platformRuntimeSecretName || 'agent-platform-runtime').trim() || 'agent-platform-runtime',
       defaultBranch: String(stored.defaultBranch || config.managedApps.defaultBranch || 'main').trim() || 'main',
       defaultContainerPort: Number.isFinite(Number(stored.defaultContainerPort))
         ? Math.max(1, Number(stored.defaultContainerPort))
@@ -837,6 +840,7 @@ class SettingsController {
           appBaseDomain: config.managedApps.appBaseDomain || 'demoserver2.buzz',
           namespacePrefix: config.managedApps.namespacePrefix || 'app-',
           platformNamespace: config.managedApps.platformNamespace || 'agent-platform',
+          platformRuntimeSecretName: config.managedApps.platformRuntimeSecretName || 'agent-platform-runtime',
           defaultBranch: config.managedApps.defaultBranch || 'main',
           defaultContainerPort: config.managedApps.defaultContainerPort || 80,
           registryPullSecretName: config.managedApps.registryPullSecretName || 'gitea-registry-credentials',

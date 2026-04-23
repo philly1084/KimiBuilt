@@ -2928,6 +2928,8 @@ class ManagedAppService {
             registryHost: registryCredentials.registryHost || giteaConfig.registryHost,
             registryUsername: registryCredentials.registryUsername,
             registryPassword: registryCredentials.registryPassword,
+            platformNamespace: managedAppsConfig.platformNamespace,
+            platformRuntimeSecretName: managedAppsConfig.platformRuntimeSecretName,
             deploymentTarget,
         });
         const deployResult = platformPreflight
