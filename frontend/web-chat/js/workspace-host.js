@@ -22,11 +22,48 @@
     }
 
     const ACTIVE_WORKSPACE_STORAGE_KEY = 'kimibuilt_web_chat_workspace_host_active';
+    const THEME_PRESET_STORAGE_KEY = 'kimibuilt_theme_preset';
+    const THEME_MODE_STORAGE_KEY = 'kimibuilt_theme';
     const workspaces = workspaceHelpers.listWorkspaceContexts();
     const panelsByKey = new Map();
     const tabsByKey = new Map();
     let activeWorkspaceKey = workspaceHelpers.DEFAULT_WORKSPACE_KEY;
     let isSwitcherOpen = false;
+
+    function readStoredTheme() {
+        try {
+            const storedMode = String(localStorage.getItem(THEME_MODE_STORAGE_KEY) || '').trim().toLowerCase();
+            const storedPreset = String(localStorage.getItem(THEME_PRESET_STORAGE_KEY) || '').trim().toLowerCase();
+            const mode = storedMode === 'light' ? 'light' : 'dark';
+            return {
+                mode,
+                preset: storedPreset || (mode === 'light' ? 'paper' : 'obsidian'),
+            };
+        } catch (_error) {
+            return {
+                mode: 'dark',
+                preset: 'obsidian',
+            };
+        }
+    }
+
+    function syncThemeMetaColor() {
+        const metaThemeColor = document.querySelector('meta[name="theme-color"]');
+        if (!metaThemeColor) {
+            return;
+        }
+
+        const rootStyles = window.getComputedStyle(document.documentElement);
+        const nextColor = String(rootStyles.getPropertyValue('--bg-primary') || '').trim() || '#0b1220';
+        metaThemeColor.setAttribute('content', nextColor);
+    }
+
+    function applyStoredTheme() {
+        const theme = readStoredTheme();
+        document.documentElement.setAttribute('data-theme', theme.mode);
+        document.documentElement.setAttribute('data-chat-theme', theme.preset);
+        syncThemeMetaColor();
+    }
 
     function getWorkspaceNumber(workspace) {
         const match = String(workspace?.key || '').match(/(\d+)$/);
@@ -86,7 +123,30 @@
         iframe.title = `${workspace.label} chat workspace`;
         iframe.loading = workspace.key === workspaceHelpers.DEFAULT_WORKSPACE_KEY ? 'eager' : 'lazy';
         iframe.src = buildWorkspaceFrameUrl(workspace);
+        iframe.addEventListener('load', () => {
+            postWorkspaceState(workspace.key);
+        });
         panel.appendChild(iframe);
+    }
+
+    function postWorkspaceState(workspaceKey) {
+        const panel = panelsByKey.get(workspaceKey);
+        const frame = panel?.querySelector('iframe');
+        if (!frame?.contentWindow) {
+            return;
+        }
+
+        frame.contentWindow.postMessage({
+            type: 'kimibuilt-web-chat-workspace-state',
+            workspaceKey,
+            active: workspaceKey === activeWorkspaceKey,
+        }, window.location.origin);
+    }
+
+    function syncAllWorkspaceStates() {
+        workspaces.forEach((workspace) => {
+            postWorkspaceState(workspace.key);
+        });
     }
 
     function updateSwitcherSummary(workspace) {
@@ -165,6 +225,7 @@
         persistActiveWorkspace(workspace.key);
         updateSwitcherSummary(workspace);
         setDocumentWorkspace(workspace);
+        syncAllWorkspaceStates();
 
         if (closeMenu) {
             closeSwitcher({ restoreFocus });
@@ -248,8 +309,17 @@
 
             activateWorkspace(event.data?.workspaceKey);
         });
+
+        window.addEventListener('storage', (event) => {
+            if (![THEME_PRESET_STORAGE_KEY, THEME_MODE_STORAGE_KEY].includes(String(event.key || '').trim())) {
+                return;
+            }
+
+            applyStoredTheme();
+        });
     }
 
+    applyStoredTheme();
     renderTabs();
     setupSwitcherControls();
     setupKeyboardShortcuts();

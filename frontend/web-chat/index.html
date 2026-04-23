@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark" data-chat-theme="obsidian">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -7,10 +7,27 @@
     <meta name="theme-color" content="#0b1220">
     <link rel="icon" href="data:,">
     <title>Lilly Workspaces</title>
+    <script>
+        (function bootstrapWorkspaceHostTheme() {
+            const root = document.documentElement;
+            try {
+                const storedMode = String(localStorage.getItem('kimibuilt_theme') || '').trim().toLowerCase();
+                const storedPreset = String(localStorage.getItem('kimibuilt_theme_preset') || '').trim().toLowerCase();
+                const mode = storedMode === 'light' ? 'light' : 'dark';
+                const preset = storedPreset || (mode === 'light' ? 'paper' : 'obsidian');
+                root.setAttribute('data-theme', mode);
+                root.setAttribute('data-chat-theme', preset);
+            } catch (_error) {
+                root.setAttribute('data-theme', 'dark');
+                root.setAttribute('data-chat-theme', 'obsidian');
+            }
+        })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/workspace-host.css?v=20260422a">
+    <link rel="stylesheet" href="css/styles.css?v=20260413b">
+    <link rel="stylesheet" href="css/workspace-host.css?v=20260423a">
 </head>
 <body class="workspace-host-page">
     <main class="workspace-host-shell" aria-label="Web chat workspaces">
@@ -52,6 +69,6 @@
     </main>
 
     <script src="js/workspace-context.js?v=20260422a"></script>
-    <script src="js/workspace-host.js?v=20260422a"></script>
+    <script src="js/workspace-host.js?v=20260423a"></script>
 </body>
 </html>

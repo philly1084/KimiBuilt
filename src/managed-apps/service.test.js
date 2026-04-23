@@ -1938,6 +1938,153 @@ describe('ManagedAppService', () => {
         }));
     });
 
+    test('deployApp refuses to deploy while the latest build is still queued', async () => {
+        const app = {
+            id: 'app-1',
+            ownerId: 'user-1',
+            sessionId: 'session-1',
+            slug: 'demo',
+            appName: 'Demo',
+            imageRepo: 'gitea.demoserver2.buzz/agent-apps/demo',
+            namespace: 'app-demo',
+            publicHost: 'demo.demoserver2.buzz',
+            status: 'building',
+            metadata: {
+                deploymentTarget: 'ssh',
+                requestedContainerPort: 80,
+            },
+        };
+        const buildRun = {
+            id: 'run-1',
+            buildStatus: 'queued',
+            deployStatus: 'pending',
+            imageTag: 'sha-abcdef123456',
+            metadata: {},
+        };
+        const deployManagedApp = jest.fn(async () => ({
+            verification: {
+                rollout: true,
+                ingress: true,
+                tls: true,
+                https: true,
+            },
+            rollout: {
+                ok: true,
+            },
+        }));
+
+        const service = new ManagedAppService({
+            store: {
+                isAvailable: () => true,
+                listBuildRunsForApp: jest.fn(async () => ([buildRun])),
+            },
+            kubernetesClient: {
+                isConfigured: jest.fn((target) => target === 'ssh'),
+                deployManagedApp,
+            },
+            giteaClient: {
+                isConfigured: jest.fn(() => false),
+            },
+        });
+
+        service.resolveApp = jest.fn(async () => app);
+
+        await expect(service.deployApp('demo', {}, 'user-1', {
+            executionProfile: 'remote-build',
+            sessionId: 'session-1',
+        })).rejects.toThrow('latest build is still running or queued');
+        expect(deployManagedApp).not.toHaveBeenCalled();
+    });
+
+    test('deployApp derives the registry username from the Gitea token owner when settings omit it', async () => {
+        const app = {
+            id: 'app-1',
+            ownerId: 'user-1',
+            sessionId: 'session-1',
+            slug: 'demo',
+            appName: 'Demo',
+            imageRepo: 'gitea.demoserver2.buzz/agent-apps/demo',
+            namespace: 'app-demo',
+            publicHost: 'demo.demoserver2.buzz',
+            status: 'built',
+            metadata: {
+                deploymentTarget: 'ssh',
+                requestedContainerPort: 80,
+            },
+        };
+        const buildRun = {
+            id: 'run-1',
+            buildStatus: 'success',
+            deployStatus: 'pending',
+            imageTag: 'sha-abcdef123456',
+            metadata: {},
+        };
+        const deployManagedApp = jest.fn(async () => ({
+            namespace: 'app-demo',
+            deployment: 'demo',
+            verification: {
+                rollout: true,
+                ingress: true,
+                tls: true,
+                https: true,
+            },
+            rollout: {
+                ok: true,
+            },
+        }));
+
+        const service = new ManagedAppService({
+            store: {
+                isAvailable: () => true,
+                listBuildRunsForApp: jest.fn(async () => ([buildRun])),
+                updateApp: jest.fn(async (_id, _ownerId, updates) => ({
+                    ...app,
+                    ...updates,
+                    metadata: updates.metadata,
+                })),
+                updateBuildRun: jest.fn(async (_id, updates) => ({
+                    ...buildRun,
+                    ...updates,
+                })),
+            },
+            kubernetesClient: {
+                isConfigured: jest.fn((target) => target === 'ssh'),
+                deployManagedApp,
+            },
+            giteaClient: {
+                isConfigured: jest.fn(() => true),
+                getCurrentUser: jest.fn(async () => ({
+                    login: 'builder',
+                })),
+            },
+        });
+
+        service.resolveApp = jest.fn(async () => app);
+        service.getEffectiveGiteaConfig = () => ({
+            baseURL: 'https://gitea.demoserver2.buzz',
+            registryHost: 'gitea.demoserver2.buzz',
+            registryUsername: '',
+            registryPassword: 'secret',
+        });
+        service.getEffectiveManagedAppsConfig = () => ({
+            defaultContainerPort: 80,
+            registryPullSecretName: 'gitea-registry-credentials',
+            platformNamespace: 'agent-platform',
+        });
+        service.recordClusterDeployment = jest.fn();
+        service.broadcastLifecycleEvent = jest.fn();
+
+        await service.deployApp('demo', {}, 'user-1', {
+            executionProfile: 'remote-build',
+            sessionId: 'session-1',
+        });
+
+        expect(deployManagedApp).toHaveBeenCalledWith(expect.objectContaining({
+            registryUsername: 'builder',
+            registryPassword: 'secret',
+        }));
+    });
+
     test('deployApp stores concrete deploy diagnostics when HTTPS verification fails after rollout', async () => {
         const app = {
             id: 'app-1',

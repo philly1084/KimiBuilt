@@ -12,6 +12,7 @@ const STORAGE_PATH = resolvePreferredWritableFile(
 const MAX_PATHS_PER_ENTRY = 8;
 const MAX_DOMAINS_PER_ENTRY = 8;
 const MAX_RECENT_ACTIVITY = 24;
+const MAX_TARGET_CONTEXT_ITEMS = 6;
 
 function isPlainObject(value) {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -137,6 +138,59 @@ function normalizePort(value = null, fallback = 22) {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function normalizeOptionalBoolean(value = null) {
+    if (value === true) {
+        return true;
+    }
+    if (value === false) {
+        return false;
+    }
+    return null;
+}
+
+function normalizeTargetServerContext(value = {}) {
+    const source = isPlainObject(value) ? value : {};
+    return {
+        hostname: normalizeText(source.hostname),
+        remoteUser: normalizeText(source.remoteUser),
+        arch: normalizeText(source.arch),
+        osSummary: summarizeText(source.osSummary || '', 160),
+        uptimeSummary: summarizeText(source.uptimeSummary || '', 160),
+        k3sVersion: summarizeText(source.k3sVersion || '', 120),
+        kubectlVersion: summarizeText(source.kubectlVersion || '', 120),
+        nodeNames: uniqueStrings(source.nodeNames, MAX_TARGET_CONTEXT_ITEMS),
+        ingressClasses: uniqueStrings(source.ingressClasses, MAX_TARGET_CONTEXT_ITEMS),
+        platformNamespaces: uniqueStrings(source.platformNamespaces, MAX_TARGET_CONTEXT_ITEMS),
+        traefikInstalled: normalizeOptionalBoolean(source.traefikInstalled),
+        certManagerInstalled: normalizeOptionalBoolean(source.certManagerInstalled),
+        lastRefreshedAt: toIsoTimestamp(source.lastRefreshedAt, null),
+    };
+}
+
+function mergeTargetServerContext(existing = {}, patch = {}) {
+    const normalizedExisting = normalizeTargetServerContext(existing);
+    const normalizedPatch = normalizeTargetServerContext(patch);
+    return normalizeTargetServerContext({
+        hostname: normalizedPatch.hostname || normalizedExisting.hostname,
+        remoteUser: normalizedPatch.remoteUser || normalizedExisting.remoteUser,
+        arch: normalizedPatch.arch || normalizedExisting.arch,
+        osSummary: normalizedPatch.osSummary || normalizedExisting.osSummary,
+        uptimeSummary: normalizedPatch.uptimeSummary || normalizedExisting.uptimeSummary,
+        k3sVersion: normalizedPatch.k3sVersion || normalizedExisting.k3sVersion,
+        kubectlVersion: normalizedPatch.kubectlVersion || normalizedExisting.kubectlVersion,
+        nodeNames: mergeUniqueStrings(normalizedExisting.nodeNames, normalizedPatch.nodeNames, MAX_TARGET_CONTEXT_ITEMS),
+        ingressClasses: mergeUniqueStrings(normalizedExisting.ingressClasses, normalizedPatch.ingressClasses, MAX_TARGET_CONTEXT_ITEMS),
+        platformNamespaces: mergeUniqueStrings(normalizedExisting.platformNamespaces, normalizedPatch.platformNamespaces, MAX_TARGET_CONTEXT_ITEMS),
+        traefikInstalled: normalizedPatch.traefikInstalled !== null
+            ? normalizedPatch.traefikInstalled
+            : normalizedExisting.traefikInstalled,
+        certManagerInstalled: normalizedPatch.certManagerInstalled !== null
+            ? normalizedPatch.certManagerInstalled
+            : normalizedExisting.certManagerInstalled,
+        lastRefreshedAt: normalizedPatch.lastRefreshedAt || normalizedExisting.lastRefreshedAt,
+    });
+}
+
 function createEmptyState() {
     return {
         version: 1,
@@ -184,6 +238,7 @@ function normalizeState(value = {}) {
                         lastObjective: summarizeText(entry.lastObjective || '', 220),
                         lastInspectionAt: toIsoTimestamp(entry.lastInspectionAt, null),
                         lastStatus: normalizeLowerText(entry.lastStatus),
+                        serverContext: normalizeTargetServerContext(entry.serverContext),
                     }];
                 })
                 .filter(([, entry]) => entry && entry.host),
@@ -462,18 +517,38 @@ class ClusterStateRegistry {
                 lastObjective: '',
                 lastInspectionAt: null,
                 lastStatus: '',
+                serverContext: normalizeTargetServerContext(),
             };
 
         existing.host = normalizeText(target.host) || existing.host;
         existing.username = normalizeText(target.username) || existing.username;
         existing.port = normalizePort(target.port, existing.port || 22);
         existing.lastSeenAt = new Date().toISOString();
+        existing.serverContext = normalizeTargetServerContext(existing.serverContext);
         if (objective) {
             existing.lastObjective = summarizeText(objective, 220);
         }
 
         state.targets[targetKey] = existing;
         return existing;
+    }
+
+    recordTargetContext(state, {
+        target = null,
+        context = {},
+        objective = '',
+    } = {}) {
+        const entry = this.ensureTargetEntry(state, target || {}, objective);
+        if (!entry) {
+            return null;
+        }
+
+        entry.serverContext = mergeTargetServerContext(entry.serverContext, context);
+        if (entry.serverContext.lastRefreshedAt) {
+            entry.lastInspectionAt = entry.serverContext.lastRefreshedAt;
+        }
+
+        return entry;
     }
 
     ensureDeploymentEntry(state, seed = {}) {
@@ -875,10 +950,17 @@ class ClusterStateRegistry {
             });
     }
 
-    buildPromptSummary({ maxDeployments = 3, maxRecentActivity = 3 } = {}) {
+    buildPromptSummary({ maxDeployments = 3, maxRecentActivity = 3, maxTargets = 2 } = {}) {
         const deployDefaults = this.getEffectiveDeployDefaults();
         const sshDefaults = this.getEffectiveSshDefaults();
         const state = this.getState();
+        const targets = Object.values(state.targets || {})
+            .sort((left, right) => {
+                const leftTime = Date.parse(left.lastInspectionAt || left.lastSeenAt || left.firstSeenAt || 0);
+                const rightTime = Date.parse(right.lastInspectionAt || right.lastSeenAt || right.firstSeenAt || 0);
+                return rightTime - leftTime;
+            })
+            .slice(0, Math.max(0, maxTargets));
         const deployments = this.listDeployments().slice(0, Math.max(0, maxDeployments));
         const activity = (Array.isArray(state.recentActivity) ? state.recentActivity : [])
             .slice(0, Math.max(0, maxRecentActivity));
@@ -891,6 +973,38 @@ class ClusterStateRegistry {
         if (deployDefaults.repositoryUrl || deployDefaults.targetDirectory || deployDefaults.deployment) {
             lines.push(`Cluster registry configured KimiBuilt self-deploy lane (do not assume it applies to unrelated apps): repo ${deployDefaults.repositoryUrl || '(unset)'}, dir ${deployDefaults.targetDirectory || '(unset)'}, manifests ${deployDefaults.manifestsPath || '(unset)'}, namespace ${deployDefaults.namespace || 'kimibuilt'}, deployment ${deployDefaults.deployment || 'backend'}, domain ${deployDefaults.publicDomain || 'demoserver2.buzz'}.`);
         }
+
+        targets.forEach((entry) => {
+            const context = normalizeTargetServerContext(entry.serverContext);
+            if (
+                !context.hostname
+                && !context.osSummary
+                && !context.k3sVersion
+                && !context.kubectlVersion
+                && context.nodeNames.length === 0
+                && context.ingressClasses.length === 0
+                && context.certManagerInstalled === null
+                && context.traefikInstalled === null
+            ) {
+                return;
+            }
+
+            const targetLabel = `${entry.username ? `${entry.username}@` : ''}${entry.host}:${entry.port || 22}`;
+            const fragments = [
+                context.hostname ? `host ${context.hostname}` : '',
+                context.osSummary ? context.osSummary : '',
+                context.arch ? `arch ${context.arch}` : '',
+                context.k3sVersion ? `k3s ${context.k3sVersion}` : '',
+                !context.k3sVersion && context.kubectlVersion ? `kubectl ${context.kubectlVersion}` : '',
+                context.nodeNames.length > 0 ? `nodes ${context.nodeNames.slice(0, 3).join(', ')}` : '',
+                context.ingressClasses.length > 0 ? `ingress ${context.ingressClasses.slice(0, 2).join(', ')}` : '',
+                context.traefikInstalled === true ? 'traefik yes' : (context.traefikInstalled === false ? 'traefik no' : ''),
+                context.certManagerInstalled === true ? 'cert-manager yes' : (context.certManagerInstalled === false ? 'cert-manager no' : ''),
+                context.platformNamespaces.length > 0 ? `platform ns ${context.platformNamespaces.slice(0, 2).join(', ')}` : '',
+            ].filter(Boolean);
+
+            lines.push(`Known remote target ${targetLabel}: ${fragments.join(', ')}.`);
+        });
 
         deployments.forEach((entry) => {
             const verificationSummary = [

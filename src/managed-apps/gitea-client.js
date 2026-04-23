@@ -120,6 +120,10 @@ class GiteaClient {
         });
     }
 
+    async getCurrentUser() {
+        return this.request('GET', '/user');
+    }
+
     async listRepositoryWorkflowRuns({
         owner = '',
         repo = '',

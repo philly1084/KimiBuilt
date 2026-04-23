@@ -150,4 +150,36 @@ describe('ClusterStateRegistry', () => {
       deploymentCount: 1,
     }));
   });
+
+  test('stores remote target baseline context so later agents can reuse it', () => {
+    const state = registry.getState();
+    registry.recordTargetContext(state, {
+      target: {
+        host: 'ubuntu-32gb-fsn1-2',
+        username: 'ubuntu',
+        port: 22,
+      },
+      objective: 'Inspect the remote k3s cluster before deploying a managed app.',
+      context: {
+        hostname: 'deploy-node-1',
+        remoteUser: 'ubuntu',
+        arch: 'aarch64',
+        osSummary: 'Ubuntu 24.04.2 LTS',
+        k3sVersion: 'k3s version v1.30.6+k3s1',
+        nodeNames: ['deploy-node-1'],
+        ingressClasses: ['traefik'],
+        traefikInstalled: true,
+        certManagerInstalled: true,
+        platformNamespaces: ['agent-platform'],
+        lastRefreshedAt: '2026-04-19T10:00:00.000Z',
+      },
+    });
+    registry.saveState();
+
+    const summary = registry.buildPromptSummary();
+    expect(summary).toContain('Known remote target ubuntu@ubuntu-32gb-fsn1-2:22');
+    expect(summary).toContain('k3s version v1.30.6+k3s1');
+    expect(summary).toContain('traefik');
+    expect(summary).toContain('cert-manager yes');
+  });
 });

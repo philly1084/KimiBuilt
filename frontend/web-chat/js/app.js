@@ -9,6 +9,14 @@ const AMBIENT_REASONING_ROTATE_MAX_MS = 30000;
 const AMBIENT_REASONING_TYPE_TICK_MS = 120;
 const AMBIENT_REASONING_IDLE_THRESHOLD_MS = 20000;
 const WEB_CHAT_QUEUE_MAX_SIZE = 3;
+const webChatWorkspaceHelpers = window.KimiBuiltWebChatWorkspace || null;
+const webChatWorkspaceEmbedHelpers = window.KimiBuiltWebChatWorkspaceEmbed || null;
+const WEB_CHAT_APP_WORKSPACE_CONTEXT = typeof webChatWorkspaceHelpers?.getWorkspaceContext === 'function'
+    ? webChatWorkspaceHelpers.getWorkspaceContext()
+    : {
+        key: 'workspace-1',
+        embedded: false,
+    };
 const AMBIENT_REASONING_STARTS = [
     'Just milking the moose',
     'Running with a fowl',
@@ -312,6 +320,7 @@ class ChatApp {
         // Track if we're generating an image
         this.isGeneratingImage = false;
         this.currentImageMessageId = null;
+        this.workspaceContext = WEB_CHAT_APP_WORKSPACE_CONTEXT;
         this.messageQueue = [];
         this.isProcessingQueue = false;
         
@@ -349,7 +358,7 @@ class ChatApp {
         this.pendingStreamResync = null;
         this.resumeSyncTimer = null;
         this.resumeSyncInFlight = false;
-        this.pageWasHidden = document.hidden === true;
+        this.pageWasHidden = this.isAppBackgrounded();
         this.lastResumeSyncAt = 0;
         this.connectionStatus = 'checking';
         this.managedAppProgressByKey = new Map();
@@ -602,6 +611,130 @@ class ChatApp {
                 this.scheduleResumeSync('focus', 0);
             }
         });
+
+        window.addEventListener('kimibuilt-web-chat-workspace-activity', (event) => {
+            this.handleWorkspaceActivityChange(event.detail?.active !== false);
+        });
+    }
+
+    isHostWorkspaceActive() {
+        if (this.workspaceContext?.embedded !== true) {
+            return true;
+        }
+
+        if (typeof webChatWorkspaceEmbedHelpers?.isHostWorkspaceActive === 'function') {
+            return webChatWorkspaceEmbedHelpers.isHostWorkspaceActive();
+        }
+
+        return window.__kimibuiltWebChatHostWorkspaceActive !== false;
+    }
+
+    isAppBackgrounded(context = {}) {
+        return context?.hidden === true || document.hidden === true || !this.isHostWorkspaceActive();
+    }
+
+    handleWorkspaceActivityChange(active = true) {
+        if (active !== false) {
+            if (this.pageWasHidden || this.pendingStreamResync) {
+                this.scheduleResumeSync('workspace-visibility', 0);
+            }
+            return;
+        }
+
+        this.pageWasHidden = true;
+        this.markActiveStreamInterrupted('workspace_hidden');
+        if ((this.pendingStreamResync || this.activeStreamRequest)?.acceptedByServer) {
+            this.enterBackgroundStreamMode({
+                detail: this.getBackgroundStreamDetail(),
+            });
+        }
+    }
+
+    getTrackedStreamRequest() {
+        return this.pendingStreamResync || this.activeStreamRequest || null;
+    }
+
+    getTrackedStreamSessionId(fallbackSessionId = '') {
+        return String(
+            this.getTrackedStreamRequest()?.sessionId
+            || fallbackSessionId
+            || sessionManager.currentSessionId
+            || '',
+        ).trim();
+    }
+
+    getStreamingMessageSessionId(messageId = '') {
+        const normalizedMessageId = String(messageId || this.currentStreamingMessageId || '').trim();
+        const trackedRequest = this.getTrackedStreamRequest();
+        if (trackedRequest && (!normalizedMessageId || trackedRequest.assistantMessageId === normalizedMessageId)) {
+            return String(trackedRequest.sessionId || '').trim();
+        }
+
+        return String(sessionManager.currentSessionId || '').trim();
+    }
+
+    isVisibleSession(sessionId = '') {
+        const normalizedSessionId = String(sessionId || '').trim();
+        return Boolean(normalizedSessionId)
+            && normalizedSessionId === String(sessionManager.currentSessionId || '').trim();
+    }
+
+    getCurrentQueueSessionId() {
+        return String(sessionManager.currentSessionId || this.getTrackedStreamSessionId('')).trim();
+    }
+
+    isQueuedMessageForSession(entry = {}, sessionId = this.getCurrentQueueSessionId()) {
+        const normalizedSessionId = String(sessionId || '').trim();
+        const normalizedEntrySessionId = String(entry?.sessionId || '').trim();
+        const normalizedWorkspaceKey = String(this.workspaceContext?.key || '').trim();
+        const normalizedEntryWorkspaceKey = String(entry?.workspaceKey || normalizedWorkspaceKey).trim();
+        return Boolean(normalizedSessionId)
+            && normalizedEntryWorkspaceKey === normalizedWorkspaceKey
+            && normalizedEntrySessionId === normalizedSessionId;
+    }
+
+    getQueuedMessageCount(sessionId = this.getCurrentQueueSessionId()) {
+        return this.messageQueue.filter((entry) => this.isQueuedMessageForSession(entry, sessionId)).length;
+    }
+
+    discardQueuedMessagesForSession(sessionId = '') {
+        const normalizedSessionId = String(sessionId || '').trim();
+        if (!normalizedSessionId) {
+            return;
+        }
+
+        this.messageQueue = this.messageQueue.filter((entry) => !this.isQueuedMessageForSession(entry, normalizedSessionId));
+    }
+
+    remapSessionScopedState(previousSessionId = '', nextSessionId = '') {
+        const normalizedPreviousSessionId = String(previousSessionId || '').trim();
+        const normalizedNextSessionId = String(nextSessionId || '').trim();
+        if (!normalizedPreviousSessionId || !normalizedNextSessionId || normalizedPreviousSessionId === normalizedNextSessionId) {
+            return normalizedNextSessionId || normalizedPreviousSessionId;
+        }
+
+        [this.activeStreamRequest, this.pendingStreamResync].forEach((request) => {
+            if (request?.sessionId === normalizedPreviousSessionId) {
+                request.sessionId = normalizedNextSessionId;
+            }
+        });
+        this.messageQueue = this.messageQueue.map((entry) => (
+            this.isQueuedMessageForSession(entry, normalizedPreviousSessionId)
+                ? {
+                    ...entry,
+                    sessionId: normalizedNextSessionId,
+                }
+                : entry
+        ));
+
+        if (this.pendingWorkloadSessionId === normalizedPreviousSessionId) {
+            this.pendingWorkloadSessionId = normalizedNextSessionId;
+        }
+        if (this.subscribedWorkloadSessionId === normalizedPreviousSessionId) {
+            this.subscribedWorkloadSessionId = normalizedNextSessionId;
+        }
+
+        return normalizedNextSessionId;
     }
 
     handleInputSlashCommand(value) {
@@ -640,11 +773,13 @@ class ChatApp {
                     this.subscribeToSessionUpdates(e.detail.sessionId);
                     this.loadSessionWorkloads(e.detail.sessionId);
                     this.updateSessionInfo();
+                    void this.processMessageQueue({ sessionId: e.detail.sessionId });
                     uiHelpers.closeSidebar();
                 });
         });
-        
+
         sessionManager.addEventListener('sessionDeleted', (e) => {
+            this.discardQueuedMessagesForSession(e.detail.sessionId);
             apiClient.setSessionId(e.detail.newCurrentSessionId || null);
             if (e.detail.newCurrentSessionId) {
                 const session = sessionManager.getCurrentSession();
@@ -672,6 +807,7 @@ class ChatApp {
         });
 
         sessionManager.addEventListener('sessionPromoted', (e) => {
+            this.remapSessionScopedState(e.detail.previousSessionId, e.detail.sessionId);
             this.subscribeToSessionUpdates(e.detail.sessionId);
             this.loadSessionWorkloads(e.detail.sessionId);
         });
@@ -3267,7 +3403,7 @@ class ChatApp {
         this.updateSendButton();
         uiHelpers.updateCharCounter(this.messageInput, this.charCounter);
 
-        if (this.isProcessing || this.messageQueue.length >= WEB_CHAT_QUEUE_MAX_SIZE) {
+        if (this.isProcessing || this.getQueuedMessageCount() >= WEB_CHAT_QUEUE_MAX_SIZE) {
             this.enqueueMessage(content);
             return;
         }
@@ -3510,7 +3646,7 @@ class ChatApp {
     }
 
     clearCurrentStreamingMessage() {
-        const sessionId = sessionManager.currentSessionId;
+        const sessionId = this.getStreamingMessageSessionId();
         const streamingMessageId = this.currentStreamingMessageId;
         if (!streamingMessageId || !sessionId) {
             return false;
@@ -3539,30 +3675,47 @@ class ChatApp {
             return false;
         }
 
-        if (this.messageQueue.length >= WEB_CHAT_QUEUE_MAX_SIZE) {
+        const sessionId = this.getCurrentQueueSessionId();
+        if (!sessionId) {
+            return false;
+        }
+
+        if (this.getQueuedMessageCount(sessionId) >= WEB_CHAT_QUEUE_MAX_SIZE) {
             uiHelpers.showToast(`You can queue up to ${WEB_CHAT_QUEUE_MAX_SIZE} messages.`, 'warning');
             return false;
         }
 
         this.messageQueue.push({
             content: normalizedContent,
+            sessionId,
+            workspaceKey: this.workspaceContext?.key || 'workspace-1',
             queuedAt: Date.now(),
         });
         this.updateSendButton();
-        uiHelpers.showToast(`Message queued (${this.messageQueue.length}/${WEB_CHAT_QUEUE_MAX_SIZE})`, 'info');
+        uiHelpers.showToast(`Message queued (${this.getQueuedMessageCount(sessionId)}/${WEB_CHAT_QUEUE_MAX_SIZE})`, 'info');
         return true;
     }
 
-    async processMessageQueue() {
-        if (this.isProcessingQueue || this.messageQueue.length === 0) {
+    async processMessageQueue(options = {}) {
+        const targetSessionId = String(options.sessionId || sessionManager.currentSessionId || '').trim();
+        if (this.isProcessingQueue || this.messageQueue.length === 0 || !targetSessionId) {
             return;
         }
 
         this.isProcessingQueue = true;
 
         try {
-            while (!this.isProcessing && this.messageQueue.length > 0) {
-                const next = this.messageQueue.shift();
+            while (!this.isProcessing) {
+                if (!this.isVisibleSession(targetSessionId)) {
+                    break;
+                }
+
+                const nextIndex = this.messageQueue.findIndex((entry) => this.isQueuedMessageForSession(entry, targetSessionId));
+                if (nextIndex === -1) {
+                    break;
+                }
+
+                const [next] = this.messageQueue.splice(nextIndex, 1);
                 if (!next?.content) {
                     continue;
                 }
@@ -5368,8 +5521,8 @@ class ChatApp {
         };
     }
 
-    appendToolSelectionMessages(parentMessageId, toolEvents = []) {
-        const sessionId = sessionManager.currentSessionId;
+    appendToolSelectionMessages(parentMessageId, toolEvents = [], options = {}) {
+        const sessionId = String(options.sessionId || sessionManager.currentSessionId || '').trim();
         if (!sessionId || !parentMessageId || !Array.isArray(toolEvents) || toolEvents.length === 0) {
             return;
         }
@@ -5537,13 +5690,18 @@ class ChatApp {
             return;
         }
 
+        const isVisibleSession = this.isVisibleSession(sessionId);
         nextMessages.forEach((message) => {
             const savedMessage = this.upsertSessionMessage(sessionId, message);
-            this.renderOrReplaceMessage(savedMessage || message);
+            if (isVisibleSession) {
+                this.renderOrReplaceMessage(savedMessage || message);
+            }
         });
 
-        uiHelpers.scrollToBottom(false);
-        this.updateSessionInfo();
+        if (isVisibleSession) {
+            uiHelpers.scrollToBottom(false);
+            this.updateSessionInfo();
+        }
         uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
     }
 
@@ -5563,6 +5721,7 @@ class ChatApp {
         const didChangeSession = currentSessionId !== sessionId;
         if (currentSessionId !== sessionId) {
             sessionManager.promoteSessionId(currentSessionId, sessionId);
+            this.remapSessionScopedState(currentSessionId, sessionId);
         }
 
         apiClient.setSessionId(sessionId);
@@ -5666,7 +5825,7 @@ class ChatApp {
                 return;
             }
 
-            const sessionId = sessionManager.currentSessionId;
+            const sessionId = this.getStreamingMessageSessionId();
             const message = this.getSessionMessage(sessionId, this.currentStreamingMessageId);
             if (!message || message.isStreaming !== true) {
                 this.clearAmbientReasoningTimer();
@@ -5834,7 +5993,7 @@ class ChatApp {
 
     updateStreamingMessageState(patch = {}, options = {}) {
         const messageId = String(this.currentStreamingMessageId || patch?.id || '').trim();
-        const sessionId = sessionManager.currentSessionId;
+        const sessionId = this.getStreamingMessageSessionId(messageId);
         if (!messageId || !sessionId) {
             return null;
         }
@@ -5887,10 +6046,10 @@ class ChatApp {
         }
 
         const savedMessage = this.upsertSessionMessage(sessionId, nextMessage);
-        if ((options.render ?? true) && savedMessage) {
+        if ((options.render ?? true) && savedMessage && this.isVisibleSession(sessionId)) {
             uiHelpers.updateMessageContent(messageId, savedMessage, savedMessage.isStreaming === true);
         }
-        if (options.scroll === true) {
+        if (options.scroll === true && this.isVisibleSession(sessionId)) {
             uiHelpers.scrollToBottom();
         }
 
@@ -5965,7 +6124,7 @@ class ChatApp {
     handleDelta(content) {
         if (!this.currentStreamingMessageId) return;
 
-        const sessionId = sessionManager.currentSessionId;
+        const sessionId = this.getStreamingMessageSessionId();
         const currentMessage = this.getSessionMessage(sessionId, this.currentStreamingMessageId);
         if (!currentMessage || currentMessage.role !== 'assistant') {
             return;
@@ -6048,7 +6207,12 @@ class ChatApp {
         // Reset retry counter on success
         this.retryAttempt = 0;
         
-        const sessionId = sessionManager.currentSessionId;
+        const trackedRequest = this.getTrackedStreamRequest();
+        const sessionId = String(trackedRequest?.sessionId || sessionManager.currentSessionId || '').trim();
+        if (!sessionId) {
+            return;
+        }
+        const isVisibleSession = this.isVisibleSession(sessionId);
         const parentMessageId = this.currentStreamingMessageId;
         const previousMessages = sessionManager.getMessages(sessionId).slice();
         
@@ -6150,10 +6314,10 @@ class ChatApp {
             || finalizedStreamingMessage
             || currentMessage;
 
-        if (insertedSurveyMessage) {
+        if (insertedSurveyMessage && isVisibleSession) {
             this.renderMessages(messages);
             this.presentAssistantMessage(insertedSurveyMessage, chunk.toolEvents);
-        } else if (lastMessage) {
+        } else if (lastMessage && isVisibleSession) {
             this.renderOrReplaceMessage(lastMessage);
             uiHelpers.markMessageSettled(lastMessage.id);
             this.presentAssistantMessage(lastMessage, chunk.toolEvents);
@@ -6169,7 +6333,7 @@ class ChatApp {
         });
 
         if (Array.isArray(chunk.toolEvents) && chunk.toolEvents.length > 0) {
-            this.appendToolSelectionMessages(parentMessageId, chunk.toolEvents);
+            this.appendToolSelectionMessages(parentMessageId, chunk.toolEvents, { sessionId });
         }
 
         if (this.hasSurveyToolEvent(chunk.toolEvents) && !hasVisibleSurveyMessage) {
@@ -6177,13 +6341,18 @@ class ChatApp {
         }
         
         // Update session info (timestamp changed)
-        this.updateSessionInfo();
+        if (isVisibleSession) {
+            this.updateSessionInfo();
+        }
         uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
-        void this.processMessageQueue();
+        void this.processMessageQueue({ sessionId });
     }
 
     handleError(message, status = null) {
         console.error('Chat error:', message, 'status:', status);
+        const trackedRequest = this.getTrackedStreamRequest();
+        const sessionId = String(trackedRequest?.sessionId || sessionManager.currentSessionId || '').trim();
+        const isVisibleSession = this.isVisibleSession(sessionId);
         
         // Check if this is a network/connection error that we should handle gracefully
         const normalizedMessage = String(message || '').toLowerCase();
@@ -6250,14 +6419,13 @@ class ChatApp {
         
         // Max retries exceeded or non-network error - show the error
         // Remove the streaming message placeholder
-        if (this.currentStreamingMessageId) {
+        if (this.currentStreamingMessageId && sessionId) {
             const el = document.getElementById(this.currentStreamingMessageId);
-            if (el) {
+            if (el && isVisibleSession) {
                 el.remove();
             }
             
             // Remove from session
-            const sessionId = sessionManager.currentSessionId;
             const messages = sessionManager.getMessages(sessionId);
             if (messages.length > 0 && messages[messages.length - 1].role === 'assistant') {
                 messages.pop();
@@ -6288,13 +6456,16 @@ class ChatApp {
         }
         
         uiHelpers.showToast(displayMessage, 'error', errorTitle);
-        void this.processMessageQueue();
+        void this.processMessageQueue({ sessionId });
     }
     
     retryLastRequest() {
         // This is called to retry the last message
         // For now, we'll just try to regenerate the last user message
-        const sessionId = sessionManager.currentSessionId;
+        const sessionId = this.getTrackedStreamSessionId();
+        if (!sessionId || !this.isVisibleSession(sessionId)) {
+            return;
+        }
         const messages = sessionManager.getMessages(sessionId);
         const lastUserMessage = [...messages].reverse().find(m => m.role === 'user');
 
@@ -6321,7 +6492,9 @@ class ChatApp {
     }
 
     handleCancelled(options = {}) {
-        const sessionId = sessionManager.currentSessionId;
+        const trackedRequest = this.getTrackedStreamRequest();
+        const sessionId = String(trackedRequest?.sessionId || sessionManager.currentSessionId || '').trim();
+        const isVisibleSession = this.isVisibleSession(sessionId);
         if (this.currentStreamingMessageId && sessionId) {
             const currentMessage = this.getSessionMessage(sessionId, this.currentStreamingMessageId);
             const currentContent = String(currentMessage?.content || '').trim();
@@ -6347,17 +6520,21 @@ class ChatApp {
             });
 
             if (stoppedMessage) {
-                this.renderOrReplaceMessage(stoppedMessage);
-                uiHelpers.markMessageSettled(stoppedMessage.id);
+                if (isVisibleSession) {
+                    this.renderOrReplaceMessage(stoppedMessage);
+                    uiHelpers.markMessageSettled(stoppedMessage.id);
+                }
                 this.persistSessionMessageIfNeeded(sessionId, stoppedMessage);
             }
         }
         this.finalizeActiveStreamState({
             hideTypingIndicator: true,
         });
-        this.updateSessionInfo();
+        if (isVisibleSession) {
+            this.updateSessionInfo();
+        }
         uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
-        void this.processMessageQueue();
+        void this.processMessageQueue({ sessionId });
     }
 
     async regenerateResponse(messageId) {
@@ -6911,7 +7088,7 @@ class ChatApp {
 
     updateSendButton() {
         const hasContent = this.messageInput?.value?.trim()?.length > 0;
-        const canQueue = this.messageQueue.length < WEB_CHAT_QUEUE_MAX_SIZE;
+        const canQueue = this.getQueuedMessageCount() < WEB_CHAT_QUEUE_MAX_SIZE;
         const canSend = hasContent && canQueue && !this.isGeneratingImage;
         const showStopControl = this.isProcessing;
         
@@ -7052,12 +7229,12 @@ class ChatApp {
     }
 
     shouldResyncAfterDisconnect(error = null, context = {}) {
-        const trackedRequest = this.pendingStreamResync || this.activeStreamRequest;
+        const trackedRequest = this.getTrackedStreamRequest();
         if (!trackedRequest) {
             return false;
         }
 
-        const hidden = context?.hidden === true || document.hidden;
+        const hidden = this.isAppBackgrounded(context);
         const online = context?.online !== false && (typeof navigator === 'undefined' || navigator.onLine !== false);
 
         if (trackedRequest.lifecycleInterrupted) {
@@ -7310,7 +7487,7 @@ class ChatApp {
             content: String(persistedMessage?.content || ''),
         });
 
-        if (!document.hidden) {
+        if (!this.isAppBackgrounded()) {
             this.scheduleResumeSync('stream-resync', 0);
         }
 
@@ -7355,7 +7532,7 @@ class ChatApp {
 
     async recoverInterruptedStream() {
         const trackedRequest = this.pendingStreamResync;
-        if (!trackedRequest || this.resumeSyncInFlight || document.hidden) {
+        if (!trackedRequest || this.resumeSyncInFlight || this.isAppBackgrounded()) {
             return;
         }
 
@@ -7375,15 +7552,17 @@ class ChatApp {
 
             const messages = this.syncAnnotatedSurveyStates(sessionId);
             if (this.hasRecoveredInterruptedStream(messages, trackedRequest)) {
-                this.renderMessages(messages);
-                this.playCueForNewAssistantMessages(trackedRequest.previousMessages, messages);
-                this.updateSessionInfo();
+                if (this.isVisibleSession(sessionId)) {
+                    this.renderMessages(messages);
+                    this.playCueForNewAssistantMessages(trackedRequest.previousMessages, messages);
+                    this.updateSessionInfo();
+                }
                 uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
                 this.finalizeActiveStreamState({
                     hideTypingIndicator: true,
                     scheduleIndicatorHide: true,
                 });
-                void this.processMessageQueue();
+                void this.processMessageQueue({ sessionId });
                 return;
             }
 
@@ -7470,7 +7649,7 @@ class ChatApp {
     }
 
     finalizeInterruptedStreamFailure() {
-        const trackedRequest = this.pendingStreamResync || this.activeStreamRequest;
+        const trackedRequest = this.getTrackedStreamRequest();
         const maxResyncAttempts = Math.max(1, Number(trackedRequest?.maxResyncAttempts) || 6);
         const resyncAttempts = Math.max(0, Number(trackedRequest?.resyncAttempts) || 0);
         if (trackedRequest?.acceptedByServer && resyncAttempts < maxResyncAttempts) {
@@ -7485,11 +7664,11 @@ class ChatApp {
             return;
         }
 
-        const sessionId = sessionManager.currentSessionId;
+        const sessionId = String(trackedRequest?.sessionId || sessionManager.currentSessionId || '').trim();
         const messageId = this.pendingStreamResync?.assistantMessageId || this.currentStreamingMessageId;
         if (sessionId && messageId) {
             const failedEl = document.getElementById(messageId);
-            if (failedEl) {
+            if (failedEl && this.isVisibleSession(sessionId)) {
                 failedEl.remove();
             }
 
@@ -7508,7 +7687,7 @@ class ChatApp {
             ? 'The reply could not be resynced after reconnecting. You can retry or send the next message.'
             : 'Connection was restored, but the latest reply could not be synced. Retry if needed.';
         uiHelpers.showToast(syncWarning, 'warning', 'Sync incomplete');
-        void this.processMessageQueue();
+        void this.processMessageQueue({ sessionId });
     }
 
     handleInterruptedStreamResync(chunk = {}) {
@@ -7527,7 +7706,7 @@ class ChatApp {
             this.enterBackgroundStreamMode({
                 detail: this.getBackgroundStreamDetail(),
             });
-            if (!document.hidden) {
+            if (!this.isAppBackgrounded()) {
                 this.scheduleResumeSync('stream-resync', 0);
             }
             return;
@@ -7555,7 +7734,7 @@ class ChatApp {
             trackedRequest.notifiedResync = true;
         }
 
-        if (!document.hidden) {
+        if (!this.isAppBackgrounded()) {
             this.scheduleResumeSync('stream-resync', 0);
         }
     }
@@ -7628,6 +7807,9 @@ class ChatApp {
     startHealthCheckInterval() {
         // Check every 30 seconds
         setInterval(async () => {
+            if (this.isAppBackgrounded()) {
+                return;
+            }
             const health = await apiClient.checkHealth();
             this.updateConnectionStatus(health.connected ? 'connected' : 'disconnected');
         }, 30000);
@@ -7635,7 +7817,7 @@ class ChatApp {
 
     startSharedSessionSyncInterval() {
         this.sharedSessionSyncTimer = setInterval(() => {
-            if (document.hidden) {
+            if (this.isAppBackgrounded()) {
                 return;
             }
 

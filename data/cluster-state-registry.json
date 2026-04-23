@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-04-22T20:49:10.216Z",
+  "updatedAt": "2026-04-23T21:36:45.697Z",
   "targets": {
     "10.0.0.5:22": {
       "key": "10.0.0.5:22",
@@ -31,7 +31,22 @@
       ],
       "lastObjective": "Use remote-build to keep going through the routine server checks.",
       "lastInspectionAt": "2026-04-19T04:12:07.113Z",
-      "lastStatus": "succeeded"
+      "lastStatus": "succeeded",
+      "serverContext": {
+        "hostname": "",
+        "remoteUser": "",
+        "arch": "",
+        "osSummary": "",
+        "uptimeSummary": "",
+        "k3sVersion": "",
+        "kubectlVersion": "",
+        "nodeNames": [],
+        "ingressClasses": [],
+        "platformNamespaces": [],
+        "traefikInstalled": null,
+        "certManagerInstalled": null,
+        "lastRefreshedAt": null
+      }
     },
     "162.55.163.199:22": {
       "key": "162.55.163.199:22",
@@ -48,7 +63,22 @@
       ],
       "lastObjective": "Replace the deployed HTML on the remote server and restart the website workload.",
       "lastInspectionAt": null,
-      "lastStatus": "succeeded"
+      "lastStatus": "succeeded",
+      "serverContext": {
+        "hostname": "",
+        "remoteUser": "",
+        "arch": "",
+        "osSummary": "",
+        "uptimeSummary": "",
+        "k3sVersion": "",
+        "kubectlVersion": "",
+        "nodeNames": [],
+        "ingressClasses": [],
+        "platformNamespaces": [],
+        "traefikInstalled": null,
+        "certManagerInstalled": null,
+        "lastRefreshedAt": null
+      }
     }
   },
   "deployments": {

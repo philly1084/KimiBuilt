@@ -38,6 +38,12 @@ function buildInspectionStdout(overrides = {}) {
         deploymentContainerPort: '80',
         servicePort: '80',
         serviceTargetPort: '80',
+        podName: 'demo-abc123',
+        podPhase: 'Running',
+        podWaitingReason: '',
+        podWaitingMessage: '',
+        podTerminatedReason: '',
+        podTerminatedMessage: '',
         ingressHost: 'demo.demoserver2.buzz',
         ingressBackendService: 'demo',
         ingressBackendPort: '80',
@@ -70,6 +76,12 @@ function buildInspectionStdout(overrides = {}) {
         `__KIMIBUILT_DEPLOYMENT_CONTAINER_PORT__=${values.deploymentContainerPort}`,
         `__KIMIBUILT_SERVICE_PORT__=${values.servicePort}`,
         `__KIMIBUILT_SERVICE_TARGET_PORT__=${values.serviceTargetPort}`,
+        `__KIMIBUILT_POD_NAME__=${values.podName}`,
+        `__KIMIBUILT_POD_PHASE__=${values.podPhase}`,
+        `__KIMIBUILT_POD_WAITING_REASON__=${values.podWaitingReason}`,
+        `__KIMIBUILT_POD_WAITING_MESSAGE__=${values.podWaitingMessage}`,
+        `__KIMIBUILT_POD_TERMINATED_REASON__=${values.podTerminatedReason}`,
+        `__KIMIBUILT_POD_TERMINATED_MESSAGE__=${values.podTerminatedMessage}`,
         `__KIMIBUILT_INGRESS_HOST__=${values.ingressHost}`,
         `__KIMIBUILT_INGRESS_BACKEND_SERVICE__=${values.ingressBackendService}`,
         `__KIMIBUILT_INGRESS_BACKEND_PORT__=${values.ingressBackendPort}`,
@@ -358,10 +370,66 @@ describe('KubernetesClient', () => {
         expect(result.diagnostics.ingressBackendMatches).toBe(false);
     });
 
+    test('deployManagedApp still inspects pod state when rollout fails so image pull errors are visible', async () => {
+        const sshTool = createDeploySshTool({
+            applyExitCode: 1,
+            inspectionStdout: buildInspectionStdout({
+                deploymentPresent: 'true',
+                servicePresent: 'true',
+                ingressPresent: 'true',
+                podPhase: 'Pending',
+                podWaitingReason: 'ErrImagePull',
+                podWaitingMessage: 'failed to authorize: unexpected status from GET request to https://gitea.demoserver2.buzz/v2/token: 401 Unauthorized',
+                tlsSecret: 'false',
+                certificateReady: 'false',
+                appProbeAttempted: 'false',
+                appProbeOk: 'false',
+                appProbeStatus: '0',
+            }),
+        });
+        const client = new KubernetesClient({
+            managedAppsConfig: {
+                deployTarget: 'ssh',
+            },
+            sshTool,
+        });
+
+        client.waitForHttps = jest.fn(async () => ({
+            ok: false,
+            error: 'Rollout failed before HTTPS verification started.',
+            attemptsCompleted: false,
+        }));
+        client.isSshConfigured = jest.fn(() => true);
+
+        const result = await client.deployManagedApp({
+            slug: 'demo',
+            namespace: 'app-demo',
+            publicHost: 'demo.demoserver2.buzz',
+            image: 'gitea.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
+            deploymentTarget: 'ssh',
+        });
+
+        expect(result.rollout.ok).toBe(false);
+        expect(result.diagnostics.podStatus).toEqual(expect.objectContaining({
+            phase: 'Pending',
+            waitingReason: 'ErrImagePull',
+            waitingMessage: expect.stringContaining('401 Unauthorized'),
+        }));
+    });
+
     test('inspectManagedAppPlatform reads remote Gitea runner health from the SSH target', async () => {
         const sshTool = {
             handler: jest.fn(async () => ({
                 stdout: [
+                    '__KIMIBUILT_HOSTNAME__=deploy-node-1',
+                    '__KIMIBUILT_REMOTE_USER__=ubuntu',
+                    '__KIMIBUILT_REMOTE_ARCH__=aarch64',
+                    '__KIMIBUILT_OS_SUMMARY__=Ubuntu 24.04.2 LTS',
+                    '__KIMIBUILT_K3S_VERSION__=k3s version v1.30.6+k3s1',
+                    '__KIMIBUILT_NODE__=deploy-node-1',
+                    '__KIMIBUILT_PLATFORM_INGRESS_CLASS__=traefik',
+                    '__KIMIBUILT_PLATFORM_TRAEFIK__=true',
+                    '__KIMIBUILT_PLATFORM_CERT_MANAGER__=true',
                     '__KIMIBUILT_PLATFORM_NAMESPACE__=agent-platform',
                     '__KIMIBUILT_PLATFORM_NAMESPACE_EXISTS__=true',
                     '__KIMIBUILT_DEPLOYMENT__=gitea|present|1|1|1|1',
@@ -406,6 +474,17 @@ describe('KubernetesClient', () => {
         expect(result.giteaInstanceUrl).toBe('https://gitea.demoserver2.buzz');
         expect(result.runnerLogExcerpt).toContain('registration token invalid');
         expect(result.executionHost).toBe('deploy.example:22');
+        expect(result.serverContext).toEqual(expect.objectContaining({
+            hostname: 'deploy-node-1',
+            remoteUser: 'ubuntu',
+            arch: 'aarch64',
+            osSummary: 'Ubuntu 24.04.2 LTS',
+            k3sVersion: 'k3s version v1.30.6+k3s1',
+            ingressClasses: expect.arrayContaining(['traefik']),
+            nodeNames: expect.arrayContaining(['deploy-node-1']),
+            traefikInstalled: true,
+            certManagerInstalled: true,
+        }));
     });
 
     test('reconcileManagedAppPlatform updates the runner secret and restarts act-runner over SSH', async () => {

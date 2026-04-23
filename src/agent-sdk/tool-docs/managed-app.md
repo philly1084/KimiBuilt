@@ -34,8 +34,10 @@ Use this tool as the single control-plane entry point when the remote Gitea inst
 ## Notes
 
 - Build runs are tracked authoritatively in Postgres.
-- Cluster verification state is also recorded in the file-backed cluster registry so later turns can reuse rollout, ingress, TLS, and HTTPS context.
+- Cluster verification state and remote server baseline context are also recorded in the file-backed cluster registry so later turns can reuse rollout, ingress, TLS, HTTPS, host, k3s, and ingress-controller context.
 - The external Gitea workflow is expected to POST build events to `/api/integrations/gitea/build-events` with `X-KimiBuilt-Webhook-Secret`.
+- `deploy` now refuses to continue when the latest build is still queued/running or failed, unless an explicit image tag is provided. It should deploy a known-good image, not guess.
+- `deploy` refreshes remote k3s platform context before manifest apply so later agents inherit a simple baseline for the deploy host and cluster.
 - The `doctor` action is the preferred first check when Gitea Actions are queued or waiting. It inspects the same remote cluster the managed-app deploy lane uses.
 - The `reconcile` action is the preferred repair path when the platform exists but Gitea runners are missing, tokened incorrectly, or stuck waiting. It is designed for the case where the Gitea instance and deploy cluster live on the same remote server or k3s environment.
 - For remote app authoring requests, prefer `managed-app create` or `managed-app update` over ad hoc repo-runner tools. This control plane is the intended path for code changes, Gitea builds, and remote k3s deployment on the same server.

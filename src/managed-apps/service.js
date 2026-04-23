@@ -473,6 +473,36 @@ function resolveManagedAppImageRepo(input = {}, giteaConfig = {}) {
     return isUsableImageRepo(derived) ? derived : '';
 }
 
+function extractImageTagFromImageRef(value = '') {
+    const normalized = normalizeText(value);
+    if (!normalized) {
+        return '';
+    }
+
+    const lastSlash = normalized.lastIndexOf('/');
+    const lastColon = normalized.lastIndexOf(':');
+    if (lastColon <= lastSlash) {
+        return '';
+    }
+
+    return normalizeText(normalized.slice(lastColon + 1));
+}
+
+function buildManagedAppDeployBuildStateError(buildRun = null) {
+    const status = normalizeBuildStatus(buildRun?.buildStatus);
+    let message = 'Managed app deployment requires a successful image build before deployment can continue.';
+    if (isPendingBuildStatus(status)) {
+        message = 'Managed app deployment requires a successful image build. The latest build is still running or queued; wait for the remote Gitea workflow to finish before deploying.';
+    } else if (isFailedBuildStatus(status)) {
+        message = 'Managed app deployment requires a successful image build. The latest build failed, so deployment will not continue until the image build succeeds or an explicit image tag is provided.';
+    }
+
+    const error = new Error(message);
+    error.statusCode = 409;
+    error.buildStatus = status || 'unknown';
+    return error;
+}
+
 function hasPersistedAppId(app = null) {
     return Boolean(normalizeText(app?.id));
 }
@@ -723,6 +753,15 @@ function getManagedAppDeployDiagnostics(app = null, deployment = null) {
     const appProbeStatus = Number(diagnostics?.appProbe?.status || 0) || 0;
     const appProbeError = normalizeText(diagnostics?.appProbe?.error);
     const appProbeBody = normalizeText(diagnostics?.appProbe?.bodyPreview);
+    const podStatus = diagnostics?.podStatus && typeof diagnostics.podStatus === 'object'
+        ? diagnostics.podStatus
+        : {};
+    const podName = normalizeText(podStatus.name);
+    const podPhase = normalizeText(podStatus.phase);
+    const podWaitingReason = normalizeText(podStatus.waitingReason);
+    const podWaitingMessage = normalizeText(podStatus.waitingMessage);
+    const podTerminatedReason = normalizeText(podStatus.terminatedReason);
+    const podTerminatedMessage = normalizeText(podStatus.terminatedMessage);
     const rolloutError = normalizeText(deployResult?.rollout?.error);
 
     let ingressIssue = '';
@@ -810,8 +849,17 @@ function getManagedAppDeployDiagnostics(app = null, deployment = null) {
     let failureCategory = '';
     let failureReason = '';
     if (rolloutError || verification.rollout === false) {
-        failureCategory = 'rollout';
-        failureReason = rolloutError || 'Deployment rollout failed on the remote cluster.';
+        if (/\bErrImagePull\b|\bImagePullBackOff\b/i.test(podWaitingReason)
+            || /\bunauthorized\b|\b401\b|\boauth token\b/i.test(podWaitingMessage)) {
+            failureCategory = 'image_pull';
+            failureReason = `Pod ${podName || 'for this deployment'} cannot pull the image${podWaitingReason ? ` (${podWaitingReason})` : ''}${podWaitingMessage ? `: ${podWaitingMessage}` : '.'}`;
+        } else if (podTerminatedReason || podTerminatedMessage) {
+            failureCategory = 'rollout';
+            failureReason = `Deployment rollout failed${podName ? ` on pod ${podName}` : ''}${podTerminatedReason ? ` (${podTerminatedReason})` : ''}${podTerminatedMessage ? `: ${podTerminatedMessage}` : '.'}`;
+        } else {
+            failureCategory = 'rollout';
+            failureReason = rolloutError || `Deployment rollout failed on the remote cluster${podPhase ? ` while pod phase was ${podPhase}` : '.'}`;
+        }
     } else if (ingressIssue) {
         failureCategory = 'ingress';
         failureReason = ingressIssue;
@@ -827,12 +875,14 @@ function getManagedAppDeployDiagnostics(app = null, deployment = null) {
         failureReason = httpsIssue;
     }
 
-    const shouldFailClosed = ['rollout', 'ingress', 'tls', 'https', 'app'].includes(failureCategory)
-        && (httpsStatusCode > 0 || ['rollout', 'ingress', 'tls', 'app'].includes(failureCategory));
+    const shouldFailClosed = ['rollout', 'image_pull', 'ingress', 'tls', 'https', 'app'].includes(failureCategory)
+        && (httpsStatusCode > 0 || ['rollout', 'image_pull', 'ingress', 'tls', 'app'].includes(failureCategory));
     const nextStep = (() => {
         switch (failureCategory) {
             case 'rollout':
                 return 'Inspect the remote rollout error, fix the cluster state, and redeploy the managed app.';
+            case 'image_pull':
+                return 'Inspect the registry pull secret and Gitea registry credentials on the remote cluster, then redeploy once the image can be pulled.';
             case 'ingress':
                 if (httpsStatusCode === 404 && appProbeOk) {
                     return 'Inspect Traefik ingress routing for this host because the service is reachable but the public endpoint returns 404.';
@@ -1443,6 +1493,64 @@ class ManagedAppService {
         return typeof settingsController.getEffectiveDeployConfig === 'function'
             ? settingsController.getEffectiveDeployConfig()
             : {};
+    }
+
+    async resolveRegistryCredentials(app = null) {
+        const giteaConfig = this.getEffectiveGiteaConfig();
+        let registryUsername = normalizeText(giteaConfig.registryUsername);
+        const registryPassword = normalizeText(giteaConfig.registryPassword || giteaConfig.token);
+
+        if (!registryUsername
+            && registryPassword
+            && this.giteaClient
+            && typeof this.giteaClient.getCurrentUser === 'function'
+            && typeof this.giteaClient.isConfigured === 'function'
+            && this.giteaClient.isConfigured() === true) {
+            try {
+                const currentUser = await this.giteaClient.getCurrentUser();
+                registryUsername = normalizeText(currentUser?.login || currentUser?.username || currentUser?.name);
+            } catch (_error) {
+                registryUsername = '';
+            }
+        }
+
+        return {
+            registryHost: resolveManagedAppRegistryHost(giteaConfig, app || {}),
+            registryUsername,
+            registryPassword,
+        };
+    }
+
+    recordRemoteServerContext(platform = null, { objective = '' } = {}) {
+        if (!platform || typeof platform !== 'object') {
+            return;
+        }
+
+        const target = clusterStateRegistry.resolveRemoteTarget({
+            result: {
+                host: normalizeText(platform.executionHost || ''),
+            },
+        });
+        if (!target) {
+            return;
+        }
+
+        const serverContext = platform.serverContext && typeof platform.serverContext === 'object'
+            ? platform.serverContext
+            : {};
+        const state = clusterStateRegistry.getState();
+        clusterStateRegistry.recordTargetContext(state, {
+            target,
+            objective,
+            context: {
+                ...serverContext,
+                platformNamespaces: [
+                    normalizeText(platform.platformNamespace),
+                    ...(Array.isArray(serverContext.platformNamespaces) ? serverContext.platformNamespaces : []),
+                ].filter(Boolean),
+            },
+        });
+        clusterStateRegistry.saveState();
     }
 
     resolveDeploymentTarget(input = {}, context = {}, app = null) {
@@ -2093,6 +2201,9 @@ class ManagedAppService {
             && normalizeText(platform.runnerTokenState).toLowerCase() === 'present';
         const suggestions = buildPlatformDoctorSuggestions(platform);
         const message = buildPlatformDoctorMessage(platform, healthy);
+        this.recordRemoteServerContext(platform, {
+            objective: normalizeText(input.prompt || input.sourcePrompt || 'Inspect the managed app platform on the remote k3s host.'),
+        });
         const app = normalizeText(input.appRef || input.app || input.id || input.slug)
             ? await this.resolveApp(normalizeText(input.appRef || input.app || input.id || input.slug), ownerId)
             : null;
@@ -2209,6 +2320,9 @@ class ManagedAppService {
             suggestions.push(`Runner verification through the Gitea API failed after reconciliation: ${runnerCatalog.error}`);
         }
         const message = `Managed app platform reconciliation on ${normalizeText(platform.executionHost || reconciliation.executionHost || 'remote ssh target')}: ${reconciliation.actions.join(', ') || 'no changes reported'}; ${healthy ? 'platform healthy' : 'platform still needs attention'}.`;
+        this.recordRemoteServerContext(platform, {
+            objective: normalizeText(input.prompt || input.sourcePrompt || 'Reconcile the managed app platform on the remote k3s host.'),
+        });
         const app = normalizeText(input.appRef || input.app || input.id || input.slug)
             ? await this.resolveApp(normalizeText(input.appRef || input.app || input.id || input.slug), ownerId)
             : null;
@@ -2682,24 +2796,48 @@ class ManagedAppService {
             throw error;
         }
 
-        const latestBuildRun = (await this.store.listBuildRunsForApp(app.id, ownerId, 1))[0] || null;
-        const imageTag = normalizeText(input.imageTag || latestBuildRun?.imageTag || 'latest');
+        let latestBuildRun = (await this.store.listBuildRunsForApp(app.id, ownerId, 1))[0] || null;
+        const reconciled = await this.reconcilePendingBuildForApp(app, ownerId, latestBuildRun);
+        latestBuildRun = reconciled.latestBuildRun || latestBuildRun;
         const giteaConfig = this.getEffectiveGiteaConfig();
         const managedAppsConfig = this.getEffectiveManagedAppsConfig();
         const deployConfig = this.getEffectiveDeployConfig();
+        const explicitImageTag = normalizeText(input.imageTag);
+        let deployableApp = this.normalizeAppRecord(reconciled.app || app);
+        const latestSuccessfulImageTag = isSuccessfulBuildStatus(latestBuildRun?.buildStatus)
+            ? normalizeText(latestBuildRun?.imageTag || buildImageTagFromCommit(latestBuildRun?.commitSha))
+            : '';
+        const lastSuccessfulBuild = deployableApp.metadata?.lastSuccessfulBuild || {};
+        const lastSuccessfulImageTag = normalizeText(
+            lastSuccessfulBuild.imageTag
+            || buildImageTagFromCommit(lastSuccessfulBuild.commitSha),
+        );
+        const lastLiveImageTag = extractImageTagFromImageRef(deployableApp.metadata?.liveDeploy?.lastImage || '');
+
+        if (!explicitImageTag && latestBuildRun && (isPendingBuildStatus(latestBuildRun.buildStatus) || isFailedBuildStatus(latestBuildRun.buildStatus))) {
+            throw buildManagedAppDeployBuildStateError(latestBuildRun);
+        }
+
+        const imageTag = explicitImageTag
+            || latestSuccessfulImageTag
+            || lastSuccessfulImageTag
+            || lastLiveImageTag;
+        if (!imageTag) {
+            throw buildManagedAppDeployBuildStateError(latestBuildRun);
+        }
+
         const normalizedNamespace = normalizeManagedAppNamespace(
-            input.namespace || app.metadata?.desiredDeploy?.namespace || app.namespace,
+            input.namespace || deployableApp.metadata?.desiredDeploy?.namespace || deployableApp.namespace,
             {
-                slug: app.slug,
+                slug: deployableApp.slug,
                 namespacePrefix: managedAppsConfig.namespacePrefix || 'app-',
             },
         );
-        let deployableApp = app;
 
-        if (normalizedNamespace !== normalizeText(app.namespace)) {
+        if (normalizedNamespace !== normalizeText(deployableApp.namespace)) {
             deployableApp = this.normalizeAppRecord(await this.store.updateApp(app.id, app.ownerId, {
                 namespace: normalizedNamespace,
-                metadata: this.buildLifecycleMetadata(app, {
+                metadata: this.buildLifecycleMetadata(deployableApp, {
                     input,
                     phase: 'deploying',
                     desiredDeploy: {
@@ -2707,9 +2845,9 @@ class ManagedAppService {
                     },
                 }),
             }) || {
-                ...app,
+                ...deployableApp,
                 namespace: normalizedNamespace,
-                metadata: this.buildLifecycleMetadata(app, {
+                metadata: this.buildLifecycleMetadata(deployableApp, {
                     input,
                     phase: 'deploying',
                     desiredDeploy: {
@@ -2757,18 +2895,53 @@ class ManagedAppService {
             },
         });
 
-        const deployResult = await this.kubernetesClient.deployManagedApp({
+        let platformPreflight = null;
+        if (typeof this.kubernetesClient.inspectManagedAppPlatform === 'function') {
+            try {
+                platformPreflight = await this.kubernetesClient.inspectManagedAppPlatform({
+                    platformNamespace: managedAppsConfig.platformNamespace,
+                    deploymentTarget,
+                });
+                this.recordRemoteServerContext(platformPreflight, {
+                    objective: normalizeText(
+                        input.sourcePrompt
+                        || input.prompt
+                        || deployableApp.metadata?.project?.currentObjective
+                        || `Deploy managed app ${deployableApp.slug}`,
+                    ),
+                });
+            } catch (error) {
+                const preflightError = new Error(`Managed app deployment preflight failed before manifest apply: ${error.message}`);
+                preflightError.statusCode = error.statusCode || 503;
+                throw preflightError;
+            }
+        }
+
+        const registryCredentials = await this.resolveRegistryCredentials(deployableApp);
+        const rawDeployResult = await this.kubernetesClient.deployManagedApp({
             slug: deployableApp.slug,
             namespace: deployableApp.namespace,
             publicHost: deployableApp.metadata?.desiredDeploy?.publicHost || deployableApp.publicHost,
             image,
             containerPort: Number(input.containerPort || deployableApp.metadata?.desiredDeploy?.containerPort || deployableApp.metadata?.requestedContainerPort || managedAppsConfig.defaultContainerPort || 80),
             registryPullSecretName: deployableApp.metadata?.desiredDeploy?.registryPullSecretName || managedAppsConfig.registryPullSecretName,
-            registryHost: giteaConfig.registryHost,
-            registryUsername: giteaConfig.registryUsername,
-            registryPassword: giteaConfig.registryPassword,
+            registryHost: registryCredentials.registryHost || giteaConfig.registryHost,
+            registryUsername: registryCredentials.registryUsername,
+            registryPassword: registryCredentials.registryPassword,
             deploymentTarget,
         });
+        const deployResult = platformPreflight
+            ? {
+                ...rawDeployResult,
+                preflight: {
+                    platformNamespace: platformPreflight.platformNamespace,
+                    executionHost: platformPreflight.executionHost,
+                    healthy: isPlatformHealthy(platformPreflight),
+                    runnerTokenState: normalizeText(platformPreflight.runnerTokenState),
+                    serverContext: platformPreflight.serverContext || null,
+                },
+            }
+            : rawDeployResult;
 
         const deployDiagnostics = getManagedAppDeployDiagnostics(deployableApp, deployResult);
         const lifecyclePhase = deployResult.verification.https
@@ -3070,6 +3243,9 @@ class ManagedAppService {
         const normalizedApp = this.normalizeAppRecord(app);
         const state = clusterStateRegistry.getState();
         const desiredDeploy = normalizedApp?.metadata?.desiredDeploy || {};
+        const deploymentDetails = details.deployment && typeof details.deployment === 'object'
+            ? details.deployment
+            : {};
         const entry = clusterStateRegistry.ensureDeploymentEntry(state, {
             namespace: normalizedApp.namespace,
             deployment: normalizedApp.slug,
@@ -3092,14 +3268,21 @@ class ManagedAppService {
         entry.lastError = normalizeText(details.error?.message || '');
         entry.lastStdout = normalizeText(details.image || '');
         entry.lastObjective = normalizeText(normalizedApp.metadata?.project?.currentObjective || normalizedApp.sourcePrompt || `Managed app ${normalizedApp.slug}`);
-        entry.verification.rollout = details.deployment?.verification?.rollout === true;
-        entry.verification.ingress = details.deployment?.verification?.ingress === true;
-        entry.verification.tls = details.deployment?.verification?.tls === true;
-        entry.verification.https = details.deployment?.verification?.https === true;
+        entry.verification.rollout = deploymentDetails?.verification?.rollout === true;
+        entry.verification.ingress = deploymentDetails?.verification?.ingress === true;
+        entry.verification.tls = deploymentDetails?.verification?.tls === true;
+        entry.verification.https = deploymentDetails?.verification?.https === true;
         entry.verification.lastVerifiedAt = new Date().toISOString();
         if (entry.verification.rollout) {
             entry.verification.lastRolloutAt = new Date().toISOString();
         }
+        this.recordRemoteServerContext({
+            executionHost: normalizeText(deploymentDetails.executionHost || deploymentDetails.preflight?.executionHost || ''),
+            platformNamespace: normalizeText(deploymentDetails.preflight?.platformNamespace || ''),
+            serverContext: deploymentDetails.preflight?.serverContext || null,
+        }, {
+            objective: entry.lastObjective,
+        });
 
         clusterStateRegistry.recordActivity(state, {
             toolId: 'managed-app',
