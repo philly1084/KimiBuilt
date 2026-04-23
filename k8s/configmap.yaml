@@ -5,14 +5,14 @@ metadata:
   namespace: kimibuilt
 data:
   API_BASE_URL: "https://kimibuilt.demoserver2.buzz"
-  # Chat/tool traffic stays on the internal OpenAI-compatible gateway.
+  # Chat/tool traffic and frontend image generation stay on the internal OpenAI-compatible gateway.
   OPENAI_BASE_URL: "http://n8n-openai-cli-gateway.n8n-openai-gateway.svc.cluster.local/v1"
   OPENAI_MODEL: "gpt-4o"
-  OPENAI_IMAGE_MODEL: "gemini-2.5-flash-image-nb"
+  OPENAI_IMAGE_MODEL: "gpt-image-2"
 
-  # Image/video generation uses the official OpenAI API with a separate key.
+  # The official OpenAI media endpoint remains available for video generation and image fallback.
   OPENAI_MEDIA_BASE_URL: "https://api.openai.com/v1"
-  OPENAI_MEDIA_IMAGE_MODEL: "gpt-image-1.5"
+  OPENAI_MEDIA_IMAGE_MODEL: "gpt-image-2"
   OPENAI_MEDIA_VIDEO_MODEL: "sora-2"
 
   OLLAMA_BASE_URL: "http://ollama:11434"

@@ -1586,10 +1586,10 @@ class OpenAIAPIClient extends EventTarget {
      * POST /api/images
      * @param {Object} options - Image generation options
      * @param {string} options.prompt - Image prompt (required)
-     * @param {string} options.model - Model to use (optional, default: 'dall-e-3')
+     * @param {string} options.model - Model to use (optional, defaults to the backend image model)
      * @param {string} options.size - Image size (optional, default: '1024x1024')
-     * @param {string} options.quality - Image quality (optional, default: 'standard')
-     * @param {string} options.style - Image style (optional, default: 'vivid')
+     * @param {string|null} options.quality - Image quality (optional)
+     * @param {string|null} options.style - Image style (optional)
      * @param {number} options.n - Number of images (optional, default: 1)
      * @param {string} options.sessionId - Session ID (optional)
      * @returns {Promise<Object>} - { sessionId, created, data: [{ url, revised_prompt }], model, size, quality, style }
@@ -1599,8 +1599,8 @@ class OpenAIAPIClient extends EventTarget {
             prompt,
             model = null,
             size = '1024x1024',
-            quality = 'standard',
-            style = 'vivid',
+            quality = null,
+            style = null,
             n = 1,
             sessionId = null
         } = options;

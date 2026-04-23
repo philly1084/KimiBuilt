@@ -1107,7 +1107,6 @@ class App {
         if (imageModelSelect) {
             imageModelSelect.addEventListener('change', (e) => {
                 window.aiAssistant?.updateImageSettings('model', e.target.value);
-                window.aiAssistant?.updateImageSizeOptions(e.target.value);
             });
         }
         

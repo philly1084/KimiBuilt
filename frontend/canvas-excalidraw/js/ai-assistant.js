@@ -23,7 +23,7 @@ class AIAssistant {
         // Image generation settings
         this.imageSettings = {
             model: '',
-            size: '1024x1024',
+            size: 'auto',
             quality: null,
             style: null
         };
@@ -110,9 +110,15 @@ class AIAssistant {
         // Update image model selector
         const imageModelSelect = document.getElementById('imageModelSelect');
         if (imageModelSelect) {
+            if (!this.imageModels.find((model) => model.id === this.imageSettings.model)) {
+                this.imageSettings.model = this.imageModels[0]?.id || '';
+            }
+
             imageModelSelect.innerHTML = this.imageModels.map(m => 
                 `<option value="${m.id}" ${m.id === this.imageSettings.model ? 'selected' : ''}>${m.name}</option>`
             ).join('');
+            imageModelSelect.value = this.imageSettings.model;
+            this.updateImageSizeOptions(this.imageSettings.model);
         }
     }
     
@@ -300,8 +306,10 @@ class AIAssistant {
                     : center;
                 this.pendingImagePosition = null;
 
-                const [widthStr, heightStr] = this.imageSettings.size.split('x');
-                const aspectRatio = parseInt(widthStr, 10) / parseInt(heightStr, 10) || 1;
+                const requestedSizeMatch = String(this.imageSettings.size || '').match(/^(\d+)x(\d+)$/);
+                const aspectRatio = requestedSizeMatch
+                    ? ((parseInt(requestedSizeMatch[1], 10) / parseInt(requestedSizeMatch[2], 10)) || 1)
+                    : 1;
                 const previewWidth = 400;
                 const previewHeight = previewWidth / aspectRatio;
                 const columns = Math.min(generatedImages.length, 2);
@@ -369,8 +377,10 @@ class AIAssistant {
                 }
                 
                 // Parse size for aspect ratio
-                const [widthStr, heightStr] = this.imageSettings.size.split('x');
-                const aspectRatio = parseInt(widthStr) / parseInt(heightStr);
+                const requestedSizeMatch = String(this.imageSettings.size || '').match(/^(\d+)x(\d+)$/);
+                const aspectRatio = requestedSizeMatch
+                    ? ((parseInt(requestedSizeMatch[1], 10) / parseInt(requestedSizeMatch[2], 10)) || 1)
+                    : (((img.naturalWidth || img.width || 400) / (img.naturalHeight || img.height || 400)) || 1);
                 
                 // Default size
                 let width = 400;
@@ -421,29 +431,102 @@ class AIAssistant {
             this.updateImageSizeOptions(value);
         }
     }
+
+    getImageModelMetadata(model) {
+        return this.imageModels.find((entry) => entry.id === model) || {};
+    }
+
+    formatImageOptionLabel(value, type = 'generic') {
+        const normalized = String(value || '').trim();
+        if (!normalized) {
+            return 'Backend default';
+        }
+
+        if (normalized === 'auto') {
+            return 'Auto';
+        }
+
+        if (type === 'size') {
+            const match = normalized.match(/^(\d+)x(\d+)$/);
+            if (match) {
+                const width = Number(match[1]);
+                const height = Number(match[2]);
+                const aspectLabel = width === height
+                    ? 'Square'
+                    : (width > height ? 'Landscape' : 'Portrait');
+                return `${normalized} (${aspectLabel})`;
+            }
+        }
+
+        if (normalized === 'hd') {
+            return 'HD';
+        }
+
+        return normalized
+            .split('-')
+            .map((part) => part ? part[0].toUpperCase() + part.slice(1) : '')
+            .join(' ');
+    }
     
     updateImageSizeOptions(model) {
         const sizeSelect = document.getElementById('imageSizeSelect');
+        const qualitySelect = document.getElementById('imageQualitySelect');
+        const styleSelect = document.getElementById('imageStyleSelect');
+        const qualityGroup = document.getElementById('imageQualityGroup');
+        const styleGroup = document.getElementById('imageStyleGroup');
         if (!sizeSelect) return;
-        
-        let sizes = [];
-        if (model === 'dall-e-3') {
-            sizes = [
-                { value: '1024x1024', label: '1024x1024 (Square)' },
-                { value: '1024x1792', label: '1024x1792 (Portrait)' },
-                { value: '1792x1024', label: '1792x1024 (Landscape)' }
-            ];
-        } else if (model === 'dall-e-2') {
-            sizes = [
-                { value: '256x256', label: '256x256' },
-                { value: '512x512', label: '512x512' },
-                { value: '1024x1024', label: '1024x1024' }
-            ];
+
+        const selectedModel = this.getImageModelMetadata(model);
+        const sizes = Array.isArray(selectedModel.sizes) && selectedModel.sizes.length > 0
+            ? selectedModel.sizes
+            : ['1024x1024'];
+        const qualities = Array.isArray(selectedModel.qualities) ? selectedModel.qualities : [];
+        const styles = Array.isArray(selectedModel.styles) ? selectedModel.styles : [];
+
+        if (!sizes.includes(this.imageSettings.size)) {
+            this.imageSettings.size = sizes[0];
         }
-        
-        sizeSelect.innerHTML = sizes.map(s => 
-            `<option value="${s.value}" ${s.value === this.imageSettings.size ? 'selected' : ''}>${s.label}</option>`
+
+        sizeSelect.innerHTML = sizes.map((value) =>
+            `<option value="${value}" ${value === this.imageSettings.size ? 'selected' : ''}>${this.formatImageOptionLabel(value, 'size')}</option>`
         ).join('');
+
+        if (qualitySelect) {
+            if (qualities.length > 0) {
+                const nextQuality = qualities.includes(this.imageSettings.quality)
+                    ? this.imageSettings.quality
+                    : (qualities.includes('auto') ? 'auto' : qualities[0]);
+                this.imageSettings.quality = nextQuality;
+                qualitySelect.innerHTML = qualities.map((value) =>
+                    `<option value="${value}" ${value === nextQuality ? 'selected' : ''}>${this.formatImageOptionLabel(value)}</option>`
+                ).join('');
+            } else {
+                this.imageSettings.quality = null;
+                qualitySelect.innerHTML = '<option value="">Default</option>';
+            }
+        }
+
+        if (styleSelect) {
+            if (styles.length > 0) {
+                const nextStyle = styles.includes(this.imageSettings.style)
+                    ? this.imageSettings.style
+                    : styles[0];
+                this.imageSettings.style = nextStyle;
+                styleSelect.innerHTML = styles.map((value) =>
+                    `<option value="${value}" ${value === nextStyle ? 'selected' : ''}>${this.formatImageOptionLabel(value)}</option>`
+                ).join('');
+            } else {
+                this.imageSettings.style = null;
+                styleSelect.innerHTML = '<option value="">Default</option>';
+            }
+        }
+
+        if (qualityGroup) {
+            qualityGroup.style.display = qualities.length > 0 ? '' : 'none';
+        }
+        if (styleGroup) {
+            styleGroup.style.display = styles.length > 0 ? '' : 'none';
+        }
     }
     
     processGeneratedContent(response) {
@@ -973,5 +1056,3 @@ class AIAssistant {
 
 // Create global instance
 window.aiAssistant = new AIAssistant();
-
-

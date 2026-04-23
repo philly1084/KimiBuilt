@@ -565,8 +565,8 @@ Session Statistics:
   /tool-help <id>    Show on-demand documentation for a tool
   /image <prompt>    Generate an image
                      Defaults to the backend image model (official OpenAI if configured)
-                     Options: --model gpt-image-1.5|gpt-image-1-mini|gpt-image-1
-                     --size 1024x1024 --quality standard|hd --style vivid|natural
+                     Options: --model gpt-image-2|gpt-image-1.5|gpt-image-1|gpt-image-1-mini
+                     --size 1024x1024 --quality auto|low|medium|high
   /image-models      List available image models
   /unsplash <query>  Search Unsplash for stock images
                      Options: --orientation landscape|portrait|squarish
@@ -1104,7 +1104,30 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
         }
     }
     async listImageModels() {
-        this.printAI("## Available Image Models\n\n  - gpt-image-1.5\n  - gpt-image-1-mini\n  - gpt-image-1");
+        try {
+            const models = await api.getImageModels();
+            if (!Array.isArray(models) || models.length === 0) {
+                this.printError('No image models available');
+                return;
+            }
+
+            this.printAI(`## Available Image Models\n\n${models.map((model) => {
+                const details = [];
+                if (Array.isArray(model.sizes) && model.sizes.length > 0) {
+                    details.push(`sizes: ${model.sizes.join(', ')}`);
+                }
+                if (Array.isArray(model.qualities) && model.qualities.length > 0) {
+                    details.push(`qualities: ${model.qualities.join(', ')}`);
+                }
+                if (Array.isArray(model.styles) && model.styles.length > 0) {
+                    details.push(`styles: ${model.styles.join(', ')}`);
+                }
+                const suffix = details.length > 0 ? ` (${details.join(' | ')})` : '';
+                return `  - ${model.name || model.id || 'Backend default'}${suffix}`;
+            }).join('\n')}`);
+        } catch (error) {
+            this.printError(`Failed to load image models: ${error.message}`);
+        }
     }
 
     
@@ -1168,7 +1191,7 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
     
     async generateImage(input) {
         if (!input) {
-            this.printError('Please provide a prompt. Usage: /image <prompt> [--model gpt-image-1.5] [--size 1024x1024] [--quality standard]');
+            this.printError('Please provide a prompt. Usage: /image <prompt> [--model gpt-image-2] [--size 1024x1024] [--quality auto]');
             return;
         }
         
@@ -1176,7 +1199,7 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
         const { prompt, options } = this.parseImageArgs(input);
         
         if (!prompt) {
-            this.printError('Please provide a prompt. Usage: /image <prompt> [--model gpt-image-1.5] [--size 1024x1024] [--quality standard]');
+            this.printError('Please provide a prompt. Usage: /image <prompt> [--model gpt-image-2] [--size 1024x1024] [--quality auto]');
             return;
         }
         
@@ -1236,8 +1259,8 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
         const options = {
             model: null,
             size: '1024x1024',
-            quality: 'standard',
-            style: 'vivid'
+            quality: null,
+            style: null
         };
         
         let prompt = input;
@@ -1250,21 +1273,21 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
         }
         
         // Parse --size
-        const sizeMatch = input.match(/--size\s+(\d+x\d+)/);
+        const sizeMatch = input.match(/--size\s+(\S+)/);
         if (sizeMatch) {
             options.size = sizeMatch[1];
             prompt = prompt.replace(sizeMatch[0], '').trim();
         }
         
         // Parse --quality
-        const qualityMatch = input.match(/--quality\s+(standard|hd)/);
+        const qualityMatch = input.match(/--quality\s+(\S+)/);
         if (qualityMatch) {
             options.quality = qualityMatch[1];
             prompt = prompt.replace(qualityMatch[0], '').trim();
         }
         
         // Parse --style
-        const styleMatch = input.match(/--style\s+(vivid|natural)/);
+        const styleMatch = input.match(/--style\s+(\S+)/);
         if (styleMatch) {
             options.style = styleMatch[1];
             prompt = prompt.replace(styleMatch[0], '').trim();

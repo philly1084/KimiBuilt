@@ -279,7 +279,7 @@ const config = {
     port: parseInt(process.env.PORT, 10) || 3000,
     nodeEnv: process.env.NODE_ENV || 'development',
 
-    // OpenAI-compatible gateway for chat/tool use
+    // OpenAI-compatible gateway for chat/tool use and frontend image generation
     openai: {
         apiKey: process.env.OPENAI_API_KEY,
         baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
@@ -289,11 +289,11 @@ const config = {
         imageModel: process.env.OPENAI_IMAGE_MODEL || '',
     },
 
-    // Official OpenAI media endpoints for image/video generation
+    // Official OpenAI media endpoints for video generation and image fallback
     media: {
         apiKey: process.env.OPENAI_MEDIA_API_KEY || '',
         baseURL: process.env.OPENAI_MEDIA_BASE_URL || 'https://api.openai.com/v1',
-        imageModel: process.env.OPENAI_MEDIA_IMAGE_MODEL || 'gpt-image-1.5',
+        imageModel: process.env.OPENAI_MEDIA_IMAGE_MODEL || 'gpt-image-2',
         videoModel: process.env.OPENAI_MEDIA_VIDEO_MODEL || 'sora-2',
     },
 

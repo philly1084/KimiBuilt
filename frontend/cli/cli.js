@@ -288,21 +288,21 @@ async function fetchImageModels() {
     // Use defaults
     availableImageModels = [
       {
-        id: 'dall-e-3',
-        name: 'DALL-E 3',
-        description: 'High-quality image generation',
-        sizes: ['1024x1024', '1024x1792', '1792x1024'],
-        qualities: ['standard', 'hd'],
-        styles: ['vivid', 'natural'],
-        maxImages: 1,
+        id: 'gpt-image-2',
+        name: 'GPT Image 2',
+        description: 'State-of-the-art OpenAI image generation',
+        sizes: ['auto', '1024x1024', '1536x1024', '1024x1536'],
+        qualities: ['auto', 'low', 'medium', 'high'],
+        styles: [],
+        maxImages: 5,
       },
       {
-        id: 'dall-e-2',
-        name: 'DALL-E 2',
-        description: 'Fast image generation',
-        sizes: ['256x256', '512x512', '1024x1024'],
-        qualities: ['standard'],
-        styles: ['natural'],
+        id: 'gpt-image-1.5',
+        name: 'GPT Image 1.5',
+        description: 'Previous OpenAI GPT Image release',
+        sizes: ['auto', '1024x1024', '1536x1024', '1024x1536'],
+        qualities: ['auto', 'low', 'medium', 'high'],
+        styles: [],
         maxImages: 5,
       },
     ];
@@ -505,13 +505,13 @@ function handleImgModels() {
     const name = chalk.white(model.name || model.id);
     const description = model.description ? chalk.gray(`- ${model.description}`) : '';
     console.log(chalk.gray(`  ${i + 1}. ${name} ${description}`));
-    if (model.sizes) {
+    if (Array.isArray(model.sizes) && model.sizes.length > 0) {
       console.log(chalk.gray(`     Sizes: ${model.sizes.join(', ')}`));
     }
-    if (model.qualities) {
+    if (Array.isArray(model.qualities) && model.qualities.length > 0) {
       console.log(chalk.gray(`     Qualities: ${model.qualities.join(', ')}`));
     }
-    if (model.styles) {
+    if (Array.isArray(model.styles) && model.styles.length > 0) {
       console.log(chalk.gray(`     Styles: ${model.styles.join(', ')}`));
     }
   });
@@ -527,8 +527,8 @@ function parseImageOptions(args) {
   const options = {
     model: null,
     size: '1024x1024',
-    quality: 'standard',
-    style: 'vivid',
+    quality: null,
+    style: null,
     n: 1,
     output: null,
   };
@@ -645,7 +645,7 @@ async function handleDownloadImageCommand(args) {
  */
 async function handleImage(args) {
   if (!args.trim()) {
-    console.log(chalk.yellow('⚠ Usage: /image <prompt> [--model model-id] [--size 1024x1024] [--quality hd] [--style vivid]'));
+    console.log(chalk.yellow('⚠ Usage: /image <prompt> [--model model-id] [--size 1024x1024] [--quality auto|low|medium|high]'));
     return;
   }
   
@@ -704,8 +704,12 @@ async function handleImage(args) {
     console.log(chalk.cyan.bold('\n┌─ Image Generated ─────────────────────┐'));
     console.log(chalk.gray(`  Model: ${chalk.cyan(result.model || imageOptions.model)}`));
     console.log(chalk.gray(`  Size: ${chalk.cyan(result.size || imageOptions.size)}`));
-    console.log(chalk.gray(`  Quality: ${chalk.cyan(result.quality || imageOptions.quality)}`));
-    console.log(chalk.gray(`  Style: ${chalk.cyan(result.style || imageOptions.style)}`));
+    if (result.quality || imageOptions.quality) {
+      console.log(chalk.gray(`  Quality: ${chalk.cyan(result.quality || imageOptions.quality)}`));
+    }
+    if (result.style || imageOptions.style) {
+      console.log(chalk.gray(`  Style: ${chalk.cyan(result.style || imageOptions.style)}`));
+    }
     
     if (result.data && result.data.length > 0) {
       lastImageUrls = [];

@@ -465,10 +465,11 @@ class UIHelpers {
         
         // Image generation state
         this.imageGenerationState = {
-            quality: 'standard',
-            style: 'vivid',
+            quality: null,
+            style: null,
             source: 'generate' // 'generate' or 'unsplash'
         };
+        this.imageGenerationControlsBound = false;
         
         // Model selector state
         this.availableModels = [];
@@ -4081,6 +4082,73 @@ class UIHelpers {
         const list = Array.isArray(models) ? models : [];
         return list[0]?.id || '';
     }
+
+    getImageModelMetadata(modelId = '') {
+        const normalizedId = String(modelId || '').trim();
+        if (!normalizedId) {
+            return this.availableImageModels[0] || {};
+        }
+
+        return this.availableImageModels.find((entry) => entry.id === normalizedId) || {};
+    }
+
+    formatImageOptionLabel(value = '', type = 'generic') {
+        const normalized = String(value || '').trim();
+        if (!normalized) {
+            return 'Backend default';
+        }
+
+        if (normalized === 'auto') {
+            return 'Auto';
+        }
+
+        if (type === 'size') {
+            const sizeMatch = normalized.match(/^(\d+)x(\d+)$/);
+            if (sizeMatch) {
+                const width = Number(sizeMatch[1]);
+                const height = Number(sizeMatch[2]);
+                const aspectLabel = width === height
+                    ? 'Square'
+                    : (width > height ? 'Landscape' : 'Portrait');
+                return `${normalized} (${aspectLabel})`;
+            }
+        }
+
+        if (normalized === 'hd') {
+            return 'HD';
+        }
+
+        return normalized
+            .split('-')
+            .map((part) => part ? part[0].toUpperCase() + part.slice(1) : '')
+            .join(' ');
+    }
+
+    renderImageOptionButtons(containerId, optionClassName, values = [], selectedValue = '', valueKey = 'value') {
+        const container = document.getElementById(containerId);
+        if (!container) {
+            return;
+        }
+
+        container.innerHTML = values
+            .map((value) => {
+                const normalizedValue = String(value || '').trim();
+                const isSelected = normalizedValue === String(selectedValue || '').trim();
+                const labelType = valueKey === 'size' ? 'size' : 'generic';
+                return `
+                    <button
+                        type="button"
+                        class="${optionClassName} ${isSelected ? 'active' : ''} flex-1 py-2 px-3 rounded-lg border border-border bg-bg-tertiary text-sm font-medium transition-all"
+                        data-${valueKey}="${normalizedValue}"
+                        role="radio"
+                        aria-checked="${isSelected ? 'true' : 'false'}"
+                    >
+                        ${this.formatImageOptionLabel(normalizedValue, labelType)}
+                    </button>
+                `;
+            })
+            .join('');
+    }
     async loadImageModels() {
         try {
             const models = await apiClient.getImageModelsFromAPI();
@@ -4121,11 +4189,14 @@ class UIHelpers {
         
         if (promptInput) promptInput.value = '';
         if (modelSelect) modelSelect.value = this.getPreferredImageModelId();
-        if (sizeSelect) sizeSelect.value = '1024x1024';
+        if (sizeSelect) sizeSelect.value = '';
         
-        this.imageGenerationState.quality = 'standard';
-        this.imageGenerationState.style = 'vivid';
+        this.imageGenerationState.quality = null;
+        this.imageGenerationState.style = null;
         this.imageGenerationState.source = 'generate';
+        if (modelSelect) {
+            this.updateImageOptionsForModel(modelSelect.value);
+        }
         this.updateToggleButtons();
         this.setImageSource('generate');
     }
@@ -4170,28 +4241,41 @@ class UIHelpers {
     }
 
     setupImageGenerationToggles() {
-        // Quality toggles
-        document.querySelectorAll('.quality-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                this.imageGenerationState.quality = btn.dataset.quality;
-                this.updateToggleButtons();
-            });
-        });
-        
-        // Style toggles
-        document.querySelectorAll('.style-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                this.imageGenerationState.style = btn.dataset.style;
-                this.updateToggleButtons();
-            });
-        });
-        
-        // Model change handler - update available options
         const modelSelect = document.getElementById('image-model-select');
-        if (modelSelect) {
-            modelSelect.addEventListener('change', (e) => {
-                this.updateImageOptionsForModel(e.target.value);
-            });
+        if (this.imageGenerationControlsBound !== true) {
+            const qualityOptions = document.getElementById('image-quality-options');
+            if (qualityOptions) {
+                qualityOptions.addEventListener('click', (event) => {
+                    const button = event.target.closest('.quality-btn');
+                    if (!button) {
+                        return;
+                    }
+
+                    this.imageGenerationState.quality = button.dataset.quality || null;
+                    this.updateToggleButtons();
+                });
+            }
+
+            const styleOptions = document.getElementById('image-style-options');
+            if (styleOptions) {
+                styleOptions.addEventListener('click', (event) => {
+                    const button = event.target.closest('.style-btn');
+                    if (!button) {
+                        return;
+                    }
+
+                    this.imageGenerationState.style = button.dataset.style || null;
+                    this.updateToggleButtons();
+                });
+            }
+
+            if (modelSelect) {
+                modelSelect.addEventListener('change', (event) => {
+                    this.updateImageOptionsForModel(event.target.value);
+                });
+            }
+
+            this.imageGenerationControlsBound = true;
         }
         
         this.updateToggleButtons();
@@ -4202,12 +4286,14 @@ class UIHelpers {
 
     updateToggleButtons() {
         document.querySelectorAll('.quality-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.quality === this.imageGenerationState.quality);
-            btn.setAttribute('aria-pressed', btn.dataset.quality === this.imageGenerationState.quality);
+            const isActive = btn.dataset.quality === this.imageGenerationState.quality;
+            btn.classList.toggle('active', isActive);
+            btn.setAttribute('aria-checked', isActive ? 'true' : 'false');
         });
         document.querySelectorAll('.style-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.style === this.imageGenerationState.style);
-            btn.setAttribute('aria-pressed', btn.dataset.style === this.imageGenerationState.style);
+            const isActive = btn.dataset.style === this.imageGenerationState.style;
+            btn.classList.toggle('active', isActive);
+            btn.setAttribute('aria-checked', isActive ? 'true' : 'false');
         });
     }
 
@@ -4218,23 +4304,47 @@ class UIHelpers {
         
         if (!sizeSelect) return;
 
-        const selectedModel = this.availableImageModels.find((entry) => entry.id === model) || {};
+        const selectedModel = this.getImageModelMetadata(model);
         const sizes = Array.isArray(selectedModel.sizes) && selectedModel.sizes.length > 0
             ? selectedModel.sizes
             : ['1024x1024'];
-        const supportsQuality = Array.isArray(selectedModel.qualities) && selectedModel.qualities.length > 0;
-        const supportsStyle = Array.isArray(selectedModel.styles) && selectedModel.styles.length > 0;
+        const qualities = Array.isArray(selectedModel.qualities) ? selectedModel.qualities : [];
+        const styles = Array.isArray(selectedModel.styles) ? selectedModel.styles : [];
+        const supportsQuality = qualities.length > 0;
+        const supportsStyle = styles.length > 0;
 
         sizeSelect.innerHTML = sizes
-            .map((size) => `<option value="${size}">${size}</option>`)
+            .map((size) => `<option value="${size}">${this.formatImageOptionLabel(size, 'size')}</option>`)
             .join('');
 
         if (!sizes.includes(sizeSelect.value)) {
             sizeSelect.value = sizes[0];
         }
 
+        if (supportsQuality) {
+            const preferredQuality = qualities.includes('auto') ? 'auto' : qualities[0];
+            if (!qualities.includes(this.imageGenerationState.quality)) {
+                this.imageGenerationState.quality = preferredQuality;
+            }
+            this.renderImageOptionButtons('image-quality-options', 'quality-btn', qualities, this.imageGenerationState.quality, 'quality');
+        } else {
+            this.imageGenerationState.quality = null;
+            this.renderImageOptionButtons('image-quality-options', 'quality-btn', [], '', 'quality');
+        }
+
+        if (supportsStyle) {
+            if (!styles.includes(this.imageGenerationState.style)) {
+                this.imageGenerationState.style = styles[0];
+            }
+            this.renderImageOptionButtons('image-style-options', 'style-btn', styles, this.imageGenerationState.style, 'style');
+        } else {
+            this.imageGenerationState.style = null;
+            this.renderImageOptionButtons('image-style-options', 'style-btn', [], '', 'style');
+        }
+
         if (qualityContainer) qualityContainer.style.display = supportsQuality ? 'block' : 'none';
         if (styleContainer) styleContainer.style.display = supportsStyle ? 'block' : 'none';
+        this.updateToggleButtons();
     }
 
     getImageGenerationOptions() {

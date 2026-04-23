@@ -63,9 +63,10 @@ const IMAGE_MODEL_KEYWORDS = [
 ];
 
 const OFFICIAL_OPENAI_IMAGE_MODELS = [
+    'gpt-image-2',
     'gpt-image-1.5',
-    'gpt-image-1-mini',
     'gpt-image-1',
+    'gpt-image-1-mini',
 ];
 
 function getClient() {
@@ -228,11 +229,33 @@ function hasDedicatedMediaConfig() {
     return Boolean(normalizeModelId(config.media.apiKey));
 }
 
+function hasGatewayImageConfig() {
+    const apiKey = String(config.openai.apiKey || '').trim();
+    const baseURL = String(config.openai.baseURL || '').trim();
+    const imageModel = normalizeModelId(config.openai.imageModel);
+    const isCustomBaseURL = Boolean(baseURL) && baseURL !== 'https://api.openai.com/v1';
+
+    return Boolean(apiKey) && (
+        Boolean(imageModel)
+        || isCustomBaseURL
+        || !hasDedicatedMediaConfig()
+    );
+}
+
 function isAgentNotesAutoWriteEnabled() {
     return settingsController.settings?.agentNotes?.enabled !== false;
 }
 
 function getImageProviderConfig() {
+    if (hasGatewayImageConfig()) {
+        return {
+            apiKey: config.openai.apiKey,
+            baseURL: config.openai.baseURL,
+            imageModel: config.openai.imageModel || config.media.imageModel,
+            source: 'gateway',
+        };
+    }
+
     if (hasDedicatedMediaConfig()) {
         return {
             apiKey: config.media.apiKey,
@@ -245,7 +268,7 @@ function getImageProviderConfig() {
     return {
         apiKey: config.openai.apiKey,
         baseURL: config.openai.baseURL,
-        imageModel: config.openai.imageModel,
+        imageModel: config.openai.imageModel || config.media.imageModel,
         source: 'gateway',
     };
 }
@@ -296,6 +319,12 @@ function sortImageModels(models = []) {
             return bConfigured - aConfigured;
         }
 
+        const aPriority = getImageModelSortPriority(aId);
+        const bPriority = getImageModelSortPriority(bId);
+        if (aPriority !== bPriority) {
+            return bPriority - aPriority;
+        }
+
         const aNb = /-nb$/i.test(aId) ? 1 : 0;
         const bNb = /-nb$/i.test(bId) ? 1 : 0;
         if (aNb !== bNb) {
@@ -304,6 +333,40 @@ function sortImageModels(models = []) {
 
         return aId.localeCompare(bId);
     });
+}
+
+function getImageModelSortPriority(modelId = '') {
+    const lower = normalizeModelId(modelId).toLowerCase();
+
+    const explicitPriorityIndex = OFFICIAL_OPENAI_IMAGE_MODELS.indexOf(lower);
+    if (explicitPriorityIndex >= 0) {
+        return 1000 - explicitPriorityIndex;
+    }
+
+    if (lower === 'chatgpt-image-latest') {
+        return 995;
+    }
+
+    const gptImageMatch = lower.match(/^gpt-image-(\d+(?:\.\d+)?)(?:-(mini))?/i);
+    if (gptImageMatch) {
+        const version = Number.parseFloat(gptImageMatch[1] || '0') || 0;
+        const miniPenalty = gptImageMatch[2] ? 0.1 : 0;
+        return 900 + Math.round((version - miniPenalty) * 100);
+    }
+
+    if (lower.includes('dall-e-3')) {
+        return 200;
+    }
+
+    if (lower.includes('dall-e-2')) {
+        return 190;
+    }
+
+    if (lower.includes('gemini')) {
+        return 180;
+    }
+
+    return 0;
 }
 
 function getImageModelMetadata(modelId, ownedBy = 'openai') {
@@ -353,10 +416,10 @@ function getImageModelMetadata(modelId, ownedBy = 'openai') {
         return {
             id: normalized,
             name: normalized,
-            description: 'Official OpenAI image generation',
+            description: 'Official OpenAI GPT Image generation',
             owned_by: ownedBy,
-            sizes: ['1024x1024', '1536x1024', '1024x1536', 'auto'],
-            qualities: ['low', 'medium', 'high', 'auto'],
+            sizes: ['auto', '1024x1024', '1536x1024', '1024x1536'],
+            qualities: ['auto', 'low', 'medium', 'high'],
             styles: [],
             maxImages: 5,
         };
@@ -454,8 +517,8 @@ async function listModels() {
     }
 }
 
-function listOfficialImageModels() {
-    const configured = normalizeModelId(getImageProviderConfig().imageModel);
+function listOfficialImageModels(configuredModel = config.media.imageModel) {
+    const configured = normalizeModelId(configuredModel);
     const modelIds = uniqueById(
         [configured, ...OFFICIAL_OPENAI_IMAGE_MODELS]
             .filter(Boolean)
@@ -466,31 +529,38 @@ function listOfficialImageModels() {
 }
 
 async function listImageModels() {
+    const imageProvider = getImageProviderConfig();
+
+    if (imageProvider.source === 'gateway') {
+        const discovered = uniqueById(
+            (await listModels())
+                .filter((model) => isLikelyImageModel(model))
+                .map((model) => getImageModelMetadata(model.id, model.owned_by || 'openai')),
+        );
+
+        if (discovered.length > 0) {
+            return sortImageModels(discovered);
+        }
+
+        return sortImageModels(uniqueById(
+            [imageProvider.imageModel]
+                .filter(Boolean)
+                .map((modelId) => getImageModelMetadata(modelId, 'openai')),
+        ));
+    }
+
     if (hasDedicatedMediaConfig()) {
-        return listOfficialImageModels();
+        return listOfficialImageModels(config.media.imageModel);
     }
 
-    const discovered = uniqueById(
-        (await listModels())
-            .filter((model) => isLikelyImageModel(model))
-            .map((model) => getImageModelMetadata(model.id, model.owned_by || 'openai')),
-    );
-
-    if (discovered.length > 0) {
-        return sortImageModels(discovered);
-    }
-
-    return sortImageModels(uniqueById(
-        [config.openai.imageModel]
-            .filter(Boolean)
-            .map((modelId) => getImageModelMetadata(modelId, 'openai')),
-    ));
+    return [];
 }
 
 async function resolveImageModel(requestedModel = null) {
+    const imageProvider = getImageProviderConfig();
     const availableModels = await listImageModels();
     const requested = normalizeModelId(requestedModel);
-    const configured = normalizeModelId(getImageProviderConfig().imageModel);
+    const configured = normalizeModelId(imageProvider.imageModel);
 
     if (requested) {
         const exactMatch = availableModels.find((model) => model.id === requested);
@@ -514,7 +584,7 @@ async function resolveImageModel(requestedModel = null) {
         return { modelId: availableModels[0].id, availableModels };
     }
 
-    const message = hasDedicatedMediaConfig()
+    const message = imageProvider.source === 'official-openai'
         ? 'No media image model is configured. Set OPENAI_MEDIA_IMAGE_MODEL.'
         : 'No image generation model is configured. Set OPENAI_IMAGE_MODEL or expose image models from the gateway.';
     const error = new Error(message);
@@ -4598,8 +4668,8 @@ async function generateImage({
     prompt,
     model = null,
     size = '1024x1024',
-    quality = 'standard',
-    style = 'vivid',
+    quality = null,
+    style = null,
     n = 1,
 }) {
     const { modelId, availableModels } = await resolveImageModel(model);

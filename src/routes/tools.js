@@ -215,10 +215,12 @@ function buildToolRuntime(toolId, options = {}) {
   }
 
   if (toolId === 'image-generate') {
+    const hasGatewayImageProvider = Boolean(config.openai.apiKey);
+    const hasOfficialMediaProvider = Boolean(config.media.apiKey);
     return {
-      configured: Boolean(config.media.apiKey || config.openai.apiKey),
-      provider: config.media.apiKey ? 'official-openai' : (config.openai.baseURL ? 'gateway' : 'openai'),
-      model: config.media.imageModel || config.openai.imageModel || '',
+      configured: Boolean(hasGatewayImageProvider || hasOfficialMediaProvider),
+      provider: hasGatewayImageProvider ? 'gateway' : (hasOfficialMediaProvider ? 'official-openai' : 'unconfigured'),
+      model: config.openai.imageModel || config.media.imageModel || '',
     };
   }
 

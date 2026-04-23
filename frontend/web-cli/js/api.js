@@ -436,8 +436,8 @@ class WebCLIAPI {
         const {
             model = null,
             size = '1024x1024',
-            quality = 'standard',
-            style = 'vivid',
+            quality = null,
+            style = null,
             n = 1
         } = options;
         
@@ -470,6 +470,27 @@ class WebCLIAPI {
             return data;
         } catch (error) {
             console.error('Image generation error:', error);
+            throw error;
+        }
+    }
+
+    async getImageModels() {
+        const baseUrl = API_BASE_URL.replace('/v1', '');
+
+        try {
+            const response = await this.fetchWithRetry(`${baseUrl}/api/images/models`, {
+                method: 'GET',
+                headers: { 'Accept': 'application/json' },
+            }, 2, API_TIMEOUT);
+
+            if (!response.ok) {
+                throw new Error(`Image model lookup failed: HTTP ${response.status}`);
+            }
+
+            const data = await response.json();
+            return Array.isArray(data.models) ? data.models : [];
+        } catch (error) {
+            console.error('Image model lookup error:', error);
             throw error;
         }
     }

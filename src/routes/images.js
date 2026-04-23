@@ -55,8 +55,8 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
             prompt,
             model = null,
             size = '1024x1024',
-            quality = 'standard',
-            style = 'vivid',
+            quality = null,
+            style = null,
             n = 1,
         } = req.body;
         const requestedCount = Math.min(Math.max(Number(n) || 1, 1), 5);
