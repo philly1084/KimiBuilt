@@ -1107,6 +1107,38 @@ describe('ToolManager image tools', () => {
     expect(result.data.app.status).toBe('live');
   });
 
+  test('routes managed app inspection by appId through the managed app service', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const inspectApp = jest.fn(async () => ({
+      app: {
+        id: 'app-1',
+        slug: 'arcade-demo',
+        status: 'building',
+      },
+      buildRuns: [{
+        id: 'run-1',
+        buildStatus: 'queued',
+      }],
+    }));
+
+    const result = await toolManager.executeTool('managed-app', {
+      action: 'inspect',
+      appId: 'app-1',
+    }, {
+      ownerId: 'user-1',
+      managedAppService: {
+        isAvailable: () => true,
+        inspectApp,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(inspectApp).toHaveBeenCalledWith('app-1', 'user-1');
+    expect(result.data.app.id).toBe('app-1');
+  });
+
   test('routes managed app doctor requests through the managed app service', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();

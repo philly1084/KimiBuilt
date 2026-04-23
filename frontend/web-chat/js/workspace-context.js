@@ -82,6 +82,7 @@
             key: workspaceKey,
             label: resolveWorkspaceLabel(workspaceKey, input.label || input.workspaceLabel || ''),
             scopeKey: resolveWorkspaceScopeKey(workspaceKey),
+            longTermMemoryEnabled: workspaceKey === DEFAULT_WORKSPACE_KEY,
             embedded: input.embedded === true,
         };
     }
@@ -127,6 +128,7 @@
             workspaceId: context.scopeKey,
             projectScope: context.scopeKey,
             memoryScope: context.scopeKey,
+            sessionIsolation: context.longTermMemoryEnabled !== true,
         };
     }
 

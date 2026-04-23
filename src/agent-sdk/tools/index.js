@@ -438,7 +438,15 @@ function normalizeManagedAppAction(value = '') {
 }
 
 function resolveManagedAppReference(params = {}) {
-  const explicitRef = String(params.appRef || params.slug || params.id || params.app || '').trim();
+  const explicitRef = String(
+    params.appRef
+    || params.appId
+    || params.appSlug
+    || params.slug
+    || params.id
+    || params.app
+    || ''
+  ).trim();
   if (explicitRef) {
     return explicitRef;
   }
@@ -3286,6 +3294,8 @@ class ToolManager {
               ],
             },
             appRef: { type: 'string' },
+            appId: { type: 'string' },
+            appSlug: { type: 'string' },
             app: { type: 'string' },
             id: { type: 'string' },
             slug: { type: 'string' },
