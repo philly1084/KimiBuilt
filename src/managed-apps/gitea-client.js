@@ -120,6 +120,45 @@ class GiteaClient {
         });
     }
 
+    async listRepositoryWorkflowRuns({
+        owner = '',
+        repo = '',
+        event = '',
+        branch = '',
+        status = '',
+        actor = '',
+        headSha = '',
+        page = 1,
+        limit = 20,
+    } = {}) {
+        const repoOwner = normalizeText(owner);
+        const repoName = normalizeText(repo);
+        if (!repoOwner || !repoName) {
+            throw new Error('Repository workflow run listing requires an owner and repository name.');
+        }
+
+        const payload = await this.request('GET', `/repos/${encodeURIComponent(repoOwner)}/${encodeURIComponent(repoName)}/actions/runs`, {
+            query: {
+                event: normalizeText(event),
+                branch: normalizeText(branch),
+                status: normalizeText(status),
+                actor: normalizeText(actor),
+                head_sha: normalizeText(headSha),
+                page: Number.isFinite(Number(page)) ? Math.max(1, Number(page)) : 1,
+                limit: Number.isFinite(Number(limit)) ? Math.max(1, Math.min(Number(limit), 100)) : 20,
+            },
+        });
+
+        const workflowRuns = Array.isArray(payload?.workflow_runs)
+            ? payload.workflow_runs
+            : (Array.isArray(payload) ? payload : []);
+
+        return {
+            workflowRuns,
+            totalCount: Number(payload?.total_count || workflowRuns.length || 0),
+        };
+    }
+
     buildRunnerScopePath({ scope = 'org', org = '', owner = '', repo = '' } = {}) {
         const normalizedScope = normalizeRunnerScope(scope);
         if (normalizedScope === 'instance') {

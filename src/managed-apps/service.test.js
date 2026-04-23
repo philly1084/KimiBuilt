@@ -1402,6 +1402,161 @@ describe('ManagedAppService', () => {
         expect(result.app.metadata.liveDeploy.https).toBe(false);
     });
 
+    test('getAppProgress reconciles a successful Gitea run when the webhook is missing', async () => {
+        const app = {
+            id: 'app-1',
+            ownerId: 'user-1',
+            sessionId: 'session-1',
+            slug: 'demo-app',
+            appName: 'Demo App',
+            repoOwner: 'agent-apps',
+            repoName: 'demo-app',
+            repoUrl: 'https://gitea.demoserver2.buzz/agent-apps/demo-app.git',
+            repoCloneUrl: 'https://gitea.demoserver2.buzz/agent-apps/demo-app.git',
+            repoSshUrl: '',
+            defaultBranch: 'main',
+            imageRepo: 'gitea.demoserver2.buzz/agent-apps/demo-app',
+            namespace: 'app-demo-app',
+            publicHost: 'demo-app.demoserver2.buzz',
+            status: 'building',
+            sourcePrompt: 'Ship the demo app.',
+            metadata: {
+                deploymentTarget: 'ssh',
+                project: {
+                    summary: 'Demo App was created in agent-apps/demo-app. Build and deploy are queued.',
+                    nextStep: 'Wait for the remote Gitea build to finish, then continue deployment through the managed-app control plane.',
+                    openItems: ['Remote build is queued.'],
+                },
+            },
+        };
+        const queuedBuildRun = {
+            id: 'run-1',
+            appId: 'app-1',
+            ownerId: 'user-1',
+            sessionId: 'session-1',
+            requestedAction: 'deploy',
+            commitSha: 'abcdef1234567890',
+            imageTag: 'sha-abcdef123456',
+            buildStatus: 'queued',
+            deployRequested: true,
+            deployStatus: 'pending',
+            verificationStatus: 'pending',
+            metadata: {},
+        };
+        const finalBuildRun = {
+            ...queuedBuildRun,
+            buildStatus: 'success',
+            deployStatus: 'succeeded',
+            verificationStatus: 'live',
+            externalRunId: '42',
+            externalRunUrl: 'https://gitea.demoserver2.buzz/agent-apps/demo-app/actions/runs/42',
+        };
+        const liveApp = {
+            ...app,
+            status: 'live',
+            metadata: {
+                deploymentTarget: 'ssh',
+                project: {
+                    summary: 'Demo App is live.',
+                    nextStep: '',
+                    openItems: [],
+                },
+                liveDeploy: {
+                    lastImage: 'gitea.demoserver2.buzz/agent-apps/demo-app:sha-abcdef123456',
+                    https: true,
+                },
+            },
+        };
+
+        const store = {
+            getAppById: jest.fn(async () => null),
+            getAppBySlug: jest.fn(async () => app),
+            ensureAvailable: jest.fn(async () => {}),
+            listBuildRunsForApp: jest.fn(async () => ([queuedBuildRun])),
+            getAppByRepo: jest.fn(async () => app),
+            getBuildRunByExternalRunId: jest.fn(async () => null),
+            getBuildRunByCommitSha: jest.fn(async () => queuedBuildRun),
+            updateBuildRun: jest.fn(async (_id, updates) => ({
+                ...queuedBuildRun,
+                ...updates,
+            })),
+            updateApp: jest.fn(async (_id, _ownerId, updates) => ({
+                ...app,
+                ...updates,
+                metadata: updates.metadata || app.metadata,
+            })),
+        };
+        const giteaClient = {
+            isConfigured: jest.fn(() => true),
+            listRepositoryWorkflowRuns: jest.fn(async () => ({
+                totalCount: 1,
+                workflowRuns: [{
+                    id: 42,
+                    head_sha: 'abcdef1234567890',
+                    status: 'completed',
+                    conclusion: 'success',
+                    html_url: 'https://gitea.demoserver2.buzz/agent-apps/demo-app/actions/runs/42',
+                    started_at: '2026-04-22T12:00:00Z',
+                    completed_at: '2026-04-22T12:01:00Z',
+                }],
+            })),
+        };
+        const service = new ManagedAppService({
+            store,
+            giteaClient,
+        });
+
+        service.getEffectiveGiteaConfig = () => ({
+            baseURL: 'https://gitea.demoserver2.buzz',
+            org: 'agent-apps',
+            registryHost: 'gitea.demoserver2.buzz',
+        });
+        service.getEffectiveDeployConfig = () => ({
+            ingressClassName: 'traefik',
+            tlsClusterIssuer: 'letsencrypt-prod',
+        });
+        service.getEffectiveManagedAppsConfig = () => ({
+            defaultBranch: 'main',
+            defaultContainerPort: 80,
+            registryPullSecretName: 'gitea-registry-credentials',
+        });
+        service.broadcastLifecycleEvent = jest.fn();
+        service.deployApp = jest.fn(async () => ({
+            app: liveApp,
+            buildRun: finalBuildRun,
+            deployment: {
+                verification: {
+                    rollout: true,
+                    ingress: true,
+                    tls: true,
+                    https: true,
+                },
+                rollout: {
+                    ok: true,
+                },
+            },
+        }));
+
+        const result = await service.getAppProgress('demo-app', 'user-1');
+
+        expect(giteaClient.listRepositoryWorkflowRuns).toHaveBeenCalledWith(expect.objectContaining({
+            owner: 'agent-apps',
+            repo: 'demo-app',
+            headSha: 'abcdef1234567890',
+        }));
+        expect(service.deployApp).toHaveBeenCalledWith('app-1', {
+            imageTag: 'sha-abcdef123456',
+        }, 'user-1', {
+            sessionId: 'session-1',
+        });
+        expect(result.app.status).toBe('live');
+        expect(result.latestBuildRun.buildStatus).toBe('success');
+        expect(result.progress).toEqual(expect.objectContaining({
+            phase: 'live',
+            phaseLabel: 'Live',
+        }));
+    });
+
     test('listApps returns canonical summary and progress fields', async () => {
         const service = new ManagedAppService({
             store: {

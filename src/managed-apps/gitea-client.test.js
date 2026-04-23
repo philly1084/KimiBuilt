@@ -164,4 +164,42 @@ describe('GiteaClient', () => {
             }),
         );
     });
+
+    test('lists repository workflow runs filtered by head sha', async () => {
+        global.fetch = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            text: async () => JSON.stringify({
+                total_count: 1,
+                workflow_runs: [{
+                    id: 42,
+                    head_sha: 'abcdef1234567890',
+                    status: 'completed',
+                    conclusion: 'success',
+                }],
+            }),
+        });
+
+        const client = new GiteaClient();
+        const result = await client.listRepositoryWorkflowRuns({
+            owner: 'agent-apps',
+            repo: 'demo-app',
+            headSha: 'abcdef1234567890',
+            limit: 5,
+        });
+
+        expect(result.totalCount).toBe(1);
+        expect(result.workflowRuns).toEqual([expect.objectContaining({
+            id: 42,
+            conclusion: 'success',
+        })]);
+        expect(global.fetch).toHaveBeenCalledWith(
+            expect.objectContaining({
+                href: 'https://gitea.example.com/api/v1/repos/agent-apps/demo-app/actions/runs?head_sha=abcdef1234567890&page=1&limit=5',
+            }),
+            expect.objectContaining({
+                method: 'GET',
+            }),
+        );
+    });
 });

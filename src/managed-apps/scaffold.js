@@ -25,7 +25,6 @@ function buildWorkflowYaml({
     giteaOrg = '',
     imageRepo = '',
     registryHost = '',
-    buildEventsUrl = '',
 } = {}) {
     return `name: build-and-publish
 
@@ -43,7 +42,6 @@ jobs:
       APP_SLUG: ${slug}
       IMAGE_REPO: ${imageRepo}
       REGISTRY_HOST: ${registryHost}
-      DEFAULT_BUILD_EVENTS_URL: ${buildEventsUrl || 'https://kimibuilt.example.com/api/integrations/gitea/build-events'}
       DEFAULT_TARGET_PLATFORMS: linux/amd64,linux/arm64
     steps:
       - name: Materialize repository
@@ -173,102 +171,6 @@ jobs:
             --output "type=image,name=$IMAGE_REPO:$IMAGE_TAG,push=true" \\
             --export-cache type=inline \\
             --import-cache "type=registry,ref=$IMAGE_REPO:latest"
-
-      - name: Notify KimiBuilt on success
-        if: success()
-        shell: bash
-        run: |
-          set -euo pipefail
-          post_json() {
-            url="$1"
-            payload="$2"
-            secret="$3"
-            insecure_flag="\${KIMIBUILT_BUILD_EVENTS_INSECURE:-0}"
-            if command -v curl >/dev/null 2>&1; then
-              curl_args="-fsSL"
-              if [ "$insecure_flag" = "1" ] || [ "$insecure_flag" = "true" ]; then
-                curl_args="$curl_args -k"
-              fi
-              # shellcheck disable=SC2086
-              curl $curl_args -X POST "$url" \\
-                -H "Content-Type: application/json" \\
-                -H "X-KimiBuilt-Webhook-Secret: $secret" \\
-                -d "$payload"
-              return
-            fi
-            if command -v wget >/dev/null 2>&1; then
-              wget_insecure_args=""
-              if [ "$insecure_flag" = "1" ] || [ "$insecure_flag" = "true" ]; then
-                wget_insecure_args="--no-check-certificate"
-              fi
-              # shellcheck disable=SC2086
-              wget -qO- \\
-                $wget_insecure_args \\
-                --header="Content-Type: application/json" \\
-                --header="X-KimiBuilt-Webhook-Secret: $secret" \\
-                --post-data="$payload" \\
-                "$url"
-              return
-            fi
-            echo "curl or wget is required on the runner host" >&2
-            exit 1
-          }
-          IMAGE_TAG="\${IMAGE_TAG:-sha-\${GITHUB_SHA::12}}"
-          test -n "\${KIMIBUILT_BUILD_EVENTS_SECRET:-}"
-          TARGET_BUILD_EVENTS_URL="\${KIMIBUILT_BUILD_EVENTS_URL:-$DEFAULT_BUILD_EVENTS_URL}"
-          PAYLOAD="$(cat <<EOF
-          {"repoOwner":"${giteaOrg}","repoName":"${slug}","slug":"${slug}","imageRepo":"$IMAGE_REPO","platforms":"$TARGET_PLATFORMS","commitSha":"$GITHUB_SHA","imageTag":"$IMAGE_TAG","buildStatus":"success","runId":"\${{ gitea.run_id }}","runUrl":"\${{ gitea.server_url }}/${giteaOrg}/${slug}/actions/runs/\${{ gitea.run_id }}"}
-          EOF
-          )"
-          post_json "$TARGET_BUILD_EVENTS_URL" "$PAYLOAD" "$KIMIBUILT_BUILD_EVENTS_SECRET" || echo "KimiBuilt success notification failed" >&2
-
-      - name: Notify KimiBuilt on failure
-        if: failure()
-        shell: bash
-        run: |
-          set -euo pipefail
-          post_json() {
-            url="$1"
-            payload="$2"
-            secret="$3"
-            insecure_flag="\${KIMIBUILT_BUILD_EVENTS_INSECURE:-0}"
-            if command -v curl >/dev/null 2>&1; then
-              curl_args="-fsSL"
-              if [ "$insecure_flag" = "1" ] || [ "$insecure_flag" = "true" ]; then
-                curl_args="$curl_args -k"
-              fi
-              # shellcheck disable=SC2086
-              curl $curl_args -X POST "$url" \\
-                -H "Content-Type: application/json" \\
-                -H "X-KimiBuilt-Webhook-Secret: $secret" \\
-                -d "$payload"
-              return
-            fi
-            if command -v wget >/dev/null 2>&1; then
-              wget_insecure_args=""
-              if [ "$insecure_flag" = "1" ] || [ "$insecure_flag" = "true" ]; then
-                wget_insecure_args="--no-check-certificate"
-              fi
-              # shellcheck disable=SC2086
-              wget -qO- \\
-                $wget_insecure_args \\
-                --header="Content-Type: application/json" \\
-                --header="X-KimiBuilt-Webhook-Secret: $secret" \\
-                --post-data="$payload" \\
-                "$url"
-              return
-            fi
-            echo "curl or wget is required on the runner host" >&2
-            exit 1
-          }
-          IMAGE_TAG="\${IMAGE_TAG:-sha-\${GITHUB_SHA::12}}"
-          test -n "\${KIMIBUILT_BUILD_EVENTS_SECRET:-}"
-          TARGET_BUILD_EVENTS_URL="\${KIMIBUILT_BUILD_EVENTS_URL:-$DEFAULT_BUILD_EVENTS_URL}"
-          PAYLOAD="$(cat <<EOF
-          {"repoOwner":"${giteaOrg}","repoName":"${slug}","slug":"${slug}","imageRepo":"$IMAGE_REPO","platforms":"$TARGET_PLATFORMS","commitSha":"$GITHUB_SHA","imageTag":"$IMAGE_TAG","buildStatus":"failed","runId":"\${{ gitea.run_id }}","runUrl":"\${{ gitea.server_url }}/${giteaOrg}/${slug}/actions/runs/\${{ gitea.run_id }}"}
-          EOF
-          )"
-          post_json "$TARGET_BUILD_EVENTS_URL" "$PAYLOAD" "$KIMIBUILT_BUILD_EVENTS_SECRET" || echo "KimiBuilt failure notification failed" >&2
 `;
 }
 

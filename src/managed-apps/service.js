@@ -241,6 +241,105 @@ function normalizeBuildStatus(value = '') {
     return normalized || 'queued';
 }
 
+function isPendingBuildStatus(value = '') {
+    const normalized = normalizeBuildStatus(value);
+    return ['queued', 'pending', 'requested', 'running', 'in_progress', 'in-progress'].includes(normalized);
+}
+
+function isSuccessfulBuildStatus(value = '') {
+    return normalizeBuildStatus(value) === 'success';
+}
+
+function isFailedBuildStatus(value = '') {
+    return ['failed', 'failure', 'cancelled', 'canceled', 'timed_out', 'timed-out', 'skipped'].includes(normalizeBuildStatus(value));
+}
+
+function normalizeWorkflowRunBuildStatus(run = {}) {
+    const status = normalizeText(run?.status || run?.state).toLowerCase();
+    const conclusion = normalizeText(run?.conclusion || run?.result).toLowerCase();
+
+    if (['success', 'successful'].includes(status) || ['success', 'successful'].includes(conclusion)) {
+        return 'success';
+    }
+
+    if (['failure', 'failed', 'cancelled', 'canceled', 'timed_out', 'timed-out', 'skipped', 'neutral', 'action_required'].includes(status)
+        || ['failure', 'failed', 'cancelled', 'canceled', 'timed_out', 'timed-out', 'skipped', 'neutral', 'action_required'].includes(conclusion)) {
+        return 'failed';
+    }
+
+    if (['completed', 'done'].includes(status)) {
+        return conclusion === 'success' ? 'success' : 'failed';
+    }
+
+    if (['in_progress', 'in-progress', 'running'].includes(status)) {
+        return 'running';
+    }
+
+    return 'queued';
+}
+
+function buildManagedAppWorkflowRunUrl(run = {}, { repoOwner = '', repoName = '', baseURL = '' } = {}) {
+    const explicit = normalizeText(run?.html_url || run?.run_url || run?.url);
+    if (explicit) {
+        return explicit;
+    }
+
+    const normalizedBase = normalizeText(baseURL).replace(/\/+$/, '');
+    const normalizedOwner = normalizeText(repoOwner);
+    const normalizedRepo = normalizeText(repoName);
+    const runId = normalizeText(run?.id || run?.run_id);
+    if (!normalizedBase || !normalizedOwner || !normalizedRepo || !runId) {
+        return '';
+    }
+
+    return `${normalizedBase}/${normalizedOwner}/${normalizedRepo}/actions/runs/${runId}`;
+}
+
+function buildManagedAppRunSortValue(run = {}) {
+    const candidate = normalizeText(
+        run?.updated_at
+        || run?.completed_at
+        || run?.started_at
+        || run?.run_started_at
+        || run?.created_at,
+    );
+    if (candidate) {
+        const timestamp = Date.parse(candidate);
+        if (Number.isFinite(timestamp)) {
+            return timestamp;
+        }
+    }
+
+    const numericId = Number(run?.id || run?.run_id);
+    return Number.isFinite(numericId) ? numericId : 0;
+}
+
+function selectMostRelevantManagedAppWorkflowRun(runs = [], buildRun = {}) {
+    const candidates = Array.isArray(runs) ? [...runs] : [];
+    if (candidates.length === 0) {
+        return null;
+    }
+
+    const externalRunId = normalizeText(buildRun?.externalRunId);
+    if (externalRunId) {
+        const matchedById = candidates.find((entry) => normalizeText(entry?.id || entry?.run_id) === externalRunId);
+        if (matchedById) {
+            return matchedById;
+        }
+    }
+
+    const commitSha = normalizeText(buildRun?.commitSha).toLowerCase();
+    const matchedBySha = commitSha
+        ? candidates.filter((entry) => normalizeText(entry?.head_sha).toLowerCase() === commitSha)
+        : candidates;
+    if (matchedBySha.length === 0) {
+        return null;
+    }
+
+    matchedBySha.sort((left, right) => buildManagedAppRunSortValue(right) - buildManagedAppRunSortValue(left));
+    return matchedBySha[0];
+}
+
 function normalizeRequestedAction(value = '') {
     const normalized = normalizeText(value).toLowerCase();
     return normalized || 'build';
@@ -1055,6 +1154,26 @@ function buildManagedProjectState(app = null, buildRun = null, phase = '', detai
     };
 }
 
+function resolveManagedAppLifecyclePhase(app = null, buildRun = null, explicitPhase = '') {
+    const preferred = normalizeText(explicitPhase).toLowerCase();
+    if (preferred) {
+        return preferred;
+    }
+
+    const appStatus = normalizeText(app?.status).toLowerCase();
+    if (appStatus !== 'building') {
+        return appStatus || 'updated';
+    }
+
+    if (isSuccessfulBuildStatus(buildRun?.buildStatus)) {
+        return 'built';
+    }
+    if (isFailedBuildStatus(buildRun?.buildStatus)) {
+        return 'build_failed';
+    }
+    return 'updated';
+}
+
 function hasOwnInput(input = {}, key = '') {
     return Boolean(input && Object.prototype.hasOwnProperty.call(input, key));
 }
@@ -1377,7 +1496,7 @@ class ManagedAppService {
             return null;
         }
 
-        const phase = normalizeText(details.phase || normalizedApp.status || '').toLowerCase() || 'updated';
+        const phase = resolveManagedAppLifecyclePhase(normalizedApp, buildRun, details.phase);
         const summary = normalizeText(
             details.summary
             || normalizedApp.metadata?.project?.summary
@@ -1394,16 +1513,157 @@ class ManagedAppService {
         });
     }
 
+    async reconcilePendingBuildForApp(app = null, ownerId = null, latestBuildRun = null) {
+        const normalizedApp = this.normalizeAppRecord(app);
+        if (!normalizedApp?.id) {
+            return {
+                app: normalizedApp,
+                latestBuildRun,
+                handledResult: null,
+            };
+        }
+
+        const buildRun = latestBuildRun || (this.store?.listBuildRunsForApp
+            ? (await this.store.listBuildRunsForApp(normalizedApp.id, ownerId, 1))[0] || null
+            : null);
+        if (!buildRun || !isPendingBuildStatus(buildRun.buildStatus) || !normalizeText(buildRun.commitSha)) {
+            return {
+                app: normalizedApp,
+                latestBuildRun: buildRun,
+                handledResult: null,
+            };
+        }
+
+        if (!this.giteaClient
+            || typeof this.giteaClient.isConfigured !== 'function'
+            || this.giteaClient.isConfigured() !== true
+            || typeof this.giteaClient.listRepositoryWorkflowRuns !== 'function') {
+            return {
+                app: normalizedApp,
+                latestBuildRun: buildRun,
+                handledResult: null,
+            };
+        }
+
+        const giteaConfig = this.getEffectiveGiteaConfig();
+        const repoOwner = normalizeText(normalizedApp.repoOwner || giteaConfig.org);
+        const repoName = normalizeText(normalizedApp.repoName || normalizedApp.slug);
+        if (!repoOwner || !repoName) {
+            return {
+                app: normalizedApp,
+                latestBuildRun: buildRun,
+                handledResult: null,
+            };
+        }
+
+        let catalog;
+        try {
+            catalog = await this.giteaClient.listRepositoryWorkflowRuns({
+                owner: repoOwner,
+                repo: repoName,
+                headSha: buildRun.commitSha,
+                limit: 10,
+            });
+        } catch (_error) {
+            return {
+                app: normalizedApp,
+                latestBuildRun: buildRun,
+                handledResult: null,
+            };
+        }
+
+        const workflowRun = selectMostRelevantManagedAppWorkflowRun(catalog?.workflowRuns || [], buildRun);
+        if (!workflowRun) {
+            return {
+                app: normalizedApp,
+                latestBuildRun: buildRun,
+                handledResult: null,
+            };
+        }
+
+        const externalRunId = normalizeText(workflowRun.id || workflowRun.run_id);
+        const externalRunUrl = buildManagedAppWorkflowRunUrl(workflowRun, {
+            repoOwner,
+            repoName,
+            baseURL: giteaConfig.baseURL,
+        });
+        const reconciledBuildStatus = normalizeWorkflowRunBuildStatus(workflowRun);
+
+        if (isSuccessfulBuildStatus(reconciledBuildStatus) || isFailedBuildStatus(reconciledBuildStatus)) {
+            const handledResult = await this.handleBuildEvent({
+                repoOwner,
+                repoName,
+                slug: normalizedApp.slug,
+                imageRepo: resolveManagedAppImageRepo(normalizedApp, giteaConfig),
+                commitSha: buildRun.commitSha,
+                imageTag: normalizeText(buildRun.imageTag || buildImageTagFromCommit(buildRun.commitSha)),
+                buildStatus: reconciledBuildStatus,
+                runId: externalRunId,
+                runUrl: externalRunUrl,
+                startedAt: workflowRun.run_started_at || workflowRun.started_at || buildRun.startedAt || null,
+                finishedAt: workflowRun.completed_at || workflowRun.updated_at || new Date().toISOString(),
+                deployRequested: buildRun.deployRequested === true,
+                requestedAction: buildRun.requestedAction || (buildRun.deployRequested === true ? 'deploy' : 'build'),
+                message: isFailedBuildStatus(reconciledBuildStatus)
+                    ? `Gitea workflow concluded with ${normalizeText(workflowRun.conclusion || workflowRun.status || 'a failure state')}.`
+                    : '',
+            });
+
+            return {
+                app: this.normalizeAppRecord(handledResult?.app || normalizedApp),
+                latestBuildRun: handledResult?.buildRun || buildRun,
+                handledResult,
+            };
+        }
+
+        const workflowMetadata = {
+            ...(buildRun.metadata || {}),
+            giteaRun: {
+                id: externalRunId,
+                status: normalizeText(workflowRun.status),
+                conclusion: normalizeText(workflowRun.conclusion),
+                htmlUrl: externalRunUrl,
+                updatedAt: normalizeText(
+                    workflowRun.updated_at
+                    || workflowRun.completed_at
+                    || workflowRun.started_at
+                    || workflowRun.run_started_at,
+                ),
+            },
+        };
+        const shouldPersistBuildRun = externalRunId !== normalizeText(buildRun.externalRunId)
+            || externalRunUrl !== normalizeText(buildRun.externalRunUrl)
+            || normalizeText(buildRun.buildStatus).toLowerCase() !== reconciledBuildStatus;
+        const nextBuildRun = shouldPersistBuildRun
+            ? await this.store.updateBuildRun(buildRun.id, {
+                buildStatus: reconciledBuildStatus,
+                externalRunId: externalRunId || buildRun.externalRunId,
+                externalRunUrl: externalRunUrl || buildRun.externalRunUrl,
+                metadata: workflowMetadata,
+                startedAt: workflowRun.run_started_at || workflowRun.started_at || buildRun.startedAt,
+            })
+            : buildRun;
+
+        return {
+            app: normalizedApp,
+            latestBuildRun: nextBuildRun,
+            handledResult: null,
+        };
+    }
+
     async getAppProgress(appRef = '', ownerId = null) {
         const app = await this.resolveApp(appRef, ownerId);
         if (!app) {
             return null;
         }
 
-        const normalizedApp = this.normalizeAppRecord(app);
-        const latestBuildRun = this.store?.listBuildRunsForApp
+        let normalizedApp = this.normalizeAppRecord(app);
+        let latestBuildRun = this.store?.listBuildRunsForApp
             ? (await this.store.listBuildRunsForApp(normalizedApp.id, ownerId, 1))[0] || null
             : null;
+        const reconciled = await this.reconcilePendingBuildForApp(normalizedApp, ownerId, latestBuildRun);
+        normalizedApp = this.normalizeAppRecord(reconciled.app || normalizedApp);
+        latestBuildRun = reconciled.latestBuildRun || latestBuildRun;
         const project = this.buildAppProjectView(normalizedApp, latestBuildRun);
 
         return {
@@ -1788,15 +2048,27 @@ class ManagedAppService {
             return null;
         }
 
-        const buildRuns = await this.store.listBuildRunsForApp(app.id, ownerId, 10);
-        const latestBuildRun = buildRuns[0] || null;
-        const project = this.buildAppProjectView(app, latestBuildRun);
+        let normalizedApp = this.normalizeAppRecord(app);
+        let buildRuns = await this.store.listBuildRunsForApp(normalizedApp.id, ownerId, 10);
+        let latestBuildRun = buildRuns[0] || null;
+        const reconciled = await this.reconcilePendingBuildForApp(normalizedApp, ownerId, latestBuildRun);
+        normalizedApp = this.normalizeAppRecord(reconciled.app || normalizedApp);
+        if (reconciled.handledResult) {
+            buildRuns = await this.store.listBuildRunsForApp(normalizedApp.id, ownerId, 10);
+            latestBuildRun = buildRuns[0] || null;
+        } else {
+            latestBuildRun = reconciled.latestBuildRun || latestBuildRun;
+            if (latestBuildRun && buildRuns.length > 0) {
+                buildRuns = [latestBuildRun, ...buildRuns.slice(1)];
+            }
+        }
+        const project = this.buildAppProjectView(normalizedApp, latestBuildRun);
         return {
-            app,
+            app: normalizedApp,
             buildRuns,
             project,
             progress: project?.progress || null,
-            summary: normalizeText(project?.summary || app.metadata?.project?.summary || buildManagedAppStatusSummary(app, latestBuildRun, app.status || 'updated')),
+            summary: normalizeText(project?.summary || normalizedApp.metadata?.project?.summary || buildManagedAppStatusSummary(normalizedApp, latestBuildRun, normalizedApp.status || 'updated')),
         };
     }
 
