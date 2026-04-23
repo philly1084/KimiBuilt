@@ -94,6 +94,29 @@ const API = (function() {
         });
     }
 
+    function getDefaultImageModels() {
+        return [
+            {
+                id: 'gpt-image-2',
+                name: 'GPT Image 2',
+                description: 'State-of-the-art OpenAI image generation',
+                sizes: ['auto', '1024x1024', '1536x1024', '1024x1536'],
+                qualities: ['auto', 'low', 'medium', 'high'],
+                styles: [],
+                maxImages: 5,
+            },
+            {
+                id: 'gpt-image-1.5',
+                name: 'GPT Image 1.5',
+                description: 'Previous OpenAI GPT Image release',
+                sizes: ['auto', '1024x1024', '1536x1024', '1024x1536'],
+                qualities: ['auto', 'low', 'medium', 'high'],
+                styles: [],
+                maxImages: 5,
+            },
+        ];
+    }
+
     function buildMessages(message, context = []) {
         if (Array.isArray(context) && context.length > 0) {
             return [...context, { role: 'user', content: message }];
@@ -269,7 +292,10 @@ const API = (function() {
     async function getImageModels() {
         try {
             const baseUrl = BASE_URL.replace('/v1', '');
-            const response = await fetch(`${baseUrl}/api/images/models`);
+            const response = await fetch(`${baseUrl}/api/images/models`, {
+                headers: { 'Accept': 'application/json' },
+                credentials: 'same-origin',
+            });
 
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${await response.text()}`);
@@ -279,9 +305,7 @@ const API = (function() {
             return data.models || [];
         } catch (error) {
             console.warn('Failed to fetch image models:', error.message);
-            return [
-                { id: '', name: 'Gateway Default', sizes: ['1024x1024'], qualities: [], styles: [] },
-            ];
+            return getDefaultImageModels();
         }
     }
     
@@ -420,7 +444,7 @@ const API = (function() {
         return result;
     }
     
-    // Generate image using backend API
+    // Generate image using the OpenAI-compatible backend API
     async function generateImage(promptOrOptions, options = {}) {
         const request = (promptOrOptions && typeof promptOrOptions === 'object' && !Array.isArray(promptOrOptions))
             ? promptOrOptions
@@ -429,7 +453,7 @@ const API = (function() {
         const {
             prompt,
             model = null,
-            size = '1024x1024',
+            size = 'auto',
             quality,
             style,
             n,
@@ -439,21 +463,25 @@ const API = (function() {
         const params = {
             prompt,
             size,
+            taskType: 'image',
+            clientSurface: NOTES_CLIENT_SURFACE,
         };
 
         if (model) params.model = model;
 
-        if (quality) params.quality = quality;
-        if (style) params.style = style;
+        if (quality != null) params.quality = quality;
+        if (style != null) params.style = style;
         if (n) params.n = n;
         if (sessionId) params.sessionId = sessionId;
         
         try {
-            // Use the backend API endpoint
-            const baseUrl = BASE_URL.replace('/v1', '');
-            const response = await fetch(`${baseUrl}/api/images`, {
+            const response = await fetch(`${BASE_URL}/images/generations`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                },
+                credentials: 'same-origin',
                 body: JSON.stringify(params),
             });
             
@@ -463,6 +491,9 @@ const API = (function() {
             }
             
             const data = await response.json();
+            if (data.sessionId || data.session_id) {
+                currentSessionId = data.sessionId || data.session_id;
+            }
             const images = Array.isArray(data.data) ? data.data : [];
             const firstImage = images[0] || {};
             const imageUrl = firstImage.url || (firstImage.b64_json ? `data:image/png;base64,${firstImage.b64_json}` : null);
@@ -479,7 +510,7 @@ const API = (function() {
                 size: data.size || params.size,
                 quality: data.quality || params.quality || null,
                 style: data.style || params.style || null,
-                sessionId: data.sessionId || sessionId,
+                sessionId: data.sessionId || data.session_id || sessionId,
             };
         } catch (error) {
             console.warn('Image generation failed:', error.message);

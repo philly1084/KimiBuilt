@@ -20,6 +20,11 @@ const EXCLUDED_MODEL_TOKENS = [
   'whisper',
 ];
 
+function toFiniteNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 class ModelsController {
   async getAll(req, res) {
     try {
@@ -227,6 +232,43 @@ class ModelsController {
       .replace(/\b\w/g, (char) => char.toUpperCase());
   }
 
+  deriveLogTokenUsage(log = {}) {
+    const promptTokens = toFiniteNumber(log.promptTokens);
+    const completionTokens = toFiniteNumber(log.completionTokens);
+    const explicitTotalTokens = toFiniteNumber(log.tokens);
+    const hasPromptTokens = promptTokens !== null;
+    const hasCompletionTokens = completionTokens !== null;
+    const hasTotalTokens = explicitTotalTokens !== null;
+    const totalTokens = hasTotalTokens
+      ? explicitTotalTokens
+      : (hasPromptTokens ? promptTokens : 0) + (hasCompletionTokens ? completionTokens : 0);
+
+    let inputTokens = hasPromptTokens ? promptTokens : null;
+    let outputTokens = hasCompletionTokens ? completionTokens : null;
+
+    if (inputTokens === null && outputTokens !== null && hasTotalTokens) {
+      inputTokens = Math.max(0, totalTokens - outputTokens);
+    }
+    if (outputTokens === null && inputTokens !== null && hasTotalTokens) {
+      outputTokens = Math.max(0, totalTokens - inputTokens);
+    }
+
+    if (inputTokens === null) {
+      inputTokens = 0;
+    }
+    if (outputTokens === null) {
+      outputTokens = (!hasPromptTokens && !hasCompletionTokens && hasTotalTokens)
+        ? totalTokens
+        : 0;
+    }
+
+    return {
+      inputTokens,
+      outputTokens,
+      totalTokens,
+    };
+  }
+
   buildUsageStats(models = []) {
     const usageByModel = new Map();
     const catalogById = new Map((models || []).map((model) => [model.id, model]));
@@ -239,14 +281,17 @@ class ModelsController {
         requests: 0,
         inputTokens: 0,
         outputTokens: 0,
+        totalTokens: 0,
         totalLatency: 0,
         successCount: 0,
       };
+      const tokenUsage = this.deriveLogTokenUsage(log);
 
       current.requests += 1;
       current.totalLatency += Number(log.latency || log.duration || 0);
-      current.inputTokens += Number(log.promptTokens || 0);
-      current.outputTokens += Number(log.completionTokens || log.tokens || 0);
+      current.inputTokens += tokenUsage.inputTokens;
+      current.outputTokens += tokenUsage.outputTokens;
+      current.totalTokens += tokenUsage.totalTokens;
       current.successCount += log.status === 'error' ? 0 : 1;
       usageByModel.set(modelId, current);
     }
@@ -264,6 +309,7 @@ class ModelsController {
         requests: 0,
         inputTokens: 0,
         outputTokens: 0,
+        totalTokens: 0,
         totalLatency: 0,
         successCount: 0,
       };
@@ -276,7 +322,7 @@ class ModelsController {
         tokens: {
           input: usage.inputTokens,
           output: usage.outputTokens,
-          total: usage.inputTokens + usage.outputTokens,
+          total: usage.totalTokens,
         },
         cost: {
           input: 0,

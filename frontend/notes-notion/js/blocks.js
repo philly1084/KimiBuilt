@@ -135,6 +135,25 @@ const Blocks = (function() {
     // Default model configuration
     const DEFAULT_MODEL = 'gpt-4o';
     const DEFAULT_IMAGE_MODEL = '';
+    const DEFAULT_IMAGE_SIZE = 'auto';
+    const DEFAULT_IMAGE_QUALITY = 'auto';
+    const DEFAULT_IMAGE_STYLE = null;
+    const FALLBACK_IMAGE_MODELS = [
+        {
+            id: 'gpt-image-2',
+            name: 'GPT Image 2',
+            sizes: ['auto', '1024x1024', '1536x1024', '1024x1536'],
+            qualities: ['auto', 'low', 'medium', 'high'],
+            styles: [],
+        },
+        {
+            id: 'gpt-image-1.5',
+            name: 'GPT Image 1.5',
+            sizes: ['auto', '1024x1024', '1536x1024', '1024x1536'],
+            qualities: ['auto', 'low', 'medium', 'high'],
+            styles: [],
+        },
+    ];
     
     /**
      * Create a new block
@@ -1189,9 +1208,9 @@ const Blocks = (function() {
             prompt: '',
             imageUrl: null,
             model: DEFAULT_IMAGE_MODEL,
-            size: '1024x1024',
-            quality: 'standard',
-            style: 'vivid',
+            size: DEFAULT_IMAGE_SIZE,
+            quality: DEFAULT_IMAGE_QUALITY,
+            style: DEFAULT_IMAGE_STYLE,
             source: 'ai',
             status: 'pending',
             unsplashResults: null,
@@ -1538,68 +1557,171 @@ const Blocks = (function() {
                 : 'Describe the image you want to generate...';
             promptInput.value = content.prompt || '';
             promptInput.rows = 3;
-            
+
             const aiOptionsRow = document.createElement('div');
             aiOptionsRow.className = 'ai-image-options';
             aiOptionsRow.style.display = content.source === 'unsplash' ? 'none' : 'flex';
-            
+
             const modelSelect = document.createElement('select');
             modelSelect.className = 'ai-image-select';
-            modelSelect.innerHTML = `
-                <option value="">Gateway Default (Recommended)</option>
-            `;
-            modelSelect.value = content.model || DEFAULT_IMAGE_MODEL;
-            
+            modelSelect.setAttribute('aria-label', 'Image model');
+
+            const sizeSelect = document.createElement('select');
+            sizeSelect.className = 'ai-image-select';
+            sizeSelect.setAttribute('aria-label', 'Image size');
+
+            const qualitySelect = document.createElement('select');
+            qualitySelect.className = 'ai-image-select';
+            qualitySelect.setAttribute('aria-label', 'Image quality');
+
+            const styleSelect = document.createElement('select');
+            styleSelect.className = 'ai-image-select';
+            styleSelect.setAttribute('aria-label', 'Image style');
+
+            const formatSizeLabel = (value = '') => {
+                const normalized = String(value || '').trim();
+                if (!normalized) {
+                    return 'Auto';
+                }
+                if (normalized === 'auto') {
+                    return 'Auto';
+                }
+
+                const sizeMatch = normalized.match(/^(\d+)x(\d+)$/);
+                if (!sizeMatch) {
+                    return normalized;
+                }
+
+                const width = Number(sizeMatch[1]);
+                const height = Number(sizeMatch[2]);
+                const aspectLabel = width === height
+                    ? 'Square'
+                    : (width > height ? 'Landscape' : 'Portrait');
+                return `${normalized} (${aspectLabel})`;
+            };
+
+            const resolveImageModels = (models = []) => {
+                const normalizedModels = Array.isArray(models)
+                    ? models.filter((model) => model && typeof model === 'object' && String(model.id || '').trim())
+                    : [];
+                return normalizedModels.length > 0 ? normalizedModels : FALLBACK_IMAGE_MODELS;
+            };
+
+            const syncSelectOptions = (select, values = [], preferredValue = '', labelFormatter = (value) => value) => {
+                const normalizedValues = (Array.isArray(values) ? values : [])
+                    .map((value) => {
+                        if (value && typeof value === 'object') {
+                            const optionValue = String(value.value ?? value.id ?? '').trim();
+                            if (!optionValue) {
+                                return null;
+                            }
+                            return {
+                                value: optionValue,
+                                label: String(value.label ?? value.name ?? optionValue).trim() || optionValue,
+                            };
+                        }
+
+                        const optionValue = String(value || '').trim();
+                        if (!optionValue) {
+                            return null;
+                        }
+                        return {
+                            value: optionValue,
+                            label: optionValue,
+                        };
+                    })
+                    .filter(Boolean);
+
+                select.innerHTML = '';
+                normalizedValues.forEach((entry) => {
+                    const option = document.createElement('option');
+                    option.value = entry.value;
+                    option.textContent = labelFormatter(entry.label, entry.value);
+                    select.appendChild(option);
+                });
+
+                if (normalizedValues.length === 0) {
+                    select.value = '';
+                    return;
+                }
+
+                const normalizedPreferredValue = String(preferredValue || '').trim();
+                const matchingOption = normalizedValues.find((entry) => entry.value === normalizedPreferredValue);
+                select.value = matchingOption ? matchingOption.value : normalizedValues[0].value;
+            };
+
+            let availableImageModels = resolveImageModels();
+
+            const getSelectedImageModel = () => {
+                const preferredModelId = String(
+                    modelSelect.value
+                    || content.model
+                    || DEFAULT_IMAGE_MODEL
+                    || availableImageModels[0]?.id
+                    || ''
+                ).trim();
+
+                return availableImageModels.find((model) => String(model.id || '').trim() === preferredModelId)
+                    || availableImageModels[0]
+                    || {
+                        id: '',
+                        sizes: [DEFAULT_IMAGE_SIZE],
+                        qualities: [DEFAULT_IMAGE_QUALITY],
+                        styles: [],
+                    };
+            };
+
+            const syncModelDrivenOptions = () => {
+                const selectedModel = getSelectedImageModel();
+                const sizes = Array.isArray(selectedModel.sizes) && selectedModel.sizes.length > 0
+                    ? selectedModel.sizes
+                    : [DEFAULT_IMAGE_SIZE];
+                const qualities = Array.isArray(selectedModel.qualities) ? selectedModel.qualities : [];
+                const styles = Array.isArray(selectedModel.styles) ? selectedModel.styles : [];
+
+                syncSelectOptions(sizeSelect, sizes, content.size || DEFAULT_IMAGE_SIZE, (_label, value) => formatSizeLabel(value));
+                syncSelectOptions(qualitySelect, qualities, content.quality || DEFAULT_IMAGE_QUALITY, (label) => label === 'auto' ? 'Auto' : label);
+                syncSelectOptions(styleSelect, styles, content.style || DEFAULT_IMAGE_STYLE || '');
+
+                qualitySelect.style.display = qualities.length > 0 ? '' : 'none';
+                qualitySelect.disabled = qualities.length === 0;
+                styleSelect.style.display = styles.length > 0 ? '' : 'none';
+                styleSelect.disabled = styles.length === 0;
+            };
+
+            const syncModelSelect = (models = []) => {
+                availableImageModels = resolveImageModels(models);
+                syncSelectOptions(
+                    modelSelect,
+                    availableImageModels.map((model) => ({
+                        value: String(model.id || '').trim(),
+                        label: String(model.name || model.id || '').trim() || String(model.id || '').trim(),
+                    })),
+                    content.model || DEFAULT_IMAGE_MODEL || availableImageModels[0]?.id || '',
+                );
+                syncModelDrivenOptions();
+            };
+
+            modelSelect.addEventListener('change', () => {
+                syncModelDrivenOptions();
+            });
+            syncModelSelect();
+
             if (window.API && typeof window.API.getImageModels === 'function') {
                 window.API.getImageModels()
                     .then((models) => {
-                        const imageModels = Array.isArray(models) ? models : [];
-                        imageModels.forEach((model) => {
-                            const option = document.createElement('option');
-                            option.value = model.id || '';
-                            option.textContent = model.name || model.id || 'Gateway Default';
-                            if (!option.value && modelSelect.querySelector('option[value=""]')) {
-                                return;
-                            }
-                            modelSelect.appendChild(option);
-                        });
-                        modelSelect.value = content.model || DEFAULT_IMAGE_MODEL || '';
+                        syncModelSelect(models);
                     })
                     .catch((error) => {
                         console.warn('Failed to load image models for AI image block:', error.message);
                     });
             }
-            
-            const sizeSelect = document.createElement('select');
-            sizeSelect.className = 'ai-image-select';
-            sizeSelect.innerHTML = `
-                <option value="1024x1024">1024x1024</option>
-                <option value="1024x1792">1024x1792 (Portrait)</option>
-                <option value="1792x1024">1792x1024 (Landscape)</option>
-            `;
-            sizeSelect.value = content.size || '1024x1024';
-            
-            const qualitySelect = document.createElement('select');
-            qualitySelect.className = 'ai-image-select';
-            qualitySelect.innerHTML = `
-                <option value="standard">Standard</option>
-                <option value="hd">HD</option>
-            `;
-            qualitySelect.value = content.quality || 'standard';
-            
-            const styleSelect = document.createElement('select');
-            styleSelect.className = 'ai-image-select';
-            styleSelect.innerHTML = `
-                <option value="vivid">Vivid</option>
-                <option value="natural">Natural</option>
-            `;
-            styleSelect.value = content.style || 'vivid';
-            
+
             aiOptionsRow.appendChild(modelSelect);
             aiOptionsRow.appendChild(sizeSelect);
             aiOptionsRow.appendChild(qualitySelect);
             aiOptionsRow.appendChild(styleSelect);
-            
+
             const buttons = document.createElement('div');
             buttons.className = 'ai-image-form-actions';
             
@@ -1638,15 +1760,15 @@ const Blocks = (function() {
                 const prompt = promptInput.value.trim();
                 if (!prompt) return;
                 
-                const currentSource = content.source || 'ai';
+                const currentSource = content.source === 'unsplash' ? 'unsplash' : 'ai';
                 block.content = {
                     ...block.content,
                     prompt,
                     source: currentSource,
                     model: modelSelect.value,
                     size: sizeSelect.value,
-                    quality: qualitySelect.value,
-                    style: styleSelect.value,
+                    quality: qualitySelect.disabled ? null : (qualitySelect.value || null),
+                    style: styleSelect.disabled ? null : (styleSelect.value || null),
                     status: 'generating',
                     imageUrl: null,
                     unsplashResults: null,

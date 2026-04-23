@@ -91,4 +91,51 @@ describe('admin models controller', () => {
       }),
     }));
   });
+
+  test('does not double count explicit zero completion tokens from total log tokens', () => {
+    logsController.logs = [{
+      model: 'tool-only-model',
+      promptTokens: 11,
+      completionTokens: 0,
+      tokens: 11,
+      latency: 30,
+      status: 'success',
+    }];
+
+    const usage = modelsController.buildUsageStats([]);
+
+    expect(usage).toEqual([
+      expect.objectContaining({
+        modelId: 'tool-only-model',
+        tokens: {
+          input: 11,
+          output: 0,
+          total: 11,
+        },
+      }),
+    ]);
+  });
+
+  test('derives the missing side from total log tokens without inflating totals', () => {
+    logsController.logs = [{
+      model: 'gpt-partial-log',
+      promptTokens: 125,
+      tokens: 165,
+      latency: 80,
+      status: 'success',
+    }];
+
+    const usage = modelsController.buildUsageStats([]);
+
+    expect(usage).toEqual([
+      expect.objectContaining({
+        modelId: 'gpt-partial-log',
+        tokens: {
+          input: 125,
+          output: 40,
+          total: 165,
+        },
+      }),
+    ]);
+  });
 });

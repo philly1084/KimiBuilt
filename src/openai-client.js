@@ -4667,7 +4667,7 @@ async function transcribeAudio({
 async function generateImage({
     prompt,
     model = null,
-    size = '1024x1024',
+    size = 'auto',
     quality = null,
     style = null,
     n = 1,

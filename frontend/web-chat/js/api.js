@@ -1546,11 +1546,51 @@ class OpenAIAPIClient extends EventTarget {
             : [];
     }
 
+    getDefaultImageModels() {
+        const created = Date.now();
+        const models = [
+            {
+                id: 'gpt-image-2',
+                name: 'GPT Image 2',
+                description: 'State-of-the-art OpenAI image generation',
+                sizes: ['auto', '1024x1024', '1536x1024', '1024x1536'],
+                qualities: ['auto', 'low', 'medium', 'high'],
+                styles: [],
+                maxImages: 5,
+            },
+            {
+                id: 'gpt-image-1.5',
+                name: 'GPT Image 1.5',
+                description: 'Previous OpenAI GPT Image release',
+                sizes: ['auto', '1024x1024', '1536x1024', '1024x1536'],
+                qualities: ['auto', 'low', 'medium', 'high'],
+                styles: [],
+                maxImages: 5,
+            },
+        ];
+
+        return {
+            object: 'list',
+            data: models.map((model) => ({
+                id: model.id,
+                object: 'model',
+                created,
+                owned_by: 'openai',
+                metadata: model,
+            })),
+        };
+    }
+
     async getImageModels() {
         const baseUrl = API_BASE_URL.replace('/v1', '');
 
         try {
-            const response = await fetch(`${baseUrl}/api/images/models`);
+            const response = await fetch(`${baseUrl}/api/images/models`, {
+                headers: buildGatewayHeaders({
+                    'Accept': 'application/json',
+                }),
+                credentials: 'same-origin',
+            });
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}`);
             }
@@ -1568,12 +1608,7 @@ class OpenAIAPIClient extends EventTarget {
             };
         } catch (error) {
             console.warn('[API] Failed to fetch image models:', error.message);
-            return {
-                object: 'list',
-                data: [
-                    { id: '', object: 'model', created: Date.now(), owned_by: 'openai', metadata: { id: '', name: 'Gateway Default', sizes: ['1024x1024'], qualities: [], styles: [] } },
-                ],
-            };
+            return this.getDefaultImageModels();
         }
     }
 
@@ -1582,12 +1617,12 @@ class OpenAIAPIClient extends EventTarget {
     // ============================================
 
     /**
-     * Generate images using the backend API
-     * POST /api/images
+     * Generate images using the OpenAI-compatible backend API
+     * POST /v1/images/generations
      * @param {Object} options - Image generation options
      * @param {string} options.prompt - Image prompt (required)
      * @param {string} options.model - Model to use (optional, defaults to the backend image model)
-     * @param {string} options.size - Image size (optional, default: '1024x1024')
+     * @param {string} options.size - Image size (optional, default: 'auto')
      * @param {string|null} options.quality - Image quality (optional)
      * @param {string|null} options.style - Image style (optional)
      * @param {number} options.n - Number of images (optional, default: 1)
@@ -1598,7 +1633,7 @@ class OpenAIAPIClient extends EventTarget {
         const {
             prompt,
             model = null,
-            size = '1024x1024',
+            size = 'auto',
             quality = null,
             style = null,
             n = 1,
@@ -1607,12 +1642,21 @@ class OpenAIAPIClient extends EventTarget {
 
         const params = {
             prompt,
-            model,
             size,
-            quality,
-            style,
             n: n || 1,
+            taskType: 'image',
+            clientSurface: WEB_CHAT_API_CLIENT_SURFACE,
         };
+
+        if (model) {
+            params.model = model;
+        }
+        if (quality != null) {
+            params.quality = quality;
+        }
+        if (style != null) {
+            params.style = style;
+        }
 
         if (sessionId || this.currentSessionId) {
             params.sessionId = sessionId || this.currentSessionId;
@@ -1620,18 +1664,19 @@ class OpenAIAPIClient extends EventTarget {
 
         let lastError = null;
         
-        // Extract base URL without /v1
-        const baseUrl = API_BASE_URL.replace('/v1', '');
-        
         for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
             try {
                 if (attempt > 0) {
                     await this.sleep(this.getRetryDelay(attempt - 1));
                 }
 
-                const response = await fetch(`${baseUrl}/api/images`, {
+                const response = await fetch(`${API_BASE_URL}/images/generations`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: buildGatewayHeaders({
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                    }),
+                    credentials: 'same-origin',
                     body: JSON.stringify(params),
                 });
                 
@@ -1646,11 +1691,14 @@ class OpenAIAPIClient extends EventTarget {
                 const data = await response.json();
                 
                 // Update current session ID if returned
-                if (data.sessionId) {
-                    this.currentSessionId = data.sessionId;
+                if (data.sessionId || data.session_id) {
+                    this.currentSessionId = data.sessionId || data.session_id;
                 }
                 
-                return data;
+                return {
+                    ...data,
+                    sessionId: data.sessionId || data.session_id || this.currentSessionId,
+                };
                 
             } catch (error) {
                 lastError = error;

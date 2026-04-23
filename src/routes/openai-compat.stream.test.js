@@ -231,6 +231,13 @@ describe('/v1/chat/completions stream forwarding', () => {
                 metadata: {
                     reasoningSummary: 'Checked the request and chose the direct path.',
                     reasoningAvailable: true,
+                    usage: {
+                        promptTokens: 21,
+                        completionTokens: 13,
+                        totalTokens: 34,
+                        cachedTokens: 5,
+                        reasoningTokens: 4,
+                    },
                     toolEvents: [],
                 },
             },
@@ -255,6 +262,17 @@ describe('/v1/chat/completions stream forwarding', () => {
         expect(response.status).toBe(200);
         expect(response.body.choices[0].message.content).toBe('Answer');
         expect(response.body.choices[0].message.reasoning).toBe('Checked the request and chose the direct path.');
+        expect(response.body.usage).toEqual({
+            prompt_tokens: 21,
+            completion_tokens: 13,
+            total_tokens: 34,
+            prompt_tokens_details: {
+                cached_tokens: 5,
+            },
+            completion_tokens_details: {
+                reasoning_tokens: 4,
+            },
+        });
     });
 
     test('reuses client-provided message ids when persisting a durable web-chat turn', async () => {

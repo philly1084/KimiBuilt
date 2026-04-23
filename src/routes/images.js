@@ -54,7 +54,7 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
         const {
             prompt,
             model = null,
-            size = '1024x1024',
+            size = 'auto',
             quality = null,
             style = null,
             n = 1,

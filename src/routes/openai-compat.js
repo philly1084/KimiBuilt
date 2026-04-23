@@ -65,6 +65,10 @@ const {
     getUserCheckpointState,
     parseUserCheckpointResponseMessage,
 } = require('../user-checkpoints');
+const {
+    extractResponseUsageMetadata,
+    normalizeUsageMetadata,
+} = require('../utils/token-usage');
 
 const router = Router();
 const FINAL_SYNTHESIS_PLACEHOLDER = 'I completed the request, but the final answer could not be synthesized from the model response.';
@@ -130,6 +134,59 @@ function normalizeMessageText(content = '') {
     }
 
     return '';
+}
+
+function buildCompatUsage(rawUsage = null) {
+    const normalizedUsage = normalizeUsageMetadata(rawUsage);
+    if (!normalizedUsage) {
+        return null;
+    }
+
+    const hasPromptTokens = Object.prototype.hasOwnProperty.call(normalizedUsage, 'promptTokens');
+    const hasCompletionTokens = Object.prototype.hasOwnProperty.call(normalizedUsage, 'completionTokens');
+    const hasTotalTokens = Object.prototype.hasOwnProperty.call(normalizedUsage, 'totalTokens');
+    const totalTokens = hasTotalTokens
+        ? normalizedUsage.totalTokens
+        : (hasPromptTokens ? normalizedUsage.promptTokens : 0) + (hasCompletionTokens ? normalizedUsage.completionTokens : 0);
+    let promptTokens = hasPromptTokens ? normalizedUsage.promptTokens : null;
+    let completionTokens = hasCompletionTokens ? normalizedUsage.completionTokens : null;
+
+    if (promptTokens === null && completionTokens !== null && hasTotalTokens) {
+        promptTokens = Math.max(0, totalTokens - completionTokens);
+    }
+    if (completionTokens === null && promptTokens !== null && hasTotalTokens) {
+        completionTokens = Math.max(0, totalTokens - promptTokens);
+    }
+
+    if (promptTokens === null) {
+        promptTokens = 0;
+    }
+    if (completionTokens === null) {
+        completionTokens = totalTokens;
+    }
+
+    const compatUsage = {
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        total_tokens: totalTokens,
+    };
+
+    if (Object.prototype.hasOwnProperty.call(normalizedUsage, 'cachedTokens')) {
+        compatUsage.prompt_tokens_details = {
+            cached_tokens: normalizedUsage.cachedTokens,
+        };
+    }
+    if (Object.prototype.hasOwnProperty.call(normalizedUsage, 'reasoningTokens')) {
+        compatUsage.completion_tokens_details = {
+            reasoning_tokens: normalizedUsage.reasoningTokens,
+        };
+    }
+
+    return compatUsage;
+}
+
+function buildCompatUsageFromResponse(response = {}) {
+    return buildCompatUsage(extractResponseUsageMetadata(response));
 }
 
 function isResponseToolOutputItem(item = {}) {
@@ -1004,6 +1061,11 @@ router.post('/chat/completions', async (req, res, next) => {
                 return;
             }
 
+            const compatUsage = buildCompatUsage(
+                generation?.metadata?.usage
+                || generation?.metadata?.tokenUsage
+                || null,
+            );
             res.json({
                 id: `chatcmpl-${generation.responseId}`,
                 object: 'chat.completion',
@@ -1018,11 +1080,7 @@ router.post('/chat/completions', async (req, res, next) => {
                     },
                     finish_reason: 'stop',
                 }],
-                usage: {
-                    prompt_tokens: -1,
-                    completion_tokens: -1,
-                    total_tokens: -1,
-                },
+                ...(compatUsage ? { usage: compatUsage } : {}),
                 session_id: sessionId,
                 artifacts: responseArtifacts,
                 tool_events: preparedImages.toolEvents,
@@ -1434,6 +1492,7 @@ router.post('/chat/completions', async (req, res, next) => {
             metadata: response?.metadata || {},
         });
         const compatReasoningSummary = extractCompatReasoningSummary(response, artifacts);
+        const compatUsage = buildCompatUsageFromResponse(response);
 
         res.json({
             id: `chatcmpl-${response.id}`,
@@ -1450,11 +1509,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 },
                 finish_reason: 'stop',
             }],
-            usage: {
-                prompt_tokens: -1,
-                completion_tokens: -1,
-                total_tokens: -1,
-            },
+            ...(compatUsage ? { usage: compatUsage } : {}),
             session_id: sessionId,
             artifacts,
             tool_events: response?.metadata?.toolEvents || [],
@@ -2196,9 +2251,9 @@ router.post('/images/generations', async (req, res, next) => {
             prompt,
             model = null,
             n = 1,
-            size = '1024x1024',
-            quality = 'standard',
-            style = 'vivid',
+            size = 'auto',
+            quality = 'auto',
+            style = null,
         } = req.body;
         const requestedCount = Math.min(Math.max(Number(n) || 1, 1), 5);
 

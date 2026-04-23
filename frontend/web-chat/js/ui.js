@@ -4307,7 +4307,7 @@ class UIHelpers {
         const selectedModel = this.getImageModelMetadata(model);
         const sizes = Array.isArray(selectedModel.sizes) && selectedModel.sizes.length > 0
             ? selectedModel.sizes
-            : ['1024x1024'];
+            : ['auto', '1024x1024', '1536x1024', '1024x1536'];
         const qualities = Array.isArray(selectedModel.qualities) ? selectedModel.qualities : [];
         const styles = Array.isArray(selectedModel.styles) ? selectedModel.styles : [];
         const supportsQuality = qualities.length > 0;
@@ -4360,7 +4360,7 @@ class UIHelpers {
         const options = {
             prompt: promptInput?.value?.trim() || '',
             model: model,
-            size: sizeSelect?.value || '1024x1024',
+            size: sizeSelect?.value || selectedModel.sizes?.[0] || 'auto',
             source: this.imageGenerationState.source
         };
         

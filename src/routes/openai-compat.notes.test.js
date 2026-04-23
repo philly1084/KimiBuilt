@@ -215,6 +215,13 @@ describe('/v1/chat/completions notes routing', () => {
                 filename: 'penguins.html',
             }],
             assistantMessage: 'Created the HTML document artifact (penguins.html).',
+            metadata: {
+                usage: {
+                    promptTokens: 120,
+                    completionTokens: 80,
+                    totalTokens: 200,
+                },
+            },
         });
 
         const app = express();
@@ -241,6 +248,11 @@ describe('/v1/chat/completions notes routing', () => {
         }));
         expect(executeConversationRuntime).not.toHaveBeenCalled();
         expect(response.body.choices[0].message.content).toBe('Created the HTML document artifact (penguins.html).');
+        expect(response.body.usage).toEqual({
+            prompt_tokens: 120,
+            completion_tokens: 80,
+            total_tokens: 200,
+        });
         expect(response.body.artifacts).toEqual([
             expect.objectContaining({ id: 'artifact-html-1', filename: 'penguins.html' }),
         ]);

@@ -396,24 +396,26 @@ Always be helpful, accurate, and concise.`;
       this.orchestrator.registerTool(new ToolDefinition({
         id: 'chat-generate-image',
         name: 'Generate Image',
-        description: 'Generate an image using DALL-E',
+        description: 'Generate an image using the custom OpenAI-compatible image endpoint',
         inputSchema: {
           type: 'object',
           required: ['prompt'],
           properties: {
             prompt: { type: 'string' },
-            size: { type: 'string', enum: ['1024x1024', '1792x1024', '1024x1792'] },
-            quality: { type: 'string', enum: ['standard', 'hd'] },
-            style: { type: 'string', enum: ['vivid', 'natural'] }
+            model: { type: 'string' },
+            size: { type: 'string', enum: ['auto', '1024x1024', '1536x1024', '1024x1536'] },
+            quality: { type: 'string', enum: ['auto', 'low', 'medium', 'high'] },
+            style: { type: 'string' }
           }
         },
         sideEffects: ['write'],
         handler: async (input) => {
-          const { prompt, size = '1024x1024', quality = 'standard', style = 'vivid' } = input;
+          const { prompt, model = null, size = 'auto', quality = 'auto', style = null } = input;
           
           if (window.ImageGenerator && window.ImageGenerator.generate) {
             const result = await window.ImageGenerator.generate({
               prompt,
+              model,
               size,
               quality,
               style
@@ -424,7 +426,7 @@ Always be helpful, accurate, and concise.`;
               window.ChatUI.addImageMessage({
                 url: result.url,
                 prompt: result.revisedPrompt || prompt,
-                metadata: { size, quality, style }
+                metadata: { model, size, quality, style }
               });
             }
             
