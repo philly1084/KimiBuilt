@@ -14,19 +14,41 @@
 </head>
 <body class="workspace-host-page">
     <main class="workspace-host-shell" aria-label="Web chat workspaces">
-        <header class="workspace-host-header">
-            <div class="workspace-host-copy">
-                <p class="workspace-host-kicker">Parallel web chat</p>
-                <h1>Lilly Workspaces</h1>
-                <p class="workspace-host-description">Run up to four isolated web-chat workspaces with their own sessions and live connections. Workspace 1 keeps the existing default chat history. Workspaces 2-4 stay separate for parallel projects.</p>
-            </div>
-            <div class="workspace-host-shortcuts" aria-label="Workspace shortcuts">
-                <span><kbd>Ctrl</kbd> + <kbd>1</kbd>..<kbd>4</kbd> switch workspace</span>
-            </div>
-        </header>
-
-        <nav id="workspace-tabs" class="workspace-tabs" aria-label="Chat workspaces" role="tablist"></nav>
         <section id="workspace-panels" class="workspace-panels" aria-live="polite"></section>
+
+        <div class="workspace-switcher">
+            <div id="workspace-switcher-backdrop" class="workspace-switcher-backdrop" hidden></div>
+
+            <button
+                id="workspace-switcher-toggle"
+                class="workspace-switcher-toggle"
+                type="button"
+                aria-controls="workspace-switcher-popover"
+                aria-expanded="false"
+                aria-haspopup="dialog"
+            >
+                <span class="workspace-switcher-toggle__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false">
+                        <rect x="4.5" y="8.5" width="8.5" height="8.5" rx="2.1"></rect>
+                        <rect x="10.5" y="5.5" width="8.5" height="8.5" rx="2.1"></rect>
+                    </svg>
+                </span>
+                <span id="workspace-switcher-current-slot" class="workspace-switcher-toggle__badge">1</span>
+                <span id="workspace-switcher-current-label" class="sr-only">Switch workspace</span>
+            </button>
+
+            <section id="workspace-switcher-popover" class="workspace-switcher-popover" role="dialog" aria-modal="true" aria-label="Workspace switcher" hidden>
+                <header class="workspace-switcher-popover__header">
+                    <div>
+                        <p class="workspace-switcher-popover__eyebrow">Parallel web chat</p>
+                        <h1 class="workspace-switcher-popover__title">Switch workspace</h1>
+                    </div>
+                    <p class="workspace-switcher-popover__hint">Ctrl/Cmd + 1-4</p>
+                </header>
+
+                <nav id="workspace-tabs" class="workspace-tabs" aria-label="Chat workspaces"></nav>
+            </section>
+        </div>
     </main>
 
     <script src="js/workspace-context.js?v=20260422a"></script>

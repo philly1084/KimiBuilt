@@ -2,8 +2,22 @@
     const workspaceHelpers = window.KimiBuiltWebChatWorkspace;
     const tabsRoot = document.getElementById('workspace-tabs');
     const panelsRoot = document.getElementById('workspace-panels');
+    const switcherToggle = document.getElementById('workspace-switcher-toggle');
+    const switcherPopover = document.getElementById('workspace-switcher-popover');
+    const switcherBackdrop = document.getElementById('workspace-switcher-backdrop');
+    const switcherCurrentSlot = document.getElementById('workspace-switcher-current-slot');
+    const switcherCurrentLabel = document.getElementById('workspace-switcher-current-label');
 
-    if (!workspaceHelpers || !tabsRoot || !panelsRoot) {
+    if (
+        !workspaceHelpers
+        || !tabsRoot
+        || !panelsRoot
+        || !switcherToggle
+        || !switcherPopover
+        || !switcherBackdrop
+        || !switcherCurrentSlot
+        || !switcherCurrentLabel
+    ) {
         return;
     }
 
@@ -11,6 +25,18 @@
     const workspaces = workspaceHelpers.listWorkspaceContexts();
     const panelsByKey = new Map();
     const tabsByKey = new Map();
+    let activeWorkspaceKey = workspaceHelpers.DEFAULT_WORKSPACE_KEY;
+    let isSwitcherOpen = false;
+
+    function getWorkspaceNumber(workspace) {
+        const match = String(workspace?.key || '').match(/(\d+)$/);
+        const workspaceNumber = match ? Number(match[1]) : 1;
+        if (!Number.isFinite(workspaceNumber) || workspaceNumber < 1) {
+            return 1;
+        }
+
+        return workspaceNumber;
+    }
 
     function getInitialWorkspaceKey() {
         const queryContext = workspaceHelpers.getWorkspaceContext(window.location.search);
@@ -63,23 +89,71 @@
         panel.appendChild(iframe);
     }
 
+    function updateSwitcherSummary(workspace) {
+        const workspaceNumber = getWorkspaceNumber(workspace);
+        const accessibleLabel = `${workspace.label} active. Switch workspace`;
+
+        switcherCurrentSlot.textContent = String(workspaceNumber);
+        switcherCurrentLabel.textContent = accessibleLabel;
+        switcherToggle.setAttribute('aria-label', accessibleLabel);
+        switcherToggle.setAttribute('title', accessibleLabel);
+    }
+
     function setDocumentWorkspace(workspace) {
-        document.title = `${workspace.label} · Lilly`;
+        document.title = `${workspace.label} - Lilly`;
+        document.body.dataset.workspaceKey = workspace.key;
 
         const nextUrl = new URL(window.location.href);
         nextUrl.searchParams.set('workspace', workspace.key);
         window.history.replaceState({ workspace: workspace.key }, '', nextUrl);
     }
 
-    function activateWorkspace(workspaceKey) {
+    function openSwitcher({ focusActiveWorkspace = true } = {}) {
+        if (isSwitcherOpen) {
+            return;
+        }
+
+        isSwitcherOpen = true;
+        document.body.classList.add('workspace-switcher-open');
+        switcherBackdrop.hidden = false;
+        switcherPopover.hidden = false;
+        switcherToggle.setAttribute('aria-expanded', 'true');
+
+        if (focusActiveWorkspace) {
+            const activeButton = tabsByKey.get(activeWorkspaceKey);
+            if (activeButton) {
+                window.requestAnimationFrame(() => {
+                    activeButton.focus();
+                });
+            }
+        }
+    }
+
+    function closeSwitcher({ restoreFocus = false } = {}) {
+        if (!isSwitcherOpen && switcherPopover.hidden) {
+            return;
+        }
+
+        isSwitcherOpen = false;
+        document.body.classList.remove('workspace-switcher-open');
+        switcherBackdrop.hidden = true;
+        switcherPopover.hidden = true;
+        switcherToggle.setAttribute('aria-expanded', 'false');
+
+        if (restoreFocus) {
+            switcherToggle.focus();
+        }
+    }
+
+    function activateWorkspace(workspaceKey, { closeMenu = true, restoreFocus = false } = {}) {
         const workspace = workspaces.find((entry) => entry.key === workspaceKey) || workspaces[0];
+        activeWorkspaceKey = workspace.key;
         ensureWorkspaceFrame(workspace);
 
         tabsByKey.forEach((button, key) => {
             const isActive = key === workspace.key;
             button.classList.toggle('is-active', isActive);
-            button.setAttribute('aria-selected', isActive ? 'true' : 'false');
-            button.tabIndex = isActive ? 0 : -1;
+            button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
         });
 
         panelsByKey.forEach((panel, key) => {
@@ -89,22 +163,28 @@
         });
 
         persistActiveWorkspace(workspace.key);
+        updateSwitcherSummary(workspace);
         setDocumentWorkspace(workspace);
+
+        if (closeMenu) {
+            closeSwitcher({ restoreFocus });
+        }
     }
 
     function renderTabs() {
         workspaces.forEach((workspace) => {
+            const workspaceNumber = getWorkspaceNumber(workspace);
             const tab = document.createElement('button');
             tab.type = 'button';
             tab.id = `workspace-tab-${workspace.key}`;
             tab.className = 'workspace-tab';
             tab.dataset.workspaceKey = workspace.key;
-            tab.setAttribute('role', 'tab');
-            tab.setAttribute('aria-controls', `workspace-panel-${workspace.key}`);
             tab.innerHTML = `
-                <span class="workspace-tab__eyebrow">Parallel slot</span>
-                <span class="workspace-tab__title">${workspace.label}</span>
-                <span class="workspace-tab__scope">${workspace.key === workspaceHelpers.DEFAULT_WORKSPACE_KEY ? 'Default chat history' : 'Isolated project space'}</span>
+                <span class="workspace-tab__badge">${workspaceNumber}</span>
+                <span class="workspace-tab__copy">
+                    <span class="workspace-tab__title">${workspace.label}</span>
+                    <span class="workspace-tab__scope">${workspace.key === workspaceHelpers.DEFAULT_WORKSPACE_KEY ? 'Default chat history' : 'Isolated project space'}</span>
+                </span>
             `;
             tab.addEventListener('click', () => activateWorkspace(workspace.key));
             tabsRoot.appendChild(tab);
@@ -113,16 +193,36 @@
             const panel = document.createElement('section');
             panel.id = `workspace-panel-${workspace.key}`;
             panel.className = 'workspace-panel';
-            panel.setAttribute('role', 'tabpanel');
-            panel.setAttribute('aria-labelledby', tab.id);
+            panel.setAttribute('aria-label', `${workspace.label} chat workspace`);
             panel.hidden = true;
             panelsRoot.appendChild(panel);
             panelsByKey.set(workspace.key, panel);
         });
     }
 
+    function setupSwitcherControls() {
+        switcherToggle.addEventListener('click', () => {
+            if (isSwitcherOpen) {
+                closeSwitcher();
+                return;
+            }
+
+            openSwitcher();
+        });
+
+        switcherBackdrop.addEventListener('click', () => {
+            closeSwitcher({ restoreFocus: true });
+        });
+    }
+
     function setupKeyboardShortcuts() {
         document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && isSwitcherOpen) {
+                event.preventDefault();
+                closeSwitcher({ restoreFocus: true });
+                return;
+            }
+
             if (!(event.ctrlKey || event.metaKey)) {
                 return;
             }
@@ -151,6 +251,7 @@
     }
 
     renderTabs();
+    setupSwitcherControls();
     setupKeyboardShortcuts();
-    activateWorkspace(getInitialWorkspaceKey());
+    activateWorkspace(getInitialWorkspaceKey(), { closeMenu: false });
 })();

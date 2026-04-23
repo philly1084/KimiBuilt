@@ -351,9 +351,16 @@ function resolveManagedAppRegistryHost(giteaConfig = {}, app = {}) {
 }
 
 function resolveManagedAppImageRepo(input = {}, giteaConfig = {}) {
-    const explicit = normalizeImageRepo(input.imageRepo);
-    if (isUsableImageRepo(explicit)) {
-        return explicit;
+    const explicitCandidates = [
+        input.imageRepo,
+        input.metadata?.desiredDeploy?.imageRepo,
+        input.metadata?.lastSuccessfulBuild?.imageRepo,
+    ];
+    for (const candidate of explicitCandidates) {
+        const explicit = normalizeImageRepo(candidate);
+        if (isUsableImageRepo(explicit)) {
+            return explicit;
+        }
     }
 
     const repoOwner = normalizeText(input.repoOwner || giteaConfig.org);
@@ -2634,9 +2641,13 @@ class ManagedAppService {
         const imageTag = normalizeText(payload.imageTag || buildImageTagFromCommit(commitSha));
         const buildStatus = normalizeBuildStatus(payload.buildStatus || payload.status);
         const giteaConfig = this.getEffectiveGiteaConfig();
-        const app = this.normalizeAppRecord(repoOwner && repoName
-            ? await this.store.getAppByRepo(repoOwner, repoName)
-            : await this.store.getAppBySlug(slug));
+        let app = null;
+        if (repoOwner && repoName) {
+            app = this.normalizeAppRecord(await this.store.getAppByRepo(repoOwner, repoName));
+        }
+        if (!app && slug) {
+            app = this.normalizeAppRecord(await this.store.getAppBySlug(slug));
+        }
         if (!app) {
             const error = new Error(`Managed app not found for ${repoOwner || '(unknown-owner)'}/${repoName || slug}.`);
             error.statusCode = 404;
@@ -2692,8 +2703,14 @@ class ManagedAppService {
             });
         }
 
+        const repoIdentityPatch = {
+            ...(repoOwner ? { repoOwner } : {}),
+            ...(repoName ? { repoName } : {}),
+        };
+
         if (buildStatus !== 'success') {
             const updatedApp = this.normalizeAppRecord(await this.store.updateApp(app.id, app.ownerId, {
+                ...repoIdentityPatch,
                 status: 'build_failed',
                 metadata: {
                     ...this.buildLifecycleMetadata(app, {
@@ -2720,6 +2737,7 @@ class ManagedAppService {
         }
 
         const updatedApp = this.normalizeAppRecord(await this.store.updateApp(app.id, app.ownerId, {
+            ...repoIdentityPatch,
             ...(imageRepo ? { imageRepo } : {}),
             status: buildRun.deployRequested ? 'deploying' : 'built',
             metadata: {
