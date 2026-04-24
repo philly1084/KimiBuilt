@@ -526,6 +526,9 @@ function parseManagedAppRepoReference(value = '') {
 
 function normalizeDeployTarget(value = '') {
     const normalized = normalizeText(value).toLowerCase();
+    if (['runner', 'remote-runner', 'remote_runner', 'agent-runner', 'agent_runner'].includes(normalized)) {
+        return 'runner';
+    }
     if (['ssh', 'remote', 'remote-ssh', 'remote_ssh'].includes(normalized)) {
         return 'ssh';
     }
@@ -1309,7 +1312,7 @@ function normalizeManagedAppMetadata(metadata = {}, app = {}, options = {}) {
             lastBuildRunId: normalizeText(repoState.lastBuildRunId),
         },
         desiredDeploy: {
-            deploymentTarget: 'ssh',
+            deploymentTarget: normalizeDeployTarget(desiredDeploy.deploymentTarget || managedAppsConfig.deployTarget) || 'ssh',
             namespace: normalizeText(desiredDeploy.namespace || app?.namespace),
             publicHost: normalizeText(desiredDeploy.publicHost || app?.publicHost),
             imageRepo: normalizeText(desiredDeploy.imageRepo || app?.imageRepo),
@@ -1329,7 +1332,7 @@ function normalizeManagedAppMetadata(metadata = {}, app = {}, options = {}) {
             lastError: normalizeText(liveDeploy.lastError),
             lastDeployResult: liveDeploy.lastDeployResult || source.lastDeployResult || null,
         },
-        deploymentTarget: 'ssh',
+        deploymentTarget: normalizeDeployTarget(source.deploymentTarget || desiredDeploy.deploymentTarget || managedAppsConfig.deployTarget) || 'ssh',
         requestedContainerPort: normalizedContainerPort,
         lastSeededPaths: normalizeStringArray(repoState.lastSeededPaths || source.lastSeededPaths, 24),
         lastImage: normalizeText(liveDeploy.lastImage || source.lastImage),
@@ -1370,7 +1373,7 @@ function buildManagedAppMetadata(existingMetadata = {}, app = {}, options = {}) 
         desiredDeploy: {
             ...normalized.desiredDeploy,
             ...desiredDeployPatch,
-            deploymentTarget: 'ssh',
+            deploymentTarget: normalizeDeployTarget(desiredDeployPatch.deploymentTarget || normalized.desiredDeploy.deploymentTarget) || 'ssh',
         },
         liveDeploy: {
             ...normalized.liveDeploy,
@@ -1397,7 +1400,7 @@ function buildManagedAppMetadata(existingMetadata = {}, app = {}, options = {}) 
     merged.liveDeploy.lastVerifiedAt = normalizeText(merged.liveDeploy.lastVerifiedAt);
     merged.liveDeploy.lastError = normalizeText(merged.liveDeploy.lastError);
 
-    merged.deploymentTarget = 'ssh';
+    merged.deploymentTarget = normalizeDeployTarget(merged.desiredDeploy.deploymentTarget || merged.deploymentTarget) || 'ssh';
     merged.requestedContainerPort = Number(merged.desiredDeploy.containerPort || merged.requestedContainerPort || 80) || 80;
     merged.lastSeededPaths = [...merged.repoState.lastSeededPaths];
     merged.lastImage = merged.liveDeploy.lastImage;
@@ -1556,14 +1559,24 @@ class ManagedAppService {
     resolveDeploymentTarget(input = {}, context = {}, app = null) {
         const explicit = normalizeDeployTarget(input.deployTarget || input.deploymentTarget || input.target);
         if (explicit) {
-            return 'ssh';
+            return explicit;
         }
 
         if (normalizeText(context.executionProfile) === 'remote-build') {
-            return 'ssh';
+            const managedAppsConfig = this.getEffectiveManagedAppsConfig();
+            return normalizeDeployTarget(managedAppsConfig.deployTarget) || 'ssh';
         }
 
-        return 'ssh';
+        const metadataTarget = normalizeDeployTarget(
+            app?.metadata?.desiredDeploy?.deploymentTarget
+            || app?.metadata?.deploymentTarget,
+        );
+        if (metadataTarget) {
+            return metadataTarget;
+        }
+
+        const managedAppsConfig = this.getEffectiveManagedAppsConfig();
+        return normalizeDeployTarget(managedAppsConfig.deployTarget) || 'ssh';
     }
 
     getPublicApiBaseUrl() {
@@ -2790,11 +2803,6 @@ class ManagedAppService {
             return null;
         }
         const deploymentTarget = this.resolveDeploymentTarget(input, context, app);
-        if (!this.kubernetesClient.isConfigured(deploymentTarget)) {
-            const error = new Error('Managed app deployment requires configured SSH access to the remote deploy host.');
-            error.statusCode = 503;
-            throw error;
-        }
 
         let latestBuildRun = (await this.store.listBuildRunsForApp(app.id, ownerId, 1))[0] || null;
         const reconciled = await this.reconcilePendingBuildForApp(app, ownerId, latestBuildRun);
@@ -2816,6 +2824,12 @@ class ManagedAppService {
 
         if (!explicitImageTag && latestBuildRun && (isPendingBuildStatus(latestBuildRun.buildStatus) || isFailedBuildStatus(latestBuildRun.buildStatus))) {
             throw buildManagedAppDeployBuildStateError(latestBuildRun);
+        }
+
+        if (!this.kubernetesClient.isConfigured(deploymentTarget)) {
+            const error = new Error('Managed app deployment requires a healthy remote runner or configured SSH access to the remote deploy host.');
+            error.statusCode = 503;
+            throw error;
         }
 
         const imageTag = explicitImageTag

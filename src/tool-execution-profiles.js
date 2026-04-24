@@ -38,6 +38,7 @@ const BASE_SHARED_TOOL_IDS = Object.freeze([
     'deep-research-presentation',
     'user-checkpoint',
     'git-safe',
+    'opencode-run',
     'tool-doc-read',
     ...PROMOTED_LOCAL_TOOL_IDS,
 ]);

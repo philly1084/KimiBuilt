@@ -1,8 +1,8 @@
 # managed-app
 
-Creates, updates, and deploys agent-owned applications through the external Gitea control plane and the remote SSH/k3s deployment lane.
+Creates, updates, and deploys agent-owned applications through the external Gitea control plane and the remote runner or SSH/k3s deployment lane.
 
-Managed-app deployment is SSH-only. It should deploy through the configured remote host and remote k3s cluster, not through the backend pod's local Kubernetes service account.
+Managed-app deployment should use the configured remote runner when it is online, with SSH retained as a break-glass fallback. It should deploy through the configured remote host and remote k3s cluster, not through the backend pod's local Kubernetes service account.
 
 Use this tool as the single control-plane entry point when the remote Gitea instance, BuildKit runner, and deploy cluster all live on the same remote server or k3s environment.
 
@@ -29,7 +29,7 @@ Use this tool as the single control-plane entry point when the remote Gitea inst
   - `appBaseDomain`
   - `namespacePrefix`
   - `platformNamespace`
-- The KimiBuilt runtime must have SSH access to the configured remote k3s host.
+- The KimiBuilt runtime must have either a connected remote runner or SSH access to the configured remote k3s host.
 
 ## Notes
 

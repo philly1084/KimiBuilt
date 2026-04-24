@@ -7,6 +7,7 @@ const {
   normalizeGitHubRepositoryUrlForToken,
 } = require('../../../../git-credentials');
 const { SSHExecuteTool } = require('./SSHExecuteTool');
+const { executeWithRunnerPreference } = require('../../../../remote-runner/transport');
 
 const ALLOWED_ACTIONS = new Set([
   'sync-repo',
@@ -120,14 +121,27 @@ class K3sDeployTool extends ToolBase {
       command,
     });
 
-    const result = await this.sshTool.handler({
+    const commandParams = {
       host: params.host,
       port: params.port,
       username: params.username,
       command,
       environment: this.buildRemoteEnvironment(),
       timeout: Math.max(1000, Number(params.timeoutSeconds || 180) * 1000),
-    }, context, tracker);
+      profile: 'deploy',
+    };
+    const result = await executeWithRunnerPreference({
+      params: commandParams,
+      context: {
+        ...context,
+        toolId: 'k3s-deploy',
+      },
+      tracker,
+      fallback: () => this.sshTool.handler(commandParams, {
+        ...context,
+        skipRunner: true,
+      }, tracker),
+    });
 
     return {
       action,

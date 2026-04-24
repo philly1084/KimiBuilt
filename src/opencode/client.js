@@ -89,6 +89,7 @@ class OpenCodeRemoteClient {
         sshConfig = {},
         timeoutMs = DEFAULT_TIMEOUT_MS,
         sshTool = new SSHExecuteTool({ id: 'opencode-ssh-bridge' }),
+        commandTransport = null,
     }) {
         this.port = port;
         this.username = username || 'opencode';
@@ -102,10 +103,10 @@ class OpenCodeRemoteClient {
             privateKeyPath: sshConfig.privateKeyPath || '',
         };
         this.sshTool = sshTool;
+        this.commandTransport = commandTransport;
     }
 
     async request(method, pathname, body = null, options = {}) {
-        const connection = await this.resolveConnection();
         const script = buildRemoteCurlScript({
             method,
             pathname,
@@ -115,14 +116,34 @@ class OpenCodeRemoteClient {
             body,
             shell: this.sshTool,
         });
-        const result = await this.sshTool.executeSSH(
-            connection,
-            script,
-            options.timeoutMs || this.timeoutMs,
-            { originalCommand: `curl ${pathname}` },
-        );
+        const result = await this.executeRemoteScript(script, options.timeoutMs || this.timeoutMs, {
+            originalCommand: `curl ${pathname}`,
+        });
 
         return parseRemoteCurlOutput(result.stdout);
+    }
+
+    async executeRemoteScript(script = '', timeoutMs = DEFAULT_TIMEOUT_MS, options = {}) {
+        if (this.commandTransport?.isAvailable?.()) {
+            return this.commandTransport.execute({
+                command: script,
+                timeout: timeoutMs,
+                profile: 'build',
+                metadata: {
+                    originalCommand: options.originalCommand || '',
+                },
+            }, {
+                toolId: 'opencode-run',
+            });
+        }
+
+        const connection = await this.resolveConnection();
+        return this.sshTool.executeSSH(
+            connection,
+            script,
+            timeoutMs,
+            options,
+        );
     }
 
     async waitForHealth() {
@@ -166,6 +187,9 @@ class OpenCodeRemoteClient {
     }
 
     async openGlobalEventStream(onEvent, options = {}) {
+        if (this.commandTransport?.isAvailable?.()) {
+            throw new Error('Remote OpenCode event stream over runner transport is not supported yet');
+        }
         const connection = await this.resolveConnection();
         const childProcess = await spawnRemoteSseProcess({
             connection,

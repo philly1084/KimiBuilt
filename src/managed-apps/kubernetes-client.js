@@ -5,6 +5,7 @@ const https = require('https');
 const { config } = require('../config');
 const settingsController = require('../routes/admin/settings.controller');
 const { SSHExecuteTool } = require('../agent-sdk/tools/categories/ssh/SSHExecuteTool');
+const { RunnerCommandTransport, getPreferredRemoteTransport } = require('../remote-runner/transport');
 
 function normalizeText(value = '') {
     return String(value || '').trim();
@@ -39,6 +40,9 @@ function buildDockerConfigJson({ registryHost = '', username = '', password = ''
 
 function normalizeDeployTarget(value = '') {
     const normalized = normalizeText(value).toLowerCase();
+    if (['runner', 'remote-runner', 'remote_runner', 'agent-runner', 'agent_runner'].includes(normalized)) {
+        return 'runner';
+    }
     if (['ssh', 'remote', 'remote-ssh', 'remote_ssh'].includes(normalized)) {
         return 'ssh';
     }
@@ -144,10 +148,11 @@ class KubernetesClient {
             name: 'Managed App SSH Internal',
             description: 'Internal SSH helper for managed app deployments',
         });
+        this.runnerTransport = options.runnerTransport || new RunnerCommandTransport();
     }
 
     resolveDeployTarget(value = '') {
-        return 'ssh';
+        return normalizeDeployTarget(value) || getPreferredRemoteTransport() || 'ssh';
     }
 
     isInClusterConfigured() {
@@ -164,7 +169,22 @@ class KubernetesClient {
     }
 
     isConfigured(deploymentTarget = '') {
-        return this.isSshConfigured();
+        const target = this.resolveDeployTarget(deploymentTarget);
+        return target === 'runner'
+            ? (this.runnerTransport.isAvailable() || this.isSshConfigured())
+            : this.isSshConfigured();
+    }
+
+    async executeRemoteCommand(params = {}, context = {}, tracker = createNoopTracker()) {
+        const target = this.resolveDeployTarget(params.deploymentTarget || params.deployTarget);
+        if (target === 'runner' && this.runnerTransport.isAvailable()) {
+            return this.runnerTransport.execute({
+                ...params,
+                profile: params.profile || 'deploy',
+            }, context, tracker);
+        }
+
+        return this.sshTool.handler(params, context, tracker);
     }
 
     getApiBaseUrl() {
@@ -722,6 +742,7 @@ class KubernetesClient {
         containerPort = 80,
         tlsSecretName = '',
         timeoutMs = 300000,
+        deploymentTarget = '',
     } = {}) {
         const command = this.buildRemoteDeployInspectionCommand({
             namespace,
@@ -734,9 +755,10 @@ class KubernetesClient {
             tlsSecretName,
             timeoutSeconds: Math.ceil(Math.max(1000, Number(timeoutMs) || 300000) / 1000),
         });
-        const result = await this.sshTool.handler({
+        const result = await this.executeRemoteCommand({
             command,
             timeout: Math.max(60000, Number(timeoutMs) || 300000),
+            deploymentTarget,
         }, {}, createNoopTracker());
         const stdout = String(result.stdout || '');
         const certificateReadyValue = readMarkerValue(stdout, '__KIMIBUILT_CERTIFICATE_READY__');
@@ -842,6 +864,7 @@ class KubernetesClient {
         ingressName = '',
         tlsSecretName = '',
         timeoutMs = 300000,
+        deploymentTarget = '',
     } = {}) {
         const command = this.buildRemoteTlsStatusCommand({
             namespace,
@@ -849,9 +872,10 @@ class KubernetesClient {
             tlsSecretName,
             timeoutSeconds: Math.ceil(Math.max(1000, Number(timeoutMs) || 300000) / 1000),
         });
-        const result = await this.sshTool.handler({
+        const result = await this.executeRemoteCommand({
             command,
             timeout: Math.max(60000, Number(timeoutMs) || 300000),
+            deploymentTarget,
         }, {}, createNoopTracker());
 
         return {
@@ -892,6 +916,7 @@ class KubernetesClient {
             registryPassword,
             platformNamespace,
             platformRuntimeSecretName,
+            deploymentTarget,
         });
     }
 
@@ -1198,15 +1223,16 @@ class KubernetesClient {
         platformNamespace = '',
         deploymentTarget = '',
     } = {}) {
-        if (!this.isSshConfigured()) {
-            throw new Error('Managed app platform inspection requires SSH access to the remote deploy host.');
+        if (!this.isConfigured(deploymentTarget)) {
+            throw new Error('Managed app platform inspection requires a healthy remote runner or SSH access to the remote deploy host.');
         }
 
         const target = this.resolveDeployTarget(deploymentTarget);
         const command = this.buildRemotePlatformDoctorCommand({ platformNamespace });
-        const result = await this.sshTool.handler({
+        const result = await this.executeRemoteCommand({
             command,
             timeout: 120000,
+            deploymentTarget,
         }, {}, createNoopTracker());
         const stdout = String(result.stdout || '');
         const deployments = {};
@@ -1289,8 +1315,8 @@ class KubernetesClient {
         runnerLabels = '',
         giteaInstanceUrl = '',
     } = {}) {
-        if (!this.isSshConfigured()) {
-            throw new Error('Managed app platform reconciliation requires SSH access to the remote deploy host.');
+        if (!this.isConfigured(deploymentTarget)) {
+            throw new Error('Managed app platform reconciliation requires a healthy remote runner or SSH access to the remote deploy host.');
         }
 
         const target = this.resolveDeployTarget(deploymentTarget);
@@ -1301,9 +1327,10 @@ class KubernetesClient {
             runnerLabels,
             giteaInstanceUrl,
         });
-        const result = await this.sshTool.handler({
+        const result = await this.executeRemoteCommand({
             command,
             timeout: 180000,
+            deploymentTarget,
         }, {}, createNoopTracker());
 
         return {
@@ -1375,9 +1402,10 @@ class KubernetesClient {
         registryPassword = '',
         platformNamespace = '',
         platformRuntimeSecretName = '',
+        deploymentTarget = '',
     } = {}) {
-        if (!this.isSshConfigured()) {
-            throw new Error('Managed app deployment requires SSH access to the remote deploy host.');
+        if (!this.isConfigured(deploymentTarget)) {
+            throw new Error('Managed app deployment requires a healthy remote runner or SSH access to the remote deploy host.');
         }
 
         const deployConfig = this.deployConfig();
@@ -1447,9 +1475,10 @@ class KubernetesClient {
                 }
                 : null,
         });
-        const result = await this.sshTool.handler({
+        const result = await this.executeRemoteCommand({
             command,
             timeout: 180000,
+            deploymentTarget,
         }, {}, createNoopTracker());
         const rolloutOk = Number(result.exitCode || 0) === 0;
         const deploymentInspection = await this.inspectRemoteManagedAppDeployment({
@@ -1464,6 +1493,7 @@ class KubernetesClient {
             timeoutMs: rolloutOk
                 ? (this.managedAppsConfig.tlsReadyTimeoutMs || 300000)
                 : 1000,
+            deploymentTarget,
         });
         const https = rolloutOk
             ? await this.waitForHttps(host, {

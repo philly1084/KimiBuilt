@@ -13,6 +13,7 @@ const settingsController = require('../routes/admin/settings.controller');
 const { broadcastToAdmins, broadcastToSession } = require('../realtime-hub');
 const { resolvePreferredWritableFile } = require('../runtime-state-paths');
 const { OpenCodeLocalClient, OpenCodeRemoteClient, extractMessageText } = require('./client');
+const { RunnerCommandTransport } = require('../remote-runner/transport');
 const {
     assertRemoteGatewayBaseURLReachable,
     resolveOpenCodeGatewayApiKey,
@@ -67,6 +68,7 @@ class OpenCodeService {
             providerEnvAllowlist: effective.providerEnvAllowlist || [],
             remoteAutoInstall: effective.remoteAutoInstall === true,
             sshConfigured: Boolean(ssh.enabled && ssh.host && ssh.username && (ssh.password || ssh.privateKeyPath)),
+            runnerConfigured: capabilities.runnerConfigured,
             activeInstances: this.instances.size,
             persistenceReady: capabilities.persistenceReady,
             localReady: capabilities.localReady,
@@ -86,6 +88,8 @@ class OpenCodeService {
         const enabled = effective.enabled !== false;
         const persistenceReady = this.isAvailable();
         const sshConfigured = Boolean(ssh.enabled && ssh.host && ssh.username && (ssh.password || ssh.privateKeyPath));
+        const runnerTransport = new RunnerCommandTransport();
+        const runnerConfigured = runnerTransport.isAvailable();
         const localWorkspaceConfigured = Boolean(
             (Array.isArray(effective.allowedWorkspaceRoots) && effective.allowedWorkspaceRoots.some(Boolean))
             || config.deploy.defaultRepositoryPath
@@ -119,8 +123,8 @@ class OpenCodeService {
             localIssues.push('local-workspace-unconfigured');
         }
 
-        if (!sshConfigured) {
-            remoteIssues.push('ssh-unconfigured');
+        if (!sshConfigured && !runnerConfigured) {
+            remoteIssues.push('remote-transport-unconfigured');
         }
 
         if (!remoteWorkspaceConfigured) {
@@ -135,6 +139,7 @@ class OpenCodeService {
             enabled,
             persistenceReady,
             sshConfigured,
+            runnerConfigured,
             localWorkspaceConfigured,
             remoteWorkspaceConfigured,
             remoteGatewayReachable,
@@ -828,8 +833,10 @@ class OpenCodeService {
     async startRemoteInstance(key, workspacePath, approvalMode = 'manual') {
         const effective = this.getEffectiveConfig();
         const ssh = settingsController.getEffectiveSshConfig();
-        if (!ssh.enabled || !ssh.host || !ssh.username || (!ssh.password && !ssh.privateKeyPath)) {
-            const error = new Error('Remote OpenCode runs require configured SSH defaults');
+        const runnerTransport = new RunnerCommandTransport();
+        const runnerAvailable = runnerTransport.isAvailable();
+        if (!runnerAvailable && (!ssh.enabled || !ssh.host || !ssh.username || (!ssh.password && !ssh.privateKeyPath))) {
+            const error = new Error('Remote OpenCode runs require a healthy remote runner or configured SSH defaults');
             error.statusCode = 503;
             throw error;
         }
@@ -858,9 +865,9 @@ class OpenCodeService {
             username: authUsername,
             password: authPassword,
             sshConfig: ssh,
+            commandTransport: runnerAvailable ? runnerTransport : null,
         });
 
-        const connection = await remoteClient.resolveConnection();
         const shell = remoteClient.sshTool;
         const configuredBinary = String(effective.binaryPath || 'opencode').trim() || 'opencode';
         const autoInstallEnabled = effective.remoteAutoInstall === true;
@@ -921,9 +928,16 @@ class OpenCodeService {
         ].join('\n');
 
         try {
-            await remoteClient.sshTool.executeSSH(connection, bootstrapScript, 60000, {
-                originalCommand: 'bootstrap remote opencode server',
-            });
+            if (typeof remoteClient.executeRemoteScript === 'function') {
+                await remoteClient.executeRemoteScript(bootstrapScript, 60000, {
+                    originalCommand: 'bootstrap remote opencode server',
+                });
+            } else {
+                const connection = await remoteClient.resolveConnection();
+                await remoteClient.sshTool.executeSSH(connection, bootstrapScript, 60000, {
+                    originalCommand: 'bootstrap remote opencode server',
+                });
+            }
         } catch (error) {
             const combined = `${error.stdout || ''}\n${error.stderr || ''}`;
             if (combined.includes('__KIMIBUILT_OPENCODE_MISSING__')) {

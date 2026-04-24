@@ -1,5 +1,6 @@
 const { spawn } = require('child_process');
 const settingsController = require('../../routes/admin/settings.controller');
+const { remoteRunnerService } = require('../../remote-runner/service');
 
 const CACHE_TTL_MS = 15000;
 
@@ -179,18 +180,34 @@ async function getRuntimeSupport(toolId) {
         : {};
 
     if (toolId === 'ssh-execute' || toolId === 'remote-command') {
+        const runner = remoteRunnerService.getHealthyRunner();
         return {
-            status: snapshot.ssh.ready ? 'stable' : 'requires_setup',
-            notes: snapshot.ssh.notes,
-            runtime: snapshot.ssh,
+            status: (runner || snapshot.ssh.ready) ? 'stable' : 'requires_setup',
+            notes: runner
+                ? [`Remote runner ${runner.runnerId} is online.`, ...snapshot.ssh.notes]
+                : snapshot.ssh.notes,
+            runtime: {
+                ...snapshot.ssh,
+                ready: Boolean(runner || snapshot.ssh.ready),
+                runnerReady: Boolean(runner),
+                runnerId: runner?.runnerId || '',
+            },
         };
     }
 
     if (toolId === 'k3s-deploy') {
+        const runner = remoteRunnerService.getHealthyRunner();
         return {
-            status: snapshot.ssh.ready ? 'stable' : 'requires_setup',
-            notes: snapshot.ssh.notes,
-            runtime: snapshot.ssh,
+            status: (runner || snapshot.ssh.ready) ? 'stable' : 'requires_setup',
+            notes: runner
+                ? [`Remote runner ${runner.runnerId} is online for deploy operations.`, ...snapshot.ssh.notes]
+                : snapshot.ssh.notes,
+            runtime: {
+                ...snapshot.ssh,
+                ready: Boolean(runner || snapshot.ssh.ready),
+                runnerReady: Boolean(runner),
+                runnerId: runner?.runnerId || '',
+            },
         };
     }
 

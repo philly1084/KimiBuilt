@@ -22,6 +22,7 @@ const {
   resolveClientSurface,
 } = require('../session-scope');
 const { clusterStateRegistry } = require('../cluster-state-registry');
+const { remoteRunnerService } = require('../remote-runner/service');
 const {
   DEFAULT_EXECUTION_PROFILE,
   NOTES_EXECUTION_PROFILE,
@@ -126,17 +127,26 @@ function buildRuntimeSummary(toolManager, options = {}) {
       platformRuntimeSecretName: managedApps.platformRuntimeSecretName || '',
       defaultBranch: managedApps.defaultBranch || '',
     },
+    remoteRunner: {
+      enabled: config.remoteRunner.enabled !== false,
+      configured: Boolean(config.remoteRunner.token),
+      preferred: config.remoteRunner.preferred !== false,
+      runners: remoteRunnerService.listRunners(),
+      healthy: Boolean(remoteRunnerService.getHealthyRunner()),
+    },
   };
 }
 
 function buildToolRuntime(toolId, options = {}) {
   if (isRemoteCommandToolId(toolId)) {
     const ssh = settingsController.getEffectiveSshConfig();
+    const runner = remoteRunnerService.getHealthyRunner();
     return {
-      configured: Boolean(ssh.enabled && ssh.host && ssh.username && (ssh.password || ssh.privateKeyPath)),
-      source: ssh.source || 'dashboard',
-      defaultTarget: ssh.host ? `${ssh.username || 'unknown'}@${ssh.host}:${ssh.port || 22}` : null,
+      configured: Boolean(runner || (ssh.enabled && ssh.host && ssh.username && (ssh.password || ssh.privateKeyPath))),
+      source: runner ? 'remote-runner' : (ssh.source || 'dashboard'),
+      defaultTarget: runner ? `runner:${runner.runnerId}` : (ssh.host ? `${ssh.username || 'unknown'}@${ssh.host}:${ssh.port || 22}` : null),
       auth: ssh.privateKeyPath ? 'private-key' : (ssh.password ? 'password' : 'unset'),
+      runnerAvailable: Boolean(runner),
     };
   }
 
@@ -145,10 +155,11 @@ function buildToolRuntime(toolId, options = {}) {
     const deploy = typeof settingsController.getEffectiveDeployConfig === 'function'
       ? settingsController.getEffectiveDeployConfig()
       : {};
+    const runner = remoteRunnerService.getHealthyRunner();
     return {
-      configured: Boolean(ssh.enabled && ssh.host && ssh.username && (ssh.password || ssh.privateKeyPath)),
-      source: ssh.source || 'dashboard',
-      defaultTarget: ssh.host ? `${ssh.username || 'unknown'}@${ssh.host}:${ssh.port || 22}` : null,
+      configured: Boolean(runner || (ssh.enabled && ssh.host && ssh.username && (ssh.password || ssh.privateKeyPath))),
+      source: runner ? 'remote-runner' : (ssh.source || 'dashboard'),
+      defaultTarget: runner ? `runner:${runner.runnerId}` : (ssh.host ? `${ssh.username || 'unknown'}@${ssh.host}:${ssh.port || 22}` : null),
       defaultRepositoryUrl: deploy.repositoryUrl || '',
       defaultTargetDirectory: deploy.targetDirectory || '',
       defaultManifestsPath: deploy.manifestsPath || '',
@@ -159,6 +170,7 @@ function buildToolRuntime(toolId, options = {}) {
       defaultPublicDomain: deploy.publicDomain || '',
       defaultIngressClassName: deploy.ingressClassName || '',
       defaultTlsClusterIssuer: deploy.tlsClusterIssuer || '',
+      runnerAvailable: Boolean(runner),
     };
   }
 
@@ -196,7 +208,9 @@ function buildToolRuntime(toolId, options = {}) {
     const deployTarget = String(managedApps.deployTarget || config.managedApps.deployTarget || 'ssh').trim() || 'ssh';
     return {
       configured: Boolean(gitea.enabled !== false && gitea.baseURL && gitea.token),
-      provider: 'external-gitea-plus-remote-k3s-over-ssh',
+      provider: remoteRunnerService.getHealthyRunner()
+        ? 'external-gitea-plus-remote-runner-k3s'
+        : 'external-gitea-plus-remote-k3s-over-ssh',
       giteaBaseURL: gitea.baseURL || '',
       giteaOrg: gitea.org || '',
       registryHost: gitea.registryHost || '',
@@ -205,6 +219,7 @@ function buildToolRuntime(toolId, options = {}) {
       platformNamespace: managedApps.platformNamespace || '',
       platformRuntimeSecretName: managedApps.platformRuntimeSecretName || '',
       deployTarget,
+      runnerAvailable: Boolean(remoteRunnerService.getHealthyRunner()),
       kubernetesConfigured: Boolean(options.managedAppService?.kubernetesClient?.isConfigured?.(deployTarget)),
       persistenceAvailable: Boolean(options.managedAppService?.isAvailable?.()),
     };

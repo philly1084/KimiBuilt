@@ -8,6 +8,7 @@ const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 const settingsController = require('../../../../routes/admin/settings.controller');
+const { executeWithRunnerPreference, shouldPreferRunner } = require('../../../../remote-runner/transport');
 
 class SSHExecuteTool extends ToolBase {
   constructor(overrides = {}) {
@@ -90,6 +91,38 @@ class SSHExecuteTool extends ToolBase {
       environment = {},
       sudo = false
     } = params;
+
+    const canUseRunner = !context?.skipRunner
+      && !String(this.id || '').includes('internal')
+      && shouldPreferRunner(params);
+
+    if (canUseRunner) {
+      return executeWithRunnerPreference({
+        params: {
+          command,
+          timeout,
+          workingDirectory,
+          environment,
+          sudo,
+          profile: 'deploy',
+          approval: params.approval || {},
+        },
+        context: {
+          ...context,
+          toolId: this.id,
+        },
+        tracker,
+        fallback: () => this.handler({
+          ...params,
+          host: requestedHost,
+          port: requestedPort,
+          username: requestedUsername,
+        }, {
+          ...context,
+          skipRunner: true,
+        }, tracker),
+      });
+    }
 
     const connection = await this.getConnectionConfig({
       host: requestedHost,

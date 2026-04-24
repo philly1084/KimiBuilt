@@ -1,6 +1,6 @@
 # remote-command
 
-Purpose: run non-interactive commands on the configured remote host over SSH.
+Purpose: run non-interactive commands on the configured remote host through the KimiBuilt remote runner when available, falling back to SSH.
 
 Project defaults:
 - The common remote target is Ubuntu Linux on ARM64 (`aarch64`) running k3s.
@@ -232,6 +232,10 @@ Rancher is a control plane and UI, not a different Kubernetes API. The same `kub
 ## Preferred structure for a remote-command call
 
 One goal per call: inspect, fix, or verify.
+
+Transport preference:
+- Prefer the remote runner when it is online and the command does not specify an explicit SSH host.
+- Use SSH as the fallback or when an explicit host/username override is provided.
 
 ```bash
 set -e

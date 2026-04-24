@@ -29,7 +29,10 @@ body[data-theme="voxel"] {
 
 body[data-theme="voxel"] .header {
     min-height: 58px;
-    background: var(--voxel-panel-strong);
+    background:
+        linear-gradient(90deg, rgba(73, 211, 167, 0.08) 1px, transparent 1px),
+        var(--voxel-panel-strong);
+    background-size: 18px 18px, auto;
     border-bottom: 2px solid var(--border-color);
     box-shadow: 0 8px 0 rgba(0, 0, 0, 0.18);
 }
@@ -78,11 +81,26 @@ body[data-theme="voxel"] .terminal-container {
         var(--bg-primary);
 }
 
+body[data-theme="voxel"] .terminal-container::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+        linear-gradient(90deg, transparent 0 23px, rgba(73, 211, 167, 0.045) 23px 24px),
+        linear-gradient(0deg, transparent 0 23px, rgba(117, 183, 255, 0.035) 23px 24px);
+    opacity: 0.55;
+}
+
 body[data-theme="voxel"] .terminal-output {
+    position: relative;
+    z-index: 1;
     padding: 18px;
 }
 
 body[data-theme="voxel"] .input-container {
+    position: relative;
+    z-index: 2;
     background: var(--voxel-panel-strong);
     border-top: 2px solid var(--border-color);
     box-shadow: 0 -8px 0 rgba(0, 0, 0, 0.16);
@@ -98,12 +116,12 @@ body[data-theme="voxel"] .input-wrapper {
 }
 
 .voxel-prompt-pet {
-    width: 42px;
-    height: 36px;
+    width: 68px;
+    height: 52px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    flex: 0 0 42px;
+    flex: 0 0 68px;
     padding: 0;
     border: 1px solid rgba(73, 211, 167, 0.35);
     border-radius: 4px;
@@ -138,12 +156,13 @@ body[data-theme="voxel"] .voxel-prompt-pet {
 }
 
 .voxel-prompt-pet-stage {
-    width: 60px;
-    height: 52px;
+    width: 78px;
+    height: 66px;
     display: flex;
     align-items: center;
     justify-content: center;
-    transform: translate(-2px, 7px);
+    transform: translate(-4px, 8px) scale(0.76);
+    transform-origin: center;
     pointer-events: none;
 }
 
@@ -209,8 +228,12 @@ body[data-theme="voxel"] .line-output.error {
     margin-left: 0;
     padding: 8px 12px;
     border: 1px solid var(--border-color);
+    border-left: 4px solid var(--voxel-pet-secondary);
     border-radius: 4px;
-    background: rgba(8, 12, 16, 0.72);
+    background:
+        linear-gradient(90deg, rgba(244, 201, 93, 0.08), transparent 42%),
+        rgba(8, 12, 16, 0.72);
+    box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.16);
 }
 
 .voxel-response-head {
@@ -251,7 +274,98 @@ body[data-theme="voxel"] .line-output.error {
 }
 
 .voxel-response-body {
-    padding: 14px;
+    padding: 16px 18px;
+    color: #edfdf7;
+    font-size: 14px;
+    line-height: 1.65;
+}
+
+.markdown-content {
+    color: var(--text-primary);
+}
+
+.markdown-content > :first-child {
+    margin-top: 0;
+}
+
+.markdown-content > :last-child {
+    margin-bottom: 0;
+}
+
+.markdown-content p {
+    margin: 0 0 12px;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 {
+    margin: 18px 0 8px;
+    color: #ffffff;
+    line-height: 1.25;
+    font-weight: 800;
+}
+
+.markdown-content h1 {
+    font-size: 24px;
+}
+
+.markdown-content h2 {
+    font-size: 20px;
+    color: var(--voxel-pet-secondary);
+}
+
+.markdown-content h3 {
+    font-size: 16px;
+    color: #ffffff;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+    margin: 8px 0 14px;
+    padding-left: 24px;
+}
+
+.markdown-content li {
+    margin: 6px 0;
+    padding-left: 2px;
+}
+
+.markdown-content li::marker {
+    color: var(--voxel-pet-secondary);
+}
+
+.markdown-content strong {
+    color: #ffffff;
+    font-weight: 800;
+}
+
+.markdown-content em {
+    color: #dff8f0;
+}
+
+.markdown-content hr {
+    height: 2px;
+    margin: 18px 0;
+    border: 0;
+    background:
+        linear-gradient(90deg, var(--voxel-pet-primary), var(--voxel-pet-secondary), transparent);
+}
+
+.markdown-content blockquote {
+    margin: 12px 0;
+    padding: 8px 12px;
+    color: #d7eee7;
+    border-left: 4px solid var(--voxel-pet-secondary);
+    background: rgba(244, 201, 93, 0.08);
+}
+
+.markdown-content a {
+    color: #9bd8ff;
+    text-decoration: underline;
+    text-underline-offset: 3px;
 }
 
 body[data-theme="voxel"] .streaming .voxel-response-head::after {
@@ -558,6 +672,23 @@ body[data-theme="voxel"] .voxel-icon-btn {
     animation: voxelBlink 1.4s steps(2, start) infinite;
 }
 
+.voxel-cube.shine .voxel-face-front {
+    opacity: 0.72;
+}
+
+.voxel-cube.shade .voxel-face-front {
+    opacity: 0.52;
+}
+
+.voxel-cube.muzzle .voxel-face-front,
+.voxel-cube.belly .voxel-face-front,
+.voxel-cube.badge .voxel-face-front,
+.voxel-cube.tool .voxel-face-front {
+    box-shadow:
+        inset -2px -2px 0 rgba(0, 0, 0, 0.2),
+        inset 2px 2px 0 rgba(255, 255, 255, 0.24);
+}
+
 .voxel-shadow {
     position: absolute;
     left: 50%;
@@ -696,7 +827,7 @@ body[data-theme="voxel"] .btn-primary {
 }
 
 .voxel-boot-title {
-    font-size: clamp(22px, 4vw, 42px);
+    font-size: clamp(18px, 3vw, 30px);
     line-height: 1;
     font-weight: 800;
     color: var(--text-primary);
@@ -728,8 +859,8 @@ body[data-theme="voxel"] .btn-primary {
 }
 
 .voxel-mini-pet {
-    width: 176px;
-    min-height: 50px;
+    width: 164px;
+    min-height: 70px;
     display: flex;
     align-items: center;
     justify-content: flex-start;
@@ -737,6 +868,26 @@ body[data-theme="voxel"] .btn-primary {
     border: 2px solid var(--border-color);
     background: var(--bg-primary);
     box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.2);
+}
+
+body[data-theme="voxel"] .autocomplete,
+body[data-theme="voxel"] .modal,
+body[data-theme="voxel"] .file-manager-modal,
+body[data-theme="voxel"] .file-manager-content {
+    border-radius: 4px;
+    border: 2px solid var(--border-color);
+    background:
+        linear-gradient(90deg, rgba(73, 211, 167, 0.05) 1px, transparent 1px),
+        linear-gradient(0deg, rgba(117, 183, 255, 0.04) 1px, transparent 1px),
+        var(--voxel-panel-strong);
+    background-size: 18px 18px, 18px 18px, auto;
+    box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.28);
+}
+
+body[data-theme="voxel"] .autocomplete-item:hover,
+body[data-theme="voxel"] .autocomplete-item.selected {
+    background: rgba(73, 211, 167, 0.14);
+    color: var(--text-primary);
 }
 
 .voxel-mini-pet .voxel-pet {
@@ -868,8 +1019,13 @@ body[data-theme="voxel"] .btn-primary {
     }
 
     .voxel-prompt-pet {
-        width: 38px;
-        flex-basis: 38px;
+        width: 56px;
+        height: 46px;
+        flex-basis: 56px;
+    }
+
+    .voxel-prompt-pet-stage {
+        transform: translate(-5px, 8px) scale(0.64);
     }
 
     .voxel-roamer {

@@ -1100,7 +1100,7 @@ function evaluateEndToEndBuilderWorkflow({
         && !candidateToolIds.has('managed-app')) {
         return buildBlockedWorkflowState(
             currentWorkflow,
-            'Repository implementation is required before this workflow can continue, but neither `managed-app` nor `opencode-run` is ready for the selected execution target.',
+            'Repository implementation is required before this workflow can continue. `opencode-run` is not ready for the selected execution target, and `managed-app` is not available as a fallback.',
         );
     }
 

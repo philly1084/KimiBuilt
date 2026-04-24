@@ -272,9 +272,11 @@ describe('OpenCode service helpers', () => {
             remoteReady: false,
             localIssues: [],
             remoteIssues: expect.arrayContaining([
-                'ssh-unconfigured',
+                'remote-transport-unconfigured',
                 'remote-gateway-unreachable',
             ]),
+            sshConfigured: false,
+            runnerConfigured: false,
         }));
     });
 

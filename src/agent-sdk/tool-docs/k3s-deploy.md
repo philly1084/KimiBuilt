@@ -1,6 +1,6 @@
 # k3s-deploy
 
-Purpose: run restricted k3s deployment actions over SSH against the configured server.
+Purpose: run restricted k3s deployment actions through the remote runner when available, falling back to SSH against the configured server.
 
 Allowed actions:
 - `sync-repo`
@@ -105,6 +105,7 @@ Check rollout only:
 
 ## Good operating rules
 
+- Prefer a healthy remote runner for deploy operations; keep SSH as the fallback and recovery path.
 - Prefer repo-managed manifests over ad hoc live-cluster mutation.
 - Treat the Admin deploy defaults as fallbacks, not proof that the cluster currently matches them.
 - The runtime keeps a persistent cluster registry from verified remote tool runs. Use it as durable context for host names, domains, deployment names, and previously discovered paths, but still re-verify before claiming the site is live.

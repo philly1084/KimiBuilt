@@ -173,6 +173,8 @@
         const s = 'var(--voxel-pet-secondary)';
         const a = 'var(--voxel-pet-accent)';
         const dark = '#061013';
+        const light = 'rgba(255, 255, 255, 0.72)';
+        const shade = 'rgba(0, 0, 0, 0.22)';
         const cells = [];
 
         const addRect = (x, y, w, h, color, classes = '', z = 0, depth = 1) => {
@@ -185,6 +187,7 @@
 
         if (pet.ears === 'point') {
             cells.push(cube(3, 0, a), cube(8, 0, a), cube(3, 1, a), cube(8, 1, a));
+            cells.push(cube(4, 1, s, '', 1, 0.8), cube(7, 1, s, '', 1, 0.8));
         } else if (pet.ears === 'antenna') {
             cells.push(cube(4, 0, a, 'spark'), cube(7, 0, a, 'spark'), cube(4, 1, s), cube(7, 1, s));
         } else if (pet.ears === 'crest') {
@@ -195,12 +198,17 @@
         }
 
         addRect(3, 2, 6, 4, p, 'head', 1, 1.15);
+        cells.push(cube(3, 2, light, 'shine', 2, 0.5), cube(4, 2, light, 'shine', 2, 0.5));
+        cells.push(cube(8, 5, shade, 'shade', 2, 0.5));
         addRect(4, 6, 4, 4, p, 'body', 0, 1.1);
+        addRect(5, 7, 2, 2, s, 'belly', 1, 0.7);
         addRect(2, 7, 2, 2, s, 'paw', 1, 0.9);
         addRect(8, 7, 2, 2, s, 'paw', 1, 0.9);
         addRect(4, 10, 2, 2, s, 'foot', 0, 0.95);
         addRect(7, 10, 2, 2, s, 'foot', 0, 0.95);
         cells.push(cube(4, 4, dark, 'eye', 2, 0.62), cube(7, 4, dark, 'eye', 2, 0.62));
+        cells.push(cube(5, 5, s, 'muzzle', 2, 0.62), cube(6, 5, s, 'muzzle', 2, 0.62));
+        cells.push(cube(5, 4, a, 'nose', 3, 0.46));
 
         if (pet.eyes === 'bright') {
             cells.push(cube(4, 3, '#ffffff', 'spark', 3, 0.55), cube(7, 3, '#ffffff', 'spark', 3, 0.55));
@@ -222,6 +230,8 @@
         if (pet.species === 'bot') {
             addRect(2, 2, 8, 4, p);
             cells.push(cube(5, 0, a, 'spark'), cube(5, 1, s));
+            addRect(4, 4, 4, 1, dark, 'eye', 2, 0.58);
+            cells.push(cube(6, 7, a, 'spark', 2, 0.7));
         }
 
         if (pet.tail === 'curl') {
@@ -234,6 +244,14 @@
             cells.push(cube(10, 8, s), cube(11, 8, s));
         }
 
+        if (pet.trait === 'builder' || pet.trait === 'tinker') {
+            cells.push(cube(2, 9, a, 'tool', 2, 0.7), cube(9, 9, a, 'tool', 2, 0.7));
+        } else if (pet.trait === 'guardian' || pet.trait === 'warden') {
+            cells.push(cube(3, 6, a, 'badge', 2, 0.7), cube(8, 6, a, 'badge', 2, 0.7));
+        } else if (pet.trait === 'mapper' || pet.trait === 'scout') {
+            cells.push(cube(9, 3, s, 'spark', 3, 0.55), cube(10, 3, a, 'spark', 3, 0.55));
+        }
+
         return cells;
     }
 
@@ -242,7 +260,7 @@
         const variant = ['full', 'mini', 'peek'].includes(options.variant) ? options.variant : 'full';
         const variantCube = {
             full: 18,
-            mini: 4,
+            mini: 5,
             peek: 6,
         };
         const cubeSize = Number.isFinite(Number(options.cubeSize))

@@ -19,6 +19,8 @@ class CodeCLIApp {
         this.voxelPet = this.loadVoxelPet();
         this.voxelPetHidden = localStorage.getItem('codecli-voxel-pet-hidden') === 'true';
         this.activePetAction = 'idle';
+        this.lastVoxelTypingReaction = 0;
+        this.lastVoxelAmbientMove = Date.now();
         
         // Session file storage
         this.sessionFiles = [];
@@ -78,6 +80,7 @@ class CodeCLIApp {
         this.loadModels();
         this.printWelcome();
         this.restoreSharedSession();
+        this.scheduleVoxelAmbientMove();
     }
     
     initMermaid() {
@@ -331,6 +334,24 @@ class CodeCLIApp {
         }
     }
 
+    scheduleVoxelAmbientMove() {
+        window.clearTimeout(this.voxelAmbientTimer);
+        const delay = 7000 + Math.floor(Math.random() * 7000);
+        this.voxelAmbientTimer = window.setTimeout(() => {
+            if (!this.voxelPetHidden && !this.isProcessing && document.hasFocus()) {
+                const actions = ['idle', 'scout', 'sleep'];
+                const action = actions[Math.floor(Math.random() * actions.length)];
+                if (action === 'idle') {
+                    this.renderVoxelPet('idle');
+                } else {
+                    this.roamVoxelPet(action === 'sleep' ? 'prompt' : 'stream', action, 1400);
+                }
+                this.lastVoxelAmbientMove = Date.now();
+            }
+            this.scheduleVoxelAmbientMove();
+        }, delay);
+    }
+
     setVoxelPetHidden(hidden) {
         this.voxelPetHidden = Boolean(hidden);
         localStorage.setItem('codecli-voxel-pet-hidden', String(this.voxelPetHidden));
@@ -371,9 +392,15 @@ class CodeCLIApp {
 
         window.clearTimeout(this.voxelTypingTimer);
         this.voxelTypingTimer = window.setTimeout(() => {
+            const now = Date.now();
+            const typed = this.commandInput?.value.trim() || '';
+            if (typed.length < 8 || now - this.lastVoxelTypingReaction < 4800) {
+                return;
+            }
+            this.lastVoxelTypingReaction = now;
             this.renderVoxelPet('scout');
-            this.roamVoxelPet('prompt', 'scout', 900);
-        }, 120);
+            this.roamVoxelPet('prompt', 'scout', 1150);
+        }, 900);
     }
 
     pulseVoxelStreaming() {
@@ -1100,15 +1127,9 @@ Session Statistics:
             <div class="voxel-response-body">
                 <div class="voxel-boot">
                     <div>
-                        <div class="voxel-boot-title">Voxel Command Deck</div>
+                        <div class="voxel-boot-title">Voxel Link Ready</div>
                         <div class="voxel-boot-copy">Mode: chat | Model: ${this.escapeHtml(api.currentModel || 'loading')} | Session: ${this.escapeHtml(api.sessionId || 'pending')}</div>
-                        <div class="voxel-command-grid">
-                            <div class="voxel-command-chip"><code>/pet &lt;prompt&gt;</code><br>spawn companion</div>
-                            <div class="voxel-command-chip"><code>/pet random</code><br>random 3D agent</div>
-                            <div class="voxel-command-chip"><code>/agent &lt;prompt&gt;</code><br>AI-filled spec</div>
-                            <div class="voxel-command-chip"><code>/creator</code><br>focus creator</div>
-                            <div class="voxel-command-chip"><code>/help</code><br>command index</div>
-                        </div>
+                        <div class="voxel-boot-copy">Type <code>/help</code> for commands.</div>
                     </div>
                     <div class="voxel-mini-pet" data-voxel-mini-pet></div>
                 </div>
@@ -1132,10 +1153,10 @@ Session Statistics:
   /help, /?          Show this help message
   /clear, /cls       Clear the screen
   /theme [name]      Set voxel, dark, or light theme
-  /voxel             Switch back to the voxel command deck
+  /voxel             Switch back to the voxel CLI theme
   /shortcuts, /keys  Show keyboard shortcuts
 
-**Voxel Pet:**
+**Voxel Command Deck:**
   /pet <prompt>      Spawn a prompt-generated voxel pet
   /pet random        Spawn a random 3D voxel character
   /pet ai <prompt>   Ask AI to design and fill the voxel pet
@@ -1386,13 +1407,12 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
     // ==================== Helper Methods ====================
     
     renderMarkdown(text) {
-        // Simple markdown rendering
         const codeBlocks = [];
-        let html = String(text || '');
+        let source = String(text || '').replace(/\r\n?/g, '\n');
         
         // Code blocks (including mermaid)
-        html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
-            const language = lang || 'text';
+        source = source.replace(/```([^\n`]*)\n([\s\S]*?)```/g, (match, lang, code) => {
+            const language = String(lang || 'text').trim().split(/\s+/)[0] || 'text';
             const trimmedCode = language === 'mermaid'
                 ? this.sanitizeMermaidCode(code)
                 : code.trim();
@@ -1438,22 +1458,110 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
             return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
         });
 
-        html = this.escapeHtml(html);
-        
-        // Inline code
-        html = html.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
-        
-        // Bold
-        html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-        
-        // Italic
-        html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-        
-        // Line breaks
-        html = html.replace(/\n/g, '<br>');
-
+        let html = this.renderMarkdownBlocks(source);
         html = html.replace(/__CODE_BLOCK_(\d+)__/g, (match, index) => codeBlocks[Number(index)] || match);
         
+        return `<div class="markdown-content">${html}</div>`;
+    }
+
+    renderMarkdownBlocks(source) {
+        const lines = String(source || '').split('\n');
+        const blocks = [];
+        let i = 0;
+
+        const isSpecialBlock = (line) => (
+            /^(#{1,6})\s+/.test(line)
+            || /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)
+            || /^\s*[-*+]\s+/.test(line)
+            || /^\s*\d+[.)]\s+/.test(line)
+            || /^>\s?/.test(line)
+            || /^__CODE_BLOCK_\d+__$/.test(line.trim())
+        );
+
+        while (i < lines.length) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            if (!trimmed) {
+                i += 1;
+                continue;
+            }
+
+            if (/^__CODE_BLOCK_\d+__$/.test(trimmed)) {
+                blocks.push(trimmed);
+                i += 1;
+                continue;
+            }
+
+            const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
+            if (heading) {
+                const level = Math.min(6, heading[1].length);
+                blocks.push(`<h${level}>${this.renderInlineMarkdown(heading[2])}</h${level}>`);
+                i += 1;
+                continue;
+            }
+
+            if (/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+                blocks.push('<hr>');
+                i += 1;
+                continue;
+            }
+
+            if (/^\s*[-*+]\s+/.test(line)) {
+                const items = [];
+                while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) {
+                    items.push(lines[i].replace(/^\s*[-*+]\s+/, '').trim());
+                    i += 1;
+                }
+                blocks.push(`<ul>${items.map((item) => `<li>${this.renderInlineMarkdown(item)}</li>`).join('')}</ul>`);
+                continue;
+            }
+
+            if (/^\s*\d+[.)]\s+/.test(line)) {
+                const items = [];
+                while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) {
+                    items.push(lines[i].replace(/^\s*\d+[.)]\s+/, '').trim());
+                    i += 1;
+                }
+                blocks.push(`<ol>${items.map((item) => `<li>${this.renderInlineMarkdown(item)}</li>`).join('')}</ol>`);
+                continue;
+            }
+
+            if (/^>\s?/.test(line)) {
+                const quoteLines = [];
+                while (i < lines.length && /^>\s?/.test(lines[i])) {
+                    quoteLines.push(lines[i].replace(/^>\s?/, '').trim());
+                    i += 1;
+                }
+                blocks.push(`<blockquote>${quoteLines.map((item) => this.renderInlineMarkdown(item)).join('<br>')}</blockquote>`);
+                continue;
+            }
+
+            const paragraphLines = [trimmed];
+            i += 1;
+            while (i < lines.length && lines[i].trim() && !isSpecialBlock(lines[i].trim())) {
+                paragraphLines.push(lines[i].trim());
+                i += 1;
+            }
+            blocks.push(`<p>${this.renderInlineMarkdown(paragraphLines.join(' '))}</p>`);
+        }
+
+        return blocks.join('');
+    }
+
+    renderInlineMarkdown(text) {
+        const inlineCodes = [];
+        let html = String(text || '').replace(/`([^`]+)`/g, (match, code) => {
+            inlineCodes.push(`<code class="inline-code">${this.escapeHtml(code)}</code>`);
+            return `__INLINE_CODE_${inlineCodes.length - 1}__`;
+        });
+
+        html = this.escapeHtml(html);
+        html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+        html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        html = html.replace(/(^|[\s(])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+        html = html.replace(/__INLINE_CODE_(\d+)__/g, (match, index) => inlineCodes[Number(index)] || match);
+
         return html;
     }
     

@@ -36,6 +36,7 @@ const authRouter = require('./routes/auth');
 const toolsRouter = require('./routes/tools');
 const workloadsRouter = require('./routes/workloads');
 const managedAppsRouter = require('./routes/managed-apps');
+const runnersRouter = require('./routes/runners');
 const giteaIntegrationsRouter = require('./routes/integrations-gitea');
 const providerSessionsRouter = require('./routes/provider-sessions');
 const DashboardController = require('./routes/admin/dashboard.controller');
@@ -50,6 +51,7 @@ const { ManagedAppService } = require('./managed-apps/service');
 const { ProviderSessionService } = require('./provider-session-service');
 const { TemplateStore } = require('./template-store');
 const { podcastService } = require('./podcast/podcast-service');
+const { remoteRunnerService } = require('./remote-runner/service');
 
 // Document Service
 const { DocumentService } = require('./documents/document-service');
@@ -150,6 +152,19 @@ app.get('/login', (req, res) => {
 
 app.use('/api/auth', authRouter);
 app.use('/api/integrations/gitea', giteaIntegrationsRouter);
+app.post('/api/runners/register', (req, res, next) => {
+    try {
+        remoteRunnerService.authenticateRequest(req);
+        const runner = remoteRunnerService.registerRunner(req.body || {});
+        res.status(201).json({ runner });
+    } catch (error) {
+        res.status(error.message.includes('Invalid') ? 401 : 503).json({
+            error: {
+                message: error.message,
+            },
+        });
+    }
+});
 app.use(requireAuth);
 
 // Serve only the 4 active frontends
@@ -253,6 +268,7 @@ app.use('/admin', providerSessionsRouter);
 app.use('/api/tools', toolsRouter);
 app.use('/api', workloadsRouter);
 app.use('/api', managedAppsRouter);
+app.use('/api', runnersRouter);
 
 app.use(express.static(path.join(__dirname, '../frontend'), buildFrontendStaticOptions()));
 
@@ -264,7 +280,15 @@ app.use(errorHandler);
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
+const runnerWss = new WebSocketServer({ server, path: '/ws/runners' });
 setupWebSocket(wss, app);
+runnerWss.on('connection', (ws, req) => {
+    try {
+        remoteRunnerService.attachWebSocket(ws, req);
+    } catch (error) {
+        ws.close(4401, error.message);
+    }
+});
 
 async function start() {
     try {

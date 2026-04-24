@@ -514,7 +514,7 @@ const config = {
 
     managedApps: {
         enabled: process.env.MANAGED_APPS_ENABLED !== 'false',
-        deployTarget: 'ssh',
+        deployTarget: process.env.MANAGED_APPS_DEPLOY_TARGET || 'runner',
         appBaseDomain: process.env.MANAGED_APPS_BASE_DOMAIN || 'demoserver2.buzz',
         namespacePrefix: process.env.MANAGED_APPS_NAMESPACE_PREFIX || 'app-',
         platformNamespace: process.env.MANAGED_APPS_PLATFORM_NAMESPACE || 'agent-platform',
@@ -529,6 +529,24 @@ const config = {
         httpsVerifyTimeoutMs: Math.max(
             1000,
             parseInt(process.env.MANAGED_APPS_HTTPS_VERIFY_TIMEOUT_MS, 10) || 15000,
+        ),
+    },
+
+    remoteRunner: {
+        enabled: process.env.KIMIBUILT_REMOTE_RUNNER_ENABLED !== 'false',
+        token: process.env.KIMIBUILT_REMOTE_RUNNER_TOKEN || '',
+        preferred: process.env.KIMIBUILT_REMOTE_RUNNER_PREFERRED !== 'false',
+        staleAfterMs: Math.max(
+            5000,
+            parseInt(process.env.KIMIBUILT_REMOTE_RUNNER_STALE_AFTER_MS, 10) || 45000,
+        ),
+        jobTimeoutMs: Math.max(
+            1000,
+            parseInt(process.env.KIMIBUILT_REMOTE_RUNNER_JOB_TIMEOUT_MS, 10) || 120000,
+        ),
+        maxOutputChars: Math.max(
+            1000,
+            parseInt(process.env.KIMIBUILT_REMOTE_RUNNER_MAX_OUTPUT_CHARS, 10) || 120000,
         ),
     },
 

@@ -20,6 +20,9 @@ const { resolvePreferredWritableFile } = require('../../runtime-state-paths');
 
 function normalizeManagedAppDeployTarget(value = '') {
   const normalized = String(value || '').trim().toLowerCase();
+  if (['runner', 'remote-runner', 'remote_runner', 'agent-runner', 'agent_runner'].includes(normalized)) {
+    return 'runner';
+  }
   if (['ssh', 'remote', 'remote-ssh', 'remote_ssh'].includes(normalized)) {
     return 'ssh';
   }
@@ -39,6 +42,14 @@ function hasUsableSshDefaults(ssh = {}) {
 }
 
 function resolvePreferredManagedAppDeployTarget({ storedTarget = '', configuredTarget = '', ssh = {} } = {}) {
+  const stored = normalizeManagedAppDeployTarget(storedTarget);
+  if (stored) {
+    return stored;
+  }
+  const configured = normalizeManagedAppDeployTarget(configuredTarget);
+  if (configured) {
+    return configured;
+  }
   return 'ssh';
 }
 
@@ -130,7 +141,7 @@ class SettingsController {
         },
         managedApps: {
           enabled: config.managedApps.enabled !== false,
-          deployTarget: 'ssh',
+          deployTarget: config.managedApps.deployTarget || 'ssh',
           appBaseDomain: config.managedApps.appBaseDomain || 'demoserver2.buzz',
           namespacePrefix: config.managedApps.namespacePrefix || 'app-',
           platformNamespace: config.managedApps.platformNamespace || 'agent-platform',
@@ -518,7 +529,7 @@ class SettingsController {
       });
 
       if (nextManagedApps.deployTarget !== undefined) {
-        nextManagedApps.deployTarget = 'ssh';
+        nextManagedApps.deployTarget = normalizeManagedAppDeployTarget(nextManagedApps.deployTarget) || 'ssh';
       }
 
       if (nextManagedApps.enabled !== undefined) {
@@ -720,7 +731,10 @@ class SettingsController {
 
     return {
       enabled: stored.enabled !== false && config.managedApps.enabled !== false,
-      deployTarget: 'ssh',
+      deployTarget: resolvePreferredManagedAppDeployTarget({
+        storedTarget: stored.deployTarget,
+        configuredTarget: config.managedApps.deployTarget,
+      }),
       appBaseDomain: String(stored.appBaseDomain || config.managedApps.appBaseDomain || 'demoserver2.buzz').trim() || 'demoserver2.buzz',
       namespacePrefix: String(stored.namespacePrefix || config.managedApps.namespacePrefix || 'app-').trim() || 'app-',
       platformNamespace: String(stored.platformNamespace || config.managedApps.platformNamespace || 'agent-platform').trim() || 'agent-platform',
@@ -836,7 +850,7 @@ class SettingsController {
         },
         managedApps: {
           enabled: config.managedApps.enabled !== false,
-          deployTarget: 'ssh',
+          deployTarget: config.managedApps.deployTarget || 'ssh',
           appBaseDomain: config.managedApps.appBaseDomain || 'demoserver2.buzz',
           namespacePrefix: config.managedApps.namespacePrefix || 'app-',
           platformNamespace: config.managedApps.platformNamespace || 'agent-platform',
