@@ -1337,6 +1337,7 @@ class SessionManager extends EventTarget {
             return false;
         }
         
+        const previousSessionId = this.currentSessionId;
         this.currentSessionId = sessionId;
         this.safeStorageSet(this.currentSessionKey, sessionId);
         if (!this.isLocalSession(sessionId)) {
@@ -1345,7 +1346,7 @@ class SessionManager extends EventTarget {
 
         const messages = this.sessionMessages.get(sessionId) || [];
         this.dispatchEvent(new CustomEvent('sessionSwitched', { 
-            detail: { sessionId, messages } 
+            detail: { sessionId, previousSessionId, messages } 
         }));
         
         return true;
@@ -1437,7 +1438,7 @@ class SessionManager extends EventTarget {
         }
 
         this.saveToStorage();
-        if (!this.isLocalSession(newSessionId)) {
+        if (!this.isLocalSession(newSessionId) && this.currentSessionId === newSessionId) {
             void this.persistActiveSession(newSessionId);
             const promotedSession = this.sessions.find((entry) => entry.id === newSessionId);
             const promotedTitle = this.normalizeSessionTitle(promotedSession?.title || '', '');

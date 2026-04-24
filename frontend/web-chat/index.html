@@ -3,73 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="description" content="Lilly multi-workspace web chat">
+    <meta name="description" content="Lilly web chat">
     <meta name="theme-color" content="#0b1220">
     <link rel="icon" href="data:,">
-    <title>Lilly Workspaces</title>
+    <title>Lilly</title>
     <script>
-        (function bootstrapWorkspaceHostTheme() {
-            const root = document.documentElement;
-            try {
-                const storedMode = String(localStorage.getItem('kimibuilt_theme') || '').trim().toLowerCase();
-                const storedPreset = String(localStorage.getItem('kimibuilt_theme_preset') || '').trim().toLowerCase();
-                const mode = storedMode === 'light' ? 'light' : 'dark';
-                const preset = storedPreset || (mode === 'light' ? 'paper' : 'obsidian');
-                root.setAttribute('data-theme', mode);
-                root.setAttribute('data-chat-theme', preset);
-            } catch (_error) {
-                root.setAttribute('data-theme', 'dark');
-                root.setAttribute('data-chat-theme', 'obsidian');
-            }
+        (function openSingleWorkspace() {
+            const target = new URL('app.html', window.location.href);
+            const current = new URL(window.location.href);
+            current.searchParams.forEach((value, key) => {
+                if (!['workspace', 'workspaceKey', 'workspace_key', 'workspaceLabel', 'workspace_label', 'embedded', 'embed'].includes(key)) {
+                    target.searchParams.set(key, value);
+                }
+            });
+            window.location.replace(target.toString());
         })();
     </script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/styles.css?v=20260423d">
-    <link rel="stylesheet" href="css/workspace-host.css?v=20260423d">
 </head>
-<body class="workspace-host-page">
-    <main class="workspace-host-shell" aria-label="Web chat workspaces">
-        <section id="workspace-panels" class="workspace-panels" aria-live="polite"></section>
-
-        <div class="workspace-switcher">
-            <div id="workspace-switcher-backdrop" class="workspace-switcher-backdrop" hidden></div>
-
-            <button
-                id="workspace-switcher-toggle"
-                class="workspace-switcher-toggle"
-                type="button"
-                aria-controls="workspace-switcher-popover"
-                aria-expanded="false"
-                aria-haspopup="dialog"
-            >
-                <span class="workspace-switcher-toggle__icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" focusable="false">
-                        <rect x="4.5" y="8.5" width="8.5" height="8.5" rx="2.1"></rect>
-                        <rect x="10.5" y="5.5" width="8.5" height="8.5" rx="2.1"></rect>
-                    </svg>
-                </span>
-                <span id="workspace-switcher-current-slot" class="workspace-switcher-toggle__badge">1</span>
-                <span id="workspace-switcher-current-label" class="sr-only">Switch workspace</span>
-            </button>
-
-            <section id="workspace-switcher-popover" class="workspace-switcher-popover" role="dialog" aria-modal="true" aria-label="Workspace switcher" hidden>
-                <header class="workspace-switcher-popover__header">
-                    <div>
-                        <p class="workspace-switcher-popover__eyebrow">Parallel web chat</p>
-                        <h1 class="workspace-switcher-popover__title">Switch workspace</h1>
-                    </div>
-                    <p class="workspace-switcher-popover__hint">Ctrl/Cmd + 1-4</p>
-                </header>
-
-                <nav id="workspace-tabs" class="workspace-tabs" aria-label="Chat workspaces"></nav>
-            </section>
-        </div>
-    </main>
-
-    <script src="/shared/openai-sse.js?v=20260410a"></script>
-    <script src="js/workspace-context.js?v=20260424c"></script>
-    <script src="js/workspace-host.js?v=20260424c"></script>
+<body>
+    <noscript>
+        <p><a href="app.html">Open Lilly web chat</a></p>
+    </noscript>
 </body>
 </html>

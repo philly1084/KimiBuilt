@@ -331,6 +331,8 @@ class ChatApp {
         // Abort controller for current stream
         this.currentAbortController = null;
         this.isCancellingCurrentRequest = false;
+        this.processingSessions = new Set();
+        this.streamStatesBySession = new Map();
         this.voiceInputState = {
             mode: 'idle',
             recorder: null,
@@ -437,7 +439,7 @@ class ChatApp {
     setupEventListeners() {
         // Send button
         this.sendBtn?.addEventListener('click', () => {
-            if (this.isProcessing) {
+            if (this.isCurrentSessionProcessing()) {
                 void this.cancelCurrentRequest();
                 return;
             }
@@ -658,6 +660,167 @@ class ChatApp {
         return this.pendingStreamResync || this.activeStreamRequest || null;
     }
 
+    getSessionStreamState(sessionId = '') {
+        const normalizedSessionId = String(sessionId || '').trim();
+        if (!normalizedSessionId) {
+            return null;
+        }
+
+        if (!this.streamStatesBySession.has(normalizedSessionId)) {
+            this.streamStatesBySession.set(normalizedSessionId, {
+                sessionId: normalizedSessionId,
+                activeStreamRequest: null,
+                pendingStreamResync: null,
+                currentStreamingMessageId: null,
+                currentAbortController: null,
+                isCancellingCurrentRequest: false,
+                liveResponseState: {
+                    phase: 'idle',
+                    detail: '',
+                    reasoningSummary: '',
+                    hasRealReasoning: false,
+                },
+            });
+        }
+
+        return this.streamStatesBySession.get(normalizedSessionId);
+    }
+
+    isSessionProcessing(sessionId = sessionManager.currentSessionId) {
+        const normalizedSessionId = String(sessionId || '').trim();
+        return Boolean(normalizedSessionId) && this.processingSessions.has(normalizedSessionId);
+    }
+
+    isCurrentSessionProcessing() {
+        return this.isSessionProcessing(sessionManager.currentSessionId);
+    }
+
+    captureVisibleStreamState(sessionId = sessionManager.currentSessionId) {
+        const normalizedSessionId = String(sessionId || '').trim();
+        if (!normalizedSessionId || !this.processingSessions.has(normalizedSessionId)) {
+            return null;
+        }
+
+        const state = this.getSessionStreamState(normalizedSessionId);
+        state.activeStreamRequest = this.activeStreamRequest;
+        state.pendingStreamResync = this.pendingStreamResync;
+        state.currentStreamingMessageId = this.currentStreamingMessageId;
+        state.currentAbortController = this.currentAbortController;
+        state.isCancellingCurrentRequest = this.isCancellingCurrentRequest;
+        state.liveResponseState = {
+            ...this.liveResponseState,
+        };
+        return state;
+    }
+
+    applyStreamStateToVisibleSession(sessionId = sessionManager.currentSessionId) {
+        const normalizedSessionId = String(sessionId || '').trim();
+        const state = normalizedSessionId ? this.streamStatesBySession.get(normalizedSessionId) : null;
+        const isProcessingSession = Boolean(normalizedSessionId) && this.processingSessions.has(normalizedSessionId);
+
+        this.activeStreamRequest = isProcessingSession ? (state?.activeStreamRequest || null) : null;
+        this.pendingStreamResync = isProcessingSession ? (state?.pendingStreamResync || null) : null;
+        this.currentStreamingMessageId = isProcessingSession ? (state?.currentStreamingMessageId || null) : null;
+        this.currentAbortController = isProcessingSession ? (state?.currentAbortController || null) : null;
+        this.isCancellingCurrentRequest = isProcessingSession ? (state?.isCancellingCurrentRequest === true) : false;
+        this.liveResponseState = isProcessingSession && state?.liveResponseState
+            ? { ...state.liveResponseState }
+            : {
+                phase: 'idle',
+                detail: '',
+                reasoningSummary: '',
+                hasRealReasoning: false,
+            };
+        this.isProcessing = isProcessingSession;
+        this.updateSendButton();
+    }
+
+    beginSessionStream(sessionId = '', statePatch = {}) {
+        const normalizedSessionId = String(sessionId || '').trim();
+        if (!normalizedSessionId) {
+            return null;
+        }
+
+        this.processingSessions.add(normalizedSessionId);
+        const state = this.getSessionStreamState(normalizedSessionId);
+        Object.assign(state, statePatch);
+
+        if (this.isVisibleSession(normalizedSessionId)) {
+            this.applyStreamStateToVisibleSession(normalizedSessionId);
+        } else {
+            this.updateSendButton();
+        }
+
+        return state;
+    }
+
+    finishSessionStream(sessionId = '') {
+        const normalizedSessionId = String(sessionId || '').trim();
+        if (!normalizedSessionId) {
+            return;
+        }
+
+        this.processingSessions.delete(normalizedSessionId);
+        this.streamStatesBySession.delete(normalizedSessionId);
+        if (this.isVisibleSession(normalizedSessionId)) {
+            this.applyStreamStateToVisibleSession(normalizedSessionId);
+        } else {
+            this.updateSendButton();
+        }
+    }
+
+    withSessionStreamContext(sessionId = '', callback = () => {}) {
+        const normalizedSessionId = String(sessionId || '').trim();
+        if (!normalizedSessionId) {
+            return callback();
+        }
+
+        this.captureVisibleStreamState(sessionManager.currentSessionId);
+
+        const previousGlobals = {
+            activeStreamRequest: this.activeStreamRequest,
+            pendingStreamResync: this.pendingStreamResync,
+            currentStreamingMessageId: this.currentStreamingMessageId,
+            currentAbortController: this.currentAbortController,
+            isCancellingCurrentRequest: this.isCancellingCurrentRequest,
+            liveResponseState: { ...this.liveResponseState },
+            isProcessing: this.isProcessing,
+        };
+        const targetState = this.getSessionStreamState(normalizedSessionId);
+
+        this.activeStreamRequest = targetState.activeStreamRequest;
+        this.pendingStreamResync = targetState.pendingStreamResync;
+        this.currentStreamingMessageId = targetState.currentStreamingMessageId;
+        this.currentAbortController = targetState.currentAbortController;
+        this.isCancellingCurrentRequest = targetState.isCancellingCurrentRequest === true;
+        this.liveResponseState = {
+            ...(targetState.liveResponseState || previousGlobals.liveResponseState),
+        };
+        this.isProcessing = this.processingSessions.has(normalizedSessionId);
+
+        try {
+            return callback();
+        } finally {
+            if (this.processingSessions.has(normalizedSessionId)) {
+                targetState.activeStreamRequest = this.activeStreamRequest;
+                targetState.pendingStreamResync = this.pendingStreamResync;
+                targetState.currentStreamingMessageId = this.currentStreamingMessageId;
+                targetState.currentAbortController = this.currentAbortController;
+                targetState.isCancellingCurrentRequest = this.isCancellingCurrentRequest;
+                targetState.liveResponseState = { ...this.liveResponseState };
+            } else {
+                this.streamStatesBySession.delete(normalizedSessionId);
+            }
+
+            if (this.isVisibleSession(normalizedSessionId)) {
+                this.applyStreamStateToVisibleSession(normalizedSessionId);
+            } else {
+                Object.assign(this, previousGlobals);
+                this.applyStreamStateToVisibleSession(sessionManager.currentSessionId);
+            }
+        }
+    }
+
     getTrackedStreamSessionId(fallbackSessionId = '') {
         return String(
             this.getTrackedStreamRequest()?.sessionId
@@ -722,6 +885,22 @@ class ChatApp {
                 request.sessionId = normalizedNextSessionId;
             }
         });
+        if (this.processingSessions.has(normalizedPreviousSessionId)) {
+            this.processingSessions.delete(normalizedPreviousSessionId);
+            this.processingSessions.add(normalizedNextSessionId);
+        }
+        const streamState = this.streamStatesBySession.get(normalizedPreviousSessionId);
+        if (streamState) {
+            this.streamStatesBySession.delete(normalizedPreviousSessionId);
+            streamState.sessionId = normalizedNextSessionId;
+            if (streamState.activeStreamRequest?.sessionId === normalizedPreviousSessionId) {
+                streamState.activeStreamRequest.sessionId = normalizedNextSessionId;
+            }
+            if (streamState.pendingStreamResync?.sessionId === normalizedPreviousSessionId) {
+                streamState.pendingStreamResync.sessionId = normalizedNextSessionId;
+            }
+            this.streamStatesBySession.set(normalizedNextSessionId, streamState);
+        }
         this.messageQueue = this.messageQueue.map((entry) => (
             this.isQueuedMessageForSession(entry, normalizedPreviousSessionId)
                 ? {
@@ -767,7 +946,9 @@ class ChatApp {
         });
         
         sessionManager.addEventListener('sessionSwitched', (e) => {
+            this.captureVisibleStreamState(e.detail.previousSessionId);
             apiClient.setSessionId(e.detail.sessionId);
+            this.applyStreamStateToVisibleSession(e.detail.sessionId);
             const session = sessionManager.getCurrentSession();
             if (session?.model) {
                 uiHelpers.setCurrentModel(session.model);
@@ -812,8 +993,10 @@ class ChatApp {
 
         sessionManager.addEventListener('sessionPromoted', (e) => {
             this.remapSessionScopedState(e.detail.previousSessionId, e.detail.sessionId);
-            this.subscribeToSessionUpdates(e.detail.sessionId);
-            this.loadSessionWorkloads(e.detail.sessionId);
+            if (this.isVisibleSession(e.detail.sessionId)) {
+                this.subscribeToSessionUpdates(e.detail.sessionId);
+                this.loadSessionWorkloads(e.detail.sessionId);
+            }
             const promotedMessages = Array.isArray(e.detail.messages) ? e.detail.messages : [];
             promotedMessages.forEach((message) => {
                 this.persistSessionMessageIfNeeded(e.detail.sessionId, message);
@@ -938,7 +1121,7 @@ class ChatApp {
         }
         
         // Priority 5: Cancel current streaming if active
-        if (this.isProcessing) {
+        if (this.isCurrentSessionProcessing()) {
             void this.cancelCurrentRequest();
         }
     }
@@ -3443,7 +3626,7 @@ class ChatApp {
         this.updateSendButton();
         uiHelpers.updateCharCounter(this.messageInput, this.charCounter);
 
-        if (this.isProcessing || this.getQueuedMessageCount() >= WEB_CHAT_QUEUE_MAX_SIZE) {
+        if (this.isCurrentSessionProcessing() || this.getQueuedMessageCount() >= WEB_CHAT_QUEUE_MAX_SIZE) {
             this.enqueueMessage(content);
             return;
         }
@@ -3471,6 +3654,10 @@ class ChatApp {
         }
 
         const sessionId = sessionManager.currentSessionId;
+        if (this.isSessionProcessing(sessionId)) {
+            this.enqueueMessage(normalizedContent);
+            return false;
+        }
         const previousMessages = sessionManager.getMessages(sessionId).slice();
         const existingAssistantMessage = reuseAssistantMessageId
             ? this.getSessionMessage(sessionId, reuseAssistantMessageId)
@@ -3575,12 +3762,22 @@ class ChatApp {
             userMessage: storedUserMessage,
             placeholderMessage: storedAssistantMessage,
         });
+        this.beginSessionStream(sessionId, {
+            activeStreamRequest: this.activeStreamRequest,
+            pendingStreamResync: this.pendingStreamResync,
+            currentStreamingMessageId: storedAssistantMessage.id,
+            liveResponseState: { ...this.liveResponseState },
+        });
         
         // Build message history for OpenAI API format
         const messages = this.buildMessageHistory(sessionId);
         
         // Create abort controller for this request
         this.currentAbortController = new AbortController();
+        const streamState = this.getSessionStreamState(sessionId);
+        if (streamState) {
+            streamState.currentAbortController = this.currentAbortController;
+        }
         
         // Send to API using OpenAI SDK
         try {
@@ -3591,6 +3788,7 @@ class ChatApp {
             let retryCount = 0;
             let streamFailed = false;
             let receivedTerminalChunk = false;
+            let streamSessionId = sessionId;
 
             // Stream the chat
             for await (const chunk of apiClient.streamChat(
@@ -3599,6 +3797,8 @@ class ChatApp {
                 this.currentAbortController.signal,
                 reasoningEffort,
                 {
+                    sessionId,
+                    bindClientSession: false,
                     metadata: {
                         foregroundRequestId: storedAssistantMessage.id,
                         messageId: storedUserMessage.id,
@@ -3610,78 +3810,92 @@ class ChatApp {
                 },
             )) {
                 if (chunk.type !== 'retry') {
-                    this.markActiveStreamAccepted();
+                    this.withSessionStreamContext(streamSessionId, () => this.markActiveStreamAccepted());
                 }
 
                 if (chunk.sessionId) {
-                    this.syncBackendSession(chunk.sessionId);
+                    this.syncBackendSession(chunk.sessionId, streamSessionId);
+                    streamSessionId = chunk.sessionId;
                 }
 
-                switch (chunk.type) {
-                    case 'stream_open':
-                        console.debug('[ChatApp] Gateway SSE stream opened.');
-                        this.updateConnectionStatus('connected');
-                        break;
-                    case 'status':
-                        this.handleStreamStatus(chunk);
-                        break;
-                    case 'progress':
-                        this.handleProgress(chunk);
-                        break;
-                    case 'text_delta':
-                        hasReceivedContent = true;
-                        this.retryAttempt = 0; // Reset retry count on successful content
-                        this.handleDelta(chunk.content);
-                        break;
-                    case 'reasoning_summary_delta':
-                        this.handleReasoningSummaryDelta(chunk);
-                        break;
-                    case 'tool_event':
-                        this.handleToolEvent(chunk);
-                        break;
-                    case 'done':
-                        receivedTerminalChunk = true;
-                        this.handleDone(chunk);
-                        break;
-                    case 'error':
-                        receivedTerminalChunk = true;
-                        streamFailed = true;
-                        if (chunk.cancelled) {
-                            this.handleCancelled();
-                        } else {
-                            // Show retry notification if retries were attempted
-                            if (chunk.retriesExhausted) {
-                                uiHelpers.showToast('Failed after multiple retries. Please try again.', 'error');
+                this.withSessionStreamContext(streamSessionId, () => {
+                    switch (chunk.type) {
+                        case 'stream_open':
+                            console.debug('[ChatApp] Gateway SSE stream opened.');
+                            this.updateConnectionStatus('connected');
+                            break;
+                        case 'status':
+                            this.handleStreamStatus(chunk);
+                            break;
+                        case 'progress':
+                            this.handleProgress(chunk);
+                            break;
+                        case 'text_delta':
+                            hasReceivedContent = true;
+                            this.retryAttempt = 0; // Reset retry count on successful content
+                            this.handleDelta(chunk.content);
+                            break;
+                        case 'reasoning_summary_delta':
+                            this.handleReasoningSummaryDelta(chunk);
+                            break;
+                        case 'tool_event':
+                            this.handleToolEvent(chunk);
+                            break;
+                        case 'done':
+                            receivedTerminalChunk = true;
+                            this.handleDone(chunk);
+                            break;
+                        case 'error':
+                            receivedTerminalChunk = true;
+                            streamFailed = true;
+                            if (chunk.cancelled) {
+                                this.handleCancelled();
+                            } else {
+                                // Show retry notification if retries were attempted
+                                if (chunk.retriesExhausted) {
+                                    uiHelpers.showToast('Failed after multiple retries. Please try again.', 'error');
+                                }
+                                this.handleError(chunk.error, chunk.status);
                             }
-                            this.handleError(chunk.error, chunk.status);
-                        }
-                        break;
-                    case 'retry':
-                        retryCount = chunk.attempt;
-                        if (retryCount > 1) {
-                            uiHelpers.showToast(`Retrying... (attempt ${chunk.attempt}/${chunk.maxAttempts})`, 'info');
-                        }
-                        break;
-                    case 'resync_required':
-                        receivedTerminalChunk = true;
-                        streamFailed = true;
-                        this.handleInterruptedStreamResync(chunk);
-                        break;
-                }
+                            break;
+                        case 'retry':
+                            retryCount = chunk.attempt;
+                            if (retryCount > 1) {
+                                uiHelpers.showToast(`Retrying... (attempt ${chunk.attempt}/${chunk.maxAttempts})`, 'info');
+                            }
+                            break;
+                        case 'resync_required':
+                            receivedTerminalChunk = true;
+                            streamFailed = true;
+                            this.handleInterruptedStreamResync(chunk);
+                            break;
+                    }
+                });
             }
 
-            if (!receivedTerminalChunk && this.isProcessing && this.currentStreamingMessageId === storedAssistantMessage.id) {
+            if (!receivedTerminalChunk && this.isSessionProcessing(streamSessionId)) {
                 streamFailed = true;
-                this.handleError('The reply stream ended before completion.', 502);
+                this.withSessionStreamContext(streamSessionId, () => {
+                    this.handleError('The reply stream ended before completion.', 502);
+                });
             }
 
             return !streamFailed;
         } catch (error) {
             console.error('Chat error:', error);
-            this.handleError(error.message || 'Failed to get response', error?.status);
+            this.withSessionStreamContext(this.getTrackedStreamSessionId(sessionId), () => {
+                this.handleError(error.message || 'Failed to get response', error?.status);
+            });
             return false;
         } finally {
-            this.currentAbortController = null;
+            const finalState = this.streamStatesBySession.get(sessionId);
+            if (finalState) {
+                finalState.currentAbortController = null;
+            }
+            if (this.isVisibleSession(sessionId)) {
+                this.currentAbortController = null;
+                this.updateSendButton();
+            }
         }
     }
 
@@ -3745,7 +3959,7 @@ class ChatApp {
         this.isProcessingQueue = true;
 
         try {
-            while (!this.isProcessing) {
+            while (!this.isSessionProcessing(targetSessionId)) {
                 if (!this.isVisibleSession(targetSessionId)) {
                     break;
                 }
@@ -3771,7 +3985,7 @@ class ChatApp {
     async submitAgentSurvey(trigger) {
         const button = trigger?.closest?.('.agent-survey-card__submit') || trigger;
         const card = button?.closest?.('.agent-survey-card');
-        if (!card || this.isProcessing) {
+        if (!card || this.isCurrentSessionProcessing()) {
             return;
         }
 
@@ -3883,7 +4097,7 @@ class ChatApp {
     goToPreviousSurveyStep(trigger) {
         const button = trigger?.closest?.('.agent-survey-card__secondary') || trigger;
         const card = button?.closest?.('.agent-survey-card');
-        if (!card || this.isProcessing) {
+        if (!card || this.isCurrentSessionProcessing()) {
             return;
         }
 
@@ -5763,23 +5977,25 @@ class ChatApp {
         this.messageInput.focus();
     }
 
-    syncBackendSession(sessionId) {
+    syncBackendSession(sessionId, previousSessionId = sessionManager.currentSessionId) {
         if (!sessionId) {
             return;
         }
 
-        const currentSessionId = sessionManager.currentSessionId;
+        const currentSessionId = String(previousSessionId || sessionManager.currentSessionId || '').trim();
         const didChangeSession = currentSessionId !== sessionId;
         if (currentSessionId !== sessionId) {
             sessionManager.promoteSessionId(currentSessionId, sessionId);
             this.remapSessionScopedState(currentSessionId, sessionId);
         }
 
-        apiClient.setSessionId(sessionId);
-        if (this.subscribedWorkloadSessionId !== sessionId) {
+        if (this.isVisibleSession(sessionId)) {
+            apiClient.setSessionId(sessionId);
+        }
+        if (this.isVisibleSession(sessionId) && this.subscribedWorkloadSessionId !== sessionId) {
             this.subscribeToSessionUpdates(sessionId);
         }
-        if (didChangeSession || this.currentSessionWorkloads.length === 0) {
+        if (this.isVisibleSession(sessionId) && (didChangeSession || this.currentSessionWorkloads.length === 0)) {
             this.loadSessionWorkloads(sessionId);
         }
     }
@@ -5973,7 +6189,9 @@ class ChatApp {
 
     beginAssistantStream(options = {}) {
         this.clearLiveIndicatorTimer();
-        this.resetAmbientReasoningState();
+        if (shouldTouchVisibleIndicator) {
+            this.resetAmbientReasoningState();
+        }
         const initialAmbientFrame = this.getAmbientReasoningFrame(Date.now());
         this.liveResponseState = {
             phase: 'thinking',
@@ -6019,16 +6237,20 @@ class ChatApp {
     updateLiveResponsePhase(phase = 'thinking', detail = '') {
         const normalizedPhase = String(phase || '').trim() || 'thinking';
         const nextDetail = String(detail || '').trim();
+        const streamSessionId = this.getStreamingMessageSessionId();
+        const isVisibleStream = this.isVisibleSession(streamSessionId);
         this.liveResponseState = {
             ...this.liveResponseState,
             phase: normalizedPhase,
             detail: nextDetail || this.liveResponseState.detail || '',
         };
 
-        uiHelpers.showTypingIndicator({
-            phase: normalizedPhase,
-            detail: this.liveResponseState.detail,
-        });
+        if (isVisibleStream) {
+            uiHelpers.showTypingIndicator({
+                phase: normalizedPhase,
+                detail: this.liveResponseState.detail,
+            });
+        }
 
         this.updateStreamingMessageState({
             liveState: {
@@ -6211,18 +6433,31 @@ class ChatApp {
             hideTypingIndicator = false,
             scheduleIndicatorHide = false,
             resetRetryAttempt = false,
+            keepSessionProcessing = false,
         } = options;
+        const finalizedSessionId = String(
+            (clearActiveStreamRequest ? this.activeStreamRequest?.sessionId : '')
+            || this.pendingStreamResync?.sessionId
+            || sessionManager.currentSessionId
+            || '',
+        ).trim();
 
-        if (scheduleIndicatorHide) {
+        const shouldTouchVisibleIndicator = !finalizedSessionId || this.isVisibleSession(finalizedSessionId);
+
+        if (scheduleIndicatorHide && shouldTouchVisibleIndicator) {
             this.scheduleLiveIndicatorHide();
         } else {
-            this.clearLiveIndicatorTimer();
-            if (hideTypingIndicator) {
+            if (shouldTouchVisibleIndicator) {
+                this.clearLiveIndicatorTimer();
+            }
+            if (hideTypingIndicator && shouldTouchVisibleIndicator) {
                 uiHelpers.hideTypingIndicator();
             }
         }
 
-        this.resetAmbientReasoningState();
+        if (shouldTouchVisibleIndicator) {
+            this.resetAmbientReasoningState();
+        }
         if (resetRetryAttempt) {
             this.retryAttempt = 0;
         }
@@ -6246,6 +6481,11 @@ class ChatApp {
             reasoningSummary: '',
             hasRealReasoning: false,
         };
+        if (!keepSessionProcessing && finalizedSessionId) {
+            this.processingSessions.delete(finalizedSessionId);
+            this.streamStatesBySession.delete(finalizedSessionId);
+            this.isProcessing = this.isCurrentSessionProcessing();
+        }
         this.updateSendButton();
     }
 
@@ -6589,7 +6829,7 @@ class ChatApp {
     }
 
     async regenerateResponse(messageId) {
-        if (this.isProcessing) {
+        if (this.isCurrentSessionProcessing()) {
             uiHelpers.showToast('Please wait for the current response to complete', 'warning');
             return;
         }
@@ -7169,7 +7409,7 @@ class ChatApp {
         const hasContent = this.messageInput?.value?.trim()?.length > 0;
         const canQueue = this.getQueuedMessageCount() < WEB_CHAT_QUEUE_MAX_SIZE;
         const canSend = hasContent && canQueue && !this.isGeneratingImage;
-        const showStopControl = this.isProcessing;
+        const showStopControl = this.isCurrentSessionProcessing();
         
         if (this.sendBtn) {
             this.sendBtn.disabled = showStopControl
@@ -7522,7 +7762,7 @@ class ChatApp {
         if (!sessionId
             || this.pendingStreamResync
             || this.activeStreamRequest
-            || this.isProcessing) {
+            || this.isSessionProcessing(sessionId)) {
             return false;
         }
 

@@ -11,7 +11,7 @@
     const WORKSPACE_QUERY_KEYS = ['workspace', 'workspaceKey', 'workspace_key'];
     const LABEL_QUERY_KEYS = ['workspaceLabel', 'workspace_label'];
     const EMBED_QUERY_KEYS = ['embedded', 'embed'];
-    const WORKSPACE_COUNT = 4;
+    const WORKSPACE_COUNT = 1;
     const WORKSPACE_LOCAL_STORAGE_KEYS = new Set([
         'kimibuilt_web_chat_sessions_v4',
         'kimibuilt_web_chat_current_session',
@@ -47,11 +47,7 @@
 
     function resolveWorkspaceScopeKey(workspaceKey = DEFAULT_WORKSPACE_KEY) {
         const normalizedKey = normalizeWorkspaceKey(workspaceKey);
-        if (normalizedKey === DEFAULT_WORKSPACE_KEY) {
-            return 'web-chat';
-        }
-
-        return `web-chat-${normalizedKey}`;
+        return 'web-chat';
     }
 
     function isWorkspaceLocalStorageKey(storageKey = '') {
@@ -64,12 +60,7 @@
             return normalizedStorageKey;
         }
 
-        const normalizedWorkspaceKey = normalizeWorkspaceKey(workspaceKey);
-        if (normalizedWorkspaceKey === DEFAULT_WORKSPACE_KEY) {
-            return normalizedStorageKey;
-        }
-
-        return `${normalizedStorageKey}::${normalizedWorkspaceKey}`;
+        return normalizedStorageKey;
     }
 
     function parseBooleanFlag(value = '') {

@@ -923,8 +923,9 @@ class OpenAIAPIClient extends EventTarget {
             params.output_format = requestOptions.outputFormat;
         }
         
-        if (this.currentSessionId && !String(this.currentSessionId).startsWith('local_')) {
-            params.session_id = this.currentSessionId;
+        const requestSessionId = String(requestOptions?.sessionId || this.currentSessionId || '').trim();
+        if (requestSessionId && !requestSessionId.startsWith('local_')) {
+            params.session_id = requestSessionId;
         }
 
         // Create abort controller for this request
@@ -949,6 +950,8 @@ class OpenAIAPIClient extends EventTarget {
      */
     async *streamChatWithFetch(params, signal, requestId, requestOptions = {}) {
         let lastError = null;
+        let requestSessionId = String(requestOptions?.sessionId || params.session_id || this.currentSessionId || '').trim();
+        const bindClientSession = requestOptions?.bindClientSession !== false;
         
         for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
             try {
@@ -983,11 +986,14 @@ class OpenAIAPIClient extends EventTarget {
 
                 const responseSessionId = response.headers.get('X-Session-Id');
                 if (responseSessionId) {
-                    this.currentSessionId = responseSessionId;
+                    requestSessionId = responseSessionId;
+                    if (bindClientSession) {
+                        this.currentSessionId = responseSessionId;
+                    }
                 }
                 
                 let pendingDone = {
-                    sessionId: this.currentSessionId,
+                    sessionId: requestSessionId || this.currentSessionId,
                     artifacts: [],
                     toolEvents: [],
                     assistantMetadata: null,
@@ -1016,7 +1022,10 @@ class OpenAIAPIClient extends EventTarget {
                     }
 
                     if (event.sessionId) {
-                        this.currentSessionId = event.sessionId;
+                        requestSessionId = event.sessionId;
+                        if (bindClientSession) {
+                            this.currentSessionId = event.sessionId;
+                        }
                         pendingDone.sessionId = event.sessionId;
                     }
 
@@ -1094,7 +1103,7 @@ class OpenAIAPIClient extends EventTarget {
                                     phase,
                                     detail,
                                 },
-                                sessionId: event.sessionId || pendingDone.sessionId,
+                                sessionId: event.sessionId || pendingDone.sessionId || requestSessionId,
                             };
                             break;
                         }
@@ -1129,7 +1138,7 @@ class OpenAIAPIClient extends EventTarget {
                 if (!this.isRetryableError(error)) {
                     const message = this.parseErrorMessage(error, error.response);
                     yield { type: 'error', error: message, status: error.status, details: error.details };
-                    yield { type: 'done', sessionId: this.currentSessionId };
+                    yield { type: 'done', sessionId: requestSessionId || this.currentSessionId };
                     return;
                 }
 
@@ -1146,7 +1155,7 @@ class OpenAIAPIClient extends EventTarget {
                             reason: 'connection_interrupted',
                             attempt: attempt + 1,
                             maxAttempts: RETRY_CONFIG.maxRetries + 1,
-                            sessionId: this.currentSessionId,
+                            sessionId: requestSessionId || this.currentSessionId,
                         };
                         return;
                     }
@@ -1156,7 +1165,7 @@ class OpenAIAPIClient extends EventTarget {
                 if (attempt === RETRY_CONFIG.maxRetries) {
                     const message = this.parseErrorMessage(error, error.response);
                     yield { type: 'error', error: message, status: error.status, details: error.details, retriesExhausted: true };
-                    yield { type: 'done', sessionId: this.currentSessionId };
+                    yield { type: 'done', sessionId: requestSessionId || this.currentSessionId };
                     return;
                 }
             }
