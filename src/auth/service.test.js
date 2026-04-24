@@ -1,7 +1,7 @@
 'use strict';
 
 const { config } = require('../config');
-const { createAuthToken, requireAuth } = require('./service');
+const { createAuthToken, isAuthorizedFrontendApiRequest, requireAuth } = require('./service');
 
 describe('auth service OpenCode gateway access', () => {
     const originalAuth = { ...config.auth };
@@ -106,6 +106,17 @@ describe('auth service OpenCode gateway access', () => {
             username: 'frontend-api',
             role: 'frontend-api',
         });
+    });
+
+    test('allows the frontend API token on WebSocket upgrade URLs', () => {
+        const req = {
+            url: '/ws?access_token=frontend-secret',
+            method: 'GET',
+            headers: {},
+            secure: false,
+        };
+
+        expect(isAuthorizedFrontendApiRequest(req)).toBe(true);
     });
 
     test('falls back to the gateway token when no dedicated frontend API key is configured', () => {

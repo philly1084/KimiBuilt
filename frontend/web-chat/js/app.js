@@ -346,10 +346,13 @@ class ChatApp {
         this.hiddenCompletedWorkloadCount = 0;
         this.editingWorkload = null;
         this.workloadSocket = null;
+        this.workloadSocketConnecting = false;
         this.workloadSocketReconnectTimer = null;
         this.pendingWorkloadSessionId = null;
         this.workloadSocketReconnectDelayMs = 1500;
         this.workloadSocketMaxReconnectDelayMs = 15000;
+        this.workloadSocketConsecutiveFailures = 0;
+        this.workloadSocketCircuitDelayMs = 60000;
         this.workloadSocketPaused = false;
         this.backgroundWorkloadStatusHideTimer = null;
         this.subscribedWorkloadSessionId = null;
@@ -2301,8 +2304,12 @@ class ChatApp {
         }
     }
 
-    connectWorkloadSocket() {
+    async connectWorkloadSocket() {
         if (this.workloadSocketPaused || this.isAppBackgrounded()) {
+            return;
+        }
+
+        if (this.workloadSocketConnecting) {
             return;
         }
 
@@ -2313,13 +2320,35 @@ class ChatApp {
             return;
         }
 
-        const wsUrl = typeof apiClient?.getRealtimeSocketUrl === 'function'
-            ? apiClient.getRealtimeSocketUrl('/ws')
-            : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
-        this.workloadSocket = new WebSocket(wsUrl);
+        this.workloadSocketConnecting = true;
+        let wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
+        try {
+            wsUrl = typeof apiClient?.getAuthenticatedRealtimeSocketUrl === 'function'
+                ? await apiClient.getAuthenticatedRealtimeSocketUrl('/ws')
+                : typeof apiClient?.getRealtimeSocketUrl === 'function'
+                    ? apiClient.getRealtimeSocketUrl('/ws')
+                    : wsUrl;
+        } catch (error) {
+            console.warn('Failed to prepare workload socket URL:', error);
+        }
+
+        if (this.workloadSocketPaused || this.isAppBackgrounded()) {
+            this.workloadSocketConnecting = false;
+            return;
+        }
+
+        try {
+            this.workloadSocket = new WebSocket(wsUrl);
+        } catch (error) {
+            this.workloadSocketConnecting = false;
+            console.warn('Failed to open workload socket:', error);
+            return;
+        }
+        this.workloadSocketConnecting = false;
 
         this.workloadSocket.addEventListener('open', () => {
             this.workloadSocketReconnectDelayMs = 1500;
+            this.workloadSocketConsecutiveFailures = 0;
             this.subscribeToSessionUpdates(this.pendingWorkloadSessionId || sessionManager.currentSessionId);
         });
         this.workloadSocket.addEventListener('message', (event) => {
@@ -2338,6 +2367,7 @@ class ChatApp {
                 ? sessionManager.currentSessionId
                 : null;
             const closeCode = Number(event?.code) || 0;
+            this.workloadSocketConsecutiveFailures += 1;
             const shouldRetry = navigator.onLine !== false
                 && ![4401, 4403, 1008].includes(closeCode)
                 && Boolean(this.pendingWorkloadSessionId || currentBackendSessionId);
@@ -2349,7 +2379,9 @@ class ChatApp {
                 return;
             }
 
-            const reconnectDelay = this.workloadSocketReconnectDelayMs;
+            const reconnectDelay = this.workloadSocketConsecutiveFailures >= 4
+                ? Math.max(this.workloadSocketCircuitDelayMs, this.workloadSocketReconnectDelayMs)
+                : this.workloadSocketReconnectDelayMs;
             this.workloadSocketReconnectTimer = setTimeout(() => {
                 this.connectWorkloadSocket();
             }, reconnectDelay);
@@ -2360,6 +2392,7 @@ class ChatApp {
         });
         this.workloadSocket.addEventListener('error', (error) => {
             console.warn('Workload socket error:', error);
+            this.workloadSocketConnecting = false;
         });
     }
 
@@ -6188,6 +6221,9 @@ class ChatApp {
     }
 
     beginAssistantStream(options = {}) {
+        const streamSessionId = this.getStreamingMessageSessionId(options.messageId);
+        const shouldTouchVisibleIndicator = !streamSessionId || this.isVisibleSession(streamSessionId);
+
         this.clearLiveIndicatorTimer();
         if (shouldTouchVisibleIndicator) {
             this.resetAmbientReasoningState();
@@ -6199,11 +6235,13 @@ class ChatApp {
             reasoningSummary: '',
             hasRealReasoning: false,
         };
-        uiHelpers.showTypingIndicator({
-            phase: 'thinking',
-            detail: this.liveResponseState.detail,
-        });
-        uiHelpers.playThinkingCue();
+        if (shouldTouchVisibleIndicator) {
+            uiHelpers.showTypingIndicator({
+                phase: 'thinking',
+                detail: this.liveResponseState.detail,
+            });
+            uiHelpers.playThinkingCue();
+        }
         this.updateStreamingMessageState({
             liveState: {
                 phase: 'thinking',

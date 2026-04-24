@@ -22,6 +22,24 @@ router.get('/session', (req, res) => {
     });
 });
 
+router.get('/ws-token', requireAuth, (req, res) => {
+    if (!isAuthEnabled()) {
+        return res.json({
+            token: null,
+            expiresAt: null,
+            authRequired: false,
+        });
+    }
+
+    const username = String(req.user?.username || config.auth.username || 'frontend-api').trim() || 'frontend-api';
+    const { token, expiresAt } = createAuthToken(username);
+    return res.json({
+        token,
+        expiresAt,
+        authRequired: true,
+    });
+});
+
 router.post('/login', (req, res) => {
     if (!isAuthEnabled()) {
         return res.status(400).json({

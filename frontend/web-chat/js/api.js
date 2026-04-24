@@ -2166,8 +2166,50 @@ class OpenAIAPIClient extends EventTarget {
         return this.currentSessionId;
     }
 
+    appendRealtimeSocketToken(socketUrl, token = API_KEY) {
+        const accessToken = String(token || API_KEY || '').trim();
+        if (!accessToken) {
+            return socketUrl;
+        }
+
+        try {
+            const parsedUrl = new URL(socketUrl, window.location.href);
+            if (!parsedUrl.searchParams.has('access_token')) {
+                parsedUrl.searchParams.set('access_token', accessToken);
+            }
+            return parsedUrl.toString();
+        } catch (_error) {
+            const separator = String(socketUrl || '').includes('?') ? '&' : '?';
+            return `${socketUrl}${separator}access_token=${encodeURIComponent(accessToken)}`;
+        }
+    }
+
     getRealtimeSocketUrl(pathname = '/ws') {
-        return buildGatewayRealtimeUrl(BASE_URL_WITHOUT_API, pathname);
+        return this.appendRealtimeSocketToken(buildGatewayRealtimeUrl(BASE_URL_WITHOUT_API, pathname), API_KEY);
+    }
+
+    async getAuthenticatedRealtimeSocketUrl(pathname = '/ws') {
+        const socketUrl = buildGatewayRealtimeUrl(BASE_URL_WITHOUT_API, pathname);
+
+        try {
+            const response = await fetch(`${BASE_URL_WITHOUT_API}/api/auth/ws-token`, {
+                method: 'GET',
+                headers: buildGatewayHeaders({ 'Accept': 'application/json' }),
+                credentials: 'same-origin',
+                cache: 'no-store',
+            });
+
+            if (response.ok) {
+                const data = await response.json().catch(() => ({}));
+                if (data?.token) {
+                    return this.appendRealtimeSocketToken(socketUrl, data.token);
+                }
+            }
+        } catch (_error) {
+            // Fall back to the static gateway token below.
+        }
+
+        return this.appendRealtimeSocketToken(socketUrl, API_KEY);
     }
 }
 

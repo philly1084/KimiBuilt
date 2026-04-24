@@ -84,6 +84,19 @@ function parseCookies(cookieHeader = '') {
         }, {});
 }
 
+function getRequestPath(req = {}) {
+    const explicitPath = String(req.path || '').trim();
+    if (explicitPath) {
+        return explicitPath;
+    }
+
+    try {
+        return new URL(String(req.url || ''), 'http://localhost').pathname;
+    } catch (_error) {
+        return '';
+    }
+}
+
 function serializeCookie(name, value, options = {}) {
     const parts = [`${name}=${encodeURIComponent(value)}`];
 
@@ -158,6 +171,18 @@ function getTokenFromRequest(req) {
         return authHeader.slice(7).trim();
     }
 
+    try {
+        const parsedUrl = new URL(String(req.url || ''), 'http://localhost');
+        const queryToken = parsedUrl.searchParams.get('access_token')
+            || parsedUrl.searchParams.get('api_key')
+            || parsedUrl.searchParams.get('token');
+        if (queryToken) {
+            return String(queryToken).trim();
+        }
+    } catch (_error) {
+        // Ignore malformed request URLs and continue as unauthenticated.
+    }
+
     return '';
 }
 
@@ -176,14 +201,17 @@ function resolveFrontendApiKey() {
 }
 
 function resolveFrontendApiUsername() {
-    const configuredUsername = String(config.auth.username || '').trim();
-    return configuredUsername || 'frontend-api';
+    return 'frontend-api';
 }
 
 function isFrontendTokenRoute(req) {
-    const routePath = String(req.path || '').trim();
+    const routePath = getRequestPath(req);
     if (!routePath) {
         return false;
+    }
+
+    if (routePath === '/ws' || routePath.startsWith('/ws/')) {
+        return true;
     }
 
     if (routePath.startsWith('/v1/')) {
@@ -265,7 +293,8 @@ function clearAuthCookie(res, req) {
 }
 
 function isApiRequest(req) {
-    return req.path.startsWith('/api/') || req.path.startsWith('/v1/') || req.path === '/ws';
+    const routePath = getRequestPath(req);
+    return routePath.startsWith('/api/') || routePath.startsWith('/v1/') || routePath === '/ws';
 }
 
 function requireAuth(req, res, next) {

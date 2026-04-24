@@ -25,7 +25,11 @@ const {
     getMissingCompletionDelta,
 } = require('../artifacts/artifact-service');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
-const { getAuthenticatedUser, isAuthEnabled } = require('../auth/service');
+const {
+    getAuthenticatedUser,
+    isAuthorizedFrontendApiRequest,
+    isAuthEnabled,
+} = require('../auth/service');
 const { resolveTranscriptObjectiveFromSession } = require('../conversation-continuity');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 const { buildContinuityInstructions } = require('../runtime-prompts');
@@ -169,11 +173,14 @@ function setupWebSocket(wss, app = null) {
         ws.app = app;
         if (isAuthEnabled()) {
             const authState = getAuthenticatedUser(req);
-            if (!authState.authenticated) {
+            if (authState.authenticated) {
+                ws.user = authState.user;
+            } else if (isAuthorizedFrontendApiRequest(req)) {
+                ws.user = { username: 'frontend-api', role: 'frontend-api' };
+            } else {
                 ws.close(4401, 'Authentication required');
                 return;
             }
-            ws.user = authState.user;
         } else {
             ws.user = { username: 'anonymous', role: 'open' };
         }
