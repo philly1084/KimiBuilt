@@ -1557,6 +1557,134 @@ describe('ManagedAppService', () => {
         }));
     });
 
+    test('getAppProgress records a failed Gitea run when the webhook is missing', async () => {
+        const app = {
+            id: 'app-1',
+            ownerId: 'user-1',
+            sessionId: 'session-1',
+            slug: 'demo-app',
+            appName: 'Demo App',
+            repoOwner: 'agent-apps',
+            repoName: 'demo-app',
+            imageRepo: 'gitea.demoserver2.buzz/agent-apps/demo-app',
+            namespace: 'app-demo-app',
+            publicHost: 'demo-app.demoserver2.buzz',
+            status: 'building',
+            sourcePrompt: 'Ship the demo app.',
+            metadata: {
+                deploymentTarget: 'ssh',
+                project: {
+                    summary: 'Demo App build is queued.',
+                    nextStep: 'Wait for the remote Gitea build to finish.',
+                    openItems: ['Remote build is queued.'],
+                },
+            },
+        };
+        const queuedBuildRun = {
+            id: 'run-1',
+            appId: 'app-1',
+            ownerId: 'user-1',
+            sessionId: 'session-1',
+            requestedAction: 'deploy',
+            commitSha: 'abcdef1234567890',
+            imageTag: 'sha-abcdef123456',
+            buildStatus: 'queued',
+            deployRequested: true,
+            deployStatus: 'pending',
+            verificationStatus: 'pending',
+            metadata: {},
+        };
+        const failedBuildRun = {
+            ...queuedBuildRun,
+            buildStatus: 'failed',
+            externalRunId: '43',
+            externalRunUrl: 'https://gitea.demoserver2.buzz/agent-apps/demo-app/actions/runs/43',
+            error: {
+                message: 'Gitea workflow concluded with failure.',
+            },
+        };
+        const failedApp = {
+            ...app,
+            status: 'build_failed',
+            metadata: {
+                deploymentTarget: 'ssh',
+                project: {
+                    summary: 'Demo App build failed.',
+                    nextStep: 'Open the Gitea run and fix the failed build step.',
+                    openItems: ['Remote build failed.'],
+                },
+                liveDeploy: {
+                    lastError: 'Gitea workflow concluded with failure.',
+                },
+            },
+        };
+
+        const store = {
+            getAppById: jest.fn(async () => null),
+            getAppBySlug: jest.fn(async () => app),
+            ensureAvailable: jest.fn(async () => {}),
+            listBuildRunsForApp: jest.fn(async () => ([queuedBuildRun])),
+            getAppByRepo: jest.fn(async () => app),
+            getBuildRunByExternalRunId: jest.fn(async () => null),
+            getBuildRunByCommitSha: jest.fn(async () => queuedBuildRun),
+            updateBuildRun: jest.fn(async (_id, updates) => ({
+                ...failedBuildRun,
+                ...updates,
+            })),
+            updateApp: jest.fn(async () => failedApp),
+        };
+        const giteaClient = {
+            isConfigured: jest.fn(() => true),
+            listRepositoryWorkflowRuns: jest.fn(async () => ({
+                totalCount: 1,
+                workflowRuns: [{
+                    id: 43,
+                    head_sha: 'abcdef1234567890',
+                    status: 'completed',
+                    conclusion: 'failure',
+                    html_url: 'https://gitea.demoserver2.buzz/agent-apps/demo-app/actions/runs/43',
+                    started_at: '2026-04-22T12:00:00Z',
+                    completed_at: '2026-04-22T12:01:00Z',
+                }],
+            })),
+        };
+        const service = new ManagedAppService({
+            store,
+            giteaClient,
+        });
+
+        service.getEffectiveGiteaConfig = () => ({
+            baseURL: 'https://gitea.demoserver2.buzz',
+            org: 'agent-apps',
+            registryHost: 'gitea.demoserver2.buzz',
+        });
+        service.broadcastLifecycleEvent = jest.fn();
+        service.deployApp = jest.fn();
+
+        const result = await service.getAppProgress('demo-app', 'user-1');
+
+        expect(giteaClient.listRepositoryWorkflowRuns).toHaveBeenCalledWith(expect.objectContaining({
+            owner: 'agent-apps',
+            repo: 'demo-app',
+            headSha: 'abcdef1234567890',
+        }));
+        expect(store.updateBuildRun).toHaveBeenCalledWith('run-1', expect.objectContaining({
+            buildStatus: 'failed',
+            externalRunId: '43',
+            externalRunUrl: 'https://gitea.demoserver2.buzz/agent-apps/demo-app/actions/runs/43',
+            error: expect.objectContaining({
+                message: 'Gitea workflow concluded with failure.',
+            }),
+        }));
+        expect(service.deployApp).not.toHaveBeenCalled();
+        expect(result.app.status).toBe('build_failed');
+        expect(result.latestBuildRun.buildStatus).toBe('failed');
+        expect(result.progress).toEqual(expect.objectContaining({
+            phase: 'build_failed',
+            phaseLabel: 'Build failed',
+        }));
+    });
+
     test('listApps returns canonical summary and progress fields', async () => {
         const service = new ManagedAppService({
             store: {

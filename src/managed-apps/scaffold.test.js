@@ -45,12 +45,17 @@ describe('managed app scaffold', () => {
         expect(workflow.content).toContain('KIMIBUILT_BUILD_EVENTS_SECRET');
         expect(workflow.content).toContain('X-KimiBuilt-Webhook-Secret');
         expect(workflow.content).toContain('KIMIBUILT_BUILD_EVENTS_INSECURE');
+        expect(workflow.content).toContain('finish_notification_failure() {');
+        expect(workflow.content).toContain('Successful managed app builds must notify KimiBuilt before the Gitea workflow can be treated as complete.');
         expect(workflow.content).toContain('"buildStatus":"$build_status"');
         expect(workflow.content).toContain('"deployRequested":true');
         expect(workflow.content).toContain('--post-file="$payload_file"');
         expect(workflow.content).toContain('BusyBox wget cannot disable TLS verification');
         expect(workflow.content).toContain('http_url="http://${target_url#https://}"');
-        expect(workflow.content).toContain('KimiBuilt notification via wget failed; leaving the build result intact.');
+        expect(workflow.content).toContain('finish_notification_failure "KimiBuilt notification via wget failed."');
+        expect(workflow.content).toContain('finish_notification_failure "KimiBuilt notification via curl failed."');
+        expect(workflow.content).toContain('finish_notification_failure "No KimiBuilt build events URL configured; cannot notify the managed app control plane."');
+        expect(workflow.content).not.toContain('KimiBuilt notification via wget failed; leaving the build result intact.');
         expect(workflow.content).not.toContain('--method=POST');
         expect(workflow.content).not.toContain('--body-file="$payload_file"');
         expect(workflow.content).not.toContain('uses: actions/checkout@v4');

@@ -182,14 +182,21 @@ jobs:
           JOB_STATUS: \${{ job.status }}
         run: |
           set -euo pipefail
-          target_url="\${KIMIBUILT_BUILD_EVENTS_URL:-$BUILD_EVENTS_URL}"
-          if [ -z "\${target_url:-}" ]; then
-            echo "No KimiBuilt build events URL configured; skipping notification."
-            exit 0
-          fi
           build_status="success"
           if [ "\${JOB_STATUS:-success}" != "success" ]; then
             build_status="failed"
+          fi
+          finish_notification_failure() {
+            echo "$1" >&2
+            if [ "$build_status" = "success" ]; then
+              echo "Successful managed app builds must notify KimiBuilt before the Gitea workflow can be treated as complete." >&2
+              exit 1
+            fi
+            exit 0
+          }
+          target_url="\${KIMIBUILT_BUILD_EVENTS_URL:-$BUILD_EVENTS_URL}"
+          if [ -z "\${target_url:-}" ]; then
+            finish_notification_failure "No KimiBuilt build events URL configured; cannot notify the managed app control plane."
           fi
           run_url="\${GITHUB_SERVER_URL:-\${GITEA_INSTANCE_URL:-}}"
           if [ -n "\${run_url:-}" ] && [ -n "\${GITHUB_REPOSITORY:-}" ] && [ -n "\${GITHUB_RUN_ID:-}" ]; then
@@ -213,8 +220,7 @@ jobs:
             if curl "\${curl_flags[@]}" "$target_url"; then
               exit 0
             fi
-            echo "KimiBuilt notification via curl failed; leaving the build result intact." >&2
-            exit 0
+            finish_notification_failure "KimiBuilt notification via curl failed."
           fi
           if command -v wget >/dev/null 2>&1; then
             wget_headers=(--header "Content-Type: application/json")
@@ -235,11 +241,9 @@ jobs:
                   ;;
               esac
             fi
-            echo "KimiBuilt notification via wget failed; leaving the build result intact." >&2
-            exit 0
+            finish_notification_failure "KimiBuilt notification via wget failed."
           fi
-          echo "curl or wget is required to notify KimiBuilt." >&2
-          exit 0
+          finish_notification_failure "curl or wget is required to notify KimiBuilt."
 `;
 }
 
