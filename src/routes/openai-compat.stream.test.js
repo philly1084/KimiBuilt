@@ -210,6 +210,7 @@ describe('/v1/chat/completions stream forwarding', () => {
         expect(response.text).toContain('"delta":{"reasoning":"Checking the request. "}');
         expect(response.text).toContain('"type":"response.reasoning_summary_text.delta"');
         expect(response.text).toContain('"summary":"Checking the request. "');
+        expect(response.text).toContain('"delta":{"tool_calls":[{"index":0,"id":"call_compat_1","type":"function","function":{"name":"web_search","arguments":"{}"}}]}');
         expect(response.text).toContain('"type":"response.output_item.added"');
         expect(response.text).toContain('"name":"web_search"');
         expect(response.text).toContain('"delta":{"content":"Answer"}');

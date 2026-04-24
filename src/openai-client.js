@@ -567,6 +567,16 @@ function listOfficialImageModels(configuredModel = config.media.imageModel) {
 
 async function listImageModels() {
     const imageProvider = getImageProviderConfig();
+    const providerFamily = inferProviderFamily({
+        baseURL: imageProvider.baseURL,
+        model: imageProvider.imageModel,
+    });
+
+    if (providerFamily === 'openai') {
+        return listOfficialImageModels(
+            imageProvider.imageModel || config.media.imageModel || config.openai.imageModel,
+        );
+    }
 
     if (imageProvider.source === 'gateway') {
         const discovered = uniqueById(
@@ -2963,13 +2973,17 @@ async function createChatCompletionsRequest(openai, params, requestOptions = und
 }
 
 function normalizeToolCall(toolCall = {}) {
-    const rawArguments = toolCall.function?.arguments;
+    const rawArguments = toolCall.function?.arguments ?? toolCall.arguments;
+    const rawName = toolCall.function?.name ?? toolCall.name;
+    const rawId = toolCall.id || toolCall.call_id;
 
     return {
-        id: toolCall.id,
-        type: toolCall.type || 'function',
+        id: rawId,
+        type: toolCall.type === 'function_call' || toolCall.type === 'custom_tool_call'
+            ? 'function'
+            : (toolCall.type || 'function'),
         function: {
-            name: toolCall.function?.name,
+            name: rawName,
             arguments: typeof rawArguments === 'string'
                 ? rawArguments
                 : JSON.stringify(rawArguments || {}),
@@ -4296,8 +4310,11 @@ function getModelResponseText(response) {
 
 function normalizeChatResponse(response) {
     const outputText = getChatCompletionText(response);
+    const finishReason = String(response?.choices?.[0]?.finish_reason || '').toLowerCase();
 
-    if (!String(outputText || '').trim() && (response?.choices?.length || response?.candidates?.length)) {
+    if (!String(outputText || '').trim()
+        && finishReason !== 'tool_calls'
+        && (response?.choices?.length || response?.candidates?.length)) {
         console.warn(`[OpenAI] Empty chat completion text after normalization. Shape=${JSON.stringify({
             responseKeys: response && typeof response === 'object' ? Object.keys(response).slice(0, 20) : [],
             choiceKeys: response?.choices?.[0] && typeof response.choices[0] === 'object' ? Object.keys(response.choices[0]).slice(0, 20) : [],
@@ -4342,6 +4359,8 @@ async function* normalizeChatCompletionsStream(stream, metadata = {}) {
     let created = null;
     let outputText = '';
     let usageMetadata = null;
+    let sawCompletion = false;
+    let sawToolCalls = false;
 
     for await (const chunk of stream) {
         if (!responseId && chunk.id) {
@@ -4357,8 +4376,16 @@ async function* normalizeChatCompletionsStream(stream, metadata = {}) {
             usageMetadata = mergeUsageMetadata(usageMetadata, chunk.usage);
         }
 
-        const delta = chunk.choices[0]?.delta?.content || '';
-        const finishReason = chunk.choices[0]?.finish_reason;
+        const choice = chunk.choices?.[0] || {};
+        const deltaPayload = choice.delta || {};
+        const delta = deltaPayload.content || '';
+        const reasoning = normalizeMessageContent(
+            deltaPayload.reasoning
+            || deltaPayload.reasoning_text
+            || deltaPayload.reasoning_content
+            || deltaPayload.reasoning_details,
+        );
+        const finishReason = choice.finish_reason;
 
         if (delta) {
             outputText += delta;
@@ -4368,7 +4395,24 @@ async function* normalizeChatCompletionsStream(stream, metadata = {}) {
             };
         }
 
+        if (reasoning) {
+            yield {
+                type: 'response.reasoning_summary_text.delta',
+                delta: reasoning,
+                summary: reasoning,
+            };
+        }
+
+        if (Array.isArray(deltaPayload.tool_calls) && deltaPayload.tool_calls.length > 0) {
+            sawToolCalls = true;
+            yield {
+                type: 'chat.completion.tool_calls.delta',
+                tool_calls: deltaPayload.tool_calls,
+            };
+        }
+
         if (isTerminalFinishReason(finishReason)) {
+            sawCompletion = true;
             const finalMetadata = usageMetadata
                 ? {
                     ...metadata,
@@ -4392,6 +4436,31 @@ async function* normalizeChatCompletionsStream(stream, metadata = {}) {
                 }, finalMetadata)),
             };
         }
+    }
+
+    if (!sawCompletion && (outputText || sawToolCalls)) {
+        const finalMetadata = usageMetadata
+            ? {
+                ...metadata,
+                usage: usageMetadata,
+                tokenUsage: usageMetadata,
+            }
+            : metadata;
+        yield {
+            type: 'response.completed',
+            response: normalizeChatResponse(attachKimibuiltMetadata({
+                id: responseId,
+                created,
+                model,
+                choices: [{
+                    message: {
+                        role: 'assistant',
+                        content: outputText,
+                    },
+                    finish_reason: sawToolCalls ? 'tool_calls' : 'stop',
+                }],
+            }, finalMetadata)),
+        };
     }
 }
 

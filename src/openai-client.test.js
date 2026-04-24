@@ -2653,4 +2653,88 @@ describe('openai-client automatic tool orchestration helpers', () => {
             },
         ]);
     });
+
+    test('normalizes streamed chat reasoning and tool call deltas from gateway chunks', async () => {
+        async function* streamChunks() {
+            yield {
+                id: 'chatcmpl-gateway-1',
+                object: 'chat.completion.chunk',
+                created: 1710000000,
+                model: 'codex-latest',
+                choices: [{
+                    index: 0,
+                    delta: { reasoning: 'Checking tools. ' },
+                    finish_reason: null,
+                }],
+            };
+            yield {
+                id: 'chatcmpl-gateway-1',
+                object: 'chat.completion.chunk',
+                created: 1710000000,
+                model: 'codex-latest',
+                choices: [{
+                    index: 0,
+                    delta: {
+                        tool_calls: [{
+                            index: 0,
+                            id: 'call_1',
+                            type: 'function',
+                            function: {
+                                name: 'web-search',
+                                arguments: '{"query":"Halifax"}',
+                            },
+                        }],
+                    },
+                    finish_reason: null,
+                }],
+            };
+            yield {
+                id: 'chatcmpl-gateway-1',
+                object: 'chat.completion.chunk',
+                created: 1710000000,
+                model: 'codex-latest',
+                choices: [{
+                    index: 0,
+                    delta: {},
+                    finish_reason: 'tool_calls',
+                }],
+            };
+        }
+
+        const events = [];
+        for await (const event of __testUtils.normalizeChatCompletionsStream(streamChunks())) {
+            events.push(event);
+        }
+
+        expect(events).toEqual([
+            {
+                type: 'response.reasoning_summary_text.delta',
+                delta: 'Checking tools. ',
+                summary: 'Checking tools. ',
+            },
+            {
+                type: 'chat.completion.tool_calls.delta',
+                tool_calls: [{
+                    index: 0,
+                    id: 'call_1',
+                    type: 'function',
+                    function: {
+                        name: 'web-search',
+                        arguments: '{"query":"Halifax"}',
+                    },
+                }],
+            },
+            expect.objectContaining({
+                type: 'response.completed',
+                response: expect.objectContaining({
+                    id: 'chatcmpl-gateway-1',
+                    output: expect.arrayContaining([
+                        expect.objectContaining({
+                            role: 'assistant',
+                        }),
+                    ]),
+                }),
+            }),
+        ]);
+    });
 });

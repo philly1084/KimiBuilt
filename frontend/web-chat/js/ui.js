@@ -3288,6 +3288,11 @@ class UIHelpers {
         const isArtifact = source === 'artifact';
         const downloadableUrl = message.downloadUrl || imageUrl;
         const shareableUrl = message.downloadUrl || imageUrl;
+        const downloadFilename = this.sanitizeDownloadFilename(
+            message.filename || prompt || 'generated-image.png',
+            'generated-image',
+            'png',
+        );
         
         const messageEl = document.createElement('div');
         messageEl.className = 'message assistant';
@@ -3316,8 +3321,8 @@ class UIHelpers {
             </div>
         ` : `
             <div class="image-container">
-                <img src="${imageUrl}" alt="${this.escapeHtmlAttr(prompt || 'Image')}" 
-                     onclick="uiHelpers.openImageLightbox('${imageUrl}')" 
+                <img src="${this.escapeHtmlAttr(imageUrl)}" alt="${this.escapeHtmlAttr(prompt || 'Image')}" 
+                     onclick="uiHelpers.openImageLightbox('${this.escapeHtmlAttr(imageUrl)}')" 
                      onload="uiHelpers.scrollToBottom()"
                      loading="lazy">
             </div>
@@ -3329,7 +3334,7 @@ class UIHelpers {
                 </div>
             ` : ''}
             <div class="image-actions">
-                <button class="image-action-btn" onclick="uiHelpers.downloadImage('${this.escapeHtmlAttr(downloadableUrl)}', '${this.escapeHtmlAttr(prompt || message.filename || 'image')}.jpg')" aria-label="Download image">
+                <button class="image-action-btn" onclick="uiHelpers.downloadImage('${this.escapeHtmlAttr(downloadableUrl)}', '${this.escapeHtmlAttr(downloadFilename)}')" aria-label="Download image">
                     <i data-lucide="download" class="w-4 h-4" aria-hidden="true"></i>
                     <span>Download</span>
                 </button>
@@ -3844,16 +3849,28 @@ class UIHelpers {
     updateImageMessage(messageId, imageData) {
         const messageEl = document.getElementById(messageId);
         if (!messageEl) return false;
+
+        const base64Image = typeof imageData.b64_json === 'string' && imageData.b64_json.trim()
+            ? (imageData.b64_json.startsWith('data:')
+                ? imageData.b64_json
+                : `data:image/png;base64,${imageData.b64_json}`)
+            : '';
+        const imageUrl = imageData.url || imageData.inlineUrl || imageData.downloadUrl || base64Image;
         
         // Create new message element with the image data
         const newMessage = {
             id: messageId,
             role: 'assistant',
             type: 'image',
-            imageUrl: imageData.url || imageData.b64_json,
+            imageUrl,
+            thumbnailUrl: imageData.thumbnailUrl || imageUrl,
+            downloadUrl: imageData.downloadUrl || '',
+            artifactId: imageData.artifactId || '',
+            filename: imageData.filename || '',
             prompt: imageData.prompt,
             revisedPrompt: imageData.revised_prompt,
             model: imageData.model,
+            source: imageData.source || 'generated',
             timestamp: new Date().toISOString()
         };
         
@@ -4078,8 +4095,42 @@ class UIHelpers {
         this.trapFocus(modal);
     }
 
+    getImageModelPreferenceRank(model = {}) {
+        const normalizedId = String(model?.id || '').trim().toLowerCase();
+        const preferredOrder = [
+            'gpt-image-2',
+            'gpt-image-1.5',
+            'gpt-image-1',
+            'gpt-image-1-mini',
+            'dall-e-3',
+            'dall-e-2',
+        ];
+        const preferredIndex = preferredOrder.indexOf(normalizedId);
+        if (preferredIndex !== -1) {
+            return preferredIndex;
+        }
+
+        if (/^(gpt-image|dall-e-)/i.test(normalizedId)) {
+            return preferredOrder.length;
+        }
+
+        return preferredOrder.length + 100;
+    }
+
+    sortImageModelsForDisplay(models = []) {
+        const list = Array.isArray(models) ? [...models] : [];
+        return list.sort((left, right) => {
+            const rankDelta = this.getImageModelPreferenceRank(left) - this.getImageModelPreferenceRank(right);
+            if (rankDelta !== 0) {
+                return rankDelta;
+            }
+
+            return String(left?.name || left?.id || '').localeCompare(String(right?.name || right?.id || ''));
+        });
+    }
+
     getPreferredImageModelId(models = this.availableImageModels) {
-        const list = Array.isArray(models) ? models : [];
+        const list = this.sortImageModelsForDisplay(models);
         return list[0]?.id || '';
     }
 
@@ -4152,7 +4203,7 @@ class UIHelpers {
     async loadImageModels() {
         try {
             const models = await apiClient.getImageModelsFromAPI();
-            this.availableImageModels = Array.isArray(models) ? models : [];
+            this.availableImageModels = this.sortImageModelsForDisplay(models);
 
             const modelSelect = document.getElementById('image-model-select');
             if (modelSelect && this.availableImageModels.length > 0) {

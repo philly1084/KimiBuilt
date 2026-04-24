@@ -43,7 +43,7 @@ describe('openai-client image model selection', () => {
         delete process.env.OPENAI_MEDIA_IMAGE_MODEL;
     });
 
-    test('prefers the gateway image model even when dedicated media config is also present', async () => {
+    test('prefers the configured gateway image model while using the official OpenAI image catalog', async () => {
         process.env.OPENAI_IMAGE_MODEL = 'gpt-image-2';
         process.env.OPENAI_MEDIA_API_KEY = 'media-key';
         process.env.OPENAI_MEDIA_IMAGE_MODEL = 'gpt-image-1.5';
@@ -55,7 +55,12 @@ describe('openai-client image model selection', () => {
         expect(models[0]).toEqual(expect.objectContaining({
             id: 'gpt-image-2',
         }));
-        expect(models.map((model) => model.id)).not.toContain('gpt-image-1.5');
+        expect(models.map((model) => model.id)).toEqual(expect.arrayContaining([
+            'gpt-image-1.5',
+            'gpt-image-1',
+            'gpt-image-1-mini',
+        ]));
+        expect(mockModelsList).not.toHaveBeenCalled();
     });
 
     test('prefers gpt-image-2 over older discovered GPT image models from a gateway', async () => {
@@ -96,5 +101,22 @@ describe('openai-client image model selection', () => {
             'gpt-image-1',
             'gpt-image-1-mini',
         ]));
+    });
+
+    test('uses the official OpenAI image catalog when the configured base URL is OpenAI', async () => {
+        mockModelsList.mockResolvedValue({
+            data: [
+                { id: 'gemini-2.0-flash-exp-image-generation', owned_by: 'google' },
+            ],
+        });
+
+        const { listImageModels } = require('./openai-client');
+        const models = await listImageModels();
+
+        expect(models[0]).toEqual(expect.objectContaining({
+            id: 'gpt-image-2',
+        }));
+        expect(models.map((model) => model.id)).not.toContain('gemini-2.0-flash-exp-image-generation');
+        expect(mockModelsList).not.toHaveBeenCalled();
     });
 });

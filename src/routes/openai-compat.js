@@ -194,6 +194,34 @@ function isResponseToolOutputItem(item = {}) {
     return type === 'function_call' || type === 'custom_tool_call';
 }
 
+function normalizeToolArgumentsForChat(argumentsValue = {}) {
+    if (typeof argumentsValue === 'string') {
+        return argumentsValue;
+    }
+
+    try {
+        return JSON.stringify(argumentsValue || {});
+    } catch (_error) {
+        return '{}';
+    }
+}
+
+function responseToolItemToChatDeltaToolCall(item = {}, index = 0) {
+    const callId = item.call_id || item.id || `call_${index + 1}`;
+    const name = item.name || item.function?.name || '';
+    const argumentsValue = item.arguments ?? item.function?.arguments ?? {};
+
+    return {
+        index,
+        id: callId,
+        type: 'function',
+        function: {
+            name,
+            arguments: normalizeToolArgumentsForChat(argumentsValue),
+        },
+    };
+}
+
 function inferOutputFormatFromTranscript(messages = [], session = null) {
     const normalizedMessages = Array.isArray(messages) ? messages : [];
     const lastUserMessage = normalizedMessages.filter((message) => message?.role === 'user').pop();
@@ -1186,16 +1214,32 @@ router.post('/chat/completions', async (req, res, next) => {
                     chunkIndex += 1;
                 }
 
-                if ((event.type === 'response.output_item.added' || event.type === 'response.output_item.done')
-                    && isResponseToolOutputItem(event.item)) {
+                if (event.type === 'chat.completion.tool_calls.delta'
+                    && Array.isArray(event.tool_calls)
+                    && event.tool_calls.length > 0) {
                     activeSse.write(`data: ${JSON.stringify({
                         id: `chatcmpl-${sessionId}-${chunkIndex}`,
                         object: 'chat.completion.chunk',
                         created: Math.floor(Date.now() / 1000),
                         model: model || 'gpt-4o',
-                        choices: [{ index: 0, delta: {}, finish_reason: null }],
+                        choices: [{ index: 0, delta: { tool_calls: event.tool_calls }, finish_reason: null }],
+                        tool_calls: event.tool_calls,
+                    })}\n\n`);
+                    chunkIndex += 1;
+                }
+
+                if ((event.type === 'response.output_item.added' || event.type === 'response.output_item.done')
+                    && isResponseToolOutputItem(event.item)) {
+                    const toolCalls = [responseToolItemToChatDeltaToolCall(event.item)];
+                    activeSse.write(`data: ${JSON.stringify({
+                        id: `chatcmpl-${sessionId}-${chunkIndex}`,
+                        object: 'chat.completion.chunk',
+                        created: Math.floor(Date.now() / 1000),
+                        model: model || 'gpt-4o',
+                        choices: [{ index: 0, delta: { tool_calls: toolCalls }, finish_reason: null }],
                         type: event.type,
                         item: event.item,
+                        tool_calls: toolCalls,
                     })}\n\n`);
                     chunkIndex += 1;
                 }

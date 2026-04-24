@@ -5376,7 +5376,15 @@ class ChatApp {
             return null;
         }
 
-        let imageUrl = image.url || '';
+        const downloadUrl = this.buildArtifactUrl(image.downloadPath || image.downloadUrl || '');
+        const inlineUrl = downloadUrl
+            ? this.buildArtifactUrl(
+                image.inlinePath || image.downloadPath || image.downloadUrl || '',
+                { inline: true },
+            )
+            : '';
+
+        let imageUrl = inlineUrl || this.buildArtifactUrl(image.url || '') || image.url || '';
         if (!imageUrl && typeof image.b64_json === 'string' && !/\[truncated \d+ chars\]/.test(image.b64_json)) {
             imageUrl = `data:image/png;base64,${image.b64_json}`;
         }
@@ -5387,11 +5395,14 @@ class ChatApp {
 
         return {
             imageUrl,
-            thumbnailUrl: image.thumbnailUrl || imageUrl,
+            thumbnailUrl: this.buildArtifactUrl(image.thumbnailUrl || '') || image.thumbnailUrl || imageUrl,
             alt: image.alt || image.revisedPrompt || fallbackPrompt || 'Generated image',
             revisedPrompt: image.revisedPrompt || image.revised_prompt || '',
             prompt: fallbackPrompt,
             model: image.model || fallbackModel || '',
+            downloadUrl,
+            artifactId: image.artifactId || '',
+            filename: image.filename || '',
             source: 'generated',
         };
     }
@@ -6828,9 +6839,13 @@ class ChatApp {
                         ...messages[msgIndex],
                         isLoading: false,
                         imageUrl: imageData.imageUrl,
+                        downloadUrl: imageData.downloadUrl || '',
+                        artifactId: imageData.artifactId || '',
+                        filename: imageData.filename || '',
                         generatedImages,
                         revisedPrompt: imageData.revisedPrompt,
                         model: result.model || options.model,
+                        source: 'generated',
                     };
                     sessionManager.saveToStorage();
                 }
@@ -6838,6 +6853,9 @@ class ChatApp {
                 // Update UI
                 uiHelpers.updateImageMessage(imageMessageId, {
                     url: imageData.imageUrl,
+                    downloadUrl: imageData.downloadUrl,
+                    artifactId: imageData.artifactId,
+                    filename: imageData.filename,
                     prompt: options.prompt,
                     revised_prompt: imageData.revisedPrompt,
                     model: result.model || options.model,
