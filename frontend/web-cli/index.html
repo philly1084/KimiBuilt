@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>KimiBuilt Voxel CLI</title>
+    <title>Lilly Voxel CLI</title>
     <script src="https://cdn.tailwindcss.com"></script>
     
     <!-- Syntax Highlighting -->
@@ -874,7 +874,7 @@
         <!-- Header -->
         <header class="header">
             <div class="header-left">
-                <span class="header-title">KimiBuilt Voxel CLI</span>
+                <span class="header-title">Lilly Voxel CLI</span>
                 <div class="status-indicator">
                     <span id="statusDot" class="status-dot connecting"></span>
                     <span id="statusText">Connecting...</span>
@@ -939,6 +939,7 @@
                         <span class="voxel-panel-title">Voxel Pet</span>
                         <div class="voxel-panel-actions">
                             <button class="voxel-icon-btn" onclick="app.handlePetAction('jump')" title="Jump" aria-label="Jump">J</button>
+                            <button class="voxel-icon-btn" onclick="app.generateRandomVoxelPet()" title="Random voxel character" aria-label="Random voxel character">R</button>
                             <button class="voxel-icon-btn" onclick="app.handlePetAction('scout')" title="Scout" aria-label="Scout">S</button>
                             <button class="voxel-icon-btn" onclick="app.handlePetAction('sleep')" title="Sleep" aria-label="Sleep">Z</button>
                         </div>
@@ -965,12 +966,15 @@
                         <div class="voxel-prompt-row">
                             <input id="voxelPetPrompt" type="text" placeholder="voxel fox with amber goggles" autocomplete="off" spellcheck="false">
                             <button class="btn btn-sm" onclick="app.generateVoxelPetFromInput()">Spawn</button>
+                            <button class="btn btn-sm" onclick="app.generateAIVoxelPetFromInput()">AI</button>
                         </div>
                         <div class="voxel-action-grid">
                             <button class="btn btn-sm" onclick="app.handlePetAction('dance')">Dance</button>
                             <button class="btn btn-sm" onclick="app.handlePetAction('guard')">Guard</button>
                             <button class="btn btn-sm" onclick="app.handlePetAction('scout')">Scout</button>
                             <button class="btn btn-sm" onclick="app.handlePetAction('sleep')">Sleep</button>
+                            <button class="btn btn-sm" onclick="app.generateRandomVoxelPet()">Random</button>
+                            <button class="btn btn-sm" onclick="app.generateAIVoxelPetFromInput()">AI Fill</button>
                         </div>
                     </div>
                 </section>

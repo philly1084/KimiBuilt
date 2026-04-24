@@ -4,6 +4,7 @@ const {
   resolveProjectKey,
   SESSION_LOCAL_MEMORY_NAMESPACE,
   SURFACE_LOCAL_MEMORY_NAMESPACE,
+  sessionMatchesScope,
   USER_GLOBAL_MEMORY_NAMESPACE,
 } = require('./session-scope');
 
@@ -86,5 +87,34 @@ describe('session scope memory routing', () => {
       memoryNamespace: USER_GLOBAL_MEMORY_NAMESPACE,
       shareAcrossSurfaces: true,
     }));
+  });
+
+  test('keeps legacy parallel web-chat workspace sessions out of workspace one', () => {
+    const workspaceTwoSession = {
+      id: 'workspace-2-session',
+      metadata: {
+        clientSurface: 'web-chat',
+        memoryScope: 'web-chat-workspace-2',
+      },
+    };
+
+    expect(sessionMatchesScope(workspaceTwoSession, 'web-chat')).toBe(false);
+    expect(sessionMatchesScope(workspaceTwoSession, 'web-chat-workspace-2')).toBe(true);
+  });
+
+  test('keeps project-scoped sessions visible inside their explicit workspace', () => {
+    const projectWorkspaceSession = {
+      id: 'project-session',
+      metadata: {
+        clientSurface: 'web-chat',
+        workspaceKey: 'web-chat-workspace-2',
+        memoryScope: 'project-alpha',
+        projectKey: 'project-alpha',
+      },
+    };
+
+    expect(sessionMatchesScope(projectWorkspaceSession, 'web-chat')).toBe(false);
+    expect(sessionMatchesScope(projectWorkspaceSession, 'web-chat-workspace-2')).toBe(true);
+    expect(sessionMatchesScope(projectWorkspaceSession, 'project-alpha')).toBe(true);
   });
 });

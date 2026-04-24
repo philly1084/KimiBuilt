@@ -32,7 +32,7 @@ class CodeCLIApp {
             '/help', '/?', '/clear', '/cls', '/models', '/model', '/theme', '/voxel',
             '/export', '/save', '/load', '/copy', '/image', '/image-models', '/unsplash', '/diagram',
             '/upload', '/session', '/history', '/artifacts', '/stats', '/shortcuts', '/keys', '/health', '/tools', '/tool', '/tool-help',
-            '/files', '/ls', '/download', '/open', '/pet', '/spawn'
+            '/files', '/ls', '/download', '/open', '/pet', '/spawn', '/agent', '/voxel-agent', '/random-agent'
         ];
         
         this.init();
@@ -229,7 +229,9 @@ class CodeCLIApp {
             console.warn('[CLI] Failed to load voxel pet:', error);
         }
 
-        return generator.generate('curious neon fox with amber goggles');
+        return typeof generator.random === 'function'
+            ? generator.random()
+            : generator.generate('curious neon fox with amber goggles');
     }
 
     saveVoxelPet() {
@@ -314,6 +316,114 @@ class CodeCLIApp {
         this.generateVoxelPet(this.voxelPetPrompt?.value || '');
     }
 
+    generateRandomVoxelPet(options = {}) {
+        if (!this.voxel) {
+            return;
+        }
+
+        this.voxelPet = typeof this.voxel.random === 'function'
+            ? this.voxel.random()
+            : this.voxel.generate(`random voxel companion ${Date.now()}`);
+        if (this.voxelPetPrompt) {
+            this.voxelPetPrompt.value = this.voxelPet.prompt;
+        }
+        this.activePetAction = 'dance';
+        this.saveVoxelPet();
+        this.renderVoxelPet('dance');
+
+        if (!options.silent) {
+            this.printPetCard('randomized');
+        }
+    }
+
+    async generateAIVoxelPetFromInput() {
+        await this.generateAIVoxelAgent(this.voxelPetPrompt?.value || 'random helpful voxel terminal agent');
+    }
+
+    buildVoxelAgentPrompt(prompt) {
+        const promptJson = JSON.stringify(prompt);
+        return `Create one compact 3D voxel terminal companion for this user prompt: ${promptJson}.
+
+Return JSON only. No markdown, no prose.
+Use this exact shape:
+{
+  "name": "short agent name",
+  "species": "fox|cat|dog|dragon|owl|bot|rabbit|panda|lizard|turtle",
+  "trait": "scout|builder|guardian|spark|mapper|scribe|tinker|pilot|forager|warden",
+  "palette": {
+    "name": "two word palette name",
+    "primary": "#49d3a7",
+    "secondary": "#f4c95d",
+    "accent": "#ff6f91"
+  },
+  "ears": "point|round|antenna|crest",
+  "tail": "stub|curl|saber|spark",
+  "eyes": "round|bright|sleepy|scan",
+  "mood": "ready|curious|thinking|proud|sleepy|alert|playful",
+  "energy": 82,
+  "prompt": ${promptJson}
+}`;
+    }
+
+    extractJsonObject(text = '') {
+        const cleaned = String(text || '')
+            .replace(/```json/gi, '')
+            .replace(/```/g, '')
+            .trim();
+
+        try {
+            return JSON.parse(cleaned);
+        } catch (_error) {
+            const start = cleaned.indexOf('{');
+            const end = cleaned.lastIndexOf('}');
+            if (start >= 0 && end > start) {
+                return JSON.parse(cleaned.slice(start, end + 1));
+            }
+            throw new Error('AI did not return a JSON object');
+        }
+    }
+
+    async generateAIVoxelAgent(prompt) {
+        if (!this.voxel) {
+            return;
+        }
+
+        if (this.isProcessing) {
+            this.printWarning('Already processing. Please wait...');
+            return;
+        }
+
+        const seed = String(prompt || this.voxelPetPrompt?.value || 'random helpful voxel terminal agent').trim()
+            || 'random helpful voxel terminal agent';
+        this.isProcessing = true;
+        this.setStatus('thinking');
+        this.reactVoxelPet(seed, 'think');
+        this.printSystem(`Asking AI for voxel agent spec: ${seed}`);
+
+        try {
+            const response = await api.sendMessage(this.buildVoxelAgentPrompt(seed));
+            const spec = this.extractJsonObject(response.content || '');
+            this.voxelPet = typeof this.voxel.fromSpec === 'function'
+                ? this.voxel.fromSpec(spec, seed)
+                : this.voxel.generate(seed);
+            if (this.voxelPetPrompt) {
+                this.voxelPetPrompt.value = this.voxelPet.prompt;
+            }
+            this.activePetAction = 'jump';
+            this.saveVoxelPet();
+            this.renderVoxelPet('jump');
+            this.printPetCard('AI-filled');
+            this.setStatus('ready');
+        } catch (error) {
+            this.printError(`AI voxel agent failed: ${error.message}`);
+            this.handlePetAction('guard', { silent: true });
+            this.setStatus('error');
+        } finally {
+            this.isProcessing = false;
+            this.processQueue();
+        }
+    }
+
     async handlePetCommand(args = []) {
         const subcommand = String(args[0] || '').toLowerCase();
         const rest = args.slice(1).join(' ').trim();
@@ -325,6 +435,16 @@ class CodeCLIApp {
 
         if (['new', 'make', 'generate', 'spawn'].includes(subcommand)) {
             this.generateVoxelPet(rest);
+            return;
+        }
+
+        if (subcommand === 'random') {
+            this.generateRandomVoxelPet();
+            return;
+        }
+
+        if (['ai', 'agent', 'fill', 'design'].includes(subcommand)) {
+            await this.generateAIVoxelAgent(rest || this.voxelPetPrompt?.value || 'random helpful voxel terminal agent');
             return;
         }
 
@@ -362,10 +482,13 @@ class CodeCLIApp {
             this.printAI(`## Voxel Pet Commands
 
   /pet <prompt>          Spawn a prompt-generated voxel pet
+  /pet random            Spawn a random voxel character
+  /pet ai <prompt>       Ask AI for a voxel agent spec
   /pet act <action>      Run jump, dance, scout, guard, or sleep
   /pet name <name>       Rename the active pet
   /pet show              Restore the pet dock
   /pet hide              Hide the pet dock
+  /agent <prompt>        Same AI-backed voxel agent generator
 
 The pet reacts to prompts while chat responses stream.`);
             return;
@@ -534,6 +657,13 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
             case 'pet':
             case 'spawn':
                 await this.handlePetCommand(args);
+                break;
+            case 'agent':
+            case 'voxel-agent':
+                await this.generateAIVoxelAgent(args.join(' '));
+                break;
+            case 'random-agent':
+                this.generateRandomVoxelPet();
                 break;
             case 'export':
                 this.exportSession();
@@ -823,7 +953,7 @@ Session Statistics:
         if (this.theme === 'voxel') {
             this.printVoxelBoot();
         } else {
-            this.printSystem('Welcome to KimiBuilt Code CLI v3.0');
+            this.printSystem('Welcome to Lilly Code CLI v3.0');
             this.printSystem('Type /help for available commands');
             this.printSystem(`Session started: ${new Date().toLocaleString()}`);
         }
@@ -835,7 +965,7 @@ Session Statistics:
         line.className = 'line line-output ai';
         line.innerHTML = `
             <div class="voxel-response-head">
-                <span>KimiBuilt Voxel CLI</span>
+                <span>Lilly Voxel CLI</span>
                 <span class="voxel-response-meta">${this.escapeHtml(new Date().toLocaleString())}</span>
             </div>
             <div class="voxel-response-body">
@@ -845,7 +975,8 @@ Session Statistics:
                         <div class="voxel-boot-copy">Mode: chat | Model: ${this.escapeHtml(api.currentModel || 'loading')} | Session: ${this.escapeHtml(api.sessionId || 'pending')}</div>
                         <div class="voxel-command-grid">
                             <div class="voxel-command-chip"><code>/pet &lt;prompt&gt;</code><br>spawn companion</div>
-                            <div class="voxel-command-chip"><code>/pet act dance</code><br>menu interaction</div>
+                            <div class="voxel-command-chip"><code>/pet random</code><br>random 3D agent</div>
+                            <div class="voxel-command-chip"><code>/agent &lt;prompt&gt;</code><br>AI-filled spec</div>
                             <div class="voxel-command-chip"><code>/models</code><br>model catalog</div>
                             <div class="voxel-command-chip"><code>/help</code><br>command index</div>
                         </div>
@@ -877,6 +1008,10 @@ Session Statistics:
 
 **Voxel Pet:**
   /pet <prompt>      Spawn a prompt-generated voxel pet
+  /pet random        Spawn a random 3D voxel character
+  /pet ai <prompt>   Ask AI to design and fill the voxel pet
+  /agent <prompt>    AI-backed voxel agent generator
+  /random-agent      Spawn a random 3D voxel character
   /pet act <action>  Run jump, dance, scout, guard, or sleep
   /pet name <name>   Rename the active pet
   /pet hide|show     Hide or restore the pet dock

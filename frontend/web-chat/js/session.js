@@ -605,6 +605,81 @@ class SessionManager extends EventTarget {
         return 'New Chat';
     }
 
+    normalizeWorkspaceScopeValue(value = '') {
+        const normalized = String(value || '')
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9._:-]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+
+        return normalized || '';
+    }
+
+    isWebChatWorkspaceScope(scope = '') {
+        const normalizedScope = this.normalizeWorkspaceScopeValue(scope);
+        return normalizedScope === 'web-chat' || normalizedScope.startsWith('web-chat-workspace-');
+    }
+
+    getSessionWorkspaceScope(session = {}) {
+        const metadata = session?.metadata && typeof session.metadata === 'object' && !Array.isArray(session.metadata)
+            ? session.metadata
+            : {};
+        const candidates = [
+            metadata.workspaceKey,
+            metadata.workspace_key,
+            metadata.workspaceId,
+            metadata.workspace_id,
+            metadata.memoryScope,
+            metadata.memory_scope,
+            metadata.projectScope,
+            metadata.project_scope,
+        ];
+
+        for (const candidate of candidates) {
+            const normalized = this.normalizeWorkspaceScopeValue(candidate);
+            if (this.isWebChatWorkspaceScope(normalized)) {
+                return normalized;
+            }
+        }
+
+        return '';
+    }
+
+    sessionBelongsToCurrentWorkspace(session = {}) {
+        const sessionWorkspaceScope = this.getSessionWorkspaceScope(session);
+        if (!sessionWorkspaceScope) {
+            return true;
+        }
+
+        const currentWorkspaceScope = this.normalizeWorkspaceScopeValue(
+            this.workspaceContext?.scopeKey || SESSION_MANAGER_CLIENT_SURFACE,
+        );
+        if (!this.isWebChatWorkspaceScope(currentWorkspaceScope)) {
+            return true;
+        }
+
+        return sessionWorkspaceScope === currentWorkspaceScope;
+    }
+
+    filterSessionsForCurrentWorkspace(sessions = []) {
+        const allowedSessionIds = new Set();
+        const filteredSessions = (Array.isArray(sessions) ? sessions : []).filter((session) => {
+            const belongs = this.sessionBelongsToCurrentWorkspace(session);
+            if (belongs && session?.id) {
+                allowedSessionIds.add(session.id);
+            }
+            return belongs;
+        });
+
+        for (const sessionId of this.sessionMessages.keys()) {
+            if (!allowedSessionIds.has(sessionId)) {
+                this.sessionMessages.delete(sessionId);
+            }
+        }
+
+        return filteredSessions;
+    }
+
     // ============================================
     // Session Operations
     // ============================================
@@ -1625,6 +1700,7 @@ class SessionManager extends EventTarget {
                     this.sessions = parsed.sessions || [];
                     this.sessionMessages = new Map(parsed.messages || []);
                 }
+                this.sessions = this.filterSessionsForCurrentWorkspace(this.sessions);
             }
             
             const currentId = this.safeStorageGet(this.currentSessionKey);

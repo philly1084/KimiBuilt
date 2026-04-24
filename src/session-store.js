@@ -753,6 +753,11 @@ class SessionStore {
 
         const session = await this.getOwned(activeSessionId, normalizedOwnerId);
         if (session) {
+            if (scopeKey && !sessionMatchesScope(session, normalizedScopeKey)) {
+                await this.setActiveSession(normalizedOwnerId, null, normalizedScopeKey);
+                return null;
+            }
+
             return session;
         }
 

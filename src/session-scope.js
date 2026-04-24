@@ -448,16 +448,29 @@ function sessionMatchesScope(session = null, scopeKey = DEFAULT_SESSION_SCOPE) {
     metadata.workspaceId,
     metadata.workspace_id,
   ]);
+  const inferredWorkspaceScope = firstNormalizedValue([
+    metadata.memoryScope,
+    metadata.memory_scope,
+    metadata.projectScope,
+    metadata.project_scope,
+  ]);
+  const explicitWebChatWorkspaceScope = [
+    explicitWorkspaceScope,
+    inferredWorkspaceScope,
+  ].find((candidate) => {
+    const normalized = normalizeSessionScopeKey(candidate);
+    return normalized === 'web-chat' || normalized.startsWith('web-chat-workspace-');
+  }) || null;
   const isWebChatWorkspaceScope = normalizedScopeKey === 'web-chat'
     || normalizedScopeKey.startsWith('web-chat-workspace-');
-  const hasWebChatWorkspaceScope = explicitWorkspaceScope === 'web-chat'
-    || String(explicitWorkspaceScope || '').startsWith('web-chat-workspace-');
 
-  if (hasWebChatWorkspaceScope && isWebChatWorkspaceScope && explicitWorkspaceScope !== normalizedScopeKey) {
+  if (explicitWebChatWorkspaceScope && isWebChatWorkspaceScope && explicitWebChatWorkspaceScope !== normalizedScopeKey) {
     return false;
   }
 
   const candidateScopes = new Set([
+    explicitWorkspaceScope,
+    explicitWebChatWorkspaceScope,
     resolveSessionScope(metadata, session),
     resolveClientSurface(metadata, session),
     firstNormalizedValue([
