@@ -17,6 +17,7 @@ class CodeCLIApp {
         this.sessionStartTime = Date.now();
         this.voxel = window.VoxelPets;
         this.voxelPet = this.loadVoxelPet();
+        this.voxelPetHidden = localStorage.getItem('codecli-voxel-pet-hidden') === 'true';
         this.activePetAction = 'idle';
         
         // Session file storage
@@ -63,6 +64,11 @@ class CodeCLIApp {
         this.voxelPetEnergy = document.getElementById('voxelPetEnergy');
         this.voxelPetSeed = document.getElementById('voxelPetSeed');
         this.voxelPetPrompt = document.getElementById('voxelPetPrompt');
+        this.voxelPetButton = document.getElementById('voxelPetButton');
+        this.voxelPetMini = document.getElementById('voxelPetMini');
+        this.voxelPetStatus = document.getElementById('voxelPetStatus');
+        this.voxelRoamer = document.getElementById('voxelRoamer');
+        this.voxelRoamerStage = document.getElementById('voxelRoamerStage');
         
         this.setupEventListeners();
         this.applyTheme(this.theme);
@@ -127,6 +133,7 @@ class CodeCLIApp {
                 this.hideAutocomplete();
                 this.closeShortcuts();
                 this.closeFileManager();
+                this.closeVoxelCreator();
             } else if (e.key === 'F1') {
                 e.preventDefault();
                 this.showShortcuts();
@@ -139,6 +146,7 @@ class CodeCLIApp {
         // Input for autocomplete
         this.commandInput.addEventListener('input', () => {
             this.updateAutocomplete();
+            this.queueVoxelTypingReaction();
         });
 
         if (this.voxelPetPrompt) {
@@ -152,7 +160,7 @@ class CodeCLIApp {
         
         // Focus input on click anywhere
         document.addEventListener('click', (e) => {
-            if (!e.target.closest('button, input, textarea, select, a, [contenteditable="true"], .autocomplete, .modal, .voxel-dock, .file-manager-modal')) {
+            if (!e.target.closest('button, input, textarea, select, a, [contenteditable="true"], .autocomplete, .modal, .voxel-creator-modal, .file-manager-modal')) {
                 this.commandInput.focus();
             }
         });
@@ -174,6 +182,7 @@ class CodeCLIApp {
             if (this.dragOverlay) {
                 this.dragOverlay.classList.add('active');
             }
+            this.roamVoxelPet('alert', 'guard', 1400);
         });
         
         document.addEventListener('dragover', (e) => {
@@ -197,12 +206,18 @@ class CodeCLIApp {
             }
             
             const files = Array.from(e.dataTransfer.files);
+            this.roamVoxelPet('alert', 'scout', 1400);
             files.forEach(file => this.handleFile(file));
         });
         
         // Cancel drag when pressing Escape
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && this.dragOverlay && this.dragOverlay.classList.contains('active')) {
+            if (e.key !== 'Escape') {
+                return;
+            }
+
+            this.closeVoxelCreator();
+            if (this.dragOverlay && this.dragOverlay.classList.contains('active')) {
                 this.cancelDrag();
             }
         });
@@ -249,12 +264,28 @@ class CodeCLIApp {
     }
 
     renderVoxelPet(action = this.activePetAction || 'idle') {
-        if (!this.voxel || !this.voxelPetStage || !this.voxelPet) {
+        if (!this.voxel || !this.voxelPet) {
             return;
         }
 
         this.setVoxelPalette();
-        this.voxelPetStage.replaceChildren(this.voxel.renderElement(this.voxelPet, { action }));
+        if (this.voxelPetStage) {
+            this.voxelPetStage.replaceChildren(this.voxel.renderElement(this.voxelPet, { action, variant: 'full' }));
+        }
+        if (this.voxelPetMini) {
+            this.voxelPetMini.replaceChildren(this.voxel.renderElement(this.voxelPet, {
+                action,
+                variant: 'mini',
+                decorative: true,
+            }));
+        }
+        if (this.voxelRoamerStage) {
+            this.voxelRoamerStage.replaceChildren(this.voxel.renderElement(this.voxelPet, {
+                action,
+                variant: 'peek',
+                decorative: true,
+            }));
+        }
 
         if (this.voxelPetName) {
             this.voxelPetName.textContent = this.voxelPet.name;
@@ -277,6 +308,19 @@ class CodeCLIApp {
         if (this.inputPrompt) {
             this.inputPrompt.textContent = this.getPromptLabel();
         }
+        if (this.voxelPetStatus) {
+            const mood = this.voxel.MOODS[this.voxelPet.mood] || this.voxelPet.mood;
+            this.voxelPetStatus.textContent = this.voxelPetHidden
+                ? 'Voxel companion hidden'
+                : `${this.voxelPet.name} | ${mood} | ${this.voxelPet.energy}%`;
+            this.voxelPetStatus.title = `${this.voxelPet.trait} ${this.voxelPet.species} - ${this.voxelPet.prompt}`;
+        }
+        if (this.voxelPetButton) {
+            this.voxelPetButton.classList.toggle('is-hidden', this.voxelPetHidden);
+        }
+        if (this.voxelRoamer) {
+            this.voxelRoamer.classList.toggle('hidden', this.voxelPetHidden);
+        }
 
         if (action !== 'idle') {
             window.clearTimeout(this.voxelActionTimer);
@@ -285,6 +329,61 @@ class CodeCLIApp {
                 this.renderVoxelPet('idle');
             }, 900);
         }
+    }
+
+    setVoxelPetHidden(hidden) {
+        this.voxelPetHidden = Boolean(hidden);
+        localStorage.setItem('codecli-voxel-pet-hidden', String(this.voxelPetHidden));
+        if (this.voxelPetHidden) {
+            this.closeVoxelCreator();
+            this.voxelRoamer?.classList.remove('is-visible', 'is-prompt', 'is-stream', 'is-alert');
+        }
+        this.renderVoxelPet(this.voxelPetHidden ? 'idle' : 'scout');
+    }
+
+    closeVoxelCreator() {
+        this.voxelDock?.classList.add('hidden');
+    }
+
+    roamVoxelPet(placement = 'prompt', action = 'scout', duration = 1200) {
+        if (this.voxelPetHidden || !this.voxelRoamer || !this.voxelRoamerStage || !this.voxel || !this.voxelPet) {
+            return;
+        }
+
+        this.voxelRoamerStage.replaceChildren(this.voxel.renderElement(this.voxelPet, {
+            action,
+            variant: 'peek',
+            decorative: true,
+        }));
+        this.voxelRoamer.classList.remove('hidden', 'is-prompt', 'is-stream', 'is-alert');
+        this.voxelRoamer.classList.add(`is-${placement}`, 'is-visible');
+
+        window.clearTimeout(this.voxelRoamTimer);
+        this.voxelRoamTimer = window.setTimeout(() => {
+            this.voxelRoamer?.classList.remove('is-visible', 'is-prompt', 'is-stream', 'is-alert');
+        }, duration);
+    }
+
+    queueVoxelTypingReaction() {
+        if (this.voxelPetHidden || !this.commandInput?.value.trim()) {
+            return;
+        }
+
+        window.clearTimeout(this.voxelTypingTimer);
+        this.voxelTypingTimer = window.setTimeout(() => {
+            this.renderVoxelPet('scout');
+            this.roamVoxelPet('prompt', 'scout', 900);
+        }, 120);
+    }
+
+    pulseVoxelStreaming() {
+        const now = Date.now();
+        if (this.voxelPetHidden || now - (this.lastVoxelStreamPulse || 0) < 900) {
+            return;
+        }
+
+        this.lastVoxelStreamPulse = now;
+        this.roamVoxelPet('stream', 'scout', 950);
     }
 
     generateVoxelPet(prompt) {
@@ -299,12 +398,15 @@ class CodeCLIApp {
         }
 
         this.voxelPet = this.voxel.generate(seed);
+        this.voxelPetHidden = false;
+        localStorage.setItem('codecli-voxel-pet-hidden', 'false');
         if (this.voxelPetPrompt) {
             this.voxelPetPrompt.value = seed;
         }
         this.activePetAction = 'jump';
         this.saveVoxelPet();
         this.renderVoxelPet('jump');
+        this.roamVoxelPet('prompt', 'jump', 1200);
         this.printPetCard('spawned');
     }
 
@@ -314,15 +416,17 @@ class CodeCLIApp {
 
     focusVoxelCreator(options = {}) {
         this.setTheme('voxel', { silent: true });
+        this.setVoxelPetHidden(false);
         this.voxelDock?.classList.remove('hidden');
         this.renderVoxelPet('scout');
+        this.roamVoxelPet('prompt', 'scout', 900);
         window.setTimeout(() => {
             this.voxelPetPrompt?.focus();
             this.voxelPetPrompt?.select();
         }, 0);
 
         if (!options.silent) {
-            this.printSystem('Voxel creator ready. Type a pet idea and press Enter for AI fill, or use Spawn for local generation.');
+            this.printSystem('Voxel creator opened. Type a pet idea and press Enter for AI fill, or use Spawn for local generation.');
         }
     }
 
@@ -334,12 +438,15 @@ class CodeCLIApp {
         this.voxelPet = typeof this.voxel.random === 'function'
             ? this.voxel.random()
             : this.voxel.generate(`random voxel companion ${Date.now()}`);
+        this.voxelPetHidden = false;
+        localStorage.setItem('codecli-voxel-pet-hidden', 'false');
         if (this.voxelPetPrompt) {
             this.voxelPetPrompt.value = this.voxelPet.prompt;
         }
         this.activePetAction = 'dance';
         this.saveVoxelPet();
         this.renderVoxelPet('dance');
+        this.roamVoxelPet('prompt', 'dance', 1300);
 
         if (!options.silent) {
             this.printPetCard('randomized');
@@ -416,12 +523,15 @@ Use this exact shape:
             this.voxelPet = typeof this.voxel.fromSpec === 'function'
                 ? this.voxel.fromSpec(spec, seed)
                 : this.voxel.generate(seed);
+            this.voxelPetHidden = false;
+            localStorage.setItem('codecli-voxel-pet-hidden', 'false');
             if (this.voxelPetPrompt) {
                 this.voxelPetPrompt.value = this.voxelPet.prompt;
             }
             this.activePetAction = 'jump';
             this.saveVoxelPet();
             this.renderVoxelPet('jump');
+            this.roamVoxelPet('prompt', 'jump', 1200);
             this.printPetCard('AI-filled');
             this.setStatus('ready');
         } catch (error) {
@@ -476,13 +586,14 @@ Use this exact shape:
         }
 
         if (subcommand === 'hide') {
-            this.voxelDock?.classList.add('hidden');
-            this.printSystem('Voxel pet dock hidden. Use /pet show to restore it.');
+            this.setVoxelPetHidden(true);
+            this.printSystem('Voxel companion hidden. Use /pet show to restore it.');
             return;
         }
 
         if (subcommand === 'show') {
-            this.voxelDock?.classList.remove('hidden');
+            this.setVoxelPetHidden(false);
+            this.focusVoxelCreator({ silent: true });
             this.renderVoxelPet('jump');
             this.printPetCard();
             return;
@@ -496,8 +607,8 @@ Use this exact shape:
   /pet ai <prompt>       Ask AI for a voxel agent spec
   /pet act <action>      Run jump, dance, scout, guard, or sleep
   /pet name <name>       Rename the active pet
-  /pet show              Restore the pet dock
-  /pet hide              Hide the pet dock
+  /pet show              Open the pet creator
+  /pet hide              Hide the prompt companion
   /agent <prompt>        Same AI-backed voxel agent generator
 
 The pet reacts to prompts while chat responses stream.`);
@@ -517,6 +628,7 @@ The pet reacts to prompts while chat responses stream.`);
         this.activePetAction = normalizedAction === 'nap' ? 'sleep' : normalizedAction;
         this.saveVoxelPet();
         this.renderVoxelPet(this.activePetAction);
+        this.roamVoxelPet('prompt', this.activePetAction, 1100);
 
         if (!options.silent) {
             this.printSystem(`${this.voxelPet.name} ${this.voxelPet.lastAction}.`);
@@ -542,6 +654,7 @@ The pet reacts to prompts while chat responses stream.`);
         this.activePetAction = moodAction[this.voxelPet.mood] || 'idle';
         this.saveVoxelPet();
         this.renderVoxelPet(this.activePetAction);
+        this.roamVoxelPet(this.activePetAction === 'jump' ? 'prompt' : 'stream', this.activePetAction, 1200);
     }
 
     printPetCard(eventLabel = 'status') {
@@ -775,6 +888,7 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
             const response = await api.sendMessage(input, (chunk) => {
                 // Stream progress
                 if (chunk.type === 'delta') {
+                    this.pulseVoxelStreaming();
                     this.appendToCurrentOutput(chunk.content);
                 }
             });
@@ -790,6 +904,7 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
             // Update status and session info
             this.setStatus('ready');
             this.reactVoxelPet(input, 'proud');
+            this.roamVoxelPet('prompt', 'jump', 1000);
             this.updateSessionInfo();
             
             // Add to conversation
@@ -930,7 +1045,7 @@ Session Statistics:
         const meta = options.meta || `${api.currentModel || 'default'} | ${this.voxelPet?.name || 'voxel companion'}`;
         return `
             <div class="voxel-response-head">
-                <span>${this.escapeHtml(title)}</span>
+                <span class="voxel-response-title"><span class="voxel-response-pip" aria-hidden="true"></span>${this.escapeHtml(title)}</span>
                 <span class="voxel-response-meta">${this.escapeHtml(meta)}</span>
             </div>
             <div class="voxel-response-body">${body}</div>
@@ -1003,7 +1118,7 @@ Session Statistics:
 
         const petSlot = line.querySelector('[data-voxel-mini-pet]');
         if (petSlot && this.voxel && this.voxelPet) {
-            petSlot.appendChild(this.voxel.renderElement(this.voxelPet, { action: 'idle' }));
+            petSlot.appendChild(this.voxel.renderElement(this.voxelPet, { action: 'idle', variant: 'peek', decorative: true }));
         }
 
         this.scrollToBottom();
@@ -1029,7 +1144,7 @@ Session Statistics:
   /creator           Focus the voxel creator panel
   /pet act <action>  Run jump, dance, scout, guard, or sleep
   /pet name <name>   Rename the active pet
-  /pet hide|show     Hide or restore the pet dock
+  /pet hide|show     Hide prompt pet or open creator
 
 **AI Controls:**
   /models            List available AI models
@@ -1529,10 +1644,12 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
             } else {
                 this.statusDot.className = 'status-dot offline';
                 this.statusText.textContent = 'Disconnected';
+                this.roamVoxelPet('alert', 'guard', 1200);
             }
         } catch (error) {
             this.statusDot.className = 'status-dot offline';
             this.statusText.textContent = 'Offline';
+            this.roamVoxelPet('alert', 'guard', 1200);
         }
     }
     

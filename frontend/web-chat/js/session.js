@@ -7,6 +7,7 @@
 const SESSION_MANAGER_TASK_TYPE = 'chat';
 const SESSION_MANAGER_CLIENT_SURFACE = 'web-chat';
 const WEB_CHAT_PREFERENCE_SYNC_DELAY_MS = 180;
+const WEB_CHAT_SECONDARY_WORKSPACE_CACHE_RESET_VERSION = '20260424-secondary-workspace-cache-reset-1';
 const WEB_CHAT_SYNCED_STORAGE_KEYS = new Set([
     'kimibuilt_default_model',
     'kimibuilt_reasoning_effort',
@@ -225,6 +226,7 @@ class SessionManager extends EventTarget {
         this.preferenceSyncTimer = null;
         this.userPreferencesPromise = null;
         
+        this.resetStaleSecondaryWorkspaceCacheIfNeeded();
         this.loadFromStorage();
         this.migrateIfNeeded();
         this.userPreferencesPromise = this.loadUserPreferences();
@@ -634,6 +636,36 @@ class SessionManager extends EventTarget {
         return normalizedScope === 'web-chat' || normalizedScope.startsWith('web-chat-workspace-');
     }
 
+    isSecondaryWebChatWorkspace() {
+        const currentWorkspaceScope = this.normalizeWebChatWorkspaceScopeValue(
+            this.workspaceContext?.scopeKey || SESSION_MANAGER_CLIENT_SURFACE,
+        );
+
+        return this.isWebChatWorkspaceScope(currentWorkspaceScope)
+            && currentWorkspaceScope !== SESSION_MANAGER_CLIENT_SURFACE;
+    }
+
+    resetStaleSecondaryWorkspaceCacheIfNeeded() {
+        if (!this.storageAvailable || !this.isSecondaryWebChatWorkspace()) {
+            return false;
+        }
+
+        const resetKey = `kimibuilt_web_chat_workspace_cache_reset_${this.workspaceContext.key}`;
+        if (this.safeStorageGet(resetKey) === WEB_CHAT_SECONDARY_WORKSPACE_CACHE_RESET_VERSION) {
+            return false;
+        }
+
+        this.safeStorageRemove(this.storageKey);
+        this.safeStorageRemove(this.currentSessionKey);
+        this.safeStorageRemove('kimibuilt_message_draft');
+        this.safeStorageRemove('kimibuilt_message_draft_time');
+        this.sessions = [];
+        this.sessionMessages.clear();
+        this.currentSessionId = null;
+        this.safeStorageSet(resetKey, WEB_CHAT_SECONDARY_WORKSPACE_CACHE_RESET_VERSION);
+        return true;
+    }
+
     getSessionWorkspaceScope(session = {}) {
         const metadata = session?.metadata && typeof session.metadata === 'object' && !Array.isArray(session.metadata)
             ? session.metadata
@@ -779,6 +811,7 @@ class SessionManager extends EventTarget {
                     'Accept': 'application/json',
                 }),
                 credentials: 'same-origin',
+                cache: 'no-store',
             });
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}`);
@@ -1024,6 +1057,7 @@ class SessionManager extends EventTarget {
                     'Accept': 'application/json',
                 }),
                 credentials: 'same-origin',
+                cache: 'no-store',
             });
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}`);
@@ -1845,11 +1879,7 @@ class SessionManager extends EventTarget {
             return;
         }
 
-        const currentWorkspaceScope = this.normalizeWebChatWorkspaceScopeValue(
-            this.workspaceContext?.scopeKey || SESSION_MANAGER_CLIENT_SURFACE,
-        );
-        if (this.isWebChatWorkspaceScope(currentWorkspaceScope)
-            && currentWorkspaceScope !== SESSION_MANAGER_CLIENT_SURFACE) {
+        if (this.isSecondaryWebChatWorkspace()) {
             return;
         }
 

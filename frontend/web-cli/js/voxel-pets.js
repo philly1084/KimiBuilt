@@ -239,20 +239,36 @@
 
     function renderElement(petValue, options = {}) {
         const pet = normalize(petValue);
+        const variant = ['full', 'mini', 'peek'].includes(options.variant) ? options.variant : 'full';
+        const variantCube = {
+            full: 18,
+            mini: 4,
+            peek: 6,
+        };
+        const cubeSize = Number.isFinite(Number(options.cubeSize))
+            ? Number(options.cubeSize)
+            : variantCube[variant];
         const wrapper = document.createElement('div');
-        wrapper.className = `voxel-pet action-${options.action || 'idle'}`;
-        wrapper.setAttribute('aria-label', `${pet.name} the ${pet.trait} ${pet.species}`);
+        wrapper.className = `voxel-pet voxel-pet-${variant} action-${options.action || 'idle'}`;
+        if (options.decorative) {
+            wrapper.setAttribute('aria-hidden', 'true');
+        } else {
+            wrapper.setAttribute('aria-label', `${pet.name} the ${pet.trait} ${pet.species}`);
+        }
+        wrapper.style.setProperty('--cube', `${cubeSize}px`);
         wrapper.style.setProperty('--voxel-pet-primary', pet.palette.primary);
         wrapper.style.setProperty('--voxel-pet-secondary', pet.palette.secondary);
         wrapper.style.setProperty('--voxel-pet-accent', pet.palette.accent);
+        wrapper.style.width = `${cubeSize * 15}px`;
+        wrapper.style.height = `${cubeSize * 13}px`;
 
         const shadow = document.createElement('div');
         shadow.className = 'voxel-shadow';
         wrapper.appendChild(shadow);
 
         petCells(pet).forEach((cell) => {
-            const cubeSize = 18;
-            const depthPx = Math.max(2, Math.min(3, Math.ceil((cell.depth || 1) * 2)));
+            const maxDepth = variant === 'full' ? 3 : 2;
+            const depthPx = Math.max(1, Math.min(maxDepth, Math.ceil((cell.depth || 1) * (cubeSize / 7))));
             const node = document.createElement('span');
             node.className = `voxel-cube ${cell.classes || ''}`.trim();
             node.style.setProperty('--x', String(cell.x));

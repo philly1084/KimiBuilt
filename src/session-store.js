@@ -708,14 +708,18 @@ class SessionStore {
         }
 
         const normalizedSessionId = this.normalizeSessionId(sessionId);
+        const normalizedScopeKey = normalizeWebChatWorkspaceScopeKey(scopeKey);
         if (normalizedSessionId) {
             const session = await this.getOwned(normalizedSessionId, normalizedOwnerId);
             if (!session) {
                 return null;
             }
+            if (scopeKey && !sessionMatchesScope(session, normalizedScopeKey)) {
+                console.warn(`[SessionStore] Refusing to set active session ${session.id} for requested scope ${normalizedScopeKey}; session scope is ${session.scopeKey || session.metadata?.memoryScope || 'unknown'}`);
+                return null;
+            }
         }
 
-        const normalizedScopeKey = normalizeWebChatWorkspaceScopeKey(scopeKey);
         const currentState = await this.getUserSessionState(normalizedOwnerId);
         const scopedActiveSessionIds = {
             ...(currentState?.scopedActiveSessionIds || {}),

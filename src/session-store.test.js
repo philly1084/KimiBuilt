@@ -222,6 +222,26 @@ describe('SessionStore recent message continuity', () => {
         expect(resolved.metadata.memoryScope).toBe('web-chat-workspace-2');
     });
 
+    test('setActiveSession refuses to pin another workspace as active', async () => {
+        const store = new SessionStore();
+        store.initialized = true;
+        store.usePostgres = false;
+
+        await store.create({
+            mode: 'chat',
+            clientSurface: 'web-chat',
+            workspaceKey: 'workspace-1',
+            ownerId: 'phill',
+        }, 'workspace-1-session');
+
+        await expect(store.setActiveSession(
+            'phill',
+            'workspace-1-session',
+            'web-chat-workspace-2',
+        )).resolves.toBeNull();
+        await expect(store.getActiveOwnedSession('phill', 'web-chat-workspace-2')).resolves.toBeNull();
+    });
+
     test('list filters sessions by scope key', async () => {
         const store = new SessionStore();
         store.initialized = true;

@@ -348,6 +348,7 @@ class ChatApp {
         this.pendingWorkloadSessionId = null;
         this.workloadSocketReconnectDelayMs = 1500;
         this.workloadSocketMaxReconnectDelayMs = 15000;
+        this.workloadSocketPaused = false;
         this.backgroundWorkloadStatusHideTimer = null;
         this.subscribedWorkloadSessionId = null;
         this.isRefreshingSessionSummaries = false;
@@ -635,12 +636,15 @@ class ChatApp {
 
     handleWorkspaceActivityChange(active = true) {
         if (active !== false) {
+            this.workloadSocketPaused = false;
+            this.subscribeToSessionUpdates(sessionManager.currentSessionId);
             if (this.pageWasHidden || this.pendingStreamResync) {
                 this.scheduleResumeSync('workspace-visibility', 0);
             }
             return;
         }
 
+        this.pauseWorkloadSocket();
         this.pageWasHidden = true;
         this.markActiveStreamInterrupted('workspace_hidden');
         if ((this.pendingStreamResync || this.activeStreamRequest)?.acceptedByServer) {
@@ -2115,6 +2119,10 @@ class ChatApp {
     }
 
     connectWorkloadSocket() {
+        if (this.workloadSocketPaused || this.isAppBackgrounded()) {
+            return;
+        }
+
         if (this.workloadSocket && (
             this.workloadSocket.readyState === WebSocket.OPEN
             || this.workloadSocket.readyState === WebSocket.CONNECTING
@@ -2138,6 +2146,11 @@ class ChatApp {
             this.workloadSocket = null;
             this.subscribedWorkloadSessionId = null;
             clearTimeout(this.workloadSocketReconnectTimer);
+            this.workloadSocketReconnectTimer = null;
+            if (this.workloadSocketPaused || this.isAppBackgrounded()) {
+                return;
+            }
+
             const currentBackendSessionId = sessionManager.currentSessionId && !sessionManager.isLocalSession?.(sessionManager.currentSessionId)
                 ? sessionManager.currentSessionId
                 : null;
@@ -2167,11 +2180,34 @@ class ChatApp {
         });
     }
 
+    pauseWorkloadSocket() {
+        this.workloadSocketPaused = true;
+        clearTimeout(this.workloadSocketReconnectTimer);
+        this.workloadSocketReconnectTimer = null;
+        this.subscribedWorkloadSessionId = null;
+
+        const socket = this.workloadSocket;
+        this.workloadSocket = null;
+        if (!socket || socket.readyState === WebSocket.CLOSED || socket.readyState === WebSocket.CLOSING) {
+            return;
+        }
+
+        try {
+            socket.close(1000, 'workspace inactive');
+        } catch (_error) {
+            // Ignore socket close failures while the browser is suspending an iframe.
+        }
+    }
+
     subscribeToSessionUpdates(sessionId) {
         const normalizedSessionId = sessionId && !sessionManager.isLocalSession?.(sessionId)
             ? sessionId
             : null;
         this.pendingWorkloadSessionId = normalizedSessionId;
+
+        if (this.workloadSocketPaused || this.isAppBackgrounded()) {
+            return;
+        }
 
         if (!normalizedSessionId && this.subscribedWorkloadSessionId && this.workloadSocket?.readyState === WebSocket.OPEN) {
             this.workloadSocket.send(JSON.stringify({
@@ -6778,14 +6814,17 @@ class ChatApp {
         const userMessage = {
             role: 'user',
             content: `/image ${options.prompt}`,
+            clientOnly: true,
+            excludeFromTranscript: true,
             timestamp: new Date().toISOString()
         };
         
-        sessionManager.addMessage(sessionId, userMessage);
+        const savedUserMessage = sessionManager.addMessage(sessionId, userMessage);
         
-        const userMessageEl = uiHelpers.renderMessage(userMessage);
+        const userMessageEl = uiHelpers.renderMessage(savedUserMessage);
         this.messagesContainer.appendChild(userMessageEl);
         uiHelpers.scrollToBottom();
+        void sessionManager.syncMessagesToBackend(sessionId, [savedUserMessage]);
         
         // Create placeholder for image
         const imageMessageId = uiHelpers.generateMessageId();
@@ -6795,15 +6834,18 @@ class ChatApp {
             id: imageMessageId,
             role: 'assistant',
             type: 'image',
+            content: `Generating image for "${options.prompt}"`,
             prompt: options.prompt,
             isLoading: true,
             loadingText: 'Generating image...',
+            clientOnly: true,
+            excludeFromTranscript: true,
             timestamp: new Date().toISOString()
         };
         
-        sessionManager.addMessage(sessionId, imageMessage);
+        const savedImageMessage = sessionManager.addMessage(sessionId, imageMessage);
         
-        const imageMessageEl = uiHelpers.renderImageMessage(imageMessage);
+        const imageMessageEl = uiHelpers.renderImageMessage(savedImageMessage);
         this.messagesContainer.appendChild(imageMessageEl);
         uiHelpers.reinitializeIcons(imageMessageEl);
         uiHelpers.scrollToBottom();
@@ -6827,7 +6869,7 @@ class ChatApp {
                 .filter(Boolean);
 
             if (generatedImages.length > 1) {
-                const selectionMessage = {
+                const selectionMessage = this.upsertSessionMessage(sessionId, {
                     id: imageMessageId,
                     role: 'assistant',
                     type: 'image-selection',
@@ -6835,45 +6877,46 @@ class ChatApp {
                     prompt: options.prompt,
                     model: result.model || options.model,
                     results: generatedImages,
+                    sourceKind: 'generated',
+                    isLoading: false,
+                    clientOnly: true,
+                    excludeFromTranscript: true,
                     timestamp: new Date().toISOString(),
-                };
+                });
 
-                this.upsertSessionMessage(sessionId, selectionMessage);
-                this.renderOrReplaceMessage(selectionMessage);
+                this.renderOrReplaceMessage(selectionMessage || savedImageMessage);
+                if (selectionMessage) {
+                    void sessionManager.syncMessageToBackend(sessionId, selectionMessage);
+                }
                 uiHelpers.scrollToBottom();
                 uiHelpers.showToast(`Generated ${generatedImages.length} image options`, 'success');
             } else if (generatedImages.length === 1) {
                 const imageData = generatedImages[0];
 
-                // Update session storage
-                const messages = sessionManager.getMessages(sessionId);
-                const msgIndex = messages.findIndex(m => m.id === imageMessageId);
-                if (msgIndex >= 0) {
-                    messages[msgIndex] = {
-                        ...messages[msgIndex],
-                        isLoading: false,
-                        imageUrl: imageData.imageUrl,
-                        downloadUrl: imageData.downloadUrl || '',
-                        artifactId: imageData.artifactId || '',
-                        filename: imageData.filename || '',
-                        generatedImages,
-                        revisedPrompt: imageData.revisedPrompt,
-                        model: result.model || options.model,
-                        source: 'generated',
-                    };
-                    sessionManager.saveToStorage();
-                }
-
-                // Update UI
-                uiHelpers.updateImageMessage(imageMessageId, {
-                    url: imageData.imageUrl,
-                    downloadUrl: imageData.downloadUrl,
-                    artifactId: imageData.artifactId,
-                    filename: imageData.filename,
+                const nextMessage = this.upsertSessionMessage(sessionId, {
+                    id: imageMessageId,
+                    role: 'assistant',
+                    type: 'image',
+                    content: imageData.alt || imageData.prompt || options.prompt || 'Generated image',
+                    imageUrl: imageData.imageUrl,
+                    thumbnailUrl: imageData.thumbnailUrl || imageData.imageUrl,
+                    downloadUrl: imageData.downloadUrl || '',
+                    artifactId: imageData.artifactId || '',
+                    filename: imageData.filename || '',
                     prompt: options.prompt,
-                    revised_prompt: imageData.revisedPrompt,
+                    revisedPrompt: imageData.revisedPrompt,
                     model: result.model || options.model,
+                    generatedImages,
+                    source: 'generated',
+                    isLoading: false,
+                    clientOnly: true,
+                    excludeFromTranscript: true,
+                    timestamp: new Date().toISOString(),
                 });
+                this.renderOrReplaceMessage(nextMessage || savedImageMessage);
+                if (nextMessage) {
+                    void sessionManager.syncMessageToBackend(sessionId, nextMessage);
+                }
 
                 uiHelpers.showToast('Image generated successfully', 'success');
             } else {

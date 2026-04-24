@@ -45,6 +45,7 @@ jest.mock('../foreground-turn-state', () => ({
 
 const { sessionStore } = require('../session-store');
 const { artifactService } = require('../artifacts/artifact-service');
+const { memoryService } = require('../memory/memory-service');
 const { abortForegroundRequest } = require('../foreground-request-registry');
 const { cancelForegroundTurn, resolveForegroundTurn } = require('../foreground-turn-state');
 const sessionsRouter = require('./sessions');
@@ -424,5 +425,39 @@ describe('/api/sessions route', () => {
             persisted: true,
             reason: 'not_found',
         }));
+    });
+
+    test('deletes the session even when memory cleanup fails', async () => {
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        sessionStore.getOwned.mockResolvedValue({
+            id: 'session-1',
+            scopeKey: 'web-chat',
+            metadata: { ownerId: 'phill', memoryScope: 'web-chat' },
+        });
+        sessionStore.getActiveOwnedSession.mockResolvedValue({ id: 'session-1' });
+        sessionStore.getLatestOwnedSession.mockResolvedValue(null);
+        sessionStore.setActiveSession.mockResolvedValue(null);
+        sessionStore.delete.mockResolvedValue(true);
+        artifactService.deleteArtifactsForSession.mockResolvedValue(undefined);
+        memoryService.forget.mockRejectedValue(new Error('vector store down'));
+
+        const app = express();
+        app.use((req, _res, next) => {
+            req.user = { username: 'phill' };
+            next();
+        });
+        app.use('/api/sessions', sessionsRouter);
+
+        try {
+            const response = await request(app).delete('/api/sessions/session-1');
+            await new Promise((resolve) => setImmediate(resolve));
+
+            expect(response.status).toBe(204);
+            expect(sessionStore.delete).toHaveBeenCalledWith('session-1');
+            expect(memoryService.forget).toHaveBeenCalledWith('session-1');
+            expect(sessionStore.setActiveSession).toHaveBeenCalledWith('phill', null, 'web-chat');
+        } finally {
+            warnSpy.mockRestore();
+        }
     });
 });

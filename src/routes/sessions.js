@@ -371,10 +371,16 @@ router.delete('/:id', async (req, res, next) => {
         const activeSession = await sessionStore.getActiveOwnedSession(ownerId, deletedScopeKey);
 
         if (typeof sessionStore.isPersistent === 'function' && sessionStore.isPersistent()) {
-            await artifactService.deleteArtifactsForSession(id);
+            try {
+                await artifactService.deleteArtifactsForSession(id);
+            } catch (error) {
+                console.warn(`[Sessions] Failed to delete artifacts for session ${id}:`, error.message);
+            }
         }
-        await memoryService.forget(id);
         await sessionStore.delete(id);
+        void memoryService.forget(id).catch((error) => {
+            console.warn(`[Sessions] Failed to forget memory for deleted session ${id}:`, error.message);
+        });
 
         if (activeSession?.id === id) {
             const nextSession = await sessionStore.getLatestOwnedSession(ownerId, {
