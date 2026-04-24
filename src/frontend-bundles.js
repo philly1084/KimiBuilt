@@ -3,6 +3,112 @@ const { createZip, readZipEntries } = require('./utils/zip');
 const { createUniqueFilename, stripHtml } = require('./utils/text');
 
 const MAX_FRONTEND_BUNDLE_EXTRACTED_TEXT_CHARS = 20000;
+const STYLE_SAFETY_NET_PATH = 'styles.css';
+const STYLE_SAFETY_NET_MARKER = 'kimibuilt bundle style safety net';
+const STYLE_SAFETY_NET_CSS = `/* ${STYLE_SAFETY_NET_MARKER} */
+:root {
+  --kb-bg: #f5f7fb;
+  --kb-surface: #ffffff;
+  --kb-panel: #eef3f8;
+  --kb-text: #172033;
+  --kb-muted: #5d6b7f;
+  --kb-accent: #2563eb;
+  --kb-accent-2: #0f766e;
+  --kb-border: #d8e0ea;
+  --kb-shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
+}
+* { box-sizing: border-box; }
+html { min-height: 100%; background: var(--kb-bg); }
+body {
+  margin: 0;
+  color: var(--kb-text);
+  background: linear-gradient(180deg, rgba(255,255,255,0.78), rgba(245,247,251,0.95)), var(--kb-bg);
+  font-family: "Aptos", "Segoe UI", Arial, sans-serif;
+  line-height: 1.58;
+}
+body > header, body > main, body > section, body > article, body > footer {
+  width: min(1120px, calc(100% - 40px));
+  margin-left: auto;
+  margin-right: auto;
+}
+body > main, body > article { padding: 32px 0 64px; }
+header, .hero, [data-dashboard-zone="hero"] { padding: 36px 0 24px; }
+h1, h2, h3 { color: #0f172a; line-height: 1.06; letter-spacing: 0; }
+h1 { font-size: clamp(2.25rem, 5vw, 4.4rem); margin: 0 0 16px; max-width: 13ch; }
+h2 { font-size: clamp(1.45rem, 3vw, 2.25rem); margin: 0 0 14px; }
+h3 { font-size: 1.08rem; margin: 0 0 10px; }
+p { color: var(--kb-muted); margin: 0 0 14px; }
+a { color: var(--kb-accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+nav { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 22px; }
+nav a, button, .button, [role="button"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 9px 14px;
+  border: 1px solid var(--kb-border);
+  border-radius: 8px;
+  background: var(--kb-surface);
+  color: var(--kb-text);
+  font: inherit;
+  font-weight: 650;
+  text-decoration: none;
+  cursor: pointer;
+}
+button, .button, [role="button"] {
+  background: var(--kb-accent);
+  color: #ffffff;
+  border-color: transparent;
+  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.18);
+}
+section, article, aside, .card, .panel, .tile, .widget, .metric, .kpi, [data-dashboard-zone] {
+  border: 1px solid var(--kb-border);
+  background: rgba(255,255,255,0.92);
+  border-radius: 14px;
+  box-shadow: var(--kb-shadow);
+  padding: 22px;
+  margin: 0 0 18px;
+}
+header section, main section section, article section section { box-shadow: none; }
+.grid, .cards, .dashboard-grid, .metrics, .kpis, [data-dashboard-zone="kpi-rail"], [data-dashboard-zone="chart-grid"] {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--kb-surface);
+}
+th, td { border-bottom: 1px solid var(--kb-border); padding: 10px 12px; text-align: left; vertical-align: top; }
+th { color: #0f172a; background: var(--kb-panel); font-weight: 750; }
+input, select, textarea {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--kb-border);
+  border-radius: 8px;
+  padding: 9px 11px;
+  background: #ffffff;
+  color: var(--kb-text);
+  font: inherit;
+}
+img, video, canvas, svg { max-width: 100%; height: auto; }
+img { border-radius: 12px; display: block; }
+pre {
+  overflow: auto;
+  padding: 14px;
+  border-radius: 10px;
+  background: #111827;
+  color: #e5e7eb;
+}
+@media (max-width: 720px) {
+  body > header, body > main, body > section, body > article, body > footer { width: min(100% - 24px, 1120px); }
+  section, article, aside, .card, .panel, .tile, .widget, .metric, .kpi, [data-dashboard-zone] { padding: 16px; }
+  nav { align-items: stretch; }
+}
+`;
 
 const CONTENT_TYPES = {
     '.css': 'text/css; charset=utf-8',
@@ -139,6 +245,143 @@ function normalizeFrontendBundle(bundle = null, content = '') {
         frameworkTarget: String(bundle?.frameworkTarget || bundle?.framework || 'static').trim().toLowerCase() || 'static',
         routing: normalizeFrontendRouting(bundle?.routing || bundle?.routeMode || bundle?.mode),
         files,
+    };
+}
+
+function htmlHasSubstantiveStyle(content = '') {
+    const source = String(content || '');
+    const styleBlocks = [...source.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/ig)]
+        .map((match) => String(match?.[1] || '').replace(/\/\*[\s\S]*?\*\//g, '').trim())
+        .filter(Boolean);
+
+    return styleBlocks.some((css) => css.replace(/\s+/g, '').length >= 80)
+        || /\sstyle=["'][^"']{12,}["']/i.test(source);
+}
+
+function htmlHasStylesheetLink(content = '') {
+    return /<link\b[^>]*rel=["'][^"']*stylesheet[^"']*["'][^>]*>/i.test(String(content || ''));
+}
+
+function getStylesheetHrefs(content = '') {
+    const source = String(content || '');
+    const links = [...source.matchAll(/<link\b[^>]*rel=["'][^"']*stylesheet[^"']*["'][^>]*>/ig)];
+    return links
+        .map((match) => String(match?.[0] || '').match(/\bhref=["']([^"']+)["']/i)?.[1] || '')
+        .map((href) => href.trim())
+        .filter(Boolean);
+}
+
+function isExternalStylesheetHref(href = '') {
+    return /^(?:https?:)?\/\//i.test(href) || /^(?:data|blob):/i.test(href);
+}
+
+function resolveStylesheetHrefPath(fromPath = '', href = '') {
+    const normalizedHref = String(href || '').split(/[?#]/)[0].trim();
+    if (!normalizedHref || isExternalStylesheetHref(normalizedHref)) {
+        return '';
+    }
+
+    const fromDir = path.dirname(normalizeBundlePath(fromPath) || 'index.html');
+    return normalizeBundlePath(
+        normalizedHref.startsWith('/')
+            ? normalizedHref
+            : path.join(fromDir && fromDir !== '.' ? fromDir : '', normalizedHref),
+    );
+}
+
+function findFirstLocalStylesheetPath(htmlFiles = []) {
+    for (const file of htmlFiles) {
+        const stylesheetPath = getStylesheetHrefs(file.content)
+            .map((href) => resolveStylesheetHrefPath(file.path, href))
+            .find(Boolean);
+        if (stylesheetPath) {
+            return stylesheetPath;
+        }
+    }
+
+    return '';
+}
+
+function getRelativeBundleHref(fromPath = '', toPath = '') {
+    const fromDir = path.dirname(normalizeBundlePath(fromPath) || 'index.html');
+    const normalizedToPath = normalizeBundlePath(toPath);
+    const relative = fromDir && fromDir !== '.'
+        ? path.relative(fromDir, normalizedToPath)
+        : normalizedToPath;
+    return relative && !relative.startsWith('.') ? `./${relative}` : relative;
+}
+
+function injectStylesheetLink(content = '', href = '') {
+    const source = String(content || '');
+    if (!source || !href || htmlHasStylesheetLink(source)) {
+        return source;
+    }
+
+    const linkTag = `<link rel="stylesheet" href="${href}">`;
+    if (/<\/head>/i.test(source)) {
+        return source.replace(/<\/head>/i, `${linkTag}\n</head>`);
+    }
+    if (/<html[^>]*>/i.test(source)) {
+        return source.replace(/<html([^>]*)>/i, `<html$1>\n<head>\n${linkTag}\n</head>`);
+    }
+    return `${linkTag}\n${source}`;
+}
+
+function ensureFrontendBundleStyling(bundle = null) {
+    const normalized = normalizeFrontendBundle(bundle);
+    if (!hasFrontendBundleFiles(normalized)) {
+        return normalized;
+    }
+
+    const files = normalized.files.map((file) => ({ ...file }));
+    const htmlFiles = files.filter((file) => /\.html?$/i.test(file.path));
+    if (htmlFiles.length === 0) {
+        return normalized;
+    }
+
+    let cssFile = files.find((file) => /\.css$/i.test(file.path) && String(file.content || '').trim());
+    const needsSafetyNetCss = htmlFiles.some((file) => {
+        if (htmlHasSubstantiveStyle(file.content)) {
+            return false;
+        }
+
+        const stylesheetHrefs = getStylesheetHrefs(file.content);
+        return stylesheetHrefs.length === 0
+            || (!cssFile && stylesheetHrefs.every((href) => !isExternalStylesheetHref(href)));
+    });
+
+    if (!cssFile && needsSafetyNetCss) {
+        const fallbackCssPath = findFirstLocalStylesheetPath(htmlFiles) || STYLE_SAFETY_NET_PATH;
+        cssFile = {
+            path: fallbackCssPath,
+            language: 'css',
+            purpose: 'Generated fallback styles for server preview.',
+            content: STYLE_SAFETY_NET_CSS,
+        };
+        files.push(cssFile);
+    }
+
+    if (!cssFile) {
+        return {
+            ...normalized,
+            files,
+        };
+    }
+
+    const styledFiles = files.map((file) => {
+        if (!/\.html?$/i.test(file.path) || htmlHasSubstantiveStyle(file.content) || htmlHasStylesheetLink(file.content)) {
+            return file;
+        }
+
+        return {
+            ...file,
+            content: injectStylesheetLink(file.content, getRelativeBundleHref(file.path, cssFile.path)),
+        };
+    });
+
+    return {
+        ...normalized,
+        files: styledFiles,
     };
 }
 
@@ -285,7 +528,7 @@ function buildFrontendBundleExtractedText(bundle = null) {
 }
 
 function buildFrontendBundleArtifact(bundle = null, title = 'Frontend Bundle') {
-    const normalized = normalizeFrontendBundle(bundle);
+    const normalized = ensureFrontendBundleStyling(bundle);
     const entryFile = normalized.files.find((file) => file.path === normalized.entry)
         || normalized.files.find((file) => /\.html?$/i.test(file.path))
         || normalized.files[0];

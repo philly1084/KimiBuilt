@@ -17,6 +17,115 @@ const PLAYWRIGHT_BROWSER_ARGS = [
     '--disable-gpu',
     '--no-sandbox',
 ];
+const GENERATED_ARTIFACT_STYLE_MARKER = 'data-kimibuilt-style-safety-net';
+const GENERATED_ARTIFACT_BASE_CSS = `
+    :root {
+      --kb-bg: #f5f7fb;
+      --kb-surface: #ffffff;
+      --kb-panel: #eef3f8;
+      --kb-text: #172033;
+      --kb-muted: #5d6b7f;
+      --kb-accent: #2563eb;
+      --kb-accent-2: #0f766e;
+      --kb-border: #d8e0ea;
+      --kb-shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
+    }
+    * { box-sizing: border-box; }
+    html { min-height: 100%; background: var(--kb-bg); }
+    body {
+      margin: 0;
+      color: var(--kb-text);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.78), rgba(245,247,251,0.95)),
+        var(--kb-bg);
+      font-family: "Aptos", "Segoe UI", Arial, sans-serif;
+      line-height: 1.58;
+    }
+    body > header, body > main, body > section, body > article, body > footer {
+      width: min(1120px, calc(100% - 40px));
+      margin-left: auto;
+      margin-right: auto;
+    }
+    body > main, body > article { padding: 32px 0 64px; }
+    header, .hero, [data-dashboard-zone="hero"] {
+      padding: 36px 0 24px;
+    }
+    h1, h2, h3 { color: #0f172a; line-height: 1.06; letter-spacing: 0; }
+    h1 { font-size: clamp(2.25rem, 5vw, 4.4rem); margin: 0 0 16px; max-width: 13ch; }
+    h2 { font-size: clamp(1.45rem, 3vw, 2.25rem); margin: 0 0 14px; }
+    h3 { font-size: 1.08rem; margin: 0 0 10px; }
+    p { color: var(--kb-muted); margin: 0 0 14px; }
+    a { color: var(--kb-accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    nav { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 22px; }
+    nav a, button, .button, [role="button"] {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 40px;
+      padding: 9px 14px;
+      border: 1px solid var(--kb-border);
+      border-radius: 8px;
+      background: var(--kb-surface);
+      color: var(--kb-text);
+      font: inherit;
+      font-weight: 650;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    button, .button, [role="button"] {
+      background: var(--kb-accent);
+      color: #ffffff;
+      border-color: transparent;
+      box-shadow: 0 12px 28px rgba(37, 99, 235, 0.18);
+    }
+    section, article, aside, .card, .panel, .tile, .widget, .metric, .kpi, [data-dashboard-zone] {
+      border: 1px solid var(--kb-border);
+      background: rgba(255,255,255,0.92);
+      border-radius: 14px;
+      box-shadow: var(--kb-shadow);
+      padding: 22px;
+      margin: 0 0 18px;
+    }
+    header section, main section section, article section section { box-shadow: none; }
+    .grid, .cards, .dashboard-grid, .metrics, .kpis, [data-dashboard-zone="kpi-rail"], [data-dashboard-zone="chart-grid"] {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border-radius: 10px;
+      background: var(--kb-surface);
+    }
+    th, td { border-bottom: 1px solid var(--kb-border); padding: 10px 12px; text-align: left; vertical-align: top; }
+    th { color: #0f172a; background: var(--kb-panel); font-weight: 750; }
+    input, select, textarea {
+      width: 100%;
+      min-height: 40px;
+      border: 1px solid var(--kb-border);
+      border-radius: 8px;
+      padding: 9px 11px;
+      background: #ffffff;
+      color: var(--kb-text);
+      font: inherit;
+    }
+    img, video, canvas, svg { max-width: 100%; height: auto; }
+    img { border-radius: 12px; display: block; }
+    pre {
+      overflow: auto;
+      padding: 14px;
+      border-radius: 10px;
+      background: #111827;
+      color: #e5e7eb;
+    }
+    @media (max-width: 720px) {
+      body > header, body > main, body > section, body > article, body > footer { width: min(100% - 24px, 1120px); }
+      section, article, aside, .card, .panel, .tile, .widget, .metric, .kpi, [data-dashboard-zone] { padding: 16px; }
+      nav { align-items: stretch; }
+    }
+`;
 
 function splitArgs(value = '') {
     return String(value || '')
@@ -297,13 +406,9 @@ function ensureHtmlDocument(bodyHtml, title = 'Document') {
 <head>
 <meta charset="utf-8">
 <title>${escapeXml(title)}</title>
-<style>
-body { font-family: Arial, sans-serif; margin: 40px; color: #1f2937; }
-h1, h2, h3 { color: #111827; }
-table { border-collapse: collapse; width: 100%; margin: 16px 0; }
-th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; }
-pre { background: #f3f4f6; padding: 12px; overflow: auto; }
-code { background: #f3f4f6; padding: 2px 4px; }
+<style ${GENERATED_ARTIFACT_STYLE_MARKER}>
+${GENERATED_ARTIFACT_BASE_CSS}
+code { background: #eef2f7; padding: 2px 4px; border-radius: 5px; }
 .mermaid-section { margin: 0 0 24px; }
 .mermaid-frame { border: 1px solid #d1d5db; border-radius: 12px; padding: 16px; background: #ffffff; }
 .mermaid { text-align: center; }
@@ -331,6 +436,34 @@ ${buildMermaidMarkup(mermaidSource)}
 ${content}
 </body>
 </html>`;
+}
+
+function hasSubstantiveCss(html = '') {
+    const source = String(html || '');
+    const styleBlocks = [...source.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/ig)]
+        .map((match) => String(match?.[1] || '').replace(/\/\*[\s\S]*?\*\//g, '').trim())
+        .filter(Boolean);
+    const hasMeaningfulStyleBlock = styleBlocks.some((css) => css.replace(/\s+/g, '').length >= 80);
+    const hasInlineStyle = /\sstyle=["'][^"']{12,}["']/i.test(source);
+    const hasStylesheetLink = /<link\b[^>]*rel=["'][^"']*stylesheet[^"']*["'][^>]*>/i.test(source);
+
+    return hasMeaningfulStyleBlock || hasInlineStyle || hasStylesheetLink;
+}
+
+function injectHtmlStyleSafetyNet(html = '') {
+    const source = String(html || '');
+    if (!source || hasSubstantiveCss(source) || source.includes(GENERATED_ARTIFACT_STYLE_MARKER)) {
+        return source;
+    }
+
+    const styleTag = `<style ${GENERATED_ARTIFACT_STYLE_MARKER}>\n${GENERATED_ARTIFACT_BASE_CSS}\n</style>`;
+    if (/<\/head>/i.test(source)) {
+        return source.replace(/<\/head>/i, `${styleTag}\n</head>`);
+    }
+    if (/<html[^>]*>/i.test(source)) {
+        return source.replace(/<html([^>]*)>/i, `<html$1>\n<head>\n${styleTag}\n</head>`);
+    }
+    return `${styleTag}\n${source}`;
 }
 
 function getInternalArtifactBaseUrl() {
@@ -517,6 +650,123 @@ function buildPdfBufferFromText(text, title = 'Document') {
     output += `trailer\n<< /Size ${objects.length + 1} /Root ${catalogId} 0 R /Info ${infoId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
 
     return Buffer.from(output, 'binary');
+}
+
+function decodeHtmlEntities(text = '') {
+    return String(text || '')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;/gi, "'")
+        .replace(/&#(\d+);/g, (_match, code) => String.fromCharCode(Number(code) || 32))
+        .replace(/&#x([0-9a-f]+);/gi, (_match, code) => String.fromCharCode(parseInt(code, 16) || 32));
+}
+
+function extractPdfMakeBlocksFromHtml(html = '', fallbackTitle = 'Document') {
+    const source = String(html || '');
+    const body = source.match(/<body[^>]*>([\s\S]*?)<\/body>/i)?.[1] || source;
+    const blocks = [];
+    const pattern = /<(h1|h2|h3|p|li|figcaption|blockquote)[^>]*>([\s\S]*?)<\/\1>/ig;
+    let match;
+
+    while ((match = pattern.exec(body)) !== null) {
+        const tag = String(match[1] || '').toLowerCase();
+        const text = decodeHtmlEntities(stripHtml(match[2] || ''))
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (!text) {
+            continue;
+        }
+
+        if (tag === 'h1') {
+            blocks.push({ text, style: 'title', margin: [0, 0, 0, 12] });
+        } else if (tag === 'h2') {
+            blocks.push({ text, style: 'heading', margin: [0, 18, 0, 8] });
+        } else if (tag === 'h3') {
+            blocks.push({ text, style: 'subheading', margin: [0, 12, 0, 6] });
+        } else if (tag === 'li') {
+            blocks.push({ text: `- ${text}`, style: 'body', margin: [12, 0, 0, 6] });
+        } else if (tag === 'figcaption') {
+            blocks.push({ text, style: 'caption', margin: [0, 2, 0, 10] });
+        } else if (tag === 'blockquote') {
+            blocks.push({ text, style: 'quote', margin: [0, 8, 0, 10] });
+        } else {
+            blocks.push({ text, style: 'body', margin: [0, 0, 0, 9] });
+        }
+    }
+
+    if (blocks.length === 0) {
+        const text = decodeHtmlEntities(stripHtml(source)).replace(/\s+/g, ' ').trim();
+        blocks.push(
+            { text: fallbackTitle, style: 'title', margin: [0, 0, 0, 12] },
+            { text: text || 'No content provided.', style: 'body' },
+        );
+    }
+
+    return blocks.slice(0, 180);
+}
+
+async function buildStyledPdfBufferFromHtml(html = '', title = 'Document') {
+    try {
+        const pdfMake = require('pdfmake/build/pdfmake');
+        pdfMake.vfs = require('pdfmake/build/vfs_fonts');
+        const blocks = extractPdfMakeBlocksFromHtml(html, title);
+        const hasTitle = blocks.some((block) => block.style === 'title');
+        const content = [
+            {
+                canvas: [
+                    { type: 'rect', x: 0, y: 0, w: 512, h: 56, r: 8, color: '#eef3f8' },
+                    { type: 'rect', x: 0, y: 56, w: 512, h: 2, color: '#2563eb' },
+                ],
+                margin: [0, 0, 0, 14],
+            },
+            ...(hasTitle ? [] : [{ text: title, style: 'title', margin: [0, 0, 0, 12] }]),
+            ...blocks,
+        ];
+        const definition = {
+            pageSize: 'LETTER',
+            pageMargins: [42, 54, 42, 48],
+            defaultStyle: {
+                font: 'Roboto',
+                fontSize: 10.5,
+                lineHeight: 1.25,
+                color: '#172033',
+            },
+            content,
+            styles: {
+                title: { fontSize: 28, bold: true, color: '#0f172a', lineHeight: 0.95 },
+                heading: { fontSize: 18, bold: true, color: '#0f172a' },
+                subheading: { fontSize: 13, bold: true, color: '#172033' },
+                body: { fontSize: 10.5, color: '#334155' },
+                caption: { fontSize: 8, italics: true, color: '#64748b' },
+                quote: { fontSize: 11, italics: true, color: '#334155' },
+            },
+            footer(currentPage, pageCount) {
+                return {
+                    columns: [
+                        { text: title, color: '#64748b', fontSize: 8 },
+                        { text: `${currentPage} / ${pageCount}`, alignment: 'right', color: '#64748b', fontSize: 8 },
+                    ],
+                    margin: [42, 0, 42, 0],
+                };
+            },
+        };
+
+        return await new Promise((resolve, reject) => {
+            pdfMake.createPdf(definition).getBuffer((buffer) => {
+                if (!buffer) {
+                    reject(new Error('pdfmake returned an empty buffer'));
+                    return;
+                }
+                resolve(Buffer.from(buffer));
+            });
+        });
+    } catch (error) {
+        console.warn('[Artifacts] Styled PDF fallback failed:', error.message);
+        return null;
+    }
 }
 
 function htmlToParagraphs(html) {
@@ -867,7 +1117,7 @@ async function renderArtifact({ format, content, title = 'artifact', workbookSpe
     const filename = createUniqueFilename(title, extension, 'artifact');
 
     if (normalizedFormat === 'html') {
-        const html = ensureHtmlDocument(content, title);
+        const html = injectHtmlStyleSafetyNet(ensureHtmlDocument(content, title));
         return {
             filename,
             format: 'html',
@@ -880,26 +1130,27 @@ async function renderArtifact({ format, content, title = 'artifact', workbookSpe
     }
 
     if (normalizedFormat === 'pdf') {
-        const html = ensureHtmlDocument(content, title);
+        const html = injectHtmlStyleSafetyNet(ensureHtmlDocument(content, title));
         const text = stripHtml(html);
         const browserBuffer = await renderPdfViaBrowser(html, title);
+        const styledFallbackBuffer = browserBuffer ? null : await buildStyledPdfBufferFromHtml(html, title);
         return {
             filename,
             format: 'pdf',
             mimeType,
-            buffer: browserBuffer || buildPdfBufferFromText(text, title),
+            buffer: browserBuffer || styledFallbackBuffer || buildPdfBufferFromText(text, title),
             previewHtml: html,
             extractedText: text,
             metadata: {
                 title,
                 sourceHtml: html,
-                renderEngine: browserBuffer ? 'browser' : 'basic',
+                renderEngine: browserBuffer ? 'browser' : (styledFallbackBuffer ? 'pdfmake' : 'basic'),
             },
         };
     }
 
     if (normalizedFormat === 'docx') {
-        const html = ensureHtmlDocument(content, title);
+        const html = injectHtmlStyleSafetyNet(ensureHtmlDocument(content, title));
         return {
             filename,
             format: 'docx',
@@ -943,9 +1194,12 @@ async function renderArtifact({ format, content, title = 'artifact', workbookSpe
 }
 
 module.exports = {
+    buildStyledPdfBufferFromHtml,
     buildXlsxBufferFromWorkbookSpec,
     ensureHtmlDocument,
     extractCompositeDocumentParts,
+    hasSubstantiveCss,
+    injectHtmlStyleSafetyNet,
     inlineExternalImagesForPdf,
     inlineRenderableImagesForPdf,
     inlineInternalArtifactImagesForPdf,

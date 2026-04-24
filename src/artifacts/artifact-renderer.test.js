@@ -6,9 +6,11 @@ jest.mock('./artifact-store', () => ({
 
 const { artifactStore } = require('./artifact-store');
 const {
+    buildStyledPdfBufferFromHtml,
     normalizeMermaidSource,
     ensureHtmlDocument,
     extractCompositeDocumentParts,
+    injectHtmlStyleSafetyNet,
     inlineExternalImagesForPdf,
     inlineRenderableImagesForPdf,
     inlineInternalArtifactImagesForPdf,
@@ -105,6 +107,36 @@ describe('normalizeMermaidSource', () => {
         expect(html).toContain('class="mermaid"');
         expect(html).toContain('Dog Life Stages Assessment');
         expect(html).toContain('cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js');
+    });
+
+    test('adds a reusable style safety net to generated html documents', () => {
+        const html = ensureHtmlDocument(
+            '<main data-dashboard-zone="hero"><h1>Support Ops</h1><button>Refresh</button></main>',
+            'Support Ops',
+        );
+
+        expect(html).toContain('data-kimibuilt-style-safety-net');
+        expect(html).toContain('[data-dashboard-zone]');
+        expect(html).toContain('grid-template-columns: repeat(auto-fit');
+    });
+
+    test('does not inject duplicate fallback styles', () => {
+        const html = '<!DOCTYPE html><html><head></head><body><main><h1>Ready</h1></main></body></html>';
+        const once = injectHtmlStyleSafetyNet(html);
+        const twice = injectHtmlStyleSafetyNet(once);
+
+        expect(twice.match(/data-kimibuilt-style-safety-net/g)).toHaveLength(1);
+    });
+
+    test('builds a styled PDF fallback when browser rendering is unavailable', async () => {
+        const buffer = await buildStyledPdfBufferFromHtml(
+            '<!DOCTYPE html><html><body><main><h1>Support Ops</h1><h2>SLA Watch</h2><p>Queue pressure is elevated.</p></main></body></html>',
+            'Support Ops',
+        );
+
+        expect(Buffer.isBuffer(buffer)).toBe(true);
+        expect(buffer.toString('utf8', 0, 4)).toBe('%PDF');
+        expect(buffer.length).toBeGreaterThan(1000);
     });
 
     test('inlines internal artifact image urls for PDF rendering', async () => {
