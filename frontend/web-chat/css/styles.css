@@ -1966,9 +1966,13 @@ body {
 
 .app-shell {
     display: flex;
+    height: 100vh;
+    height: 100dvh;
     min-height: 100%;
+    min-height: 0;
     gap: 1rem;
     padding: 1rem;
+    overflow: hidden;
 }
 
 .main-shell {
@@ -1976,6 +1980,7 @@ body {
     flex: 1 1 0%;
     flex-direction: column;
     min-width: 0;
+    min-height: 0;
     position: relative;
     border: 1px solid var(--border);
     border-radius: 1.75rem;
@@ -2443,6 +2448,7 @@ select:focus-visible,
     width: 320px;
     flex-shrink: 0;
     min-width: 0;
+    min-height: 0;
     transition:
         width var(--transition-normal),
         transform var(--transition-normal),
@@ -2456,9 +2462,43 @@ select:focus-visible,
     border-right: none;
 }
 
+.sidebar.collapsed .sidebar-btn-text,
+.sidebar.collapsed .sidebar-session-info,
+.sidebar.collapsed .session-actions,
+.sidebar.collapsed .sidebar-brand-copy,
+.sidebar.collapsed .sidebar-footer-label,
+.sidebar.collapsed .empty-state p {
+    display: none !important;
+}
+
+.sidebar.collapsed .sidebar-brand-card,
+.sidebar.collapsed .session-item {
+    justify-content: center;
+}
+
+.sidebar.collapsed #new-chat-btn,
+.sidebar.collapsed .session-item {
+    min-height: 44px;
+    gap: 0;
+    overflow: hidden;
+}
+
+.sidebar.collapsed #sessions-list {
+    overflow-x: hidden;
+}
+
 #sessions-list {
     scrollbar-width: thin;
     scrollbar-color: var(--text-muted) transparent;
+    min-height: 0;
+}
+
+#messages-container {
+    min-height: 0;
+}
+
+.input-area {
+    flex: 0 0 auto;
 }
 
 .session-item {
@@ -2567,9 +2607,12 @@ select:focus-visible,
     align-items: center;
     gap: 0.5rem;
     min-width: 0;
+    flex-wrap: nowrap;
 }
 
 .session-title {
+    flex: 1 1 auto;
+    min-width: 0;
     font-size: 0.875rem;
     font-weight: 500;
     color: var(--text-primary);
@@ -2597,11 +2640,19 @@ select:focus-visible,
     display: flex;
     align-items: center;
     gap: 0.25rem;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.session-meta span {
+    flex-shrink: 0;
 }
 
 .session-scope-label {
     color: var(--text-muted);
+    flex: 1 1 auto;
+    min-width: 0;
     max-width: 8rem;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2781,6 +2832,7 @@ body.mobile-chat-menu-open {
     color: var(--text-primary);
     text-align: left;
     transition: border-color var(--transition-fast), background-color var(--transition-fast), transform var(--transition-fast);
+    min-height: 3.55rem;
 }
 
 .mobile-chat-menu__action:hover {
@@ -2796,7 +2848,13 @@ body.mobile-chat-menu-open {
     font-size: 0.92rem;
     font-weight: 600;
     min-width: 0;
-    overflow-wrap: anywhere;
+    white-space: nowrap;
+}
+
+.mobile-chat-menu__action-main span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .mobile-chat-menu__action-value {
@@ -2806,7 +2864,9 @@ body.mobile-chat-menu-open {
     line-height: 1.35;
     text-align: right;
     min-width: 0;
-    overflow-wrap: anywhere;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .mobile-chat-menu__action--danger {
@@ -3443,6 +3503,7 @@ body.mobile-chat-menu-open {
     position: sticky;
     top: 0;
     z-index: 10;
+    flex: 0 0 auto;
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
 }
@@ -3571,6 +3632,9 @@ body.layout-minimal .sidebar {
 body.layout-minimal .app-shell {
     gap: 0;
     padding: 0;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
 }
 
 body.layout-minimal .sidebar,
@@ -3579,6 +3643,10 @@ body.layout-minimal .sidebar-resize-handle {
 }
 
 body.layout-minimal .main-shell {
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
     border: none;
     border-radius: 0;
     box-shadow: none;
@@ -3694,6 +3762,7 @@ body.layout-minimal .welcome-description {
 }
 
 body.layout-minimal .input-area {
+    flex: 0 0 auto;
     background-color: var(--bg-secondary);
 }
 
@@ -7673,15 +7742,18 @@ code[class*="language-"] {
     }
 
     .mobile-chat-menu__action {
-        align-items: flex-start;
-        flex-direction: column;
-        gap: 0.4rem;
+        align-items: center;
+        flex-direction: row;
+        gap: 0.65rem;
+        min-height: 3.35rem;
+        padding-top: 0.78rem;
+        padding-bottom: 0.78rem;
     }
 
     .mobile-chat-menu__action-value {
-        max-width: 100%;
-        padding-left: 1.7rem;
-        text-align: left;
+        max-width: 46%;
+        padding-left: 0;
+        text-align: right;
     }
     
     #connection-status {

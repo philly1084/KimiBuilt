@@ -163,8 +163,26 @@ class SidebarResizer {
       
       .sidebar.collapsed .sidebar-btn-text,
       .sidebar.collapsed .sidebar-session-info,
-      .sidebar.collapsed .session-actions {
+      .sidebar.collapsed .session-actions,
+      .sidebar.collapsed .sidebar-brand-copy,
+      .sidebar.collapsed .sidebar-footer-label,
+      .sidebar.collapsed .empty-state p {
         display: none !important;
+      }
+
+      .sidebar.collapsed .sidebar-brand-shell,
+      .sidebar.collapsed .sidebar-footer {
+        gap: 8px;
+      }
+
+      .sidebar.collapsed .sidebar-brand-card {
+        justify-content: center;
+      }
+
+      .sidebar.collapsed .sidebar-brand-mark {
+        width: 40px;
+        height: 40px;
+        border-radius: 12px;
       }
       
       .sidebar.collapsed .sidebar-full {
@@ -180,15 +198,36 @@ class SidebarResizer {
         width: 44px;
         height: 44px;
         margin: 0 auto;
+        min-height: 44px;
+        gap: 0;
+        overflow: hidden;
       }
       
       .sidebar.collapsed .session-item {
         padding: 12px 8px;
         justify-content: center;
+        min-height: 44px;
+        gap: 0;
       }
       
       .sidebar.collapsed .session-icon {
         margin-right: 0;
+      }
+
+      .sidebar.collapsed #sessions-list {
+        padding: 8px;
+        overflow-x: hidden;
+      }
+
+      .sidebar.collapsed .empty-state {
+        padding: 8px 0;
+      }
+
+      .sidebar.collapsed .empty-state svg,
+      .sidebar.collapsed .empty-state i {
+        width: 28px;
+        height: 28px;
+        margin: 0;
       }
       
       .sidebar.collapsed .p-4 {

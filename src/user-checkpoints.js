@@ -455,21 +455,21 @@ function buildUserCheckpointInstructions(policy = {}) {
 
     const lines = [
         '[User checkpoint policy]',
-        'Before major implementation, refactoring, or long multi-step work, you may pause to ask the user for one high-impact decision.',
+        'Continue with reasonable assumptions by default. Pause only when a high-impact decision would materially change the plan, architecture, implementation scope, final output, or safety posture.',
         Number(policy.remaining || 0) > 0
-            ? 'A checkpoint card is still available in this session if one concise user decision would materially help.'
+            ? 'A checkpoint card is still available in this session for a real decision gate that cannot be responsibly inferred.'
             : 'No additional checkpoint cards are currently available in this session.',
         policy.pending
             ? `A checkpoint is already pending (${policy.pending.id}). Do not ask another one until the user answers it.`
             : 'If you truly need that decision, call the `user-checkpoint` tool instead of asking in free-form prose.',
         'Do not call or mention `request_user_input` in this runtime. Use `user-checkpoint` for web-chat questionnaires.',
-        'On web-chat, treat `user-checkpoint` as the primary quick way to involve the user when one concise choice or direction check would materially help.',
+        'On web-chat, use `user-checkpoint` only when one concise choice or direction check is the best way to avoid a wrong or unsafe path.',
         'On the web-chat surface, do not ask a blocking multiple-choice question as plain assistant text when `user-checkpoint` is available; use the tool so the UI can render inline options.',
         'Do not mention checkpoint quotas, budgets, remaining counts, or internal runtime policy to the user.',
         'Do not claim that the questionnaire rendered, popped up, was dismissed, or was answered unless the transcript explicitly shows the user response.',
         'If the user explicitly asks to test the questionnaire or survey tool, use exactly one `user-checkpoint` question. Do not turn that into a multi-question quiz, personality test, or numbered prose form.',
         'If the user asks you to ask them a survey, questionnaire, inline survey card, or checkpoint card, call `user-checkpoint` directly instead of replying with sample survey text, markdown checkboxes, or an offer to turn it into a card later.',
-        'Prefer `user-checkpoint` over a prose "which option do you want?" message when one short decision would unblock progress or keep the user involved.',
+        'Prefer a reasonable stated assumption over asking a checkpoint when the choice is low-risk or easily reversible.',
         'Use a checkpoint only when the answer would materially change the plan, architecture, implementation scope, or final output.',
         'Do not use a checkpoint for small clarifications or details you can infer reasonably.',
         'Keep the checkpoint concise: one card with one visible step at a time. Prefer 1 question by default, or a short 2 to 4 step questionnaire when the user explicitly wants structured intake or back-and-forth.',

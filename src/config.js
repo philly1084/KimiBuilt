@@ -607,31 +607,38 @@ const config = {
         remoteBuildAutonomyDefault: process.env.REMOTE_BUILD_AUTONOMY_DEFAULT !== 'false',
         remoteBuildMaxAutonomousRounds: Math.max(
             1,
-            parseInt(process.env.REMOTE_BUILD_MAX_AUTONOMOUS_ROUNDS, 10) || 8,
+            parseInt(process.env.REMOTE_BUILD_MAX_AUTONOMOUS_ROUNDS, 10) || 20,
         ),
         remoteBuildMaxAutonomousToolCalls: Math.max(
             1,
-            parseInt(process.env.REMOTE_BUILD_MAX_AUTONOMOUS_TOOL_CALLS, 10) || 24,
+            parseInt(process.env.REMOTE_BUILD_MAX_AUTONOMOUS_TOOL_CALLS, 10) || 80,
         ),
         remoteBuildMaxAutonomousMs: Math.max(
             1000,
-            parseInt(process.env.REMOTE_BUILD_MAX_AUTONOMOUS_MS, 10) || 120000,
+            parseInt(process.env.REMOTE_BUILD_MAX_AUTONOMOUS_MS, 10) || 600000,
+        ),
+        remoteBuildContinuationCheckpointEnabled: process.env.REMOTE_BUILD_CONTINUATION_CHECKPOINT_ENABLED === 'true',
+        remoteBuildConfigDefaultSingleRoundStop: process.env.REMOTE_BUILD_CONFIG_DEFAULT_SINGLE_ROUND_STOP === 'true',
+        remoteBuildGenericFallbackSingleUseStop: process.env.REMOTE_BUILD_GENERIC_FALLBACK_SINGLE_USE_STOP !== 'false',
+        foregroundProgressPersistIntervalMs: Math.max(
+            250,
+            parseInt(process.env.FOREGROUND_PROGRESS_PERSIST_INTERVAL_MS, 10) || 1000,
         ),
         remoteBuildBudgetExtensionMaxUses: Math.max(
             0,
-            parseInt(process.env.REMOTE_BUILD_BUDGET_EXTENSION_MAX_USES, 10) || 2,
+            parseInt(process.env.REMOTE_BUILD_BUDGET_EXTENSION_MAX_USES, 10) || 6,
         ),
         remoteBuildBudgetExtensionRounds: Math.max(
             0,
-            parseInt(process.env.REMOTE_BUILD_BUDGET_EXTENSION_ROUNDS, 10) || 4,
+            parseInt(process.env.REMOTE_BUILD_BUDGET_EXTENSION_ROUNDS, 10) || 8,
         ),
         remoteBuildBudgetExtensionToolCalls: Math.max(
             0,
-            parseInt(process.env.REMOTE_BUILD_BUDGET_EXTENSION_TOOL_CALLS, 10) || 12,
+            parseInt(process.env.REMOTE_BUILD_BUDGET_EXTENSION_TOOL_CALLS, 10) || 32,
         ),
         remoteBuildBudgetExtensionMs: Math.max(
             0,
-            parseInt(process.env.REMOTE_BUILD_BUDGET_EXTENSION_MS, 10) || 60000,
+            parseInt(process.env.REMOTE_BUILD_BUDGET_EXTENSION_MS, 10) || 180000,
         ),
     },
 };

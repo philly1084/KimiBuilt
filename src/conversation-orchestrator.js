@@ -1084,7 +1084,7 @@ function buildScoredCandidateToolMap({
     if (classification) {
         adjustCandidateToolScore(scoreMap, USER_CHECKPOINT_TOOL_ID, classification.checkpointNeed === 'required' && canUseUserCheckpoint ? 1.6 : 0, 'The classifier requires a user decision before major work.');
         if (classification.checkpointNeed === 'optional' && canUseUserCheckpoint) {
-            adjustCandidateToolScore(scoreMap, USER_CHECKPOINT_TOOL_ID, 0.45, 'The classifier suggests a checkpoint could clarify an ambiguous high-impact request.');
+            adjustCandidateToolScore(scoreMap, USER_CHECKPOINT_TOOL_ID, 0.18, 'The classifier found ambiguity, but execution should continue with reasonable assumptions unless a real decision gate appears.');
         }
 
         if (classification.groundingRequirement === 'required') {
@@ -1219,7 +1219,7 @@ function buildScoredCandidateToolMap({
     }
 
     if (classificationConfidence < 0.72) {
-        adjustCandidateToolScore(scoreMap, USER_CHECKPOINT_TOOL_ID, canUseUserCheckpoint ? 0.4 : 0, 'Lower classifier confidence favors a checkpoint over a brittle direct action.');
+        adjustCandidateToolScore(scoreMap, USER_CHECKPOINT_TOOL_ID, canUseUserCheckpoint ? 0.12 : 0, 'Lower classifier confidence can justify a checkpoint only when the decision is high-impact.');
     }
 
     failedToolIds.forEach((toolId) => {
@@ -6050,7 +6050,8 @@ class ConversationOrchestrator extends EventEmitter {
                     nextPlan = nextPlan.slice(0, remainingToolBudget);
                 }
 
-                if (autonomyApproved
+                if (config.runtime?.remoteBuildGenericFallbackSingleUseStop !== false
+                    && autonomyApproved
                     && nextPlan.length > 0
                     && nextPlan.every((step) => isGenericRemoteFallbackStep(step))
                     && toolEvents.some((event) => isGenericRemoteFallbackStep({
@@ -6414,6 +6415,7 @@ class ConversationOrchestrator extends EventEmitter {
 
                     if (autonomyApproved
                         && autonomyApprovalSource === 'config'
+                        && config.runtime?.remoteBuildConfigDefaultSingleRoundStop === true
                         && !roundFailed
                         && !blockingRoundFailure
                         && roundToolEvents.length > 0
@@ -6543,6 +6545,7 @@ class ConversationOrchestrator extends EventEmitter {
             }
 
             const canOfferAutonomyContinuationCheckpoint = resolvedProfile === REMOTE_BUILD_EXECUTION_PROFILE
+                && config.runtime?.remoteBuildContinuationCheckpointEnabled === true
                 && findLatestExecutionTraceEntry(executionTrace, 'Autonomous execution time budget reached')
                 && toolPolicy.allowedToolIds.includes(USER_CHECKPOINT_TOOL_ID)
                 && toolPolicy.userCheckpointPolicy?.enabled === true
