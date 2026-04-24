@@ -685,6 +685,9 @@ class FileManager {
     try {
       const response = await fetch(`/api/sessions/${sessionId}/artifacts`);
       if (response.status === 404 || response.status === 503) {
+        if (this.getSessionId() !== sessionId) {
+          return;
+        }
         this.files = [];
         this.renderFiles();
         return;
@@ -692,6 +695,9 @@ class FileManager {
       if (!response.ok) throw new Error('Failed to load files');
       
       const data = await response.json();
+      if (this.getSessionId() !== sessionId) {
+        return;
+      }
       this.files = (data.artifacts || []).map(f => ({
         ...f,
         category: this.getFileCategory(f.filename),
@@ -702,6 +708,9 @@ class FileManager {
       
       this.renderFiles();
     } catch (error) {
+      if (this.getSessionId() !== sessionId) {
+        return;
+      }
       console.error('[FileManager] Failed to load files:', error);
       this.showToast('Failed to load files', 'error');
     }
@@ -1196,7 +1205,13 @@ class FileManager {
   /**
    * Add a file to the list (for generated files)
    */
-  addFile(file) {
+  addFile(file, options = {}) {
+    const targetSessionId = String(options.sessionId || file?.sessionId || file?.session_id || '').trim();
+    const currentSessionId = String(this.getSessionId() || '').trim();
+    if (targetSessionId && currentSessionId && targetSessionId !== currentSessionId) {
+      return;
+    }
+
     const existingIndex = this.files.findIndex(f => f.id === file.id);
     const enrichedFile = {
       ...file,

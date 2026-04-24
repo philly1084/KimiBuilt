@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Lilly Voxel CLI</title>
+    <title>KimiBuilt Voxel Agent CLI</title>
     <script src="https://cdn.tailwindcss.com"></script>
     
     <!-- Syntax Highlighting -->
@@ -874,7 +874,7 @@
         <!-- Header -->
         <header class="header">
             <div class="header-left">
-                <span class="header-title">Lilly Voxel CLI</span>
+                <span class="header-title">KimiBuilt Voxel Agent</span>
                 <div class="status-indicator">
                     <span id="statusDot" class="status-dot connecting"></span>
                     <span id="statusText">Connecting...</span>
@@ -894,8 +894,8 @@
                 <button class="btn btn-sm" data-short="Thm" onclick="app.cycleTheme()" title="Toggle theme" aria-label="Toggle theme">
                     <span>Theme</span>
                 </button>
-                <button class="btn btn-sm" data-short="Vox" onclick="app.focusVoxelCreator()" title="Voxel creator" aria-label="Focus voxel creator">
-                    <span>Creator</span>
+                <button class="btn btn-sm" data-short="Bud" onclick="app.focusVoxelCreator()" title="Voxel buddy" aria-label="Focus voxel buddy">
+                    <span>Buddy</span>
                 </button>
                 <button class="btn btn-sm" onclick="app.showShortcuts()" title="Help (F1)" aria-label="Show keyboard shortcuts">?</button>
                 <a href="/" class="btn btn-sm" aria-label="Go to home">Home</a>
@@ -919,13 +919,35 @@
                             type="text" 
                             id="commandInput" 
                             name="cli-command"
-                            placeholder="Type a message or /help for commands..."
+                            placeholder="Ask the coding buddy, run /sandbox, or type /help..."
                             autocomplete="new-password"
                             autocorrect="off"
                             autocapitalize="off"
                             spellcheck="false"
                             autofocus
                         >
+                    </div>
+                    <div id="voxelToolbelt" class="voxel-toolbelt" aria-label="Voxel coding toolbelt">
+                        <button type="button" class="voxel-tool-chip active" data-tool="chat" onclick="app.useVoxelQuickTool('chat')" title="Chat with the coding buddy">
+                            <span class="voxel-tool-icon" aria-hidden="true"></span>
+                            <span>Chat</span>
+                        </button>
+                        <button type="button" class="voxel-tool-chip" data-tool="sandbox" onclick="app.useVoxelQuickTool('sandbox')" title="Prefill a code sandbox command">
+                            <span class="voxel-tool-icon" aria-hidden="true"></span>
+                            <span>Sandbox</span>
+                        </button>
+                        <button type="button" class="voxel-tool-chip" data-tool="build" onclick="app.useVoxelQuickTool('build')" title="Open build workflow prompts">
+                            <span class="voxel-tool-icon" aria-hidden="true"></span>
+                            <span>Build</span>
+                        </button>
+                        <button type="button" class="voxel-tool-chip" data-tool="tools" onclick="app.useVoxelQuickTool('tools')" title="List agent tools">
+                            <span class="voxel-tool-icon" aria-hidden="true"></span>
+                            <span>Tools</span>
+                        </button>
+                        <button type="button" class="voxel-tool-chip" data-tool="files" onclick="app.useVoxelQuickTool('files')" title="Open session files">
+                            <span class="voxel-tool-icon" aria-hidden="true"></span>
+                            <span>Files</span>
+                        </button>
                     </div>
                     <div class="input-meta">
                         <span id="sessionInfo">Session: none</span>
@@ -943,11 +965,11 @@
             </div>
 
             <!-- Voxel Creator Modal -->
-            <aside id="voxelDock" class="voxel-creator-modal hidden" role="dialog" aria-modal="true" aria-labelledby="voxelCreatorTitle" aria-label="Voxel creator console">
+            <aside id="voxelDock" class="voxel-creator-modal hidden" role="dialog" aria-modal="true" aria-labelledby="voxelCreatorTitle" aria-label="Voxel buddy console">
                 <div class="voxel-creator-scrim" onclick="app.closeVoxelCreator()" aria-hidden="true"></div>
                 <section class="voxel-panel voxel-creator-panel">
                     <div class="voxel-panel-head">
-                        <span id="voxelCreatorTitle" class="voxel-panel-title">Voxel Creator</span>
+                        <span id="voxelCreatorTitle" class="voxel-panel-title">Voxel Coding Buddy</span>
                         <div class="voxel-panel-actions">
                             <button class="voxel-icon-btn" onclick="app.handlePetAction('jump')" title="Jump" aria-label="Jump">J</button>
                             <button class="voxel-icon-btn" onclick="app.generateRandomVoxelPet()" title="Random voxel character" aria-label="Random voxel character">R</button>
@@ -975,9 +997,41 @@
                             </div>
                         </div>
                         <div id="voxelPetSeed" class="voxel-seed"></div>
-                        <div class="voxel-creator-label">AI voxel request</div>
+                        <div class="voxel-agent-stats" aria-label="Voxel agent progress">
+                            <div class="voxel-agent-stat">
+                                <span>Bond</span>
+                                <strong id="voxelBondStat">0%</strong>
+                            </div>
+                            <div class="voxel-agent-stat">
+                                <span>Focus</span>
+                                <strong id="voxelFocusStat">0%</strong>
+                            </div>
+                            <div class="voxel-agent-stat">
+                                <span>Builds</span>
+                                <strong id="voxelBuildStat">0</strong>
+                            </div>
+                            <div class="voxel-agent-stat">
+                                <span>Tools</span>
+                                <strong id="voxelToolStat">0</strong>
+                            </div>
+                        </div>
+                        <div class="voxel-agent-toolbox">
+                            <button class="voxel-tool-card" onclick="app.useVoxelQuickTool('sandbox')">
+                                <strong>Sandbox</strong>
+                                <span>Run small code safely with /sandbox</span>
+                            </button>
+                            <button class="voxel-tool-card" onclick="app.useVoxelQuickTool('build')">
+                                <strong>Build</strong>
+                                <span>Plan, implement, test, and ship</span>
+                            </button>
+                            <button class="voxel-tool-card" onclick="app.useVoxelQuickTool('tools')">
+                                <strong>Tools</strong>
+                                <span>Inspect sandbox, git, web, deploy tools</span>
+                            </button>
+                        </div>
+                        <div class="voxel-creator-label">AI voxel buddy request</div>
                         <div class="voxel-prompt-row">
-                            <input id="voxelPetPrompt" type="text" placeholder="AI voxel agent prompt..." autocomplete="off" spellcheck="false">
+                            <input id="voxelPetPrompt" type="text" placeholder="AI voxel coding buddy prompt..." autocomplete="off" spellcheck="false">
                             <button class="btn btn-sm" onclick="app.generateVoxelPetFromInput()">Spawn</button>
                             <button class="btn btn-sm btn-primary" onclick="app.generateAIVoxelPetFromInput()">AI</button>
                         </div>

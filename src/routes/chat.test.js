@@ -16,6 +16,7 @@ jest.mock('../session-store', () => ({
         updateControlState: jest.fn(),
         recordResponse: jest.fn(),
         appendMessages: jest.fn(),
+        upsertMessage: jest.fn(),
     },
 }));
 
@@ -117,6 +118,7 @@ describe('/api/chat route', () => {
         sessionStore.getRecentMessages.mockResolvedValue([]);
         sessionStore.update.mockResolvedValue(session);
         sessionStore.updateControlState.mockResolvedValue({});
+        sessionStore.upsertMessage.mockResolvedValue({});
         buildInstructionsWithArtifacts.mockResolvedValue('continuity instructions');
         maybeGenerateOutputArtifact.mockResolvedValue([]);
         maybePrepareImagesForArtifactPrompt.mockResolvedValue({
@@ -898,7 +900,16 @@ describe('/api/chat route', () => {
                 sessionId: 'session-1',
                 message: 'Investigate and fix the issue.',
                 stream: true,
+                metadata: {
+                    clientSurface: 'web-chat',
+                    foregroundRequestId: 'assistant-live-1',
+                    messageId: 'user-live-1',
+                    assistantMessageId: 'assistant-live-1',
+                    userMessageTimestamp: '2026-04-24T12:00:00.000Z',
+                    assistantMessageTimestamp: '2026-04-24T12:00:00.001Z',
+                },
             });
+        await new Promise((resolve) => setImmediate(resolve));
 
         expect(response.status).toBe(200);
         expect(response.text).toContain('"type":"progress"');
@@ -906,6 +917,26 @@ describe('/api/chat route', () => {
         expect(response.text).toContain('"summary":"1/3 steps complete"');
         expect(response.text).toContain('"totalSteps":3');
         expect(response.text).toContain('"type":"delta","content":"Done"');
+        expect(sessionStore.upsertMessage).toHaveBeenCalledWith('session-1', expect.objectContaining({
+            id: 'assistant-live-1',
+            role: 'assistant',
+            metadata: expect.objectContaining({
+                pendingForeground: true,
+                progressState: expect.objectContaining({
+                    phase: 'planning',
+                    summary: '0/3 steps complete',
+                }),
+            }),
+        }));
+        expect(sessionStore.upsertMessage).toHaveBeenCalledWith('session-1', expect.objectContaining({
+            id: 'assistant-live-1',
+            role: 'assistant',
+            content: 'Done',
+            metadata: expect.objectContaining({
+                pendingForeground: false,
+                progressState: null,
+            }),
+        }));
     });
 
     test('streams the completed response text when the runtime emits no deltas', async () => {

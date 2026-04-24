@@ -50,6 +50,11 @@ const {
     resolveClientSurface,
     resolveSessionScope,
 } = require('../session-scope');
+const {
+    beginForegroundTurn,
+    buildForegroundTurnMessageOptions,
+    persistForegroundTurnMessages,
+} = require('../foreground-turn-state');
 
 const router = Router();
 const WORKLOAD_PREFLIGHT_RECENT_LIMIT = config.memory.recentTranscriptLimit;
@@ -66,6 +71,115 @@ function normalizeClientNow(value = '') {
 
 function getRequestOwnerId(req) {
     return String(req.user?.username || '').trim() || null;
+}
+
+function buildForegroundMetadata(metadata = {}, clientSurface = '', taskType = 'chat') {
+    const source = metadata && typeof metadata === 'object' ? metadata : {};
+    const foregroundRequestId = String(
+        source.foregroundRequestId
+        || source.foreground_request_id
+        || source.assistantMessageId
+        || source.assistant_message_id
+        || '',
+    ).trim();
+    const userMessageId = String(
+        source.messageId
+        || source.message_id
+        || source.userMessageId
+        || source.user_message_id
+        || '',
+    ).trim();
+    const assistantMessageId = String(
+        source.assistantMessageId
+        || source.assistant_message_id
+        || foregroundRequestId
+        || '',
+    ).trim();
+
+    if (!foregroundRequestId || !userMessageId || !assistantMessageId) {
+        return null;
+    }
+
+    const userTimestamp = normalizeClientNow(
+        source.userMessageTimestamp
+        || source.user_message_timestamp
+        || source.clientNow
+        || source.client_now,
+    ) || new Date().toISOString();
+    const assistantTimestamp = normalizeClientNow(
+        source.assistantMessageTimestamp
+        || source.assistant_message_timestamp,
+    ) || new Date(new Date(userTimestamp).getTime() + 1).toISOString();
+
+    return {
+        requestId: foregroundRequestId,
+        userMessageId,
+        assistantMessageId,
+        clientSurface,
+        taskType,
+        status: 'running',
+        placeholderText: String(source.assistantPlaceholder || source.assistant_placeholder || 'Working in background...').trim()
+            || 'Working in background...',
+        startedAt: normalizeClientNow(source.clientNow || source.client_now) || new Date().toISOString(),
+        userTimestamp,
+        assistantTimestamp,
+    };
+}
+
+function createForegroundProgressPersister({
+    sessionStore,
+    sessionId = '',
+    foregroundTurn = null,
+    intervalMs = config.runtime.foregroundProgressPersistIntervalMs,
+} = {}) {
+    const normalizedSessionId = String(sessionId || '').trim();
+    const turn = foregroundTurn && typeof foregroundTurn === 'object' ? foregroundTurn : null;
+    if (!sessionStore || !normalizedSessionId || !turn?.assistantMessageId) {
+        return null;
+    }
+
+    let lastPersistedAt = 0;
+    let pending = Promise.resolve();
+    return (progress = {}) => {
+        const now = Date.now();
+        if (now - lastPersistedAt < intervalMs) {
+            return pending;
+        }
+        lastPersistedAt = now;
+
+        const progressState = progress && typeof progress === 'object' ? progress : {};
+        const phase = String(progressState.phase || 'thinking').trim() || 'thinking';
+        const detail = String(progressState.detail || '').trim();
+        pending = pending
+            .catch(() => null)
+            .then(() => sessionStore.upsertMessage(normalizedSessionId, {
+                id: turn.assistantMessageId,
+                role: 'assistant',
+                content: turn.placeholderText || 'Working in background...',
+                timestamp: turn.assistantTimestamp || new Date().toISOString(),
+                metadata: {
+                    foregroundRequestId: turn.requestId,
+                    taskType: turn.taskType || 'chat',
+                    clientSurface: turn.clientSurface || '',
+                    isStreaming: true,
+                    pendingForeground: true,
+                    liveState: {
+                        phase,
+                        detail,
+                        reasoningSummary: '',
+                    },
+                    progressState: {
+                        ...progressState,
+                        phase,
+                        detail,
+                    },
+                },
+            }))
+            .catch((error) => {
+                console.warn(`[ChatRoute] Failed to persist foreground progress: ${error.message}`);
+            });
+        return pending;
+    };
 }
 
 function buildOwnerMemoryMetadata(ownerId = null, memoryScope = null, extra = {}) {
@@ -603,6 +717,35 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             activeSse = openSseStream(req, res, sessionId);
 
             const toolManager = await ensureRuntimeToolManager(req.app);
+            let foregroundTurn = null;
+            const requestedForegroundTurn = buildForegroundMetadata(effectiveRequestMetadata, clientSurface, taskType);
+            if (requestedForegroundTurn) {
+                foregroundTurn = await beginForegroundTurn({
+                    sessionStore,
+                    sessionId,
+                    userText: message,
+                    metadata: {
+                        ...effectiveRequestMetadata,
+                        foregroundRequestId: requestedForegroundTurn.requestId,
+                        messageId: requestedForegroundTurn.userMessageId,
+                        assistantMessageId: requestedForegroundTurn.assistantMessageId,
+                        userMessageTimestamp: requestedForegroundTurn.userTimestamp,
+                        assistantMessageTimestamp: requestedForegroundTurn.assistantTimestamp,
+                        assistantPlaceholder: requestedForegroundTurn.placeholderText,
+                    },
+                    clientSurface,
+                    taskType,
+                });
+            }
+            const persistForegroundProgress = createForegroundProgressPersister({
+                sessionStore,
+                sessionId,
+                foregroundTurn,
+            });
+            effectiveRequestMetadata = {
+                ...effectiveRequestMetadata,
+                ...(foregroundTurn ? { foregroundTurn } : {}),
+            };
 
             const execution = await executeConversationRuntime(req.app, {
                 input: effectiveMessage,
@@ -642,6 +785,9 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 ownerId,
                 onProgress: (progress) => {
                     writeSseProgressPayload(activeSse, sessionId, progress);
+                    if (persistForegroundProgress) {
+                        persistForegroundProgress(progress);
+                    }
                 },
             });
             const response = execution.response;
@@ -755,13 +901,20 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                         artifacts,
                     }, ownerId);
                     if (!execution.handledPersistence) {
-                        await sessionStore.appendMessages(sessionId, buildWebChatSessionMessages({
+                        const sessionMessages = buildWebChatSessionMessages({
                             userText: message,
                             assistantText: fullText,
                             toolEvents,
                             artifacts,
                             assistantMetadata: event.response?.metadata,
-                        }));
+                            ...buildForegroundTurnMessageOptions(foregroundTurn),
+                        });
+                        await persistForegroundTurnMessages(
+                            sessionStore,
+                            sessionId,
+                            sessionMessages,
+                            foregroundTurn,
+                        );
                     }
                     completeRuntimeTask(runtimeTask?.id, {
                         responseId: event.response.id,

@@ -22,6 +22,7 @@ class CodeCLIApp {
         this.lastVoxelTypingReaction = 0;
         this.lastVoxelAmbientMove = Date.now();
         this.voxelPersonality = this.loadVoxelPersonality();
+        this.activeVoxelTool = 'chat';
         
         // Session file storage
         this.sessionFiles = [];
@@ -36,7 +37,8 @@ class CodeCLIApp {
             '/help', '/?', '/clear', '/cls', '/new', '/sessions', '/switch', '/models', '/model', '/theme', '/voxel',
             '/export', '/save', '/load', '/copy', '/image', '/image-models', '/unsplash', '/diagram',
             '/upload', '/session', '/history', '/artifacts', '/stats', '/shortcuts', '/keys', '/health', '/tools', '/tool', '/tool-help',
-            '/files', '/ls', '/download', '/open', '/pet', '/spawn', '/agent', '/voxel-agent', '/random-agent', '/creator', '/voxel-creator'
+            '/files', '/ls', '/download', '/open', '/pet', '/spawn', '/agent', '/voxel-agent', '/random-agent', '/creator', '/voxel-creator',
+            '/buddy', '/toolbelt', '/build', '/sandbox', '/sandbox-help',
         ];
         
         this.init();
@@ -72,6 +74,11 @@ class CodeCLIApp {
         this.voxelPetStatus = document.getElementById('voxelPetStatus');
         this.voxelRoamer = document.getElementById('voxelRoamer');
         this.voxelRoamerStage = document.getElementById('voxelRoamerStage');
+        this.voxelToolbelt = document.getElementById('voxelToolbelt');
+        this.voxelBondStat = document.getElementById('voxelBondStat');
+        this.voxelFocusStat = document.getElementById('voxelFocusStat');
+        this.voxelBuildStat = document.getElementById('voxelBuildStat');
+        this.voxelToolStat = document.getElementById('voxelToolStat');
         
         this.setupEventListeners();
         this.applyTheme(this.theme);
@@ -264,6 +271,9 @@ class CodeCLIApp {
             curiosity: 46,
             confidence: 38,
             playfulness: 34,
+            sandboxRuns: 0,
+            buildRuns: 0,
+            toolRuns: 0,
             lastThought: '',
         };
 
@@ -281,6 +291,9 @@ class CodeCLIApp {
                 curiosity: this.clampPersonalityValue(stored.curiosity, fallback.curiosity),
                 confidence: this.clampPersonalityValue(stored.confidence, fallback.confidence),
                 playfulness: this.clampPersonalityValue(stored.playfulness, fallback.playfulness),
+                sandboxRuns: Math.max(0, Number.parseInt(stored.sandboxRuns, 10) || fallback.sandboxRuns),
+                buildRuns: Math.max(0, Number.parseInt(stored.buildRuns, 10) || fallback.buildRuns),
+                toolRuns: Math.max(0, Number.parseInt(stored.toolRuns, 10) || fallback.toolRuns),
             };
         } catch (_error) {
             return fallback;
@@ -359,6 +372,7 @@ class CodeCLIApp {
                 : `${this.voxelPet.name} | ${mood} | bond ${bond}%`;
             this.voxelPetStatus.title = `${this.voxelPet.trait} ${this.voxelPet.species} - ${this.voxelPet.prompt} - ${this.voxelPet.energy}% energy`;
         }
+        this.renderVoxelAgentStats();
         if (this.voxelPetButton) {
             this.voxelPetButton.classList.toggle('is-hidden', this.voxelPetHidden);
         }
@@ -372,6 +386,28 @@ class CodeCLIApp {
                 this.activePetAction = 'idle';
                 this.renderVoxelPet('idle');
             }, 900);
+        }
+    }
+
+    renderVoxelAgentStats() {
+        const personality = this.voxelPersonality || {};
+        const focus = Math.round((
+            Number(personality.curiosity || 0)
+            + Number(personality.confidence || 0)
+        ) / 2);
+
+        if (this.voxelBondStat) {
+            this.voxelBondStat.textContent = `${Math.round(personality.bond || 0)}%`;
+        }
+        if (this.voxelFocusStat) {
+            this.voxelFocusStat.textContent = `${focus}%`;
+        }
+        if (this.voxelBuildStat) {
+            this.voxelBuildStat.textContent = String(personality.buildRuns || 0);
+        }
+        if (this.voxelToolStat) {
+            const toolRuns = Number(personality.toolRuns || 0) + Number(personality.sandboxRuns || 0);
+            this.voxelToolStat.textContent = String(toolRuns);
         }
     }
 
@@ -473,6 +509,80 @@ class CodeCLIApp {
         };
         this.saveVoxelPersonality();
         this.renderVoxelPet();
+    }
+
+    recordVoxelToolUse(kind = 'tool') {
+        if (!this.voxelPersonality) {
+            return;
+        }
+
+        const normalized = String(kind || 'tool').toLowerCase();
+        const key = normalized === 'sandbox'
+            ? 'sandboxRuns'
+            : normalized === 'build'
+                ? 'buildRuns'
+                : 'toolRuns';
+
+        this.voxelPersonality = {
+            ...this.voxelPersonality,
+            [key]: Number(this.voxelPersonality[key] || 0) + 1,
+            bond: this.clampPersonalityValue(Number(this.voxelPersonality.bond || 0) + 1),
+            curiosity: this.clampPersonalityValue(Number(this.voxelPersonality.curiosity || 0) + (normalized === 'sandbox' ? 2 : 1)),
+            confidence: this.clampPersonalityValue(Number(this.voxelPersonality.confidence || 0) + (normalized === 'build' ? 3 : 2)),
+        };
+        this.saveVoxelPersonality();
+        this.renderVoxelAgentStats();
+    }
+
+    setActiveVoxelTool(tool = 'chat') {
+        this.activeVoxelTool = tool;
+        if (!this.voxelToolbelt) {
+            return;
+        }
+
+        this.voxelToolbelt.querySelectorAll('.voxel-tool-chip').forEach((button) => {
+            button.classList.toggle('active', button.dataset.tool === tool);
+        });
+    }
+
+    useVoxelQuickTool(tool = 'chat') {
+        const normalized = String(tool || 'chat').toLowerCase();
+        this.setTheme('voxel', { silent: true });
+        this.setActiveVoxelTool(normalized);
+        this.setVoxelPetHidden(false);
+
+        const actions = {
+            chat: () => {
+                this.commandInput.value = '';
+                this.commandInput.placeholder = 'Ask the coding buddy what to build next...';
+                this.commandInput.focus();
+                this.roamVoxelPet('prompt', 'scout', 1000, { thought: 'buddy link' });
+            },
+            sandbox: () => {
+                this.commandInput.value = '/sandbox javascript console.log("hello from the voxel sandbox")';
+                this.commandInput.focus();
+                this.roamVoxelPet('prompt', 'guard', 1200, { thought: 'sandbox ready' });
+            },
+            build: () => {
+                this.printBuildDeck();
+                this.commandInput.value = 'Build a small feature in this repo: ';
+                this.commandInput.focus();
+                this.recordVoxelToolUse('build');
+                this.roamVoxelPet('stream', 'scout', 1300, { thought: 'build map open' });
+            },
+            tools: async () => {
+                this.recordVoxelToolUse('tool');
+                this.roamVoxelPet('stream', 'scout', 1200, { thought: 'tool scan' });
+                await this.listTools();
+            },
+            files: () => {
+                this.openFileManager();
+                this.roamVoxelPet('prompt', 'scout', 1000, { thought: 'file crate' });
+            },
+        };
+
+        const handler = actions[normalized] || actions.chat;
+        handler();
     }
 
     getVoxelTypingThought() {
@@ -610,7 +720,7 @@ class CodeCLIApp {
         }, 0);
 
         if (!options.silent) {
-            this.printSystem('Voxel creator opened. Type a pet idea and press Enter for AI fill, or use Spawn for local generation.');
+            this.printSystem('Voxel buddy opened. Use the tool cards for sandbox/build work, or type a buddy idea and press Enter for AI fill.');
         }
     }
 
@@ -970,6 +1080,21 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
                 this.setTheme('voxel');
                 this.printPetCard();
                 break;
+            case 'buddy':
+            case 'toolbelt':
+                this.focusVoxelCreator();
+                this.printToolbeltCard();
+                break;
+            case 'build':
+                this.printBuildDeck();
+                this.recordVoxelToolUse('build');
+                break;
+            case 'sandbox':
+                await this.invokeSandboxCommand(args);
+                break;
+            case 'sandbox-help':
+                this.printSandboxHelp();
+                break;
             case 'creator':
             case 'voxel-creator':
                 this.focusVoxelCreator();
@@ -1293,15 +1418,15 @@ Session Statistics:
         line.className = 'line line-output ai';
         line.innerHTML = `
             <div class="voxel-response-head">
-                <span>Lilly Voxel CLI</span>
+                <span>KimiBuilt Voxel Agent</span>
                 <span class="voxel-response-meta">${this.escapeHtml(new Date().toLocaleString())}</span>
             </div>
             <div class="voxel-response-body">
                 <div class="voxel-boot">
                     <div>
-                        <div class="voxel-boot-title">Voxel Link Ready</div>
-                        <div class="voxel-boot-copy">Mode: chat | Model: ${this.escapeHtml(api.currentModel || 'loading')} | Session: ${this.escapeHtml(api.sessionId || 'pending')}</div>
-                        <div class="voxel-boot-copy">Type <code>/help</code> for commands.</div>
+                        <div class="voxel-boot-title">Buddy Build Link Ready</div>
+                        <div class="voxel-boot-copy">Mode: chat | Model: ${this.escapeHtml(api.currentModel || 'loading')}</div>
+                        <div class="voxel-boot-copy">Use <code>/build</code>, <code>/sandbox-help</code>, or <code>/help</code>.</div>
                     </div>
                     <div class="voxel-mini-pet" data-voxel-mini-pet></div>
                 </div>
@@ -1341,6 +1466,10 @@ Session Statistics:
   /pet act <action>  Run jump, dance, scout, guard, or sleep
   /pet name <name>   Rename the active pet
   /pet hide|show     Hide prompt pet or open creator
+  /buddy             Open the voxel coding buddy panel
+  /toolbelt          Show sandbox/build/tool shortcuts
+  /build             Show the coding-agent build workflow
+  /sandbox <lang>    Run code with the code-sandbox tool
 
 **AI Controls:**
   /models            List available AI models
@@ -1383,7 +1512,102 @@ Type any message to chat with the AI.
         `.trim());
     }
 
+    printToolbeltCard() {
+        const personality = this.voxelPersonality || {};
+        this.printAI(`## Voxel Coding Toolbelt
+
+Your buddy is wired for coding-agent work, not just chat decoration.
+
+- \`/sandbox javascript console.log("hi")\` runs a small isolated code snippet through \`code-sandbox\`.
+- \`/build\` opens a compact build loop for plan -> edit -> test -> verify.
+- \`/tools sandbox\`, \`/tools system\`, \`/tools ssh\`, and \`/tool-help <id>\` inspect the backend tool catalog.
+- \`/files\` and \`/open\` manage generated session files.
+
+Buddy stats: bond ${Math.round(personality.bond || 0)}%, sandbox runs ${personality.sandboxRuns || 0}, builds ${personality.buildRuns || 0}, tool runs ${personality.toolRuns || 0}.`);
+    }
+
+    printBuildDeck() {
+        this.setActiveVoxelTool('build');
+        this.printAI(`## Build Mode
+
+Use this when you want the buddy to act like a coding agent.
+
+1. Describe the target behavior in the prompt.
+2. Let the agent inspect files, edit narrowly, and run checks.
+3. Use \`/tools\` to see available building tools.
+4. Use \`/sandbox <language> <code>\` for quick experiments.
+5. Use \`/files\` for generated artifacts.
+
+Good prompt:
+\`\`\`text
+Improve the repo feature that handles <area>. Keep changes scoped, run relevant tests, and summarize the verification.
+\`\`\``);
+    }
+
+    printSandboxHelp() {
+        this.printAI(`## Sandbox Command
+
+Run short code snippets through the backend \`code-sandbox\` tool.
+
+Usage:
+\`\`\`text
+/sandbox <language> <code>
+\`\`\`
+
+Languages: \`javascript\`, \`python\`, \`bash\`, \`sql\`, \`ruby\`, \`go\`, \`rust\`
+
+Examples:
+\`\`\`text
+/sandbox javascript console.log([1,2,3].map(n => n * 2))
+/sandbox python print(sum(range(10)))
+/sandbox bash printf "voxel-ready"
+\`\`\``);
+    }
+
+    async invokeSandboxCommand(args = []) {
+        const language = String(args[0] || '').toLowerCase();
+        const code = args.slice(1).join(' ').trim();
+        const languages = new Set(['javascript', 'python', 'bash', 'sql', 'ruby', 'go', 'rust']);
+
+        this.setActiveVoxelTool('sandbox');
+        if (!languages.has(language) || !code) {
+            this.printSandboxHelp();
+            return;
+        }
+
+        this.setStatus('thinking');
+        this.reactVoxelPet(code, 'guard');
+        this.recordVoxelToolUse('sandbox');
+
+        try {
+            const invocation = await api.invokeTool('code-sandbox', {
+                language,
+                code,
+                limits: {
+                    timeout: 30000,
+                    maxOutput: 80000,
+                },
+            });
+            const result = invocation?.result || {};
+            const serialized = JSON.stringify(result, null, 2);
+            this.printAI(`## Sandbox Result: \`${language}\`
+
+Exit code: \`${Number.isFinite(Number(result.exitCode)) ? result.exitCode : 'unknown'}\`
+
+\`\`\`json
+${serialized}
+\`\`\``);
+            this.handlePetAction(Number(result.exitCode) === 0 ? 'proud' : 'guard', { silent: true });
+        } catch (error) {
+            this.printError(`Sandbox failed: ${error.message}`);
+            this.handlePetAction('guard', { silent: true });
+        } finally {
+            this.setStatus('ready');
+        }
+    }
+
     async listTools(category = null) {
+        this.setActiveVoxelTool('tools');
         try {
             const toolResponse = await api.getAvailableTools(category);
             const tools = Array.isArray(toolResponse) ? toolResponse : (toolResponse.tools || []);
@@ -1448,6 +1672,7 @@ Type any message to chat with the AI.
             return;
         }
 
+        this.setActiveVoxelTool('tools');
         this.setStatus('thinking');
         try {
             const doc = await api.getToolDoc(toolId);
@@ -1478,7 +1703,9 @@ Type any message to chat with the AI.
             }
         }
 
+        this.setActiveVoxelTool('tools');
         this.setStatus('thinking');
+        this.recordVoxelToolUse('tool');
         try {
             const invocation = await api.invokeTool(toolId, params);
             const serialized = JSON.stringify(invocation?.result, null, 2);

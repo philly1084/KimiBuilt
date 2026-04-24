@@ -18,16 +18,16 @@ describe('workspace-context', () => {
         }));
     });
 
-    test('keeps every workspace key on the single web-chat scope', () => {
-        expect(resolveWorkspaceScopeKey('workspace-3')).toBe('web-chat');
+    test('maps secondary workspace keys to isolated web-chat scopes', () => {
+        expect(resolveWorkspaceScopeKey('workspace-3')).toBe('web-chat-workspace-3');
         expect(buildWorkspaceScopeMetadata(
             { clientSurface: 'web-chat', taskType: 'chat' },
             createWorkspaceContext({ key: 'workspace-3' }),
         )).toEqual(expect.objectContaining({
-            workspaceKey: 'web-chat',
-            workspaceId: 'web-chat',
-            projectScope: 'web-chat',
-            memoryScope: 'web-chat',
+            workspaceKey: 'web-chat-workspace-3',
+            workspaceId: 'web-chat-workspace-3',
+            projectScope: 'web-chat-workspace-3',
+            memoryScope: 'web-chat-workspace-3',
             sessionIsolation: false,
         }));
     });
@@ -41,19 +41,19 @@ describe('workspace-context', () => {
             sessionIsolation: false,
         }));
         expect(createWorkspaceContext({ key: 'workspace-4' })).toEqual(expect.objectContaining({
-            scopeKey: 'web-chat',
+            scopeKey: 'web-chat-workspace-4',
             longTermMemoryEnabled: true,
             persistentMemoryEnabled: true,
         }));
     });
 
-    test('keeps session cache storage shared for the single workspace', () => {
+    test('scopes session cache storage for secondary workspaces', () => {
         expect(resolveWorkspaceScopedStorageKey('kimibuilt_web_chat_sessions_v4', 'workspace-1'))
             .toBe('kimibuilt_web_chat_sessions_v4');
         expect(resolveWorkspaceScopedStorageKey('kimibuilt_web_chat_sessions_v4', 'workspace-4'))
-            .toBe('kimibuilt_web_chat_sessions_v4');
+            .toBe('kimibuilt_web_chat_sessions_v4:workspace-4');
         expect(resolveWorkspaceScopedStorageKey('kimibuilt_web_chat_deleted_sessions_v1', 'workspace-4'))
-            .toBe('kimibuilt_web_chat_deleted_sessions_v1');
+            .toBe('kimibuilt_web_chat_deleted_sessions_v1:workspace-4');
         expect(resolveWorkspaceScopedStorageKey('kimibuilt_theme', 'workspace-4'))
             .toBe('kimibuilt_theme');
     });
@@ -63,7 +63,7 @@ describe('workspace-context', () => {
             .toEqual(expect.objectContaining({
                 key: 'workspace-2',
                 label: 'Ops',
-                scopeKey: 'web-chat',
+                scopeKey: 'web-chat-workspace-2',
                 embedded: true,
             }));
     });

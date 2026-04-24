@@ -228,6 +228,7 @@ async function persistForegroundTurnMessages(sessionStore, sessionId, messages =
                     isStreaming: false,
                     pendingForeground: false,
                     liveState: null,
+                    progressState: null,
                 },
             }
             : message;

@@ -4842,18 +4842,18 @@ function recoverEmptyModelResponse(response = null, {
 
 function getRemoteBuildAutonomyBudget() {
     return {
-        maxRounds: Math.max(1, Number(config.runtime?.remoteBuildMaxAutonomousRounds) || 8),
-        maxToolCalls: Math.max(1, Number(config.runtime?.remoteBuildMaxAutonomousToolCalls) || 24),
-        maxDurationMs: Math.max(1000, Number(config.runtime?.remoteBuildMaxAutonomousMs) || 120000),
+        maxRounds: Math.max(1, Number(config.runtime?.remoteBuildMaxAutonomousRounds) || 20),
+        maxToolCalls: Math.max(1, Number(config.runtime?.remoteBuildMaxAutonomousToolCalls) || 80),
+        maxDurationMs: Math.max(1000, Number(config.runtime?.remoteBuildMaxAutonomousMs) || 600000),
     };
 }
 
 function getRemoteBuildAutonomyExtensionBudget() {
     return {
-        maxUses: Math.max(0, Number(config.runtime?.remoteBuildBudgetExtensionMaxUses) || 0),
-        rounds: Math.max(0, Number(config.runtime?.remoteBuildBudgetExtensionRounds) || 0),
-        toolCalls: Math.max(0, Number(config.runtime?.remoteBuildBudgetExtensionToolCalls) || 0),
-        durationMs: Math.max(0, Number(config.runtime?.remoteBuildBudgetExtensionMs) || 0),
+        maxUses: Math.max(0, Number(config.runtime?.remoteBuildBudgetExtensionMaxUses) || 6),
+        rounds: Math.max(0, Number(config.runtime?.remoteBuildBudgetExtensionRounds) || 8),
+        toolCalls: Math.max(0, Number(config.runtime?.remoteBuildBudgetExtensionToolCalls) || 32),
+        durationMs: Math.max(0, Number(config.runtime?.remoteBuildBudgetExtensionMs) || 180000),
     };
 }
 

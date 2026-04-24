@@ -1931,6 +1931,10 @@ describe('ConversationOrchestrator', () => {
     });
 
     test('plans and executes remote-build tool steps explicitly', async () => {
+        const originalSingleRoundStop = config.runtime.remoteBuildConfigDefaultSingleRoundStop;
+        config.runtime.remoteBuildConfigDefaultSingleRoundStop = true;
+
+        try {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
             host: '10.0.0.5',
@@ -2011,6 +2015,9 @@ describe('ConversationOrchestrator', () => {
         expect(result.response.metadata.toolEvents).toHaveLength(1);
         expect(result.response.metadata.executionProfile).toBe('remote-build');
         expect(result.output).toBe('Deployment is healthy.');
+        } finally {
+            config.runtime.remoteBuildConfigDefaultSingleRoundStop = originalSingleRoundStop;
+        }
     });
 
     test('pins remote-build remote-command steps to the trusted SSH target when the planner invents a bogus host', async () => {
@@ -2798,10 +2805,12 @@ describe('ConversationOrchestrator', () => {
 
     test('adds a yes-no user checkpoint when the autonomous time budget is exhausted on web chat', async () => {
         const originalMaxMs = config.runtime.remoteBuildMaxAutonomousMs;
+        const originalContinuationCheckpointEnabled = config.runtime.remoteBuildContinuationCheckpointEnabled;
         const nowSpy = jest.spyOn(Date, 'now');
         let currentNow = 1760001000000;
         nowSpy.mockImplementation(() => currentNow);
         config.runtime.remoteBuildMaxAutonomousMs = 1000;
+        config.runtime.remoteBuildContinuationCheckpointEnabled = true;
 
         try {
             settingsController.getEffectiveSshConfig.mockReturnValue({
@@ -2939,6 +2948,7 @@ describe('ConversationOrchestrator', () => {
             });
         } finally {
             config.runtime.remoteBuildMaxAutonomousMs = originalMaxMs;
+            config.runtime.remoteBuildContinuationCheckpointEnabled = originalContinuationCheckpointEnabled;
             nowSpy.mockRestore();
         }
     });

@@ -36,6 +36,15 @@
         lastDone: null,
     };
 
+    function getCurrentSessionId() {
+        return String(window.sessionManager?.currentSessionId || window.apiClient?.getSessionId?.() || '').trim();
+    }
+
+    function isCurrentSessionId(sessionId = '') {
+        const normalizedSessionId = String(sessionId || '').trim();
+        return Boolean(normalizedSessionId) && normalizedSessionId === getCurrentSessionId();
+    }
+
     function injectStyles() {
         const style = document.createElement('style');
         style.textContent = `
@@ -286,7 +295,7 @@
     }
 
     async function fetchArtifacts() {
-        const sessionId = window.sessionManager?.currentSessionId || window.apiClient?.getSessionId?.();
+        const sessionId = getCurrentSessionId();
         if (!sessionId || window.sessionManager?.isLocalSession?.(sessionId)) {
             state.artifacts = [];
             renderSelectedChips();
@@ -296,18 +305,24 @@
         try {
             const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/artifacts`);
             if (response.status === 404 || response.status === 503) {
+                if (!isCurrentSessionId(sessionId)) {
+                    return;
+                }
                 state.artifacts = [];
                 renderSelectedChips();
                 return;
             }
             if (!response.ok) return;
             const data = await response.json();
+            if (!isCurrentSessionId(sessionId)) {
+                return;
+            }
             state.artifacts = data.artifacts || [];
-            
+
             // Sync with file manager if available
             if (window.fileManager) {
                 state.artifacts.forEach(artifact => {
-                    window.fileManager.addFile(artifact);
+                    window.fileManager.addFile(artifact, { sessionId });
                 });
             }
             
@@ -760,7 +775,7 @@
             container.appendChild(card);
 
             if (window.fileManager) {
-                window.fileManager.addFile(artifact);
+                window.fileManager.addFile(artifact, { sessionId: getCurrentSessionId() });
             }
 
             window.uiHelpers?.renderMermaidDiagrams?.(card);
@@ -892,8 +907,10 @@
         window.chatApp.handleDone = function(...args) {
             if (originalHandleDone) originalHandleDone(...args);
             if (state.lastDone?.artifacts?.length) {
-                if (window.sessionManager?.currentSessionId) {
-                    const sessionId = window.sessionManager.currentSessionId;
+                const completedArtifactState = state.lastDone;
+                const sessionId = String(completedArtifactState.sessionId || getCurrentSessionId()).trim();
+                const isCurrentSession = isCurrentSessionId(sessionId);
+                if (sessionId) {
                     const messages = window.sessionManager.getMessages(sessionId) || [];
                     const lastMessage = [...messages].reverse().find((message) => (
                         message
@@ -926,17 +943,22 @@
                         }
                         lastMessage.metadata = nextMetadata;
                         window.sessionManager.saveToStorage?.();
-                        if (lastMessage.id && window.chatApp?.renderOrReplaceMessage) {
+                        if (isCurrentSession && lastMessage.id && window.chatApp?.renderOrReplaceMessage) {
                             window.chatApp.renderOrReplaceMessage(lastMessage);
                         }
                     }
                 }
-                state.artifacts = [...state.lastDone.artifacts, ...state.artifacts.filter((artifact) => !state.lastDone.artifacts.find((next) => next.id === artifact.id))];
-                state.lastDone.artifacts.forEach((artifact) => {
-                    window.fileManager?.addFile?.(artifact);
-                });
-                state.selectedArtifactIds = [];
-                renderSelectedChips();
+                if (isCurrentSession) {
+                    state.artifacts = [
+                        ...completedArtifactState.artifacts,
+                        ...state.artifacts.filter((artifact) => !completedArtifactState.artifacts.find((next) => next.id === artifact.id)),
+                    ];
+                    completedArtifactState.artifacts.forEach((artifact) => {
+                        window.fileManager?.addFile?.(artifact, { sessionId });
+                    });
+                    state.selectedArtifactIds = [];
+                    renderSelectedChips();
+                }
                 state.lastDone = null;
             } else {
                 fetchArtifacts();
