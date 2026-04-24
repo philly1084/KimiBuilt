@@ -234,6 +234,60 @@ describe('SessionStore recent message continuity', () => {
         expect(sessions.map((session) => session.id)).toEqual(['web-chat-session']);
     });
 
+    test('list keeps parallel web-chat workspaces in their own scopes', async () => {
+        const store = new SessionStore();
+        store.initialized = true;
+        store.usePostgres = false;
+
+        await store.create({
+            mode: 'chat',
+            clientSurface: 'web-chat',
+            workspaceKey: 'web-chat',
+            ownerId: 'phill',
+        }, 'workspace-1-session');
+        await store.create({
+            mode: 'chat',
+            clientSurface: 'web-chat',
+            workspaceKey: 'web-chat-workspace-2',
+            ownerId: 'phill',
+        }, 'workspace-2-session');
+
+        await expect(store.list({
+            ownerId: 'phill',
+            scopeKey: 'web-chat',
+        })).resolves.toEqual([
+            expect.objectContaining({ id: 'workspace-1-session' }),
+        ]);
+        await expect(store.list({
+            ownerId: 'phill',
+            scopeKey: 'web-chat-workspace-2',
+        })).resolves.toEqual([
+            expect.objectContaining({ id: 'workspace-2-session' }),
+        ]);
+    });
+
+    test('list still allows project scope lookup inside a web-chat workspace', async () => {
+        const store = new SessionStore();
+        store.initialized = true;
+        store.usePostgres = false;
+
+        await store.create({
+            mode: 'chat',
+            clientSurface: 'web-chat',
+            workspaceKey: 'web-chat-workspace-2',
+            projectKey: 'project-alpha',
+            memoryScope: 'project-alpha',
+            ownerId: 'phill',
+        }, 'workspace-project-session');
+
+        await expect(store.list({
+            ownerId: 'phill',
+            scopeKey: 'project-alpha',
+        })).resolves.toEqual([
+            expect.objectContaining({ id: 'workspace-project-session' }),
+        ]);
+    });
+
     test('listMessages returns the full persisted transcript, not just the recent continuity window', async () => {
         const store = new SessionStore();
         store.initialized = true;

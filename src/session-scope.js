@@ -442,6 +442,21 @@ function sessionMatchesScope(session = null, scopeKey = DEFAULT_SESSION_SCOPE) {
 
   const normalizedScopeKey = normalizeSessionScopeKey(scopeKey);
   const metadata = getPlainObject(session?.metadata);
+  const explicitWorkspaceScope = firstNormalizedValue([
+    metadata.workspaceKey,
+    metadata.workspace_key,
+    metadata.workspaceId,
+    metadata.workspace_id,
+  ]);
+  const isWebChatWorkspaceScope = normalizedScopeKey === 'web-chat'
+    || normalizedScopeKey.startsWith('web-chat-workspace-');
+  const hasWebChatWorkspaceScope = explicitWorkspaceScope === 'web-chat'
+    || String(explicitWorkspaceScope || '').startsWith('web-chat-workspace-');
+
+  if (hasWebChatWorkspaceScope && isWebChatWorkspaceScope && explicitWorkspaceScope !== normalizedScopeKey) {
+    return false;
+  }
+
   const candidateScopes = new Set([
     resolveSessionScope(metadata, session),
     resolveClientSurface(metadata, session),

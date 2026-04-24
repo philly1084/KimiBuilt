@@ -40,6 +40,7 @@ const {
     hasExplicitPodcastIntent,
     extractExplicitPodcastTopic,
 } = require('./podcast/podcast-intent');
+const { extractArtifactsFromToolEvents } = require('./runtime-artifacts');
 const DOCUMENT_WORKFLOW_TOOL_ID = 'document-workflow';
 const DEEP_RESEARCH_PRESENTATION_TOOL_ID = 'deep-research-presentation';
 
@@ -456,10 +457,32 @@ function parseErrorMessage(errorBody, status) {
     }
 }
 
+function isUnsupportedImageResponseFormatError(errorBody = '', status = 0) {
+    if (![400, 422].includes(Number(status))) {
+        return false;
+    }
+
+    const normalized = String(errorBody || '').toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return (
+        /response[_ -]?format/.test(normalized)
+        || /\bb64_json\b/.test(normalized)
+    ) && (
+        /\b(unsupported|not supported|unknown|invalid|unexpected|additional properties are not allowed|not allowed|not permitted|unrecognized)\b/.test(normalized)
+    );
+}
+
 async function postImageGeneration(params) {
     const imageProvider = getImageProviderConfig();
     const configuredBaseURL = String(imageProvider.baseURL || 'https://api.openai.com/v1').replace(/\/$/, '');
     const candidateBaseURLs = [configuredBaseURL];
+    const preferredParams = {
+        ...params,
+        response_format: 'b64_json',
+    };
 
     if (/\/v1$/i.test(configuredBaseURL) && imageProvider.source !== 'official-openai') {
         candidateBaseURLs.push(configuredBaseURL.replace(/\/v1$/i, ''));
@@ -468,28 +491,42 @@ async function postImageGeneration(params) {
     let lastError = null;
 
     for (const baseURL of candidateBaseURLs) {
-        const response = await fetch(`${baseURL}/images/generations`, {
-            method: 'POST',
-            headers: {
-                Authorization: `Bearer ${imageProvider.apiKey}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(params),
-        });
+        const requestVariants = [preferredParams, params];
 
-        if (response.ok) {
-            return response.json();
-        }
+        for (let index = 0; index < requestVariants.length; index += 1) {
+            const requestBody = requestVariants[index];
+            const response = await fetch(`${baseURL}/images/generations`, {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${imageProvider.apiKey}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestBody),
+            });
 
-        const errorBody = await response.text();
-        const error = new Error(parseErrorMessage(errorBody, response.status));
-        error.status = response.status;
-        error.baseURL = baseURL;
-        error.provider = imageProvider.source;
-        lastError = error;
+            if (response.ok) {
+                return response.json();
+            }
 
-        if (response.status !== 404) {
-            throw error;
+            const errorBody = await response.text();
+            const error = new Error(parseErrorMessage(errorBody, response.status));
+            error.status = response.status;
+            error.baseURL = baseURL;
+            error.provider = imageProvider.source;
+            lastError = error;
+
+            const responseFormatFallbackAllowed = index === 0
+                && response.status !== 404
+                && isUnsupportedImageResponseFormatError(errorBody, response.status);
+            if (responseFormatFallbackAllowed) {
+                continue;
+            }
+
+            if (response.status !== 404) {
+                throw error;
+            }
+
+            break;
         }
     }
 
@@ -3303,6 +3340,55 @@ async function runDeterministicToolPreflight({
     };
 }
 
+function isPreviewableDirectArtifact(artifact = {}) {
+    const format = String(artifact?.format || '').toLowerCase();
+    const filename = String(artifact?.filename || '').toLowerCase();
+
+    if (artifact?.previewUrl || artifact?.bundleDownloadUrl) {
+        return true;
+    }
+
+    return ['html', 'mermaid'].includes(format)
+        || ['.html', '.htm', '.mmd', '.mermaid'].some((ext) => filename.endsWith(ext));
+}
+
+function buildDirectArtifactSummary(toolEvent = {}) {
+    const artifacts = extractArtifactsFromToolEvents([toolEvent]);
+    if (artifacts.length === 0) {
+        return '';
+    }
+
+    const hasPreview = artifacts.some((artifact) => isPreviewableDirectArtifact(artifact));
+    const actionLabel = hasPreview ? 'Preview and Download below.' : 'Use Download below.';
+
+    if (artifacts.length === 1) {
+        return `Created ${artifacts[0].filename || 'the requested file'}. ${actionLabel}`;
+    }
+
+    return `Created ${artifacts.length} files. ${actionLabel}`;
+}
+
+function buildDirectImageToolSummary(result = {}) {
+    const data = result?.data || {};
+    const images = Array.isArray(data.images) ? data.images.filter((image) => image && typeof image === 'object') : [];
+    const count = Math.max(
+        Number(data.count) || 0,
+        Number(data.requestedCount) || 0,
+        images.length,
+        data.image ? 1 : 0,
+    );
+
+    if (!count) {
+        return '';
+    }
+
+    if (count === 1) {
+        return 'Generated 1 image. Open or download it below.';
+    }
+
+    return `Generated ${count} image options. Select one below.`;
+}
+
 function formatDirectToolResultMessage(toolEvent = {}) {
     const toolId = toolEvent?.toolCall?.function?.name || toolEvent?.result?.toolId || 'tool';
     const result = toolEvent?.result || {};
@@ -3378,6 +3464,10 @@ function formatDirectToolResultMessage(toolEvent = {}) {
         return sections.join('\n\n');
     }
 
+    if (toolId === 'image-generate') {
+        return buildDirectImageToolSummary(result) || 'Generated image output.';
+    }
+
     if (toolId === 'agent-workload') {
         if (!result.success) {
             return `Workload request failed: ${result.error || 'Unknown error'}`;
@@ -3397,6 +3487,11 @@ function formatDirectToolResultMessage(toolEvent = {}) {
         }
 
         return JSON.stringify(data, null, 2);
+    }
+
+    const artifactSummary = buildDirectArtifactSummary(toolEvent);
+    if (artifactSummary) {
+        return artifactSummary;
     }
 
     if (toolId === USER_CHECKPOINT_TOOL_ID) {
@@ -4733,6 +4828,7 @@ module.exports = {
         collectInputSystemMessages,
         extractExplicitWebResearchQuery,
         extractRequestedDirectoryPath,
+        formatDirectToolResultMessage,
         getResponseApiText,
         getChatCompletionText,
         hashPromptText,

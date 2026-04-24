@@ -810,6 +810,10 @@ class ChatApp {
             this.remapSessionScopedState(e.detail.previousSessionId, e.detail.sessionId);
             this.subscribeToSessionUpdates(e.detail.sessionId);
             this.loadSessionWorkloads(e.detail.sessionId);
+            const promotedMessages = Array.isArray(e.detail.messages) ? e.detail.messages : [];
+            promotedMessages.forEach((message) => {
+                this.persistSessionMessageIfNeeded(e.detail.sessionId, message);
+            });
         });
     }
 

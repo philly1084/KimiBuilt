@@ -6419,6 +6419,18 @@ class UIHelpers {
             themeColorMeta.setAttribute('content', preset.metaColor || (preset.mode === 'light' ? '#f4f7fb' : '#0a1018'));
         }
 
+        if (window.parent && window.parent !== window) {
+            try {
+                window.parent.postMessage({
+                    type: 'kimibuilt-web-chat-theme-state',
+                    mode: preset.mode,
+                    preset: preset.id,
+                }, window.location.origin);
+            } catch (_error) {
+                // Ignore postMessage failures inside standalone chat windows.
+            }
+        }
+
         this.refreshMermaidTheme(preset.mode);
         this.updateThemeUI();
         this.updateMobileActionSheetUI();

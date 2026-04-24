@@ -47,6 +47,9 @@ describe('managed app scaffold', () => {
         expect(workflow.content).toContain('KIMIBUILT_BUILD_EVENTS_INSECURE');
         expect(workflow.content).toContain('"buildStatus":"$build_status"');
         expect(workflow.content).toContain('"deployRequested":true');
+        expect(workflow.content).toContain('--post-file="$payload_file"');
+        expect(workflow.content).not.toContain('--method=POST');
+        expect(workflow.content).not.toContain('--body-file="$payload_file"');
         expect(workflow.content).not.toContain('uses: actions/checkout@v4');
         expect(workflow.content).not.toContain('secrets.GITEA_REGISTRY_USERNAME');
     });

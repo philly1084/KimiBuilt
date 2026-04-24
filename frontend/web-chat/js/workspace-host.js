@@ -1,4 +1,5 @@
 (function initWorkspaceHost() {
+    const gatewayHelpers = window.KimiBuiltGatewaySSE || {};
     const workspaceHelpers = window.KimiBuiltWebChatWorkspace;
     const tabsRoot = document.getElementById('workspace-tabs');
     const panelsRoot = document.getElementById('workspace-panels');
@@ -24,20 +25,36 @@
     const ACTIVE_WORKSPACE_STORAGE_KEY = 'kimibuilt_web_chat_workspace_host_active';
     const THEME_PRESET_STORAGE_KEY = 'kimibuilt_theme_preset';
     const THEME_MODE_STORAGE_KEY = 'kimibuilt_theme';
+    const API_BASE_URL = window.location.hostname === 'localhost'
+        ? 'http://localhost:3000/api'
+        : `${window.location.protocol}//${window.location.host}/api`;
+    const buildGatewayHeaders = gatewayHelpers.buildGatewayHeaders || ((headers) => headers);
     const workspaces = workspaceHelpers.listWorkspaceContexts();
     const panelsByKey = new Map();
     const tabsByKey = new Map();
     let activeWorkspaceKey = workspaceHelpers.DEFAULT_WORKSPACE_KEY;
     let isSwitcherOpen = false;
 
+    function normalizeThemeMode(value = '') {
+        return String(value || '').trim().toLowerCase() === 'light' ? 'light' : 'dark';
+    }
+
+    function normalizeThemePreset(value = '', mode = 'dark') {
+        const normalizedPreset = String(value || '').trim().toLowerCase();
+        if (normalizedPreset) {
+            return normalizedPreset;
+        }
+
+        return mode === 'light' ? 'paper' : 'obsidian';
+    }
+
     function readStoredTheme() {
         try {
-            const storedMode = String(localStorage.getItem(THEME_MODE_STORAGE_KEY) || '').trim().toLowerCase();
-            const storedPreset = String(localStorage.getItem(THEME_PRESET_STORAGE_KEY) || '').trim().toLowerCase();
-            const mode = storedMode === 'light' ? 'light' : 'dark';
+            const storedMode = normalizeThemeMode(localStorage.getItem(THEME_MODE_STORAGE_KEY));
+            const storedPreset = normalizeThemePreset(localStorage.getItem(THEME_PRESET_STORAGE_KEY), storedMode);
             return {
                 mode,
-                preset: storedPreset || (mode === 'light' ? 'paper' : 'obsidian'),
+                preset: storedPreset,
             };
         } catch (_error) {
             return {
@@ -58,11 +75,45 @@
         metaThemeColor.setAttribute('content', nextColor);
     }
 
-    function applyStoredTheme() {
-        const theme = readStoredTheme();
-        document.documentElement.setAttribute('data-theme', theme.mode);
-        document.documentElement.setAttribute('data-chat-theme', theme.preset);
+    function applyTheme(theme = {}) {
+        const mode = normalizeThemeMode(theme.mode);
+        const preset = normalizeThemePreset(theme.preset, mode);
+        document.documentElement.setAttribute('data-theme', mode);
+        document.documentElement.setAttribute('data-chat-theme', preset);
         syncThemeMetaColor();
+    }
+
+    async function loadRemoteTheme() {
+        const response = await fetch(`${API_BASE_URL}/preferences/web-chat`, {
+            method: 'GET',
+            headers: buildGatewayHeaders({
+                'Accept': 'application/json',
+            }),
+            credentials: 'same-origin',
+            cache: 'no-store',
+        });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const payload = await response.json();
+        const preferences = payload?.preferences && typeof payload.preferences === 'object' && !Array.isArray(payload.preferences)
+            ? payload.preferences
+            : {};
+        const mode = normalizeThemeMode(preferences[THEME_MODE_STORAGE_KEY]);
+
+        return {
+            mode,
+            preset: normalizeThemePreset(preferences[THEME_PRESET_STORAGE_KEY], mode),
+        };
+    }
+
+    async function hydrateRemoteTheme() {
+        try {
+            applyTheme(await loadRemoteTheme());
+        } catch (_error) {
+            // Leave the seeded local theme in place when synced preferences are unavailable.
+        }
     }
 
     function getWorkspaceNumber(workspace) {
@@ -303,6 +354,14 @@
             }
 
             const messageType = String(event.data?.type || '').trim();
+            if (messageType === 'kimibuilt-web-chat-theme-state') {
+                applyTheme({
+                    mode: event.data?.mode,
+                    preset: event.data?.preset,
+                });
+                return;
+            }
+
             if (messageType !== 'kimibuilt-web-chat-activate-workspace') {
                 return;
             }
@@ -315,11 +374,12 @@
                 return;
             }
 
-            applyStoredTheme();
+            applyTheme(readStoredTheme());
         });
     }
 
-    applyStoredTheme();
+    applyTheme(readStoredTheme());
+    void hydrateRemoteTheme();
     renderTabs();
     setupSwitcherControls();
     setupKeyboardShortcuts();

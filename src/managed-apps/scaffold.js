@@ -216,7 +216,7 @@ jobs:
             if [ -n "\${header_secret:-}" ]; then
               wget_headers+=(--header "X-KimiBuilt-Webhook-Secret: $header_secret")
             fi
-            wget -qO- --method=POST "\${wget_headers[@]}" --body-file="$payload_file" "$target_url" >/dev/null
+            wget -qO- "\${wget_headers[@]}" --post-file="$payload_file" "$target_url" >/dev/null
             exit 0
           fi
           echo "curl or wget is required to notify KimiBuilt." >&2

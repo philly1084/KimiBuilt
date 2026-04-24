@@ -721,6 +721,7 @@ class SessionManager extends EventTarget {
 
             await this.pruneBlankSessions();
             this.saveToStorage();
+            await this.promoteRecoveredLocalSessions();
         } catch (error) {
             console.warn('Failed to load backend sessions, using local cache:', error);
         }
@@ -894,6 +895,88 @@ class SessionManager extends EventTarget {
 
         if (removedIds.has(this.currentSessionId)) {
             this.currentSessionId = this.sessions[0]?.id || null;
+        }
+    }
+
+    async promoteRecoveredLocalSessions() {
+        const recoveredSessions = this.sessions.filter((session) => (
+            this.isLocalSession(session.id)
+            && session.recoveredFromCache === true
+            && !this.isBlankSession(session)
+        ));
+
+        if (recoveredSessions.length === 0) {
+            return [];
+        }
+
+        const promoted = [];
+        for (const session of recoveredSessions) {
+            const promotedSession = await this.promoteLocalSessionToBackend(session);
+            if (promotedSession) {
+                promoted.push(promotedSession);
+            }
+        }
+
+        return promoted;
+    }
+
+    async promoteLocalSessionToBackend(localSession) {
+        const previousSessionId = String(localSession?.id || '').trim();
+        if (!previousSessionId || !this.isLocalSession(previousSessionId)) {
+            return null;
+        }
+
+        const metadata = localSession?.metadata && typeof localSession.metadata === 'object' && !Array.isArray(localSession.metadata)
+            ? localSession.metadata
+            : {};
+        const mode = localSession.mode || metadata.mode || SESSION_MANAGER_TASK_TYPE;
+        const title = this.normalizeSessionTitle(localSession.title || metadata.title || '', '');
+        const model = normalizeSessionModel(localSession.model || metadata.model || SESSION_DEFAULT_MODEL);
+
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/sessions`, {
+                method: 'POST',
+                headers: buildSessionGatewayHeaders({
+                    'Content-Type': 'application/json',
+                }),
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    taskType: SESSION_MANAGER_TASK_TYPE,
+                    clientSurface: SESSION_MANAGER_CLIENT_SURFACE,
+                    workspaceKey: this.workspaceContext.scopeKey,
+                    metadata: buildSessionWorkspaceMetadata({
+                        ...metadata,
+                        mode,
+                        title,
+                        model,
+                        taskType: SESSION_MANAGER_TASK_TYPE,
+                        clientSurface: SESSION_MANAGER_CLIENT_SURFACE,
+                    }),
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            const backendSession = await response.json();
+            const backendSessionId = String(backendSession?.id || '').trim();
+            if (!backendSessionId) {
+                throw new Error('Backend session response did not include an id');
+            }
+
+            this.promoteSessionId(previousSessionId, backendSessionId);
+            const messages = this.getMessages(backendSessionId);
+            await Promise.all(messages.map((message) => this.syncMessageToBackend(backendSessionId, message)));
+
+            if (title && title !== 'New Chat') {
+                await this.persistSessionMetadata(backendSessionId, { title });
+            }
+
+            return this.sessions.find((entry) => entry.id === backendSessionId) || null;
+        } catch (error) {
+            console.warn('Failed to promote cached workspace session to backend:', error);
+            return null;
         }
     }
 

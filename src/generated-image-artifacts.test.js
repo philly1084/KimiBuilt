@@ -1,3 +1,7 @@
+const fs = require('fs/promises');
+const os = require('os');
+const path = require('path');
+
 jest.mock('./artifacts/artifact-service', () => ({
     artifactService: {
         createStoredArtifact: jest.fn(),
@@ -112,5 +116,37 @@ describe('generated-image-artifacts', () => {
             url: '/api/artifacts/artifact-1/download?inline=1',
             artifactId: 'artifact-1',
         }));
+    });
+
+    test('reads sandbox file urls when the provider returns local image paths', async () => {
+        const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-image-'));
+        const localImagePath = path.join(tempDir, 'generated-image.png');
+
+        try {
+            await fs.writeFile(localImagePath, Buffer.from([0, 1, 2, 3]));
+
+            const result = await persistGeneratedImages({
+                sessionId: 'session-1',
+                sourceMode: 'image',
+                prompt: 'Travel dashboard hero',
+                model: 'gateway-image-model',
+                images: [{
+                    url: `sandbox:${localImagePath.replace(/\\/g, '/')}`,
+                    revised_prompt: 'Travel dashboard hero, editorial collage',
+                }],
+            });
+
+            expect(artifactService.createStoredArtifact).toHaveBeenCalledWith(expect.objectContaining({
+                sessionId: 'session-1',
+                extension: 'png',
+                mimeType: 'image/png',
+            }));
+            expect(result.images[0]).toEqual(expect.objectContaining({
+                url: '/api/artifacts/artifact-1/download?inline=1',
+                artifactId: 'artifact-1',
+            }));
+        } finally {
+            await fs.rm(tempDir, { recursive: true, force: true });
+        }
     });
 });

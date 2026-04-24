@@ -1,3 +1,4 @@
+const fs = require('fs/promises');
 const { artifactService } = require('./artifacts/artifact-service');
 const { config } = require('./config');
 const { sessionStore } = require('./session-store');
@@ -73,6 +74,60 @@ function decodeGeneratedImage(image = {}) {
     }
 
     return decodeDataUrl(image?.url || '');
+}
+
+function resolveGeneratedImageLocalPath(url = '') {
+    const normalized = String(url || '').trim();
+    if (!normalized) {
+        return null;
+    }
+
+    let candidate = normalized;
+    if (/^sandbox:/i.test(candidate)) {
+        candidate = candidate.replace(/^sandbox:/i, '');
+    } else if (!/^(?:file:|\/|[a-z]:[\\/])/i.test(candidate)) {
+        return null;
+    }
+
+    if (/^file:/i.test(candidate)) {
+        try {
+            const parsed = new URL(candidate);
+            candidate = parsed.pathname || '';
+        } catch (_error) {
+            return null;
+        }
+    }
+
+    candidate = decodeURIComponent(String(candidate || '').trim());
+    if (!candidate) {
+        return null;
+    }
+
+    if (/^\/[a-z]:[\\/]/i.test(candidate)) {
+        candidate = candidate.slice(1);
+    }
+
+    return candidate;
+}
+
+async function readGeneratedImageFromLocalPath(image = {}) {
+    const filePath = resolveGeneratedImageLocalPath(image?.url || '');
+    if (!filePath) {
+        return null;
+    }
+
+    try {
+        const buffer = await fs.readFile(filePath);
+        const mimeType = inferMimeTypeFromUrl(filePath);
+        return {
+            mimeType,
+            extension: extensionForMimeType(mimeType),
+            buffer,
+        };
+    } catch (error) {
+        console.warn('[Images] Failed to read generated sandbox image for persistence:', error.message);
+        return null;
+    }
 }
 
 function inferMimeTypeFromUrl(url = '') {
@@ -204,7 +259,9 @@ async function persistGeneratedImages({
     for (let index = 0; index < (Array.isArray(images) ? images : []).length; index += 1) {
         const image = images[index] || {};
         let storedArtifact = null;
-        const decoded = decodeGeneratedImage(image) || await downloadGeneratedImage(image);
+        const decoded = decodeGeneratedImage(image)
+            || await readGeneratedImageFromLocalPath(image)
+            || await downloadGeneratedImage(image);
 
         if (sessionId && decoded?.buffer?.length) {
             try {

@@ -227,6 +227,58 @@ describe('openai-client response threading', () => {
         expect(response.metadata.tokenUsage).toEqual(response.metadata.usage);
     });
 
+    test('summarizes direct artifact tool outputs instead of dumping raw payload JSON', async () => {
+        const { __testUtils } = require('./openai-client');
+
+        const summary = __testUtils.formatDirectToolResultMessage({
+            toolCall: {
+                function: {
+                    name: 'document-workflow',
+                },
+            },
+            result: {
+                success: true,
+                toolId: 'document-workflow',
+                data: {
+                    artifact: {
+                        id: 'artifact-html-1',
+                        filename: 'dashboard.html',
+                        mimeType: 'text/html',
+                        downloadUrl: '/api/artifacts/artifact-html-1/download',
+                        previewUrl: '/api/artifacts/artifact-html-1/preview',
+                    },
+                },
+            },
+        });
+
+        expect(summary).toBe('Created dashboard.html. Preview and Download below.');
+    });
+
+    test('summarizes direct image tool outputs without exposing raw provider payloads', async () => {
+        const { __testUtils } = require('./openai-client');
+
+        const summary = __testUtils.formatDirectToolResultMessage({
+            toolCall: {
+                function: {
+                    name: 'image-generate',
+                },
+            },
+            result: {
+                success: true,
+                toolId: 'image-generate',
+                data: {
+                    count: 2,
+                    images: [
+                        { url: 'sandbox:/mnt/data/0.png' },
+                        { url: 'sandbox:/mnt/data/1.png' },
+                    ],
+                },
+            },
+        });
+
+        expect(summary).toBe('Generated 2 image options. Select one below.');
+    });
+
     test('aggregates usage across responses tool-loop rounds', async () => {
         const { __testUtils } = require('./openai-client');
         const openai = {
