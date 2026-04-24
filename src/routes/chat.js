@@ -700,20 +700,22 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                         effectiveSession,
                         toolEvents,
                     );
-                    const generatedArtifacts = await maybeGenerateOutputArtifact({
-                        sessionId,
-                        session: effectiveSession,
-                        mode: taskType,
-                        outputFormat: effectiveOutputFormat,
-                        content: fullText,
-                        prompt: message,
-                        title: 'chat-output',
-                        responseId: event.response.id,
-                        artifactIds,
-                        model,
-                        reasoningEffort,
-                        recentMessages: await sessionStore.getRecentMessages(sessionId, WORKLOAD_PREFLIGHT_RECENT_LIMIT),
-                    });
+                    const generatedArtifacts = effectiveOutputFormat
+                        ? await maybeGenerateOutputArtifact({
+                            sessionId,
+                            session: effectiveSession,
+                            mode: taskType,
+                            outputFormat: effectiveOutputFormat,
+                            content: fullText,
+                            prompt: message,
+                            title: 'chat-output',
+                            responseId: event.response.id,
+                            artifactIds,
+                            model,
+                            reasoningEffort,
+                            recentMessages: await sessionStore.getRecentMessages(sessionId, WORKLOAD_PREFLIGHT_RECENT_LIMIT),
+                        })
+                        : [];
                     const artifacts = mergeRuntimeArtifacts(
                         extractArtifactsFromToolEvents(toolEvents),
                         generatedArtifacts,
@@ -850,20 +852,22 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             effectiveSession,
             response?.metadata?.toolEvents || [],
         );
-        const generatedArtifacts = await maybeGenerateOutputArtifact({
-            sessionId,
-            session: effectiveSession,
-            mode: taskType,
-            outputFormat: effectiveOutputFormat,
-            content: outputText,
-            prompt: message,
-            title: 'chat-output',
-            responseId: response.id,
-            artifactIds,
-            model,
-            reasoningEffort,
-            recentMessages: await sessionStore.getRecentMessages(sessionId, WORKLOAD_PREFLIGHT_RECENT_LIMIT),
-        });
+        const generatedArtifacts = effectiveOutputFormat
+            ? await maybeGenerateOutputArtifact({
+                sessionId,
+                session: effectiveSession,
+                mode: taskType,
+                outputFormat: effectiveOutputFormat,
+                content: outputText,
+                prompt: message,
+                title: 'chat-output',
+                responseId: response.id,
+                artifactIds,
+                model,
+                reasoningEffort,
+                recentMessages: await sessionStore.getRecentMessages(sessionId, WORKLOAD_PREFLIGHT_RECENT_LIMIT),
+            })
+            : [];
         const artifacts = mergeRuntimeArtifacts(
             extractArtifactsFromToolEvents(response?.metadata?.toolEvents || []),
             generatedArtifacts,

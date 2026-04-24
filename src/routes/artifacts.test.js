@@ -128,6 +128,29 @@ describe('/api/artifacts route', () => {
         expect(response.headers['cross-origin-resource-policy']).toBe('cross-origin');
     });
 
+    test('serves sandbox shells for generated previews', async () => {
+        artifactService.getArtifact.mockResolvedValue({
+            id: 'artifact-site-1',
+            sessionId: 'session-1',
+            filename: 'interactive.html',
+            extension: 'html',
+            previewHtml: '<!DOCTYPE html><html><body><script>window.ready=true</script></body></html>',
+            metadata: {},
+        });
+        sessionStore.getOwned.mockResolvedValue({
+            id: 'session-1',
+            metadata: { ownerId: 'phill' },
+        });
+
+        const response = await request(buildApp()).get('/api/artifacts/artifact-site-1/sandbox');
+
+        expect(response.status).toBe(200);
+        expect(response.headers['content-type']).toContain('text/html');
+        expect(response.headers['content-security-policy']).toContain("default-src 'none'");
+        expect(response.text).toContain('sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads"');
+        expect(response.text).toContain('src="/api/artifacts/artifact-site-1/preview"');
+    });
+
     test('serves bundled html artifact previews from the server', async () => {
         artifactService.getArtifact.mockResolvedValue({
             id: 'artifact-site-1',

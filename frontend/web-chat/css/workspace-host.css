@@ -210,7 +210,7 @@ body.workspace-host-page {
     font-family: var(--font-display, 'Space Grotesk', sans-serif);
     font-size: 1.18rem;
     font-weight: 700;
-    letter-spacing: -0.03em;
+    letter-spacing: 0;
 }
 
 .workspace-switcher-popover__hint {
@@ -288,7 +288,7 @@ body.workspace-host-page {
     font-family: var(--font-display, 'Space Grotesk', sans-serif);
     font-size: 0.98rem;
     font-weight: 700;
-    letter-spacing: -0.02em;
+    letter-spacing: 0;
     color: var(--workspace-host-text);
 }
 

@@ -7,6 +7,7 @@ const { resolveDeferredWorkloadPreflight } = require('./workloads/preflight');
 const { isDashboardRequest } = require('./dashboard-template-catalog');
 const settingsController = require('./routes/admin/settings.controller');
 const { parseLenientJson } = require('./utils/lenient-json');
+const { isInteractiveDocumentRequest } = require('./artifacts/artifact-experience');
 
 const REMOTE_CONTINUATION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const ALLOWED_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh']);
@@ -408,6 +409,10 @@ function inferRequestedOutputFormat(text = '') {
 
     if (hasExplicitMermaidArtifactIntent(normalized)) {
         return 'mermaid';
+    }
+
+    if (isInteractiveDocumentRequest(normalized)) {
+        return 'html';
     }
 
     if (hasWebsiteArtifactSubject && (

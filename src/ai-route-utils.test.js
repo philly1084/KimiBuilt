@@ -297,6 +297,12 @@ describe('ai-route-utils', () => {
         expect(inferRequestedOutputFormat('Build an executive brief template as a frontend example for our web design system')).toBe('html');
     });
 
+    test('inferRequestedOutputFormat auto-selects html for interactive research documents', () => {
+        expect(inferRequestedOutputFormat('Do some research on AI browser tools and make it an interactive document with filters.')).toBe('html');
+        expect(inferRequestedOutputFormat('Create a source-backed research dashboard about local robotics grants.')).toBe('html');
+        expect(inferRequestedOutputFormat('Do some research on AI browser tools.')).toBeNull();
+    });
+
     test('hasExplicitMermaidFileIntent only returns true for file-like Mermaid requests', () => {
         expect(hasExplicitMermaidFileIntent('Create a Mermaid diagram for the auth flow')).toBe(false);
         expect(hasExplicitMermaidFileIntent('Export this as a Mermaid file')).toBe(true);

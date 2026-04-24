@@ -237,6 +237,7 @@ function normalizeAssistantMetadata(value) {
             format: String(artifact.format || '').trim(),
             downloadUrl: String(artifact.downloadUrl || '').trim(),
             previewUrl: String(artifact.previewUrl || '').trim(),
+            sandboxUrl: String(artifact.sandboxUrl || '').trim(),
             bundleDownloadUrl: String(artifact.bundleDownloadUrl || '').trim(),
         }))
         .filter((artifact) => artifact.id && artifact.downloadUrl);

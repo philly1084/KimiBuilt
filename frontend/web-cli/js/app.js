@@ -9,12 +9,15 @@ class CodeCLIApp {
         this.historyIndex = -1;
         this.currentOutput = '';
         this.isProcessing = false;
-        this.theme = localStorage.getItem('codecli-theme') || 'dark';
+        this.theme = localStorage.getItem('codecli-theme') || 'voxel';
         this.commandHistory = JSON.parse(localStorage.getItem('codecli-cmd-history') || '[]');
         this.autocompleteIndex = -1;
         this.autocompleteMatches = [];
         this.lastResponse = '';
         this.sessionStartTime = Date.now();
+        this.voxel = window.VoxelPets;
+        this.voxelPet = this.loadVoxelPet();
+        this.activePetAction = 'idle';
         
         // Session file storage
         this.sessionFiles = [];
@@ -26,10 +29,10 @@ class CodeCLIApp {
         
         // Available commands for autocomplete
         this.commands = [
-            '/help', '/?', '/clear', '/cls', '/models', '/model', '/theme', 
+            '/help', '/?', '/clear', '/cls', '/models', '/model', '/theme', '/voxel',
             '/export', '/save', '/load', '/copy', '/image', '/image-models', '/unsplash', '/diagram',
             '/upload', '/session', '/history', '/artifacts', '/stats', '/shortcuts', '/keys', '/health', '/tools', '/tool', '/tool-help',
-            '/files', '/ls', '/download', '/open'
+            '/files', '/ls', '/download', '/open', '/pet', '/spawn'
         ];
         
         this.init();
@@ -42,6 +45,7 @@ class CodeCLIApp {
         this.statusDot = document.getElementById('statusDot');
         this.statusText = document.getElementById('statusText');
         this.sessionInfo = document.getElementById('sessionInfo');
+        this.inputPrompt = document.querySelector('.input-prompt');
         this.autocompleteEl = document.getElementById('autocomplete');
         this.shortcutsModal = document.getElementById('shortcutsModal');
         this.cliStatus = document.getElementById('cliStatus');
@@ -51,9 +55,18 @@ class CodeCLIApp {
         this.queueList = null;
         this.queueCount = null;
         this.dragEnterCounter = 0;  // For reliable drag overlay
+        this.voxelDock = document.getElementById('voxelDock');
+        this.voxelPetStage = document.getElementById('voxelPetStage');
+        this.voxelPetName = document.getElementById('voxelPetName');
+        this.voxelPetKind = document.getElementById('voxelPetKind');
+        this.voxelPetMood = document.getElementById('voxelPetMood');
+        this.voxelPetEnergy = document.getElementById('voxelPetEnergy');
+        this.voxelPetSeed = document.getElementById('voxelPetSeed');
+        this.voxelPetPrompt = document.getElementById('voxelPetPrompt');
         
         this.setupEventListeners();
         this.applyTheme(this.theme);
+        this.renderVoxelPet();
         this.initMermaid();
         this.checkConnection();
         this.loadModels();
@@ -66,7 +79,7 @@ class CodeCLIApp {
         if (typeof mermaid !== 'undefined') {
             mermaid.initialize({
                 startOnLoad: false,
-                theme: this.theme === 'dark' ? 'dark' : 'default',
+                theme: this.theme === 'light' ? 'default' : 'dark',
                 securityLevel: 'loose',
                 fontFamily: 'var(--font-family)'
             });
@@ -127,6 +140,15 @@ class CodeCLIApp {
         this.commandInput.addEventListener('input', () => {
             this.updateAutocomplete();
         });
+
+        if (this.voxelPetPrompt) {
+            this.voxelPetPrompt.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.generateVoxelPetFromInput();
+                }
+            });
+        }
         
         // Focus input on click anywhere
         document.addEventListener('click', (e) => {
@@ -188,6 +210,221 @@ class CodeCLIApp {
                 this.cancelDrag();
             }
         });
+    }
+
+    // ==================== Voxel Pet System ====================
+
+    loadVoxelPet() {
+        const generator = this.voxel;
+        if (!generator) {
+            return null;
+        }
+
+        try {
+            const stored = localStorage.getItem('codecli-voxel-pet');
+            if (stored) {
+                return generator.normalize(JSON.parse(stored));
+            }
+        } catch (error) {
+            console.warn('[CLI] Failed to load voxel pet:', error);
+        }
+
+        return generator.generate('curious neon fox with amber goggles');
+    }
+
+    saveVoxelPet() {
+        if (!this.voxelPet) {
+            return;
+        }
+
+        localStorage.setItem('codecli-voxel-pet', JSON.stringify(this.voxelPet));
+    }
+
+    setVoxelPalette() {
+        if (!this.voxelPet?.palette) {
+            return;
+        }
+
+        document.body.style.setProperty('--voxel-pet-primary', this.voxelPet.palette.primary);
+        document.body.style.setProperty('--voxel-pet-secondary', this.voxelPet.palette.secondary);
+        document.body.style.setProperty('--voxel-pet-accent', this.voxelPet.palette.accent);
+    }
+
+    renderVoxelPet(action = this.activePetAction || 'idle') {
+        if (!this.voxel || !this.voxelPetStage || !this.voxelPet) {
+            return;
+        }
+
+        this.setVoxelPalette();
+        this.voxelPetStage.replaceChildren(this.voxel.renderElement(this.voxelPet, { action }));
+
+        if (this.voxelPetName) {
+            this.voxelPetName.textContent = this.voxelPet.name;
+        }
+        if (this.voxelPetKind) {
+            this.voxelPetKind.textContent = `${this.voxelPet.trait} ${this.voxelPet.species}`;
+        }
+        if (this.voxelPetMood) {
+            this.voxelPetMood.textContent = this.voxel.MOODS[this.voxelPet.mood] || this.voxelPet.mood;
+        }
+        if (this.voxelPetEnergy) {
+            this.voxelPetEnergy.style.setProperty('--value', `${this.voxelPet.energy}%`);
+        }
+        if (this.voxelPetSeed) {
+            this.voxelPetSeed.textContent = `Seed: ${this.voxelPet.prompt}`;
+        }
+        if (this.voxelPetPrompt && !this.voxelPetPrompt.value) {
+            this.voxelPetPrompt.value = this.voxelPet.prompt;
+        }
+        if (this.inputPrompt) {
+            this.inputPrompt.textContent = this.getPromptLabel();
+        }
+
+        if (action !== 'idle') {
+            window.clearTimeout(this.voxelActionTimer);
+            this.voxelActionTimer = window.setTimeout(() => {
+                this.activePetAction = 'idle';
+                this.renderVoxelPet('idle');
+            }, 900);
+        }
+    }
+
+    generateVoxelPet(prompt) {
+        if (!this.voxel) {
+            return;
+        }
+
+        const seed = String(prompt || this.voxelPetPrompt?.value || '').trim();
+        if (!seed) {
+            this.printWarning('Usage: /pet <prompt>');
+            return;
+        }
+
+        this.voxelPet = this.voxel.generate(seed);
+        if (this.voxelPetPrompt) {
+            this.voxelPetPrompt.value = seed;
+        }
+        this.activePetAction = 'jump';
+        this.saveVoxelPet();
+        this.renderVoxelPet('jump');
+        this.printPetCard('spawned');
+    }
+
+    generateVoxelPetFromInput() {
+        this.generateVoxelPet(this.voxelPetPrompt?.value || '');
+    }
+
+    async handlePetCommand(args = []) {
+        const subcommand = String(args[0] || '').toLowerCase();
+        const rest = args.slice(1).join(' ').trim();
+
+        if (!subcommand) {
+            this.printPetCard();
+            return;
+        }
+
+        if (['new', 'make', 'generate', 'spawn'].includes(subcommand)) {
+            this.generateVoxelPet(rest);
+            return;
+        }
+
+        if (subcommand === 'act') {
+            this.handlePetAction(rest || 'jump');
+            return;
+        }
+
+        if (subcommand === 'name') {
+            if (!rest) {
+                this.printWarning('Usage: /pet name <name>');
+                return;
+            }
+            this.voxelPet = { ...this.voxelPet, name: rest.slice(0, 28) };
+            this.saveVoxelPet();
+            this.renderVoxelPet('scout');
+            this.printPetCard('renamed');
+            return;
+        }
+
+        if (subcommand === 'hide') {
+            this.voxelDock?.classList.add('hidden');
+            this.printSystem('Voxel pet dock hidden. Use /pet show to restore it.');
+            return;
+        }
+
+        if (subcommand === 'show') {
+            this.voxelDock?.classList.remove('hidden');
+            this.renderVoxelPet('jump');
+            this.printPetCard();
+            return;
+        }
+
+        if (subcommand === 'help') {
+            this.printAI(`## Voxel Pet Commands
+
+  /pet <prompt>          Spawn a prompt-generated voxel pet
+  /pet act <action>      Run jump, dance, scout, guard, or sleep
+  /pet name <name>       Rename the active pet
+  /pet show              Restore the pet dock
+  /pet hide              Hide the pet dock
+
+The pet reacts to prompts while chat responses stream.`);
+            return;
+        }
+
+        this.generateVoxelPet(args.join(' '));
+    }
+
+    handlePetAction(action = 'ready', options = {}) {
+        if (!this.voxel || !this.voxelPet) {
+            return;
+        }
+
+        const normalizedAction = String(action || 'ready').trim().toLowerCase();
+        this.voxelPet = this.voxel.mutate(this.voxelPet, normalizedAction);
+        this.activePetAction = normalizedAction === 'nap' ? 'sleep' : normalizedAction;
+        this.saveVoxelPet();
+        this.renderVoxelPet(this.activePetAction);
+
+        if (!options.silent) {
+            this.printSystem(`${this.voxelPet.name} ${this.voxelPet.lastAction}.`);
+        }
+    }
+
+    reactVoxelPet(input = '', fallbackAction = 'ready') {
+        if (!this.voxel || !this.voxelPet) {
+            return;
+        }
+
+        this.voxelPet = fallbackAction && fallbackAction !== 'auto'
+            ? this.voxel.mutate(this.voxelPet, fallbackAction)
+            : this.voxel.reactToText(this.voxelPet, input);
+        const moodAction = {
+            sleepy: 'sleep',
+            playful: 'dance',
+            thinking: 'scout',
+            proud: 'jump',
+            alert: 'guard',
+            curious: 'scout',
+        };
+        this.activePetAction = moodAction[this.voxelPet.mood] || 'idle';
+        this.saveVoxelPet();
+        this.renderVoxelPet(this.activePetAction);
+    }
+
+    printPetCard(eventLabel = 'status') {
+        if (!this.voxelPet) {
+            return;
+        }
+
+        const mood = this.voxel?.MOODS?.[this.voxelPet.mood] || this.voxelPet.mood;
+        this.printAI(`## ${this.voxelPet.name}
+
+${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} | ${eventLabel}
+
+- Mood: ${mood}
+- Energy: ${this.voxelPet.energy}%
+- Seed: ${this.voxelPet.prompt}
+- Last action: ${this.voxelPet.lastAction || 'ready'}`);
     }
     
     // ==================== Command Processing ====================
@@ -284,7 +521,19 @@ class CodeCLIApp {
                 }
                 break;
             case 'theme':
-                this.cycleTheme();
+                if (args[0]) {
+                    this.setTheme(args[0]);
+                } else {
+                    this.cycleTheme();
+                }
+                break;
+            case 'voxel':
+                this.setTheme('voxel');
+                this.printPetCard();
+                break;
+            case 'pet':
+            case 'spawn':
+                await this.handlePetCommand(args);
                 break;
             case 'export':
                 this.exportSession();
@@ -374,6 +623,7 @@ class CodeCLIApp {
         
         // Update status
         this.setStatus('thinking');
+        this.reactVoxelPet(input, 'think');
         
         try {
             const startTime = Date.now();
@@ -395,6 +645,7 @@ class CodeCLIApp {
             
             // Update status and session info
             this.setStatus('ready');
+            this.reactVoxelPet(input, 'proud');
             this.updateSessionInfo();
             
             // Add to conversation
@@ -402,6 +653,7 @@ class CodeCLIApp {
             
         } catch (error) {
             this.printError(`Request failed: ${error.message}`);
+            this.handlePetAction('guard', { silent: true });
             this.setStatus('error');
         } finally {
             this.isProcessing = false;
@@ -481,6 +733,14 @@ Session Statistics:
             this.sessionInfo.title = `Full session ID: ${api.sessionId}`;
         }
     }
+
+    getPromptLabel() {
+        if (this.theme === 'voxel' && this.voxelPet?.name) {
+            return `[${this.voxelPet.name.split('-')[0]}]`;
+        }
+
+        return '>';
+    }
     
     // ==================== Output Methods ====================
     
@@ -488,7 +748,7 @@ Session Statistics:
         const line = document.createElement('div');
         line.className = 'line line-input user-message';
         line.innerHTML = `
-            <span class="prompt">❯</span>
+            <span class="prompt">${this.escapeHtml(this.getPromptLabel())}</span>
             <span class="input-text">${this.escapeHtml(text)}</span>
         `;
         this.terminalOutput.appendChild(line);
@@ -498,20 +758,39 @@ Session Statistics:
     printAI(text) {
         const line = document.createElement('div');
         line.className = 'line line-output ai';
-        line.innerHTML = this.renderMarkdown(text);
+        line.innerHTML = this.renderAIContent(text);
         this.terminalOutput.appendChild(line);
         this.scrollToBottom();
         
         // Highlight code blocks
-        line.querySelectorAll('pre code').forEach((block) => {
-            if (block.classList.contains('language-mermaid') || block.classList.contains('nohighlight')) {
-                return;
-            }
-            hljs.highlightElement(block);
-        });
+        if (typeof hljs !== 'undefined') {
+            line.querySelectorAll('pre code').forEach((block) => {
+                if (block.classList.contains('language-mermaid') || block.classList.contains('nohighlight')) {
+                    return;
+                }
+                hljs.highlightElement(block);
+            });
+        }
         
         // Render any mermaid diagrams
         this.renderMermaidDiagrams(line);
+    }
+
+    renderAIContent(text, options = {}) {
+        const body = this.renderMarkdown(text);
+        if (this.theme !== 'voxel') {
+            return body;
+        }
+
+        const title = options.title || 'AI Output';
+        const meta = options.meta || `${api.currentModel || 'default'} | ${this.voxelPet?.name || 'voxel companion'}`;
+        return `
+            <div class="voxel-response-head">
+                <span>${this.escapeHtml(title)}</span>
+                <span class="voxel-response-meta">${this.escapeHtml(meta)}</span>
+            </div>
+            <div class="voxel-response-body">${body}</div>
+        `;
     }
     
     printSystem(text) {
@@ -541,10 +820,48 @@ Session Statistics:
     
     printWelcome() {
         this.terminalOutput.innerHTML = '';
-        this.printSystem('Welcome to LillyBuilt Code CLI v3.0');
-        this.printSystem('Type /help for available commands');
-        this.printSystem(`Session started: ${new Date().toLocaleString()}`);
+        if (this.theme === 'voxel') {
+            this.printVoxelBoot();
+        } else {
+            this.printSystem('Welcome to KimiBuilt Code CLI v3.0');
+            this.printSystem('Type /help for available commands');
+            this.printSystem(`Session started: ${new Date().toLocaleString()}`);
+        }
         this.terminalOutput.appendChild(document.createElement('div')).style.height = '8px';
+    }
+
+    printVoxelBoot() {
+        const line = document.createElement('div');
+        line.className = 'line line-output ai';
+        line.innerHTML = `
+            <div class="voxel-response-head">
+                <span>KimiBuilt Voxel CLI</span>
+                <span class="voxel-response-meta">${this.escapeHtml(new Date().toLocaleString())}</span>
+            </div>
+            <div class="voxel-response-body">
+                <div class="voxel-boot">
+                    <div>
+                        <div class="voxel-boot-title">Voxel Command Deck</div>
+                        <div class="voxel-boot-copy">Mode: chat | Model: ${this.escapeHtml(api.currentModel || 'loading')} | Session: ${this.escapeHtml(api.sessionId || 'pending')}</div>
+                        <div class="voxel-command-grid">
+                            <div class="voxel-command-chip"><code>/pet &lt;prompt&gt;</code><br>spawn companion</div>
+                            <div class="voxel-command-chip"><code>/pet act dance</code><br>menu interaction</div>
+                            <div class="voxel-command-chip"><code>/models</code><br>model catalog</div>
+                            <div class="voxel-command-chip"><code>/help</code><br>command index</div>
+                        </div>
+                    </div>
+                    <div class="voxel-mini-pet" data-voxel-mini-pet></div>
+                </div>
+            </div>
+        `;
+        this.terminalOutput.appendChild(line);
+
+        const petSlot = line.querySelector('[data-voxel-mini-pet]');
+        if (petSlot && this.voxel && this.voxelPet) {
+            petSlot.appendChild(this.voxel.renderElement(this.voxelPet, { action: 'idle' }));
+        }
+
+        this.scrollToBottom();
     }
     
     printHelp() {
@@ -554,8 +871,15 @@ Session Statistics:
 **General:**
   /help, /?          Show this help message
   /clear, /cls       Clear the screen
-  /theme             Toggle light/dark theme
+  /theme [name]      Set voxel, dark, or light theme
+  /voxel             Switch back to the voxel command deck
   /shortcuts, /keys  Show keyboard shortcuts
+
+**Voxel Pet:**
+  /pet <prompt>      Spawn a prompt-generated voxel pet
+  /pet act <action>  Run jump, dance, scout, guard, or sleep
+  /pet name <name>   Rename the active pet
+  /pet hide|show     Hide or restore the pet dock
 
 **AI Controls:**
   /models            List available AI models
@@ -1876,12 +2200,28 @@ ${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${p
     }
     
     cycleTheme() {
-        const themes = ['dark', 'light'];
+        const themes = ['voxel', 'dark', 'light'];
         const currentIndex = themes.indexOf(this.theme);
         this.theme = themes[(currentIndex + 1) % themes.length];
+        this.setTheme(this.theme, { silent: true });
+        this.printSystem(`Theme: ${this.theme}`);
+    }
+
+    setTheme(theme, options = {}) {
+        const validThemes = ['voxel', 'dark', 'light'];
+        const normalizedTheme = String(theme || '').toLowerCase();
+        if (!validThemes.includes(normalizedTheme)) {
+            this.printError(`Unknown theme: ${theme}. Use voxel, dark, or light.`);
+            return;
+        }
+
+        this.theme = normalizedTheme;
         this.applyTheme(this.theme);
         localStorage.setItem('codecli-theme', this.theme);
-        this.printSystem(`Theme: ${this.theme}`);
+        this.renderVoxelPet();
+        if (!options.silent) {
+            this.printSystem(`Theme: ${this.theme}`);
+        }
     }
     
     applyTheme(theme) {
@@ -1891,7 +2231,7 @@ ${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${p
         if (typeof mermaid !== 'undefined') {
             mermaid.initialize({
                 startOnLoad: false,
-                theme: theme === 'dark' ? 'dark' : 'default',
+                theme: theme === 'light' ? 'default' : 'dark',
                 securityLevel: 'loose',
                 fontFamily: 'var(--font-family)'
             });
@@ -2062,19 +2402,27 @@ ${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${p
         const lines = this.terminalOutput.querySelectorAll('.line-output.ai');
         const lastLine = lines[lines.length - 1];
         if (lastLine && lastLine.classList.contains('streaming')) {
-            lastLine.innerHTML = this.renderMarkdown(this.currentOutput + text);
-            this.currentOutput += text;
-            lastLine.querySelectorAll('pre code').forEach((block) => {
-                if (block.classList.contains('language-mermaid') || block.classList.contains('nohighlight')) {
-                    return;
-                }
-                hljs.highlightElement(block);
+            lastLine.innerHTML = this.renderAIContent(this.currentOutput + text, {
+                title: 'Streaming',
+                meta: `${api.currentModel || 'default'} | ${this.voxelPet?.name || 'voxel companion'}`,
             });
+            this.currentOutput += text;
+            if (typeof hljs !== 'undefined') {
+                lastLine.querySelectorAll('pre code').forEach((block) => {
+                    if (block.classList.contains('language-mermaid') || block.classList.contains('nohighlight')) {
+                        return;
+                    }
+                    hljs.highlightElement(block);
+                });
+            }
         } else {
             this.currentOutput = text;
             const line = document.createElement('div');
             line.className = 'line line-output ai streaming';
-            line.innerHTML = this.renderMarkdown(text);
+            line.innerHTML = this.renderAIContent(text, {
+                title: 'Streaming',
+                meta: `${api.currentModel || 'default'} | ${this.voxelPet?.name || 'voxel companion'}`,
+            });
             this.terminalOutput.appendChild(line);
         }
         this.scrollToBottom();

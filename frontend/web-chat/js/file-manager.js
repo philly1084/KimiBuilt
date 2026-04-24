@@ -798,7 +798,7 @@ class FileManager {
    */
   renderFileItem(file) {
     const icon = this.getFileIcon(file.category, file.filename);
-    const openUrl = file.previewUrl || file.downloadUrl || '';
+    const openUrl = file.sandboxUrl || file.previewUrl || file.downloadUrl || '';
     const statusIcon = {
       ready: '',
       downloading: 'loader',

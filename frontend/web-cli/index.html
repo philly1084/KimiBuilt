@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>LillyBuilt Code CLI</title>
+    <title>KimiBuilt Voxel CLI</title>
     <script src="https://cdn.tailwindcss.com"></script>
     
     <!-- Syntax Highlighting -->
@@ -23,6 +23,7 @@
 
     <!-- PDF export for Mermaid diagrams -->
     <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <link rel="stylesheet" href="css/voxel.css">
     
     <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
@@ -868,12 +869,12 @@
         }
     </style>
 </head>
-<body data-theme="dark">
+<body data-theme="voxel">
     <div class="app-container">
         <!-- Header -->
         <header class="header">
             <div class="header-left">
-                <span class="header-title">◈ LillyBuilt Code CLI</span>
+                <span class="header-title">KimiBuilt Voxel CLI</span>
                 <div class="status-indicator">
                     <span id="statusDot" class="status-dot connecting"></span>
                     <span id="statusText">Connecting...</span>
@@ -884,13 +885,13 @@
                 <select id="modelSelect" style="padding: 6px 10px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); font-family: inherit; font-size: 12px;">
                     <option>Loading models...</option>
                 </select>
-                <button class="btn btn-sm" onclick="app.clearOutput()" title="Clear (Ctrl+L)" aria-label="Clear terminal">
+                <button class="btn btn-sm" data-short="Clr" onclick="app.clearOutput()" title="Clear (Ctrl+L)" aria-label="Clear terminal">
                     <span>Clear</span>
                 </button>
-                <button class="btn btn-sm" onclick="app.exportSession()" title="Export session" aria-label="Export session">
+                <button class="btn btn-sm" data-short="Exp" onclick="app.exportSession()" title="Export session" aria-label="Export session">
                     <span>Export</span>
                 </button>
-                <button class="btn btn-sm" onclick="app.cycleTheme()" title="Toggle theme" aria-label="Toggle theme">
+                <button class="btn btn-sm" data-short="Thm" onclick="app.cycleTheme()" title="Toggle theme" aria-label="Toggle theme">
                     <span>Theme</span>
                 </button>
                 <button class="btn btn-sm" onclick="app.showShortcuts()" title="Help (F1)" aria-label="Show keyboard shortcuts">?</button>
@@ -907,7 +908,7 @@
                 <!-- Input Area -->
                 <div class="input-container" style="position: relative;">
                     <div class="input-wrapper">
-                        <span class="input-prompt">❯</span>
+                        <span class="input-prompt">[##]</span>
                         <input 
                             type="text" 
                             id="commandInput" 
@@ -925,13 +926,55 @@
                         <span>•</span>
                         <span id="cliStatus" class="cli-status ready">Ready</span>
                         <span id="queueIndicator" class="queue-indicator hidden" title="Commands queued"></span>
-                        <span style="margin-left: auto;">Ctrl+L=Clear | ↑↓=History | F1=Help</span>
+                        <span class="shortcut-hint">Ctrl+L=Clear | ↑↓=History | F1=Help</span>
                     </div>
                     <div id="autocomplete" class="autocomplete hidden"></div>
                 </div>
             </div>
 
-            <!-- Side Panel removed - using inline status instead -->
+            <!-- Voxel Pet Dock -->
+            <aside id="voxelDock" class="voxel-dock" aria-label="Voxel pet console">
+                <section class="voxel-panel">
+                    <div class="voxel-panel-head">
+                        <span class="voxel-panel-title">Voxel Pet</span>
+                        <div class="voxel-panel-actions">
+                            <button class="voxel-icon-btn" onclick="app.handlePetAction('jump')" title="Jump" aria-label="Jump">J</button>
+                            <button class="voxel-icon-btn" onclick="app.handlePetAction('scout')" title="Scout" aria-label="Scout">S</button>
+                            <button class="voxel-icon-btn" onclick="app.handlePetAction('sleep')" title="Sleep" aria-label="Sleep">Z</button>
+                        </div>
+                    </div>
+                    <div id="voxelPetStage" class="voxel-pet-stage"></div>
+                    <div class="voxel-pet-card">
+                        <div class="voxel-pet-name">
+                            <strong id="voxelPetName">Voxel</strong>
+                            <span id="voxelPetKind">companion</span>
+                        </div>
+                        <div class="voxel-stat-grid">
+                            <div class="voxel-stat">
+                                <label>Mood</label>
+                                <span id="voxelPetMood">Ready</span>
+                            </div>
+                            <div class="voxel-stat">
+                                <label>Energy</label>
+                                <div class="voxel-meter" aria-label="Voxel pet energy">
+                                    <div id="voxelPetEnergy" class="voxel-meter-fill"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="voxelPetSeed" class="voxel-seed"></div>
+                        <div class="voxel-prompt-row">
+                            <input id="voxelPetPrompt" type="text" placeholder="voxel fox with amber goggles" autocomplete="off" spellcheck="false">
+                            <button class="btn btn-sm" onclick="app.generateVoxelPetFromInput()">Spawn</button>
+                        </div>
+                        <div class="voxel-action-grid">
+                            <button class="btn btn-sm" onclick="app.handlePetAction('dance')">Dance</button>
+                            <button class="btn btn-sm" onclick="app.handlePetAction('guard')">Guard</button>
+                            <button class="btn btn-sm" onclick="app.handlePetAction('scout')">Scout</button>
+                            <button class="btn btn-sm" onclick="app.handlePetAction('sleep')">Sleep</button>
+                        </div>
+                    </div>
+                </section>
+            </aside>
         </div>
     </div>
 
@@ -955,6 +998,7 @@
 
     <script src="js/api.js"></script>
     <script src="js/file-handler.js"></script>
+    <script src="js/voxel-pets.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>

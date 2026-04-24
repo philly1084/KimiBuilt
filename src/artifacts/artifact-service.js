@@ -34,6 +34,12 @@ const {
 } = require('../utils/token-usage');
 const { parseLenientJson } = require('../utils/lenient-json');
 const { resolveDocumentTheme } = require('../documents/document-design-engine');
+const {
+    buildArtifactExperienceMetadata,
+    isInteractiveDocumentRequest,
+    renderInteractiveArtifactInstructions,
+    shouldUseInteractiveHtmlArtifact,
+} = require('./artifact-experience');
 const MULTI_PASS_DOCUMENT_FORMATS = new Set(['html', 'pdf', 'docx']);
 const DEFAULT_DOCUMENT_IMAGE_TARGET = 20;
 const COMPOSITION_PLANNING_PATTERNS = [
@@ -1305,6 +1311,10 @@ function isFrontendDemoArtifactRequest(prompt = '') {
         return false;
     }
 
+    if (isInteractiveDocumentRequest(normalized)) {
+        return true;
+    }
+
     return /\b(website|web page|webpage|landing page|homepage|microsite|marketing site|product page|campaign page|frontend demo|front-end demo|site prototype|site mockup)\b/.test(normalized)
         || isDashboardRequest(normalized)
         || (
@@ -1402,6 +1412,7 @@ function buildFrontendBundleGenerationInstructions({
     requestedPageCount = null,
     dashboardInstructions = '',
 } = {}) {
+    const interactiveInstructions = renderInteractiveArtifactInstructions(requestPrompt, existingContent);
     const pageCountNote = requestedPageCount
         ? `Create ${requestedPageCount} distinct HTML pages unless the request explicitly needs fewer.`
         : 'Create 5 distinct HTML pages when the request implies a full site but does not specify a count.';
@@ -1426,8 +1437,10 @@ function buildFrontendBundleGenerationInstructions({
         'Use stable ids or data-component attributes on major sections to support later repo extraction.',
         'Never expose internal template labels, archetype names, or planning language in visible copy.',
         'Keep the content grounded, concrete, and production-like.',
+        'The preview runs inside a sandbox that allows scripts but withholds same-origin privileges. Keep interactive behavior client-side, static-safe, and resilient without cookies or server mutation.',
         buildDocumentImageInstructions(),
         dashboardInstructions,
+        interactiveInstructions,
         promptContext,
         existingContent ? `Existing content to revise:\n${existingContent}` : '',
         `User request:\n${requestPrompt}`,
@@ -1484,6 +1497,9 @@ class ArtifactService {
         const previewUrl = (artifact.extension === 'html' || Boolean(artifact.previewHtml))
             ? `/api/artifacts/${artifact.id}/preview`
             : null;
+        const sandboxUrl = previewUrl
+            ? `/api/artifacts/${artifact.id}/sandbox`
+            : null;
         const bundleDownloadUrl = hasSiteBundle
             ? `/api/artifacts/${artifact.id}/bundle`
             : null;
@@ -1508,13 +1524,14 @@ class ArtifactService {
             vectorized: Boolean(artifact.vectorizedAt),
             downloadUrl: `/api/artifacts/${artifact.id}/download`,
             previewUrl,
+            sandboxUrl,
             bundleDownloadUrl,
             preview: hasSiteBundle
                 ? {
                     type: 'site',
                     entry: siteBundle.entry,
                     fileCount: siteBundleFileCount,
-                    url: previewUrl,
+                    url: sandboxUrl || previewUrl,
                 }
                 : artifact.previewHtml
                 ? { type: 'html', content: artifact.previewHtml }
@@ -1776,6 +1793,9 @@ class ArtifactService {
         const dashboardInstructions = normalizedFormat === 'html'
             ? buildDashboardHtmlInstructions(requestPrompt, existingContent)
             : '';
+        const interactiveInstructions = normalizedFormat === 'html'
+            ? renderInteractiveArtifactInstructions(requestPrompt, existingContent)
+            : '';
         const researchBackedRequest = isResearchBackedArtifactRequest(requestPrompt, normalizedFormat);
         const baseContext = [
             'You are the Lilly Business Agent.',
@@ -1790,6 +1810,7 @@ class ArtifactService {
             'The platform will render, store, and deliver the file artifact for the user.',
             promptContext,
             creativityContext,
+            interactiveInstructions,
         ].filter(Boolean).join('\n\n');
         const base = [
             baseContext,
@@ -1816,6 +1837,7 @@ class ArtifactService {
                 base,
                 buildDocumentImageInstructions(),
                 dashboardInstructions,
+                interactiveInstructions,
                 'Return JSON only. No markdown fences.',
                 'Build a polished frontend demo instead of a plain document.',
                 'Choose the right HTML artifact family for the request: landing page, dashboard, app workspace, documentation site, report/brief, editorial feature, campaign microsite, or portfolio showcase.',
@@ -1831,6 +1853,7 @@ class ArtifactService {
                 'Use stable ids or data-component attributes on major sections to help later component extraction.',
                 'Prefer realistic copy, concrete sections, and clean calls to action over filler cards or placeholder boxes.',
                 'Never expose internal template labels, archetype names, or planning language in visible copy.',
+                'The preview runs inside a sandbox that allows scripts but withholds same-origin privileges. Keep interactions client-side, static-safe, and resilient without cookies or server mutation.',
                 'When the request asks for a full website, news site, or multi-page experience, return a linked bundle with multiple HTML pages plus shared assets instead of a single-page mockup.',
                 'Support static-server preview first. If you target Vite, React, or Next-style handoff, still make the preview files browser-runnable without a bundler by using relative modules or browser-compatible URLs instead of unresolved bare package imports.',
                 'Mirror the preview entry page in `content`, and place the complete site files in `metadata.bundle`.',
@@ -1872,6 +1895,9 @@ class ArtifactService {
                 'Start at the first character with <!DOCTYPE html> and include no preface, explanation, or trailing notes.',
                 'Use a deliberate visual thesis, strong hierarchy, and non-generic section pacing.',
                 'Treat any provided template or sample as reference material, not copy to preserve verbatim.',
+                normalizedFormat === 'html'
+                    ? 'For HTML outputs, add web-document affordances such as sticky wayfinding, details/summary disclosures, source cards, tasteful CSS motion, and responsive controls when they improve comprehension.'
+                    : 'For PDF and DOCX outputs, keep the HTML print-safe while still visually composed.',
             ].filter(Boolean).join('\n\n');
         }
         if (normalizedFormat === 'xml') {
@@ -2315,7 +2341,12 @@ class ArtifactService {
         executionProfile = 'default',
     }) {
         const normalizedFormat = normalizeFormat(format);
-        const frontendDemoRequest = normalizedFormat === 'html' && isFrontendDemoArtifactRequest(prompt);
+        const frontendDemoRequest = normalizedFormat === 'html'
+            && (isFrontendDemoArtifactRequest(prompt) || shouldUseInteractiveHtmlArtifact({
+                prompt,
+                format: normalizedFormat,
+                existingContent: [template, existingContent].filter(Boolean).join('\n\n'),
+            }));
         const complexFrontendBundleRequest = normalizedFormat === 'html'
             && isComplexFrontendBundleRequest(prompt, [template, existingContent].filter(Boolean).join('\n\n'));
         const enableArtifactToolOrchestration = shouldEnableArtifactToolOrchestration(prompt, normalizedFormat);
@@ -2335,6 +2366,11 @@ class ArtifactService {
         });
         const imageReferenceContext = this.formatImageReferenceContext(imageReferences);
         const combinedExistingContent = [template, existingContent].filter(Boolean).join('\n\n');
+        const artifactExperienceMetadata = buildArtifactExperienceMetadata({
+            prompt,
+            format: normalizedFormat,
+            existingContent: combinedExistingContent,
+        });
         const dashboardTemplates = normalizedFormat === 'html'
             ? selectDashboardTemplates({
                 prompt,
@@ -2514,6 +2550,7 @@ class ArtifactService {
                 ...dashboardMetadata,
                 ...(normalizedFrontendPayload?.metadata || {}),
                 ...(generated.metadata || {}),
+                ...artifactExperienceMetadata,
             },
             vectorize: Boolean(rendered.extractedText),
         });

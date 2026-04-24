@@ -103,6 +103,35 @@
                 max-height: 80px;
                 overflow-y: auto;
             }
+
+            body.layout-minimal .artifact-toolbar-compact {
+                width: max-content;
+                max-width: 100%;
+                margin: 8px auto 0;
+                padding: 0;
+                gap: 6px;
+                border: 0;
+                background: transparent;
+            }
+
+            body.layout-minimal .artifact-toolbar-compact .toolbar-btn {
+                width: 36px;
+                height: 36px;
+                justify-content: center;
+                padding: 0;
+                border-radius: 10px;
+                background: color-mix(in srgb, var(--bg-tertiary) 78%, transparent);
+            }
+
+            body.layout-minimal .artifact-toolbar-compact .toolbar-btn span,
+            body.layout-minimal .artifact-toolbar-compact .toolbar-divider,
+            body.layout-minimal .artifact-toolbar-compact .selected-count {
+                display: none;
+            }
+
+            body.layout-minimal .artifact-selected-chips:empty {
+                display: none;
+            }
             
             .artifact-selected-chip {
                 display: flex;
@@ -319,6 +348,27 @@
             || (/\bhtml\b/.test(normalized) && /\b(export|download|save|artifact|file|link|share|attachment)\b/.test(normalized));
     }
 
+    function isInteractiveDocumentRequest(text = '') {
+        const normalized = String(text || '')
+            .trim()
+            .toLowerCase()
+            .replace(/[_-]+/g, ' ')
+            .replace(/\s+/g, ' ');
+        if (!normalized || /\b(text only|text-only|plain text|no html|without html|no website|not a website|no interactive|without interaction|static only)\b/.test(normalized)) {
+            return false;
+        }
+
+        const hasResearchCue = /\b(research|sources?|citations?|latest|recent|current|news|headline|headlines|coverage|fact check|fact-check|verify|look up|web search|online|evidence)\b/.test(normalized);
+        const hasDocumentCue = /\b(document|doc|report|brief|guide|research|case study|whitepaper|dossier|analysis|article|memo|note)\b/.test(normalized);
+        const hasInteractiveCue = /\b(interactive|clickable|explorable|sortable|filterable|drill down|drilldown|animated|animation|motion|web native|browser native|website grade|website feel|site like|living document|rich document|evidence explorer|source explorer|source map)\b/.test(normalized);
+
+        return /\binteractive\s+(?:document|doc|report|brief|research|guide|dossier|whitepaper|article|page)\b/.test(normalized)
+            || /\b(?:document|doc|report|brief|research|guide|dossier|whitepaper|article|analysis)\b.{0,60}\b(?:interactive|clickable|explorable|animated|animation|motion|web native|browser native|website grade|website feel|site like|rich)\b/.test(normalized)
+            || (/\b(?:website grade|website feel|web native|browser native|living document|rich document|interactive article|interactive essay)\b/.test(normalized) && hasDocumentCue)
+            || (hasResearchCue && /\b(research dashboard|evidence explorer|source explorer|source map|visual report|microsite|web page|webpage|html page|browser page)\b/.test(normalized))
+            || (hasResearchCue && hasDocumentCue && hasInteractiveCue);
+    }
+
     function inferRequestedOutputFormat(messages = []) {
         const lastUserMessage = [...messages].reverse().find((message) => message?.role === 'user' && message?.content);
         const text = String(lastUserMessage?.content || '').toLowerCase();
@@ -336,6 +386,7 @@
             return 'xlsx';
         }
 
+        if (isInteractiveDocumentRequest(text)) return 'html';
         if (/\bpdf\b/.test(text) && hasArtifactIntent) return 'pdf';
         if (/\b(docx|word document)\b/.test(text) && hasArtifactIntent) return 'docx';
         if (/\bxml\b/.test(text) && hasArtifactIntent) return 'xml';
@@ -541,6 +592,13 @@
 
     function getArtifactPreviewUrl(artifact, options = {}) {
         const absolute = options && options.absolute === true;
+        const preferSandbox = options && options.sandbox === true;
+
+        if (preferSandbox && artifact?.sandboxUrl) {
+            return absolute
+                ? `${API_BASE}${artifact.sandboxUrl}`
+                : artifact.sandboxUrl;
+        }
 
         if (artifact?.previewUrl) {
             return absolute
@@ -603,7 +661,13 @@
         const htmlPreview = inlineHtmlPreview
             ? `
                 <div class="artifact-html-preview">
-                    <iframe src="${escapeHtmlAttr(htmlPreviewUrl)}" loading="lazy" referrerpolicy="no-referrer" sandbox="allow-forms allow-modals"></iframe>
+                    <iframe
+                        src="${escapeHtmlAttr(htmlPreviewUrl)}"
+                        title="${escapeHtmlAttr(artifact.filename || 'Artifact preview')}"
+                        loading="lazy"
+                        referrerpolicy="no-referrer"
+                        sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads"
+                    ></iframe>
                 </div>
             `
             : '';
@@ -717,11 +781,11 @@
         toolbar.id = 'artifact-toolbar';
         toolbar.className = 'artifact-toolbar-compact';
         toolbar.innerHTML = `
-            <button class="toolbar-btn" onclick="document.getElementById('artifact-file-input').click()">
+            <button class="toolbar-btn" type="button" title="Upload file" aria-label="Upload file" onclick="document.getElementById('artifact-file-input').click()">
                 <i data-lucide="upload" class="w-4 h-4"></i>
                 <span>Upload</span>
             </button>
-            <button class="toolbar-btn primary" onclick="fileManager.open()">
+            <button class="toolbar-btn primary" type="button" title="Open files" aria-label="Open files" onclick="fileManager.open()">
                 <i data-lucide="folder-open" class="w-4 h-4"></i>
                 <span>Files</span>
             </button>
@@ -1090,7 +1154,7 @@
 
         openArtifactPreview: (id) => {
             const artifact = state.artifacts.find((entry) => entry.id === id) || state.lastDone?.artifacts?.find((entry) => entry.id === id);
-            const previewUrl = getArtifactPreviewUrl(artifact);
+            const previewUrl = getArtifactPreviewUrl(artifact, { sandbox: true });
             if (!previewUrl) {
                 if (window.uiHelpers?.showToast) {
                     uiHelpers.showToast('Preview is not available for this file yet.', 'warning');

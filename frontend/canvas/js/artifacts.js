@@ -88,7 +88,7 @@
                 <div class="artifact-meta">${artifact.format} | ${artifact.sizeBytes} bytes</div>
                 <div class="artifact-actions">
                     <button type="button" data-action="toggle">${state.selectedArtifactIds.includes(artifact.id) ? 'Detach' : 'Attach'}</button>
-                    ${artifact.previewUrl ? `<a href="${artifact.previewUrl}" target="_blank" rel="noopener">Preview</a>` : ''}
+                    ${(artifact.sandboxUrl || artifact.previewUrl) ? `<a href="${artifact.sandboxUrl || artifact.previewUrl}" target="_blank" rel="noopener">Preview</a>` : ''}
                     <a href="${artifact.downloadUrl}" target="_blank" rel="noopener">Download</a>
                 </div>
             `;

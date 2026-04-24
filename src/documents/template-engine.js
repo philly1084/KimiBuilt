@@ -541,7 +541,7 @@ class TemplateEngine {
 
     for (const variable of variables) {
       if (variable.default !== undefined) {
-        defaults[variable.id] = variable.default;
+        defaults[variable.id] = this.resolveDefaultVariableValue(variable.default, variable);
       } else if (variable.type === 'date') {
         defaults[variable.id] = new Date().toISOString().split('T')[0];
       } else if (variable.type === 'select' && variable.options?.length > 0) {
@@ -550,6 +550,18 @@ class TemplateEngine {
     }
 
     return defaults;
+  }
+
+  resolveDefaultVariableValue(value, variable = {}) {
+    if (typeof value !== 'string') {
+      return value;
+    }
+
+    if (value.trim() === '{{today}}' || (variable.type === 'date' && value.includes('{{today}}'))) {
+      return value.replace(/\{\{today\}\}/g, new Date().toISOString().split('T')[0]);
+    }
+
+    return value;
   }
 }
 

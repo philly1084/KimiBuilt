@@ -103,6 +103,7 @@ const chatRouter = require('./chat');
 describe('/api/chat route', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        const routeUtils = require('../ai-route-utils');
 
         const session = {
             id: 'session-1',
@@ -118,7 +119,22 @@ describe('/api/chat route', () => {
         sessionStore.updateControlState.mockResolvedValue({});
         buildInstructionsWithArtifacts.mockResolvedValue('continuity instructions');
         maybeGenerateOutputArtifact.mockResolvedValue([]);
+        maybePrepareImagesForArtifactPrompt.mockResolvedValue({
+            artifactIds: [],
+            artifacts: [],
+            toolEvents: [],
+            imagePrompt: null,
+        });
         memoryService.process.mockResolvedValue({ contextMessages: [] });
+        routeUtils.inferRequestedOutputFormat.mockReturnValue(null);
+        routeUtils.inferOutputFormatFromSession.mockReturnValue(null);
+        routeUtils.resolveArtifactContextIds.mockReturnValue([]);
+        shouldSuppressNotesSurfaceArtifact.mockReturnValue(false);
+        shouldSuppressImplicitMermaidArtifact.mockReturnValue(false);
+        routeUtils.shouldSuppressWebChatImplicitHtmlArtifact.mockReturnValue(false);
+        stripInjectedNotesPageEditDirective.mockImplementation((text) => text);
+        resolveSshRequestContext.mockReturnValue({});
+        resolveReasoningEffort.mockReturnValue(null);
         resolveDeferredWorkloadPreflight.mockReturnValue({
             timing: 'now',
             shouldSchedule: false,
@@ -575,8 +591,8 @@ describe('/api/chat route', () => {
             }),
         }));
         expect(response.body.artifacts).toEqual([
-            { id: 'image-artifact-1', filename: 'hypercar-01.png' },
-            { id: 'pdf-artifact-1', filename: 'hypercars.pdf' },
+            expect.objectContaining({ id: 'image-artifact-1', filename: 'hypercar-01.png' }),
+            expect.objectContaining({ id: 'pdf-artifact-1', filename: 'hypercars.pdf' }),
         ]);
         expect(response.body.toolEvents).toEqual([{ toolCall: { function: { name: 'image-generate' } } }]);
     });
@@ -994,7 +1010,7 @@ describe('/api/chat route', () => {
             });
 
         expect(response.status).toBe(200);
-        expect(maybeGenerateOutputArtifact).toHaveBeenCalled();
+        expect(maybeGenerateOutputArtifact).not.toHaveBeenCalled();
         expect(response.body.artifacts).toEqual([
             expect.objectContaining({
                 id: 'doc-1',

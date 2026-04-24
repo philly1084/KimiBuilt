@@ -32,6 +32,85 @@ function applyPreviewResponseHeaders(res) {
     // default CORP protection for same-origin assets.
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     res.setHeader('Origin-Agent-Cluster', '?0');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), accelerometer=(), gyroscope=()');
+    if (!res.hasHeader('Content-Security-Policy')) {
+        res.setHeader(
+            'Content-Security-Policy',
+            [
+                "default-src 'self' data: blob: https:",
+                "img-src 'self' data: blob: https:",
+                "media-src 'self' data: blob: https:",
+                "font-src 'self' data: blob: https:",
+                "style-src 'self' 'unsafe-inline' https:",
+                "script-src 'self' 'unsafe-inline' https:",
+                "connect-src 'self' data: blob: https:",
+                "frame-src 'self' data: blob: https:",
+                "worker-src 'self' blob:",
+                "base-uri 'self'",
+                "form-action 'self'",
+            ].join('; '),
+        );
+    }
+}
+
+function applySandboxShellHeaders(res) {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.setHeader('Origin-Agent-Cluster', '?0');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), accelerometer=(), gyroscope=()');
+    res.setHeader(
+        'Content-Security-Policy',
+        [
+            "default-src 'none'",
+            "style-src 'unsafe-inline'",
+            "frame-src 'self'",
+            "img-src data:",
+            "base-uri 'none'",
+            "form-action 'none'",
+        ].join('; '),
+    );
+}
+
+function escapeHtmlAttribute(value = '') {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function buildSandboxPreviewShell(artifactId = '') {
+    const previewSrc = `/api/artifacts/${encodeURIComponent(String(artifactId || '').trim())}/preview`;
+    return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sandboxed Artifact Preview</title>
+<style>
+html, body { margin: 0; min-height: 100%; background: #0f172a; color: #e5e7eb; font-family: Arial, sans-serif; }
+.sandbox-shell { min-height: 100vh; display: grid; grid-template-rows: minmax(0, 1fr); }
+iframe { width: 100%; height: 100vh; border: 0; background: #fff; display: block; }
+</style>
+</head>
+<body>
+<main class="sandbox-shell">
+  <iframe
+    src="${escapeHtmlAttribute(previewSrc)}"
+    title="Sandboxed artifact preview"
+    loading="eager"
+    referrerpolicy="no-referrer"
+    sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads"
+  ></iframe>
+</main>
+</body>
+</html>`;
 }
 
 function getRequestOwnerId(req) {
@@ -241,6 +320,20 @@ router.get('/:id', async (req, res, next) => {
             return res.status(404).json({ error: { message: 'Artifact not found' } });
         }
         res.json(artifact);
+    } catch (err) {
+        next(err);
+    }
+});
+
+router.get('/:id/sandbox', async (req, res, next) => {
+    try {
+        const artifact = await getOwnedArtifact(req, req.params.id);
+        if (!artifact) {
+            return res.status(404).json({ error: { message: 'Artifact not found' } });
+        }
+
+        applySandboxShellHeaders(res);
+        res.send(buildSandboxPreviewShell(req.params.id));
     } catch (err) {
         next(err);
     }

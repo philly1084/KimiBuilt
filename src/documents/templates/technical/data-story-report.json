@@ -6,7 +6,7 @@
   "icon": "📈",
   "tags": ["data", "analytics", "report", "chart", "insights"],
   "blueprint": "data-story",
-  "recommendedFormats": ["pdf", "docx", "html", "md"],
+  "recommendedFormats": ["pdf", "docx", "html", "xlsx", "md"],
   "useCases": ["analytics report", "trend review", "insight memo"],
   "variables": [
     {
@@ -65,7 +65,7 @@
       "placeholder": "Double down on onboarding\nFix drop-off after activation\nRun pricing test"
     }
   ],
-  "formats": ["docx", "pdf", "html", "md"],
+  "formats": ["docx", "pdf", "html", "xlsx", "md"],
   "aiEnhancement": {
     "enabled": true,
     "features": [

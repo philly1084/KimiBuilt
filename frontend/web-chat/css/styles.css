@@ -2787,6 +2787,7 @@ body.mobile-chat-menu-open {
     font-size: 0.92rem;
     font-weight: 600;
     min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .mobile-chat-menu__action-value {
@@ -2795,6 +2796,8 @@ body.mobile-chat-menu-open {
     font-size: 0.78rem;
     line-height: 1.35;
     text-align: right;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .mobile-chat-menu__action--danger {
@@ -3141,10 +3144,10 @@ body.mobile-chat-menu-open {
 }
 
 .assistant-sound-volume-setting {
-    padding: 0.35rem 0.55rem 0.6rem;
+    padding: 0.45rem 0.6rem 0.55rem;
     border-radius: 0.72rem;
-    border: 1px solid rgba(148, 163, 184, 0.22);
-    background: color-mix(in srgb, rgba(148, 163, 184, 0.1) 45%, transparent);
+    border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+    background: color-mix(in srgb, var(--bg-tertiary) 48%, transparent);
 }
 
 .assistant-sound-preview-row {
@@ -3170,45 +3173,46 @@ body.mobile-chat-menu-open {
     width: 100%;
     appearance: none;
     margin: 0;
-    height: 0.38rem;
-    min-height: 20px;
+    height: 0.28rem;
+    min-height: 18px;
     border-radius: 999px;
-    background: linear-gradient(90deg, rgba(96, 165, 250, 0.2), rgba(96, 165, 250, 0.55));
+    background: transparent;
     outline: none;
     cursor: pointer;
+    accent-color: var(--accent);
 }
 
 .assistant-sound-volume-range::-webkit-slider-runnable-track {
-    height: 0.38rem;
+    height: 0.28rem;
     border-radius: 999px;
-    background: rgba(148, 163, 184, 0.2);
+    background: color-mix(in srgb, var(--accent) 28%, var(--bg-hover));
 }
 
 .assistant-sound-volume-range::-webkit-slider-thumb {
     appearance: none;
-    width: 0.92rem;
-    height: 0.92rem;
-    margin-top: -0.26rem;
+    width: 0.78rem;
+    height: 0.78rem;
+    margin-top: -0.25rem;
     border-radius: 50%;
-    border: 2px solid rgba(15, 23, 42, 0.9);
+    border: 2px solid var(--bg-secondary);
     background: var(--accent);
-    box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.16);
+    box-shadow: 0 2px 8px rgba(5, 10, 18, 0.18);
 }
 
 .assistant-sound-volume-range::-moz-range-track {
-    height: 0.38rem;
+    height: 0.28rem;
     border: none;
     border-radius: 999px;
-    background: rgba(148, 163, 184, 0.2);
+    background: color-mix(in srgb, var(--accent) 28%, var(--bg-hover));
 }
 
 .assistant-sound-volume-range::-moz-range-thumb {
-    width: 0.92rem;
-    height: 0.92rem;
-    border: 2px solid rgba(15, 23, 42, 0.9);
+    width: 0.78rem;
+    height: 0.78rem;
+    border: 2px solid var(--bg-secondary);
     border-radius: 50%;
     background: var(--accent);
-    box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.16);
+    box-shadow: 0 2px 8px rgba(5, 10, 18, 0.18);
 }
 
 .model-selector-list-header {
@@ -3470,7 +3474,7 @@ body.mobile-chat-menu-open {
 
 .chat-brand-title {
     font-family: var(--font-display);
-    letter-spacing: -0.02em;
+    letter-spacing: 0;
 }
 
 .chat-header-pill {
@@ -3652,6 +3656,9 @@ body.layout-minimal #welcome-message {
     max-width: 48rem;
     margin: 0 auto;
     gap: 0.75rem;
+    min-height: min(56vh, 34rem);
+    height: auto;
+    padding: 2.25rem 1.5rem;
 }
 
 body.layout-minimal .welcome-capability-row,
@@ -3668,6 +3675,7 @@ body.layout-minimal .welcome-badge {
 
 body.layout-minimal .welcome-title {
     font-size: clamp(2.1rem, 4.2vw, 3.4rem);
+    letter-spacing: 0;
 }
 
 body.layout-minimal .welcome-description {
@@ -3960,7 +3968,7 @@ body.layout-minimal #input-meta-row {
     font-family: var(--font-display);
     font-size: clamp(2.2rem, 4vw, 4.1rem);
     line-height: 0.98;
-    letter-spacing: -0.05em;
+    letter-spacing: 0;
     color: var(--text-primary);
 }
 
@@ -4266,6 +4274,7 @@ body.layout-minimal #input-meta-row {
     color: var(--text-primary);
     line-height: 1.6;
     word-wrap: break-word;
+    overflow-wrap: anywhere;
 }
 
 /* User message specific */
@@ -5467,6 +5476,7 @@ body.layout-minimal #input-meta-row {
 
 .markdown-content p {
     margin-bottom: 1rem;
+    overflow-wrap: anywhere;
 }
 
 .markdown-content p:last-child {
@@ -5531,10 +5541,15 @@ body.layout-minimal #input-meta-row {
     padding: 0;
     font-size: 0.875rem;
     line-height: 1.6;
+    overflow-wrap: normal;
+    word-break: normal;
 }
 
 .markdown-content table {
     width: 100%;
+    max-width: 100%;
+    display: block;
+    overflow-x: auto;
     border-collapse: collapse;
     margin: 1rem 0;
     font-size: 0.875rem;
@@ -7646,6 +7661,18 @@ code[class*="language-"] {
     .mobile-chat-menu__sheet {
         padding-left: 0.75rem;
         padding-right: 0.75rem;
+    }
+
+    .mobile-chat-menu__action {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 0.4rem;
+    }
+
+    .mobile-chat-menu__action-value {
+        max-width: 100%;
+        padding-left: 1.7rem;
+        text-align: left;
     }
     
     #connection-status {

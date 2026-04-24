@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-04-23T23:24:35.190Z",
+  "updatedAt": "2026-04-23T23:41:49.650Z",
   "targets": {
     "10.0.0.5:22": {
       "key": "10.0.0.5:22",
@@ -8,7 +8,7 @@
       "username": "ubuntu",
       "port": 22,
       "firstSeenAt": "2026-04-19T03:51:57.201Z",
-      "lastSeenAt": "2026-04-22T20:49:10.215Z",
+      "lastSeenAt": "2026-04-23T23:41:49.649Z",
       "paths": [
         "/etc/os-release",
         "/opt/kimibuilt",
@@ -29,7 +29,7 @@
         "metadata.name",
         "deployment.apps"
       ],
-      "lastObjective": "Use remote-build to keep going through the routine server checks.",
+      "lastObjective": "Reconnect to the Ubuntu server and continue the remote-build setup.",
       "lastInspectionAt": "2026-04-19T04:12:07.113Z",
       "lastStatus": "succeeded",
       "serverContext": {
@@ -54,7 +54,7 @@
       "username": "root",
       "port": 22,
       "firstSeenAt": "2026-04-19T03:51:57.675Z",
-      "lastSeenAt": "2026-04-22T00:12:52.452Z",
+      "lastSeenAt": "2026-04-23T23:41:49.331Z",
       "paths": [
         "/tmp/website-html.yaml"
       ],
@@ -86,7 +86,7 @@
       "username": "",
       "port": 22,
       "firstSeenAt": "2026-04-23T23:24:35.187Z",
-      "lastSeenAt": "2026-04-23T23:24:35.190Z",
+      "lastSeenAt": "2026-04-23T23:41:46.574Z",
       "paths": [],
       "domains": [],
       "lastObjective": "Reconcile the managed app platform on the remote k3s host.",
@@ -129,11 +129,11 @@
       "ingressClassName": "traefik",
       "tlsClusterIssuer": "letsencrypt-prod",
       "firstSeenAt": "2026-04-19T03:51:57.202Z",
-      "lastSeenAt": "2026-04-22T00:12:52.890Z",
+      "lastSeenAt": "2026-04-23T23:41:49.650Z",
       "lastAction": "remote-command",
       "lastTool": "remote-command",
-      "lastActionAt": "2026-04-22T00:12:52.888Z",
-      "lastSuccessAt": "2026-04-22T00:12:52.888Z",
+      "lastActionAt": "2026-04-23T23:41:49.648Z",
+      "lastSuccessAt": "2026-04-23T23:41:49.648Z",
       "lastFailureAt": null,
       "lastVerificationAt": null,
       "lastStatus": "succeeded",
@@ -179,11 +179,11 @@
       "ingressClassName": "traefik",
       "tlsClusterIssuer": "letsencrypt-prod",
       "firstSeenAt": "2026-04-19T03:51:57.675Z",
-      "lastSeenAt": "2026-04-22T00:12:52.453Z",
+      "lastSeenAt": "2026-04-23T23:41:49.332Z",
       "lastAction": "remote-command",
       "lastTool": "remote-command",
-      "lastActionAt": "2026-04-22T00:12:52.450Z",
-      "lastSuccessAt": "2026-04-22T00:12:52.450Z",
+      "lastActionAt": "2026-04-23T23:41:49.331Z",
+      "lastSuccessAt": "2026-04-23T23:41:49.331Z",
       "lastFailureAt": null,
       "lastVerificationAt": null,
       "lastStatus": "succeeded",
@@ -223,12 +223,12 @@
       "ingressClassName": "traefik",
       "tlsClusterIssuer": "letsencrypt-prod",
       "firstSeenAt": "2026-04-19T03:51:57.786Z",
-      "lastSeenAt": "2026-04-22T00:12:52.638Z",
+      "lastSeenAt": "2026-04-23T23:41:49.466Z",
       "lastAction": "remote-command",
       "lastTool": "remote-command",
-      "lastActionAt": "2026-04-22T00:12:52.635Z",
-      "lastSuccessAt": "2026-04-22T00:12:52.612Z",
-      "lastFailureAt": "2026-04-22T00:12:52.635Z",
+      "lastActionAt": "2026-04-23T23:41:49.465Z",
+      "lastSuccessAt": "2026-04-23T23:41:49.442Z",
+      "lastFailureAt": "2026-04-23T23:41:49.465Z",
       "lastVerificationAt": "2026-04-19T04:12:07.113Z",
       "lastStatus": "failed",
       "lastError": "Error from server (NotFound): deployments.apps \"svc\" not found Error from server (NotFound): deployments.apps \"ingress\" not found",
@@ -269,11 +269,11 @@
       "ingressClassName": "traefik",
       "tlsClusterIssuer": "letsencrypt-prod",
       "firstSeenAt": "2026-04-19T03:51:57.810Z",
-      "lastSeenAt": "2026-04-22T00:12:52.623Z",
+      "lastSeenAt": "2026-04-23T23:41:49.448Z",
       "lastAction": "remote-command",
       "lastTool": "remote-command",
-      "lastActionAt": "2026-04-22T00:12:52.621Z",
-      "lastSuccessAt": "2026-04-22T00:12:52.621Z",
+      "lastActionAt": "2026-04-23T23:41:49.447Z",
+      "lastSuccessAt": "2026-04-23T23:41:49.447Z",
       "lastFailureAt": null,
       "lastVerificationAt": null,
       "lastStatus": "succeeded",
@@ -317,11 +317,11 @@
       "ingressClassName": "traefik",
       "tlsClusterIssuer": "letsencrypt-prod",
       "firstSeenAt": "2026-04-19T03:51:57.830Z",
-      "lastSeenAt": "2026-04-22T00:12:52.638Z",
+      "lastSeenAt": "2026-04-23T23:41:49.466Z",
       "lastAction": "remote-command",
       "lastTool": "remote-command",
-      "lastActionAt": "2026-04-22T00:12:52.636Z",
-      "lastSuccessAt": "2026-04-22T00:12:52.636Z",
+      "lastActionAt": "2026-04-23T23:41:49.465Z",
+      "lastSuccessAt": "2026-04-23T23:41:49.465Z",
       "lastFailureAt": null,
       "lastVerificationAt": null,
       "lastStatus": "succeeded",
@@ -360,11 +360,11 @@
       "ingressClassName": "traefik",
       "tlsClusterIssuer": "letsencrypt-prod",
       "firstSeenAt": "2026-04-19T03:51:57.866Z",
-      "lastSeenAt": "2026-04-22T00:12:52.665Z",
+      "lastSeenAt": "2026-04-23T23:41:49.488Z",
       "lastAction": "remote-command",
       "lastTool": "remote-command",
-      "lastActionAt": "2026-04-22T00:12:52.663Z",
-      "lastSuccessAt": "2026-04-22T00:12:52.663Z",
+      "lastActionAt": "2026-04-23T23:41:49.487Z",
+      "lastSuccessAt": "2026-04-23T23:41:49.487Z",
       "lastFailureAt": null,
       "lastVerificationAt": null,
       "lastStatus": "succeeded",
@@ -390,31 +390,7 @@
   },
   "recentActivity": [
     {
-      "timestamp": "2026-04-22T20:49:10.216Z",
-      "toolId": "remote-command",
-      "action": "remote-command",
-      "status": "succeeded",
-      "host": "10.0.0.5",
-      "namespace": "",
-      "deployment": "",
-      "publicDomain": "",
-      "summary": "remote-command completed a remote inspection step.",
-      "error": ""
-    },
-    {
-      "timestamp": "2026-04-22T20:39:18.618Z",
-      "toolId": "remote-command",
-      "action": "remote-command",
-      "status": "succeeded",
-      "host": "10.0.0.5",
-      "namespace": "",
-      "deployment": "",
-      "publicDomain": "",
-      "summary": "remote-command completed a remote inspection step.",
-      "error": ""
-    },
-    {
-      "timestamp": "2026-04-22T00:12:52.890Z",
+      "timestamp": "2026-04-23T23:41:49.650Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -426,7 +402,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-04-22T00:12:52.875Z",
+      "timestamp": "2026-04-23T23:41:49.633Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -438,7 +414,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-04-22T00:12:52.665Z",
+      "timestamp": "2026-04-23T23:41:49.488Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -450,7 +426,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-04-22T00:12:52.664Z",
+      "timestamp": "2026-04-23T23:41:49.488Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -462,7 +438,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-04-22T00:12:52.652Z",
+      "timestamp": "2026-04-23T23:41:49.475Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -474,7 +450,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-04-22T00:12:52.651Z",
+      "timestamp": "2026-04-23T23:41:49.475Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "failed",
@@ -486,7 +462,7 @@
       "error": "--- pod title --- --- public title ---"
     },
     {
-      "timestamp": "2026-04-22T00:12:52.638Z",
+      "timestamp": "2026-04-23T23:41:49.466Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -498,7 +474,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-04-22T00:12:52.638Z",
+      "timestamp": "2026-04-23T23:41:49.466Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "failed",
@@ -510,7 +486,7 @@
       "error": "Error from server (NotFound): deployments.apps \"svc\" not found Error from server (NotFound): deployments.apps \"ingress\" not found"
     },
     {
-      "timestamp": "2026-04-22T00:12:52.632Z",
+      "timestamp": "2026-04-23T23:41:49.458Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -522,7 +498,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-04-22T00:12:52.631Z",
+      "timestamp": "2026-04-23T23:41:49.458Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "failed",
@@ -534,7 +510,7 @@
       "error": "curl: (6) Could not resolve host: api"
     },
     {
-      "timestamp": "2026-04-22T00:12:52.623Z",
+      "timestamp": "2026-04-23T23:41:49.448Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -546,7 +522,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-04-22T00:12:52.623Z",
+      "timestamp": "2026-04-23T23:41:49.448Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -558,7 +534,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-04-22T00:12:52.615Z",
+      "timestamp": "2026-04-23T23:41:49.443Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -570,7 +546,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-04-22T00:12:52.614Z",
+      "timestamp": "2026-04-23T23:41:49.443Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -582,7 +558,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-04-22T00:12:52.614Z",
+      "timestamp": "2026-04-23T23:41:49.443Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -594,7 +570,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-04-22T00:12:52.551Z",
+      "timestamp": "2026-04-23T23:41:49.430Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -606,7 +582,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-04-22T00:12:52.551Z",
+      "timestamp": "2026-04-23T23:41:49.430Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "failed",
@@ -618,7 +594,7 @@
       "error": "Unit gitea.service could not be found."
     },
     {
-      "timestamp": "2026-04-22T00:12:52.542Z",
+      "timestamp": "2026-04-23T23:41:49.421Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -630,7 +606,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-04-22T00:12:52.542Z",
+      "timestamp": "2026-04-23T23:41:49.421Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -642,7 +618,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-04-22T00:12:52.542Z",
+      "timestamp": "2026-04-23T23:41:49.421Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -654,7 +630,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-04-22T00:12:52.542Z",
+      "timestamp": "2026-04-23T23:41:49.421Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -666,7 +642,31 @@
       "error": ""
     },
     {
-      "timestamp": "2026-04-22T00:12:52.531Z",
+      "timestamp": "2026-04-23T23:41:49.411Z",
+      "toolId": "remote-command",
+      "action": "remote-command",
+      "status": "succeeded",
+      "host": "10.0.0.5",
+      "namespace": "",
+      "deployment": "",
+      "publicDomain": "",
+      "summary": "remote-command completed a remote inspection step.",
+      "error": ""
+    },
+    {
+      "timestamp": "2026-04-23T23:41:49.401Z",
+      "toolId": "remote-command",
+      "action": "remote-command",
+      "status": "succeeded",
+      "host": "10.0.0.5",
+      "namespace": "",
+      "deployment": "",
+      "publicDomain": "",
+      "summary": "remote-command completed a remote inspection step.",
+      "error": ""
+    },
+    {
+      "timestamp": "2026-04-23T23:41:49.394Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",

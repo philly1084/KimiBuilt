@@ -265,14 +265,19 @@ class DocumentService {
       throw new Error(formatCompatibility.error);
     }
 
-    const variableValidation = this.templateEngine.validateTemplateVariableRequirements(template, variables);
+    const resolvedVariables = {
+      ...this.templateEngine.getDefaultVariables(templateId),
+      ...(variables || {}),
+    };
+
+    const variableValidation = this.templateEngine.validateTemplateVariableRequirements(template, resolvedVariables);
     if (!variableValidation.valid) {
       throw new Error(`Missing required template variables: ${variableValidation.missing.join(', ')}`);
     }
 
     // Populate template with variables
-    const populated = await this.templateEngine.populate(template, variables);
-    const renderableTemplate = this.buildRenderableTemplate(populated, variables);
+    const populated = await this.templateEngine.populate(template, resolvedVariables);
+    const renderableTemplate = this.buildRenderableTemplate(populated, resolvedVariables);
 
     // Generate document
     const document = await this.renderDocument({

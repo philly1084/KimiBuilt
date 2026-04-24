@@ -1,0 +1,645 @@
+body[data-theme="voxel"] {
+    --bg-primary: #080c10;
+    --bg-secondary: #0e1518;
+    --bg-tertiary: #162124;
+    --bg-hover: #203238;
+    --border-color: #2b4548;
+    --text-primary: #e6f7ef;
+    --text-secondary: #9db5ae;
+    --text-muted: #657d78;
+    --accent: #49d3a7;
+    --accent-hover: #79f2c9;
+    --success: #1d8f66;
+    --success-bright: #7bf1b8;
+    --warning: #f4c95d;
+    --error: #ff6f6f;
+    --info: #75b7ff;
+    --voxel-ink: #061013;
+    --voxel-panel: rgba(12, 22, 25, 0.94);
+    --voxel-panel-strong: rgba(17, 33, 36, 0.98);
+    --voxel-pet-primary: #49d3a7;
+    --voxel-pet-secondary: #f4c95d;
+    --voxel-pet-accent: #ff6f91;
+    background:
+        linear-gradient(90deg, rgba(73, 211, 167, 0.04) 1px, transparent 1px),
+        linear-gradient(0deg, rgba(117, 183, 255, 0.035) 1px, transparent 1px),
+        var(--bg-primary);
+    background-size: 24px 24px, 24px 24px, auto;
+}
+
+body[data-theme="voxel"] .header {
+    min-height: 58px;
+    background: var(--voxel-panel-strong);
+    border-bottom: 2px solid var(--border-color);
+    box-shadow: 0 8px 0 rgba(0, 0, 0, 0.18);
+}
+
+body[data-theme="voxel"] .header-title {
+    letter-spacing: 0;
+    color: var(--text-primary);
+    text-transform: uppercase;
+}
+
+body[data-theme="voxel"] .header-title::before {
+    content: "";
+    width: 14px;
+    height: 14px;
+    display: inline-block;
+    margin-right: 8px;
+    vertical-align: -2px;
+    background: var(--voxel-pet-primary);
+    box-shadow:
+        4px 4px 0 var(--voxel-pet-secondary),
+        8px 0 0 var(--voxel-pet-accent);
+}
+
+body[data-theme="voxel"] .header-model,
+body[data-theme="voxel"] .btn,
+body[data-theme="voxel"] #modelSelect {
+    border-radius: 4px;
+    border-width: 2px;
+    box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.28);
+}
+
+body[data-theme="voxel"] .btn:hover,
+body[data-theme="voxel"] #modelSelect:hover {
+    transform: translate(-1px, -1px);
+    box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.3);
+}
+
+body[data-theme="voxel"] .main-content {
+    gap: 0;
+}
+
+body[data-theme="voxel"] .terminal-container {
+    background:
+        linear-gradient(180deg, rgba(73, 211, 167, 0.04), transparent 34%),
+        var(--bg-primary);
+}
+
+body[data-theme="voxel"] .terminal-output {
+    padding: 18px;
+}
+
+body[data-theme="voxel"] .input-container {
+    background: var(--voxel-panel-strong);
+    border-top: 2px solid var(--border-color);
+    box-shadow: 0 -8px 0 rgba(0, 0, 0, 0.16);
+}
+
+body[data-theme="voxel"] .input-wrapper {
+    min-height: 48px;
+    padding: 0 12px;
+    background: var(--bg-primary);
+    border: 2px solid var(--border-color);
+    border-radius: 4px;
+    box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.24);
+}
+
+body[data-theme="voxel"] .input-prompt {
+    min-width: 54px;
+    color: var(--voxel-pet-secondary);
+    font-size: 13px;
+}
+
+body[data-theme="voxel"] #commandInput {
+    min-width: 0;
+}
+
+body[data-theme="voxel"] .input-meta {
+    flex-wrap: wrap;
+}
+
+body[data-theme="voxel"] .shortcut-hint {
+    margin-left: auto;
+}
+
+body[data-theme="voxel"] .line {
+    margin: 8px 0;
+}
+
+body[data-theme="voxel"] .line-input.user-message {
+    align-items: stretch;
+    gap: 10px;
+    padding: 10px 12px;
+    background: rgba(22, 33, 36, 0.82);
+    border: 2px solid var(--border-color);
+    border-left-color: var(--voxel-pet-secondary);
+    border-radius: 4px;
+    box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.18);
+}
+
+body[data-theme="voxel"] .line-input .prompt {
+    color: var(--voxel-pet-secondary);
+}
+
+body[data-theme="voxel"] .line-output.ai {
+    margin: 12px 0;
+    padding: 0;
+    overflow: hidden;
+    color: var(--text-primary);
+    background: var(--voxel-panel);
+    border: 2px solid var(--border-color);
+    border-left: 6px solid var(--voxel-pet-primary);
+    border-radius: 4px;
+    box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.22);
+}
+
+body[data-theme="voxel"] .line-output.system,
+body[data-theme="voxel"] .line-output.error {
+    margin-left: 0;
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: rgba(8, 12, 16, 0.72);
+}
+
+.voxel-response-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    color: var(--voxel-pet-secondary);
+    background: var(--voxel-ink);
+    border-bottom: 2px solid var(--border-color);
+    font-size: 12px;
+    text-transform: uppercase;
+}
+
+.voxel-response-meta {
+    color: var(--text-muted);
+    font-size: 11px;
+    text-transform: none;
+}
+
+.voxel-response-body {
+    padding: 14px;
+}
+
+body[data-theme="voxel"] .streaming .voxel-response-head::after {
+    content: " live";
+    color: var(--success-bright);
+    animation: voxelBlink 1s steps(2, start) infinite;
+}
+
+body[data-theme="voxel"] .streaming::after {
+    content: "";
+}
+
+body[data-theme="voxel"] .code-block,
+body[data-theme="voxel"] .diagram-block,
+body[data-theme="voxel"] .inline-code {
+    border-radius: 4px;
+    border-width: 2px;
+}
+
+body[data-theme="voxel"] .code-header {
+    background: #071013;
+    border-bottom-width: 2px;
+}
+
+.voxel-dock {
+    width: 320px;
+    flex: 0 0 320px;
+    padding: 14px;
+    overflow-y: auto;
+    background: var(--bg-secondary);
+    border-left: 1px solid var(--border-color);
+}
+
+body[data-theme="voxel"] .voxel-dock {
+    background: var(--voxel-panel);
+    border-left: 2px solid var(--border-color);
+    box-shadow: -8px 0 0 rgba(0, 0, 0, 0.16);
+}
+
+.voxel-panel {
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+body[data-theme="voxel"] .voxel-panel {
+    border-width: 2px;
+    border-radius: 4px;
+    box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.22);
+}
+
+.voxel-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-tertiary);
+}
+
+body[data-theme="voxel"] .voxel-panel-head {
+    border-bottom-width: 2px;
+    background: var(--voxel-ink);
+}
+
+.voxel-panel-title {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--text-primary);
+}
+
+.voxel-panel-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.voxel-icon-btn {
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    cursor: pointer;
+    font-family: inherit;
+}
+
+body[data-theme="voxel"] .voxel-icon-btn {
+    border-width: 2px;
+    box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.24);
+}
+
+.voxel-icon-btn:hover {
+    color: var(--voxel-pet-secondary);
+    transform: translate(-1px, -1px);
+}
+
+.voxel-pet-stage {
+    min-height: 248px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+    background:
+        linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+        linear-gradient(0deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+        var(--bg-primary);
+    background-size: 18px 18px, 18px 18px, auto;
+}
+
+.voxel-pet {
+    position: relative;
+    width: 260px;
+    height: 230px;
+    transform-style: preserve-3d;
+    animation: voxelIdle 3.2s ease-in-out infinite;
+}
+
+.voxel-pet.action-jump {
+    animation: voxelJump 650ms cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+
+.voxel-pet.action-dance {
+    animation: voxelDance 760ms steps(4, end);
+}
+
+.voxel-pet.action-scout,
+.voxel-pet.action-guard {
+    animation: voxelScan 900ms ease-in-out;
+}
+
+.voxel-pet.action-sleep {
+    animation: voxelSleep 1.2s ease-in-out;
+}
+
+.voxel-cube {
+    position: absolute;
+    width: var(--cube, 18px);
+    height: var(--cube, 18px);
+    left: calc(var(--x) * var(--cube, 18px));
+    top: calc(var(--y) * var(--cube, 18px));
+    background: var(--color);
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    box-shadow:
+        3px 3px 0 rgba(0, 0, 0, 0.4),
+        inset -4px -4px 0 rgba(0, 0, 0, 0.22),
+        inset 3px 3px 0 rgba(255, 255, 255, 0.18);
+}
+
+.voxel-cube.eye {
+    background: #061013;
+    border-color: rgba(255, 255, 255, 0.5);
+}
+
+.voxel-cube.spark {
+    animation: voxelBlink 1.4s steps(2, start) infinite;
+}
+
+.voxel-shadow {
+    position: absolute;
+    left: 50%;
+    bottom: -10px;
+    width: 126px;
+    height: 16px;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.35);
+    filter: blur(1px);
+}
+
+.voxel-pet-card {
+    padding: 12px;
+    border-top: 1px solid var(--border-color);
+}
+
+body[data-theme="voxel"] .voxel-pet-card {
+    border-top-width: 2px;
+}
+
+.voxel-pet-name {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.voxel-pet-name strong {
+    color: var(--text-primary);
+}
+
+.voxel-pet-name span {
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+.voxel-stat-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.voxel-stat {
+    display: grid;
+    grid-template-columns: 64px 1fr;
+    gap: 8px;
+    align-items: center;
+    font-size: 12px;
+}
+
+.voxel-stat label {
+    color: var(--text-muted);
+}
+
+.voxel-meter {
+    height: 10px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+}
+
+.voxel-meter-fill {
+    height: 100%;
+    width: var(--value, 50%);
+    background: linear-gradient(90deg, var(--voxel-pet-primary), var(--voxel-pet-secondary));
+}
+
+.voxel-seed {
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 1.45;
+    margin-bottom: 12px;
+}
+
+.voxel-prompt-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.voxel-prompt-row input {
+    min-width: 0;
+    flex: 1;
+    padding: 9px 10px;
+    color: var(--text-primary);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 12px;
+}
+
+body[data-theme="voxel"] .voxel-prompt-row input {
+    border-width: 2px;
+}
+
+.voxel-action-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.voxel-action-grid .btn {
+    justify-content: center;
+    min-height: 36px;
+}
+
+.voxel-boot {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 220px;
+    gap: 16px;
+    align-items: stretch;
+}
+
+.voxel-boot-title {
+    font-size: clamp(22px, 4vw, 42px);
+    line-height: 1;
+    font-weight: 800;
+    color: var(--text-primary);
+    text-transform: uppercase;
+}
+
+.voxel-boot-copy {
+    margin-top: 10px;
+    color: var(--text-secondary);
+}
+
+.voxel-command-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 18px;
+}
+
+.voxel-command-chip {
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    background: rgba(8, 12, 16, 0.72);
+    color: var(--text-secondary);
+    border-radius: 4px;
+}
+
+.voxel-command-chip code {
+    color: var(--voxel-pet-secondary);
+}
+
+.voxel-mini-pet {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 180px;
+    border: 2px solid var(--border-color);
+    background: var(--bg-primary);
+    box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.2);
+}
+
+.voxel-mini-pet .voxel-pet {
+    transform: scale(0.78);
+}
+
+@keyframes voxelIdle {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-4px); }
+}
+
+@keyframes voxelJump {
+    0%, 100% { transform: translateY(0) scale(1); }
+    45% { transform: translateY(-24px) scale(0.98, 1.04); }
+}
+
+@keyframes voxelDance {
+    0%, 100% { transform: translateX(0) rotate(0deg); }
+    25% { transform: translateX(-8px) rotate(-3deg); }
+    50% { transform: translateX(6px) rotate(3deg); }
+    75% { transform: translateX(-4px) rotate(-2deg); }
+}
+
+@keyframes voxelScan {
+    0%, 100% { transform: translateX(0); filter: none; }
+    30% { transform: translateX(8px); filter: drop-shadow(0 0 10px var(--voxel-pet-secondary)); }
+    60% { transform: translateX(-8px); filter: drop-shadow(0 0 10px var(--voxel-pet-primary)); }
+}
+
+@keyframes voxelSleep {
+    0%, 100% { transform: translateY(0) rotate(0deg); opacity: 1; }
+    50% { transform: translateY(8px) rotate(-2deg); opacity: 0.72; }
+}
+
+@keyframes voxelBlink {
+    0%, 60% { opacity: 1; }
+    61%, 100% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .voxel-pet,
+    .voxel-pet.action-jump,
+    .voxel-pet.action-dance,
+    .voxel-pet.action-scout,
+    .voxel-pet.action-guard,
+    .voxel-pet.action-sleep,
+    .voxel-cube.spark,
+    body[data-theme="voxel"] .streaming .voxel-response-head::after {
+        animation: none;
+    }
+}
+
+@media (max-width: 900px) {
+    .main-content {
+        flex-direction: column;
+    }
+
+    .voxel-dock {
+        width: 100%;
+        flex: 0 0 auto;
+        max-height: 334px;
+        border-left: none;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    body[data-theme="voxel"] .voxel-dock {
+        border-left: none;
+        border-bottom: 2px solid var(--border-color);
+        box-shadow: 0 8px 0 rgba(0, 0, 0, 0.16);
+    }
+
+    .voxel-panel {
+        display: grid;
+        grid-template-columns: 240px minmax(0, 1fr);
+    }
+
+    .voxel-panel-head {
+        grid-column: 1 / -1;
+    }
+
+    .voxel-pet-stage {
+        min-height: 210px;
+    }
+
+    .voxel-boot {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 600px) {
+    body[data-theme="voxel"] .toolbar {
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+
+    body[data-theme="voxel"] #modelSelect {
+        flex: 0 1 130px;
+        width: 130px;
+        min-width: 0;
+        max-width: 130px;
+    }
+
+    body[data-theme="voxel"] .toolbar .btn {
+        min-width: 44px;
+        justify-content: center;
+    }
+
+    body[data-theme="voxel"] .toolbar .btn span {
+        display: none;
+    }
+
+    body[data-theme="voxel"] .toolbar .btn[data-short]::after {
+        content: attr(data-short);
+    }
+
+    body[data-theme="voxel"] .toolbar a.btn {
+        display: none;
+    }
+
+    body[data-theme="voxel"] .shortcut-hint {
+        display: none;
+    }
+
+    .voxel-dock {
+        max-height: none;
+        padding: 10px;
+    }
+
+    .voxel-panel {
+        display: block;
+    }
+
+    .voxel-pet-stage {
+        min-height: 200px;
+        padding: 12px;
+    }
+
+    .voxel-pet {
+        transform: scale(0.84);
+    }
+
+    .voxel-command-grid {
+        grid-template-columns: 1fr;
+    }
+
+    body[data-theme="voxel"] .terminal-output {
+        padding: 12px;
+    }
+}

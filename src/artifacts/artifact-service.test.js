@@ -370,6 +370,51 @@ describe('ArtifactService', () => {
         expect(result.responseId).toBe('resp-frontend-1');
     });
 
+    test('uses frontend artifact generation for interactive research documents', async () => {
+        createResponse.mockResolvedValueOnce({
+            id: 'resp-interactive-research-1',
+            output: [{
+                type: 'message',
+                content: [{
+                    text: '<!DOCTYPE html><html><head><title>AI Browser Research</title></head><body><main data-component="interactive-research"><h1>AI Browser Research</h1><button>Filter sources</button><script>document.body.dataset.ready = "true";</script></main></body></html>',
+                }],
+            }],
+        });
+
+        const result = await artifactService.generateArtifact({
+            session: { previousResponseId: 'prev-interactive-doc', metadata: {} },
+            sessionId: 'session-1',
+            mode: 'chat',
+            prompt: 'Do some research on AI browser tools and make it an interactive document with source filters and light motion.',
+            format: 'html',
+            artifactIds: [],
+            existingContent: '',
+            model: 'gpt-5.3',
+        });
+
+        expect(createResponse).toHaveBeenCalledTimes(1);
+        expect(createResponse.mock.calls[0][0]?.instructions).toContain('[Interactive document experience]');
+        expect(createResponse.mock.calls[0][0]?.instructions).toContain('sandbox that allows scripts');
+        expect(renderArtifact).toHaveBeenCalledWith(expect.objectContaining({
+            format: 'html',
+            title: expect.stringContaining('AI Browser Research'),
+            content: expect.stringContaining('data-component="interactive-research"'),
+        }));
+        expect(artifactStore.create).toHaveBeenCalledWith(expect.objectContaining({
+            metadata: expect.objectContaining({
+                generationStrategy: 'single-pass-frontend-demo',
+                artifactExperience: expect.objectContaining({
+                    family: 'interactive-research-document',
+                    sandbox: expect.objectContaining({
+                        scripts: true,
+                        sameOrigin: false,
+                    }),
+                }),
+            }),
+        }));
+        expect(result.responseId).toBe('resp-interactive-research-1');
+    });
+
     test('stores multi-page frontend bundles as previewable zip artifacts', async () => {
         createResponse.mockResolvedValueOnce({
             id: 'resp-frontend-bundle-1',
@@ -589,12 +634,13 @@ describe('ArtifactService', () => {
         });
 
         expect(serialized.previewUrl).toBe('/api/artifacts/artifact-site-1/preview');
+        expect(serialized.sandboxUrl).toBe('/api/artifacts/artifact-site-1/sandbox');
         expect(serialized.bundleDownloadUrl).toBe('/api/artifacts/artifact-site-1/bundle');
         expect(serialized.preview).toEqual(expect.objectContaining({
             type: 'site',
             entry: 'index.html',
             fileCount: 2,
-            url: '/api/artifacts/artifact-site-1/preview',
+            url: '/api/artifacts/artifact-site-1/sandbox',
         }));
     });
 
@@ -617,6 +663,7 @@ describe('ArtifactService', () => {
         });
 
         expect(serialized.previewUrl).toBe('/api/artifacts/artifact-text-1/preview');
+        expect(serialized.sandboxUrl).toBe('/api/artifacts/artifact-text-1/sandbox');
         expect(serialized.preview).toEqual({
             type: 'html',
             content: '<pre>hello world</pre>',
