@@ -342,7 +342,7 @@ body[data-theme="voxel"] .voxel-icon-btn {
 
 .voxel-face-front {
     inset: 0;
-    transform: translateZ(var(--half-depth-px, 9px));
+    transform: translateZ(var(--half-depth-px, 2px));
     box-shadow:
         inset -4px -4px 0 rgba(0, 0, 0, 0.24),
         inset 3px 3px 0 rgba(255, 255, 255, 0.18);
@@ -351,7 +351,7 @@ body[data-theme="voxel"] .voxel-icon-btn {
 .voxel-face-right {
     left: 100%;
     top: 0;
-    width: var(--depth-px, 18px);
+    width: var(--depth-px, 2px);
     height: var(--cube, 18px);
     transform-origin: left center;
     transform: rotateY(90deg);
@@ -362,7 +362,7 @@ body[data-theme="voxel"] .voxel-icon-btn {
     left: 0;
     bottom: 100%;
     width: var(--cube, 18px);
-    height: var(--depth-px, 18px);
+    height: var(--depth-px, 2px);
     transform-origin: bottom center;
     transform: rotateX(90deg);
     filter: brightness(1.24);
@@ -372,7 +372,7 @@ body[data-theme="voxel"] .voxel-icon-btn {
     content: "";
     position: absolute;
     inset: 0;
-    transform: translate3d(4px, 4px, -9px);
+    transform: translate3d(2px, 2px, -3px);
     background: var(--color);
     filter: brightness(0.25);
     opacity: 0.28;
@@ -462,6 +462,14 @@ body[data-theme="voxel"] .voxel-pet-card {
     margin-bottom: 12px;
 }
 
+.voxel-creator-label {
+    margin-bottom: 6px;
+    color: var(--voxel-pet-secondary);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
 .voxel-prompt-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;
@@ -483,6 +491,19 @@ body[data-theme="voxel"] .voxel-pet-card {
 
 body[data-theme="voxel"] .voxel-prompt-row input {
     border-width: 2px;
+}
+
+body[data-theme="voxel"] .voxel-prompt-row input:focus {
+    outline: none;
+    border-color: var(--voxel-pet-secondary);
+    box-shadow: 0 0 0 2px rgba(244, 201, 93, 0.18), 3px 3px 0 rgba(0, 0, 0, 0.24);
+}
+
+body[data-theme="voxel"] .btn-primary {
+    background: var(--voxel-pet-primary);
+    border-color: var(--voxel-pet-secondary);
+    color: #061013;
+    font-weight: 700;
 }
 
 .voxel-action-grid {

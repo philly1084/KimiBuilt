@@ -894,6 +894,9 @@
                 <button class="btn btn-sm" data-short="Thm" onclick="app.cycleTheme()" title="Toggle theme" aria-label="Toggle theme">
                     <span>Theme</span>
                 </button>
+                <button class="btn btn-sm" data-short="Vox" onclick="app.focusVoxelCreator()" title="Voxel creator" aria-label="Focus voxel creator">
+                    <span>Creator</span>
+                </button>
                 <button class="btn btn-sm" onclick="app.showShortcuts()" title="Help (F1)" aria-label="Show keyboard shortcuts">?</button>
                 <a href="/" class="btn btn-sm" aria-label="Go to home">Home</a>
             </div>
@@ -932,11 +935,11 @@
                 </div>
             </div>
 
-            <!-- Voxel Pet Dock -->
-            <aside id="voxelDock" class="voxel-dock" aria-label="Voxel pet console">
+            <!-- Voxel Creator Dock -->
+            <aside id="voxelDock" class="voxel-dock" aria-label="Voxel creator console">
                 <section class="voxel-panel">
                     <div class="voxel-panel-head">
-                        <span class="voxel-panel-title">Voxel Pet</span>
+                        <span class="voxel-panel-title">Voxel Creator</span>
                         <div class="voxel-panel-actions">
                             <button class="voxel-icon-btn" onclick="app.handlePetAction('jump')" title="Jump" aria-label="Jump">J</button>
                             <button class="voxel-icon-btn" onclick="app.generateRandomVoxelPet()" title="Random voxel character" aria-label="Random voxel character">R</button>
@@ -963,10 +966,11 @@
                             </div>
                         </div>
                         <div id="voxelPetSeed" class="voxel-seed"></div>
+                        <div class="voxel-creator-label">AI voxel request</div>
                         <div class="voxel-prompt-row">
-                            <input id="voxelPetPrompt" type="text" placeholder="voxel fox with amber goggles" autocomplete="off" spellcheck="false">
+                            <input id="voxelPetPrompt" type="text" placeholder="AI voxel agent prompt..." autocomplete="off" spellcheck="false">
                             <button class="btn btn-sm" onclick="app.generateVoxelPetFromInput()">Spawn</button>
-                            <button class="btn btn-sm" onclick="app.generateAIVoxelPetFromInput()">AI</button>
+                            <button class="btn btn-sm btn-primary" onclick="app.generateAIVoxelPetFromInput()">AI</button>
                         </div>
                         <div class="voxel-action-grid">
                             <button class="btn btn-sm" onclick="app.handlePetAction('dance')">Dance</button>

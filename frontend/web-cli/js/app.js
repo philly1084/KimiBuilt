@@ -32,7 +32,7 @@ class CodeCLIApp {
             '/help', '/?', '/clear', '/cls', '/models', '/model', '/theme', '/voxel',
             '/export', '/save', '/load', '/copy', '/image', '/image-models', '/unsplash', '/diagram',
             '/upload', '/session', '/history', '/artifacts', '/stats', '/shortcuts', '/keys', '/health', '/tools', '/tool', '/tool-help',
-            '/files', '/ls', '/download', '/open', '/pet', '/spawn', '/agent', '/voxel-agent', '/random-agent'
+            '/files', '/ls', '/download', '/open', '/pet', '/spawn', '/agent', '/voxel-agent', '/random-agent', '/creator', '/voxel-creator'
         ];
         
         this.init();
@@ -145,18 +145,14 @@ class CodeCLIApp {
             this.voxelPetPrompt.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') {
                     e.preventDefault();
-                    this.generateVoxelPetFromInput();
+                    this.generateAIVoxelPetFromInput();
                 }
             });
         }
         
         // Focus input on click anywhere
         document.addEventListener('click', (e) => {
-            if (e.target.tagName !== 'BUTTON' && 
-                e.target.tagName !== 'SELECT' && 
-                e.target.tagName !== 'A' &&
-                !e.target.closest('.autocomplete') &&
-                !e.target.closest('.modal')) {
+            if (!e.target.closest('button, input, textarea, select, a, [contenteditable="true"], .autocomplete, .modal, .voxel-dock, .file-manager-modal')) {
                 this.commandInput.focus();
             }
         });
@@ -314,6 +310,20 @@ class CodeCLIApp {
 
     generateVoxelPetFromInput() {
         this.generateVoxelPet(this.voxelPetPrompt?.value || '');
+    }
+
+    focusVoxelCreator(options = {}) {
+        this.setTheme('voxel', { silent: true });
+        this.voxelDock?.classList.remove('hidden');
+        this.renderVoxelPet('scout');
+        window.setTimeout(() => {
+            this.voxelPetPrompt?.focus();
+            this.voxelPetPrompt?.select();
+        }, 0);
+
+        if (!options.silent) {
+            this.printSystem('Voxel creator ready. Type a pet idea and press Enter for AI fill, or use Spawn for local generation.');
+        }
     }
 
     generateRandomVoxelPet(options = {}) {
@@ -654,6 +664,10 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
                 this.setTheme('voxel');
                 this.printPetCard();
                 break;
+            case 'creator':
+            case 'voxel-creator':
+                this.focusVoxelCreator();
+                break;
             case 'pet':
             case 'spawn':
                 await this.handlePetCommand(args);
@@ -977,7 +991,7 @@ Session Statistics:
                             <div class="voxel-command-chip"><code>/pet &lt;prompt&gt;</code><br>spawn companion</div>
                             <div class="voxel-command-chip"><code>/pet random</code><br>random 3D agent</div>
                             <div class="voxel-command-chip"><code>/agent &lt;prompt&gt;</code><br>AI-filled spec</div>
-                            <div class="voxel-command-chip"><code>/models</code><br>model catalog</div>
+                            <div class="voxel-command-chip"><code>/creator</code><br>focus creator</div>
                             <div class="voxel-command-chip"><code>/help</code><br>command index</div>
                         </div>
                     </div>
@@ -1012,6 +1026,7 @@ Session Statistics:
   /pet ai <prompt>   Ask AI to design and fill the voxel pet
   /agent <prompt>    AI-backed voxel agent generator
   /random-agent      Spawn a random 3D voxel character
+  /creator           Focus the voxel creator panel
   /pet act <action>  Run jump, dance, scout, guard, or sleep
   /pet name <name>   Rename the active pet
   /pet hide|show     Hide or restore the pet dock

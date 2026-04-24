@@ -252,7 +252,7 @@
 
         petCells(pet).forEach((cell) => {
             const cubeSize = 18;
-            const depthPx = Math.max(8, Math.round(cubeSize * (cell.depth || 1)));
+            const depthPx = Math.max(2, Math.min(3, Math.ceil((cell.depth || 1) * 2)));
             const node = document.createElement('span');
             node.className = `voxel-cube ${cell.classes || ''}`.trim();
             node.style.setProperty('--x', String(cell.x));
@@ -260,9 +260,9 @@
             node.style.setProperty('--z', String(cell.z || 0));
             node.style.setProperty('--x-px', `${cell.x * cubeSize}px`);
             node.style.setProperty('--y-px', `${cell.y * cubeSize}px`);
-            node.style.setProperty('--z-px', `${(cell.z || 0) * 5}px`);
+            node.style.setProperty('--z-px', `${cell.z || 0}px`);
             node.style.setProperty('--depth-px', `${depthPx}px`);
-            node.style.setProperty('--half-depth-px', `${Math.round(depthPx / 2)}px`);
+            node.style.setProperty('--half-depth-px', `${depthPx / 2}px`);
             node.style.setProperty('--color', cell.color);
             ['front', 'right', 'top'].forEach((face) => {
                 const side = document.createElement('span');
