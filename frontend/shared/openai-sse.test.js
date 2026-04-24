@@ -7,6 +7,7 @@ const {
   resolvePreferredChatModel,
   selectPreferredCodexModel,
   splitSSEFrames,
+  streamGatewayResponse,
 } = require('./openai-sse');
 
 describe('openai-sse helpers', () => {
@@ -235,6 +236,62 @@ describe('openai-sse helpers', () => {
     ]);
     expect(events[0].content).toBe('Final answer');
     expect(events[1].content).toBe('Checked the request. Chose the direct path.');
+  });
+
+  test('streams final response text when SSE completion arrives without deltas', async () => {
+    const payload = {
+      type: 'response.completed',
+      session_id: 'session-final',
+      response: {
+        id: 'resp-final',
+        output: [{
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: 'Recovered final answer' }],
+        }],
+      },
+    };
+    const response = new Response(`data: ${JSON.stringify(payload)}\n\ndata: [DONE]\n\n`, {
+      headers: { 'content-type': 'text/event-stream' },
+    });
+
+    const events = [];
+    for await (const event of streamGatewayResponse(response)) {
+      events.push(event);
+    }
+
+    expect(events.map((event) => event.type)).toEqual(['text_delta', 'final', 'done']);
+    expect(events[0]).toMatchObject({
+      content: 'Recovered final answer',
+      finalChunk: true,
+      sessionId: 'session-final',
+      responseId: 'resp-final',
+    });
+  });
+
+  test('streams only missing final suffix after partial SSE deltas', async () => {
+    const delta = { type: 'response.output_text.delta', delta: 'Partial ' };
+    const completed = {
+      type: 'response.completed',
+      response: {
+        id: 'resp-partial',
+        output_text: 'Partial final answer',
+      },
+    };
+    const response = new Response(
+      `data: ${JSON.stringify(delta)}\n\ndata: ${JSON.stringify(completed)}\n\ndata: [DONE]\n\n`,
+      { headers: { 'content-type': 'text/event-stream' } },
+    );
+
+    const events = [];
+    for await (const event of streamGatewayResponse(response)) {
+      events.push(event);
+    }
+
+    expect(events.filter((event) => event.type === 'text_delta').map((event) => event.content)).toEqual([
+      'Partial ',
+      'final answer',
+    ]);
   });
 
   test('filters and selects Codex-backed models', () => {

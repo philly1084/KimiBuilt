@@ -512,6 +512,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 buildOwnerMemoryMetadata(ownerId, memoryScope, {
                     sourceSurface: clientSurface || taskType,
                     memoryKeywords,
+                    ...(sessionIsolation ? { sessionIsolation: true } : {}),
                 }),
             );
             await memoryService.rememberArtifactResult(sessionId, {
@@ -524,6 +525,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     sourcePrompt: message,
                     artifactFormat: effectiveOutputFormat,
                     artifactFilename: generationArtifacts.artifact?.filename || '',
+                    ...(sessionIsolation ? { sessionIsolation: true } : {}),
                 }),
             });
             await memoryService.rememberLearnedSkill(sessionId, {
@@ -534,6 +536,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 metadata: buildOwnerMemoryMetadata(ownerId, memoryScope, {
                     sourceSurface: clientSurface || taskType,
                     memoryKeywords,
+                    ...(sessionIsolation ? { sessionIsolation: true } : {}),
                 }),
             });
             await sessionStore.appendMessages(sessionId, buildWebChatSessionMessages({
@@ -687,6 +690,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                         memoryService.rememberResponse(sessionId, fullText, buildOwnerMemoryMetadata(ownerId, memoryScope, {
                             sourceSurface: clientSurface || taskType,
                             memoryKeywords,
+                            ...(sessionIsolation ? { sessionIsolation: true } : {}),
                         }));
                     }
                     const sshMetadata = extractSshSessionMetadataFromToolEvents(event.response?.metadata?.toolEvents);
@@ -729,6 +733,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                                 sourceSurface: clientSurface || taskType,
                                 memoryKeywords,
                                 sourcePrompt: message,
+                                ...(sessionIsolation ? { sessionIsolation: true } : {}),
                             }),
                         })));
                         await memoryService.rememberLearnedSkill(sessionId, {
@@ -739,6 +744,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                             metadata: buildOwnerMemoryMetadata(ownerId, memoryScope, {
                                 sourceSurface: clientSurface || taskType,
                                 memoryKeywords,
+                                ...(sessionIsolation ? { sessionIsolation: true } : {}),
                             }),
                         });
                     }
@@ -839,6 +845,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             memoryService.rememberResponse(sessionId, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope, {
                 sourceSurface: clientSurface || taskType,
                 memoryKeywords,
+                ...(sessionIsolation ? { sessionIsolation: true } : {}),
             }));
         }
         const sshMetadata = extractSshSessionMetadataFromToolEvents(response?.metadata?.toolEvents);
@@ -881,6 +888,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     sourceSurface: clientSurface || taskType,
                     memoryKeywords,
                     sourcePrompt: message,
+                    ...(sessionIsolation ? { sessionIsolation: true } : {}),
                 }),
             })));
             await memoryService.rememberLearnedSkill(sessionId, {
@@ -891,6 +899,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 metadata: buildOwnerMemoryMetadata(ownerId, memoryScope, {
                     sourceSurface: clientSurface || taskType,
                     memoryKeywords,
+                    ...(sessionIsolation ? { sessionIsolation: true } : {}),
                 }),
             });
         }

@@ -1028,6 +1028,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 buildOwnerMemoryMetadata(ownerId, memoryScope, {
                     sourceSurface: clientSurface || taskType,
                     ...(memoryKeywords.length > 0 ? { memoryKeywords } : {}),
+                    ...(sessionIsolation ? { sessionIsolation: true } : {}),
                 }),
             );
             await persistForegroundTurnMessages(
@@ -1280,6 +1281,7 @@ router.post('/chat/completions', async (req, res, next) => {
                         memoryService.rememberResponse(sessionId, fullText, buildOwnerMemoryMetadata(ownerId, memoryScope, {
                             sourceSurface: clientSurface || taskType,
                             ...(memoryKeywords.length > 0 ? { memoryKeywords } : {}),
+                            ...(sessionIsolation ? { sessionIsolation: true } : {}),
                         }));
                     }
                     const sshMetadata = extractSshSessionMetadataFromToolEvents(resolvedCompletion.response?.metadata?.toolEvents);
@@ -1479,6 +1481,7 @@ router.post('/chat/completions', async (req, res, next) => {
             memoryService.rememberResponse(sessionId, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope, {
                 sourceSurface: clientSurface || taskType,
                 ...(memoryKeywords.length > 0 ? { memoryKeywords } : {}),
+                ...(sessionIsolation ? { sessionIsolation: true } : {}),
             }));
         }
         const sshMetadata = extractSshSessionMetadataFromToolEvents(response?.metadata?.toolEvents);
@@ -1857,6 +1860,7 @@ router.post('/responses', async (req, res, next) => {
                 buildOwnerMemoryMetadata(ownerId, memoryScope, {
                     sourceSurface: clientSurface || taskType,
                     ...(memoryKeywords.length > 0 ? { memoryKeywords } : {}),
+                    ...(sessionIsolation ? { sessionIsolation: true } : {}),
                 }),
             );
             await sessionStore.appendMessages(sessionId, buildWebChatSessionMessages({
@@ -2039,6 +2043,7 @@ router.post('/responses', async (req, res, next) => {
                         memoryService.rememberResponse(sessionId, fullText, buildOwnerMemoryMetadata(ownerId, memoryScope, {
                             sourceSurface: clientSurface || taskType,
                             ...(memoryKeywords.length > 0 ? { memoryKeywords } : {}),
+                            ...(sessionIsolation ? { sessionIsolation: true } : {}),
                         }));
                     }
                     const sshMetadata = extractSshSessionMetadataFromToolEvents(resolvedCompletion.response?.metadata?.toolEvents);
@@ -2215,6 +2220,7 @@ router.post('/responses', async (req, res, next) => {
             memoryService.rememberResponse(sessionId, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope, {
                 sourceSurface: clientSurface || taskType,
                 ...(memoryKeywords.length > 0 ? { memoryKeywords } : {}),
+                ...(sessionIsolation ? { sessionIsolation: true } : {}),
             }));
         }
         const sshMetadata = extractSshSessionMetadataFromToolEvents(response?.metadata?.toolEvents);

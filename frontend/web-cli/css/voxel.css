@@ -590,6 +590,33 @@ body[data-theme="voxel"] .voxel-icon-btn {
     filter: drop-shadow(0 9px 16px rgba(0, 0, 0, 0.36));
 }
 
+.voxel-roamer-bubble {
+    position: absolute;
+    left: 58px;
+    top: -8px;
+    max-width: 150px;
+    padding: 5px 8px;
+    color: #fff7d6;
+    background: rgba(6, 16, 19, 0.94);
+    border: 2px solid var(--voxel-pet-secondary);
+    border-radius: 4px;
+    box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.24);
+    font-size: 11px;
+    line-height: 1.25;
+    white-space: nowrap;
+}
+
+.voxel-roamer-bubble::before {
+    content: "";
+    position: absolute;
+    left: -6px;
+    bottom: 8px;
+    width: 6px;
+    height: 6px;
+    background: var(--voxel-pet-secondary);
+    box-shadow: -5px 5px 0 rgba(6, 16, 19, 0.94);
+}
+
 .voxel-pet.action-jump {
     animation: voxelJump 650ms cubic-bezier(0.2, 0.9, 0.2, 1);
 }

@@ -274,6 +274,31 @@ function getImageProviderConfig() {
     };
 }
 
+function isSameImageProvider(left = {}, right = {}) {
+    return String(left.apiKey || '').trim() === String(right.apiKey || '').trim()
+        && String(left.baseURL || '').trim().replace(/\/$/, '') === String(right.baseURL || '').trim().replace(/\/$/, '')
+        && normalizeModelId(left.imageModel) === normalizeModelId(right.imageModel);
+}
+
+function getImageProviderCandidates() {
+    const candidates = [getImageProviderConfig()];
+
+    if (hasDedicatedMediaConfig()) {
+        const mediaProvider = {
+            apiKey: config.media.apiKey,
+            baseURL: config.media.baseURL,
+            imageModel: config.media.imageModel,
+            source: 'official-openai',
+        };
+
+        if (!candidates.some((candidate) => isSameImageProvider(candidate, mediaProvider))) {
+            candidates.push(mediaProvider);
+        }
+    }
+
+    return candidates.filter((candidate) => String(candidate.apiKey || '').trim());
+}
+
 function isLikelyImageModel(model = {}) {
     const id = normalizeModelId(typeof model === 'string' ? model : model.id).toLowerCase();
     const owner = String(model.owned_by || '').toLowerCase();
@@ -475,14 +500,56 @@ function isUnsupportedImageResponseFormatError(errorBody = '', status = 0) {
     );
 }
 
-async function postImageGeneration(params) {
-    const imageProvider = getImageProviderConfig();
-    const configuredBaseURL = String(imageProvider.baseURL || 'https://api.openai.com/v1').replace(/\/$/, '');
-    const candidateBaseURLs = [configuredBaseURL];
-    const preferredParams = {
+function buildImageGenerationParamsForProvider(params = {}, imageProvider = getImageProviderConfig()) {
+    const nextParams = { ...params };
+    const providerFamily = inferProviderFamily({
+        baseURL: imageProvider.baseURL,
+        model: imageProvider.imageModel || params.model,
+    });
+    const isOpenAIStyleProvider = providerFamily === 'openai'
+        || shouldUseOfficialOpenAIImageCatalogForGateway(imageProvider);
+
+    if (isOpenAIStyleProvider) {
+        const officialModel = getOfficialOpenAIConfiguredImageModel(
+            nextParams.model,
+            imageProvider.imageModel || config.media.imageModel,
+        );
+
+        if (!officialModel) {
+            const error = new Error(`Image model "${nextParams.model || ''}" is not supported by the official OpenAI image API.`);
+            error.status = 400;
+            error.provider = imageProvider.source;
+            throw error;
+        }
+
+        nextParams.model = officialModel;
+    }
+
+    return nextParams;
+}
+
+function buildImageRequestVariants(params = {}, imageProvider = getImageProviderConfig()) {
+    const providerFamily = inferProviderFamily({
+        baseURL: imageProvider.baseURL,
+        model: imageProvider.imageModel || params.model,
+    });
+    const bareParams = { ...params };
+    const responseFormatParams = {
         ...params,
         response_format: 'b64_json',
     };
+
+    if (providerFamily === 'openai') {
+        return [bareParams, responseFormatParams];
+    }
+
+    return [responseFormatParams, bareParams];
+}
+
+async function postImageGenerationToProvider(params, imageProvider) {
+    const configuredBaseURL = String(imageProvider.baseURL || 'https://api.openai.com/v1').replace(/\/$/, '');
+    const candidateBaseURLs = [configuredBaseURL];
+    const providerParams = buildImageGenerationParamsForProvider(params, imageProvider);
 
     if (/\/v1$/i.test(configuredBaseURL) && imageProvider.source !== 'official-openai') {
         candidateBaseURLs.push(configuredBaseURL.replace(/\/v1$/i, ''));
@@ -491,7 +558,7 @@ async function postImageGeneration(params) {
     let lastError = null;
 
     for (const baseURL of candidateBaseURLs) {
-        const requestVariants = [preferredParams, params];
+        const requestVariants = buildImageRequestVariants(providerParams, imageProvider);
 
         for (let index = 0; index < requestVariants.length; index += 1) {
             const requestBody = requestVariants[index];
@@ -527,6 +594,28 @@ async function postImageGeneration(params) {
             }
 
             break;
+        }
+    }
+
+    throw lastError || new Error('Image generation failed.');
+}
+
+async function postImageGeneration(params) {
+    const providers = getImageProviderCandidates();
+    let lastError = null;
+
+    for (let index = 0; index < providers.length; index += 1) {
+        const imageProvider = providers[index];
+
+        try {
+            return await postImageGenerationToProvider(params, imageProvider);
+        } catch (error) {
+            lastError = error;
+            if (index >= providers.length - 1) {
+                throw error;
+            }
+
+            console.warn(`[OpenAI] Image generation failed via ${imageProvider.source}; trying next configured image provider: ${error.message}`);
         }
     }
 

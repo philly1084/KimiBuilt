@@ -21,6 +21,7 @@ class CodeCLIApp {
         this.activePetAction = 'idle';
         this.lastVoxelTypingReaction = 0;
         this.lastVoxelAmbientMove = Date.now();
+        this.voxelPersonality = this.loadVoxelPersonality();
         
         // Session file storage
         this.sessionFiles = [];
@@ -32,7 +33,7 @@ class CodeCLIApp {
         
         // Available commands for autocomplete
         this.commands = [
-            '/help', '/?', '/clear', '/cls', '/models', '/model', '/theme', '/voxel',
+            '/help', '/?', '/clear', '/cls', '/new', '/sessions', '/switch', '/models', '/model', '/theme', '/voxel',
             '/export', '/save', '/load', '/copy', '/image', '/image-models', '/unsplash', '/diagram',
             '/upload', '/session', '/history', '/artifacts', '/stats', '/shortcuts', '/keys', '/health', '/tools', '/tool', '/tool-help',
             '/files', '/ls', '/download', '/open', '/pet', '/spawn', '/agent', '/voxel-agent', '/random-agent', '/creator', '/voxel-creator'
@@ -256,6 +257,45 @@ class CodeCLIApp {
         localStorage.setItem('codecli-voxel-pet', JSON.stringify(this.voxelPet));
     }
 
+    loadVoxelPersonality() {
+        const fallback = {
+            turns: 0,
+            bond: 18,
+            curiosity: 46,
+            confidence: 38,
+            playfulness: 34,
+            lastThought: '',
+        };
+
+        try {
+            const stored = JSON.parse(localStorage.getItem('codecli-voxel-personality') || 'null');
+            if (!stored || typeof stored !== 'object') {
+                return fallback;
+            }
+
+            return {
+                ...fallback,
+                ...stored,
+                turns: Number.isFinite(Number(stored.turns)) ? Number(stored.turns) : fallback.turns,
+                bond: this.clampPersonalityValue(stored.bond, fallback.bond),
+                curiosity: this.clampPersonalityValue(stored.curiosity, fallback.curiosity),
+                confidence: this.clampPersonalityValue(stored.confidence, fallback.confidence),
+                playfulness: this.clampPersonalityValue(stored.playfulness, fallback.playfulness),
+            };
+        } catch (_error) {
+            return fallback;
+        }
+    }
+
+    saveVoxelPersonality() {
+        localStorage.setItem('codecli-voxel-personality', JSON.stringify(this.voxelPersonality));
+    }
+
+    clampPersonalityValue(value, fallback = 0) {
+        const numeric = Number(value);
+        return Number.isFinite(numeric) ? Math.max(0, Math.min(100, numeric)) : fallback;
+    }
+
     setVoxelPalette() {
         if (!this.voxelPet?.palette) {
             return;
@@ -313,10 +353,11 @@ class CodeCLIApp {
         }
         if (this.voxelPetStatus) {
             const mood = this.voxel.MOODS[this.voxelPet.mood] || this.voxelPet.mood;
+            const bond = Math.round(this.voxelPersonality?.bond || 0);
             this.voxelPetStatus.textContent = this.voxelPetHidden
                 ? 'Voxel companion hidden'
-                : `${this.voxelPet.name} | ${mood} | ${this.voxelPet.energy}%`;
-            this.voxelPetStatus.title = `${this.voxelPet.trait} ${this.voxelPet.species} - ${this.voxelPet.prompt}`;
+                : `${this.voxelPet.name} | ${mood} | bond ${bond}%`;
+            this.voxelPetStatus.title = `${this.voxelPet.trait} ${this.voxelPet.species} - ${this.voxelPet.prompt} - ${this.voxelPet.energy}% energy`;
         }
         if (this.voxelPetButton) {
             this.voxelPetButton.classList.toggle('is-hidden', this.voxelPetHidden);
@@ -336,15 +377,16 @@ class CodeCLIApp {
 
     scheduleVoxelAmbientMove() {
         window.clearTimeout(this.voxelAmbientTimer);
-        const delay = 7000 + Math.floor(Math.random() * 7000);
+        const delay = 9000 + Math.floor(Math.random() * 10000);
         this.voxelAmbientTimer = window.setTimeout(() => {
             if (!this.voxelPetHidden && !this.isProcessing && document.hasFocus()) {
-                const actions = ['idle', 'scout', 'sleep'];
+                const actions = ['idle', 'scout', 'sleep', 'dance'];
                 const action = actions[Math.floor(Math.random() * actions.length)];
+                const thought = this.getVoxelAmbientThought(action);
                 if (action === 'idle') {
                     this.renderVoxelPet('idle');
                 } else {
-                    this.roamVoxelPet(action === 'sleep' ? 'prompt' : 'stream', action, 1400);
+                    this.roamVoxelPet(action === 'sleep' ? 'prompt' : 'stream', action, 1800, { thought });
                 }
                 this.lastVoxelAmbientMove = Date.now();
             }
@@ -366,16 +408,24 @@ class CodeCLIApp {
         this.voxelDock?.classList.add('hidden');
     }
 
-    roamVoxelPet(placement = 'prompt', action = 'scout', duration = 1200) {
+    roamVoxelPet(placement = 'prompt', action = 'scout', duration = 1200, options = {}) {
         if (this.voxelPetHidden || !this.voxelRoamer || !this.voxelRoamerStage || !this.voxel || !this.voxelPet) {
             return;
         }
 
-        this.voxelRoamerStage.replaceChildren(this.voxel.renderElement(this.voxelPet, {
+        const nodes = [this.voxel.renderElement(this.voxelPet, {
             action,
             variant: 'peek',
             decorative: true,
-        }));
+        })];
+        const thought = String(options.thought || '').trim();
+        if (thought) {
+            const bubble = document.createElement('span');
+            bubble.className = 'voxel-roamer-bubble';
+            bubble.textContent = thought.slice(0, 48);
+            nodes.push(bubble);
+        }
+        this.voxelRoamerStage.replaceChildren(...nodes);
         this.voxelRoamer.classList.remove('hidden', 'is-prompt', 'is-stream', 'is-alert');
         this.voxelRoamer.classList.add(`is-${placement}`, 'is-visible');
 
@@ -399,8 +449,115 @@ class CodeCLIApp {
             }
             this.lastVoxelTypingReaction = now;
             this.renderVoxelPet('scout');
-            this.roamVoxelPet('prompt', 'scout', 1150);
+            this.roamVoxelPet('prompt', 'scout', 1150, { thought: this.getVoxelTypingThought() });
         }, 900);
+    }
+
+    recordVoxelInteraction(input = '', response = '') {
+        if (!this.voxelPersonality || this.voxelPetHidden) {
+            return;
+        }
+
+        const text = `${input} ${response}`.toLowerCase();
+        const asksQuestion = input.includes('?');
+        const praise = /\b(thanks|thank you|nice|great|awesome|perfect|love|cool)\b/.test(text);
+        const complexWork = /\b(debug|deploy|implement|refactor|kubectl|docker|test|fix|error|commit|build)\b/.test(text);
+
+        this.voxelPersonality = {
+            ...this.voxelPersonality,
+            turns: this.voxelPersonality.turns + 1,
+            bond: this.clampPersonalityValue(this.voxelPersonality.bond + (praise ? 5 : 1)),
+            curiosity: this.clampPersonalityValue(this.voxelPersonality.curiosity + (asksQuestion ? 3 : 1)),
+            confidence: this.clampPersonalityValue(this.voxelPersonality.confidence + (complexWork ? 3 : 1)),
+            playfulness: this.clampPersonalityValue(this.voxelPersonality.playfulness + (praise ? 2 : 0.5)),
+        };
+        this.saveVoxelPersonality();
+        this.renderVoxelPet();
+    }
+
+    getVoxelTypingThought() {
+        const name = this.voxelPet?.name?.split('-')[0] || 'Vox';
+        const thoughts = [
+            `${name} is listening`,
+            'mapping that',
+            'tiny gears on',
+            'scanning...',
+        ];
+        return thoughts[Math.floor(Math.random() * thoughts.length)];
+    }
+
+    getVoxelAmbientThought(action = 'idle') {
+        const name = this.voxelPet?.name?.split('-')[0] || 'Vox';
+        const personality = this.voxelPersonality || {};
+        const curious = Number(personality.curiosity || 0) > 58;
+        const bonded = Number(personality.bond || 0) > 48;
+        const confident = Number(personality.confidence || 0) > 54;
+        const playful = Number(personality.playfulness || 0) > 52;
+
+        const pool = [
+            bonded ? `${name} is comfy here` : `${name} checks in`,
+            curious ? 'what is that signal?' : 'keeping watch',
+            confident ? 'systems feel steady' : 'calibrating...',
+            playful || action === 'dance' ? 'little victory hop' : 'quiet cube thoughts',
+        ];
+
+        const thought = pool[Math.floor(Math.random() * pool.length)];
+        this.voxelPersonality = {
+            ...this.voxelPersonality,
+            lastThought: thought,
+        };
+        this.saveVoxelPersonality();
+        return thought;
+    }
+
+    shouldAttachVoxelPersona(input = '') {
+        if (this.theme !== 'voxel' || this.voxelPetHidden || !this.voxelPet) {
+            return false;
+        }
+
+        const text = String(input || '').toLowerCase();
+        if (!text || text.startsWith('/')) {
+            return false;
+        }
+
+        const hardWork = /\b(kubectl|docker|git|npm|node|test|build|deploy|commit|push|fix|debug|implement|refactor|make|create|generate|write|update|change|add|remove|design|code|page|site|html|css|javascript|file|spec|report|research|analyze|security|prod|production|tls|secret|api key)\b/.test(text);
+        if (hardWork) {
+            return false;
+        }
+
+        const casual = /\b(hello|hi|hey|thanks|thank you|what do you think|ideas|brainstorm|explain|why|how would|should we|help me think)\b/.test(text);
+        return casual || (text.length < 90 && Math.random() < 0.35);
+    }
+
+    buildVoxelChatOptions(input = '') {
+        if (!this.shouldAttachVoxelPersona(input)) {
+            return {};
+        }
+
+        const pet = this.voxel.normalize(this.voxelPet);
+        const mood = this.voxel.MOODS[pet.mood] || pet.mood;
+        const personality = this.voxelPersonality || {};
+        const systemContent = [
+            'You are answering inside Lilly Voxel CLI with a visible voxel companion profile.',
+            `Current companion name: ${pet.name}. Use this exact current name if the persona naturally refers to itself.`,
+            `Profile: ${pet.trait} ${pet.species}, mood ${mood}, energy ${pet.energy}%, palette ${pet.palette?.name || 'custom'}, seed "${pet.prompt}".`,
+            `Long-running personality: bond ${Math.round(personality.bond || 0)}%, curiosity ${Math.round(personality.curiosity || 0)}%, confidence ${Math.round(personality.confidence || 0)}%, playfulness ${Math.round(personality.playfulness || 0)}%, shared turns ${Math.round(personality.turns || 0)}.`,
+            'For casual, reflective, brainstorming, or conversational replies only, lightly let the answer feel like it comes through this companion. Keep it subtle: at most one small emotional beat or one mention of the companion name.',
+            'Do not apply the voxel persona to CLI agent work, tool results, code, commands, deployment steps, test output, file edits, exact specs, or safety-critical guidance. In those cases, answer normally and professionally.',
+        ].join('\n');
+
+        return {
+            systemMessages: [{ role: 'system', content: systemContent }],
+            metadata: {
+                voxelPersona: {
+                    enabled: true,
+                    name: pet.name,
+                    mood,
+                    trait: pet.trait,
+                    species: pet.species,
+                },
+            },
+        };
     }
 
     pulseVoxelStreaming() {
@@ -779,6 +936,15 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
             case 'cls':
                 this.clearOutput();
                 break;
+            case 'new':
+                await this.startNewSession(args.join(' '));
+                break;
+            case 'sessions':
+                await this.listSessions();
+                break;
+            case 'switch':
+                await this.switchSession(args[0]);
+                break;
             case 'models':
                 await this.listModels();
                 break;
@@ -851,7 +1017,7 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
                 this.triggerFileUpload();
                 break;
             case 'session':
-                await this.printSessionInfo();
+                await this.handleSessionCommand(args);
                 break;
             case 'history':
                 await this.showSessionHistory();
@@ -911,6 +1077,7 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
         
         try {
             const startTime = Date.now();
+            const chatOptions = this.buildVoxelChatOptions(input);
             
             const response = await api.sendMessage(input, (chunk) => {
                 // Stream progress
@@ -918,7 +1085,7 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
                     this.pulseVoxelStreaming();
                     this.appendToCurrentOutput(chunk.content);
                 }
-            });
+            }, null, chatOptions);
             
             const duration = ((Date.now() - startTime) / 1000).toFixed(1);
             
@@ -936,6 +1103,7 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
             
             // Add to conversation
             this.lastResponse = response.content;
+            this.recordVoxelInteraction(input, response.content || '');
             
         } catch (error) {
             this.printError(`Request failed: ${error.message}`);
@@ -994,30 +1162,34 @@ Session Statistics:
         try {
             const data = await api.getSessionState();
             const activeSessionId = String(data.activeSessionId || '').trim();
-            const fallbackSessionId = Array.isArray(data.sessions) && data.sessions.length > 0
-                ? String(data.sessions[0].id || '').trim()
-                : '';
-            const resolvedSessionId = activeSessionId || fallbackSessionId || '';
 
-            if (!resolvedSessionId) {
+            if (!activeSessionId) {
                 this.updateSessionInfo();
                 return;
             }
 
-            api.setSessionId(resolvedSessionId);
+            api.setSessionId(activeSessionId);
             this.updateSessionInfo();
-            this.printSystem(`Connected to shared session ${resolvedSessionId.slice(0, 8)}...`);
+            this.printSystem(`Connected to isolated session ${activeSessionId.slice(0, 8)}...`);
         } catch (error) {
-            console.warn('Failed to restore shared session:', error);
+            console.warn('Failed to restore isolated session:', error);
         }
     }
 
     updateSessionInfo() {
-        if (this.sessionInfo && api.sessionId) {
-            const shortId = api.sessionId.slice(0, 8);
-            this.sessionInfo.textContent = `Session: ${shortId}...`;
-            this.sessionInfo.title = `Full session ID: ${api.sessionId}`;
+        if (!this.sessionInfo) {
+            return;
         }
+
+        if (!api.sessionId) {
+            this.sessionInfo.textContent = 'Session: new';
+            this.sessionInfo.title = 'A new isolated session will be created on the next request.';
+            return;
+        }
+
+        const shortId = api.sessionId.slice(0, 8);
+        this.sessionInfo.textContent = `Session: ${shortId}...`;
+        this.sessionInfo.title = `Full session ID: ${api.sessionId}`;
     }
 
     getPromptLabel() {
@@ -1152,6 +1324,9 @@ Session Statistics:
 **General:**
   /help, /?          Show this help message
   /clear, /cls       Clear the screen
+  /new [name]        Start a fresh isolated backend session
+  /sessions          List isolated Voxel CLI sessions
+  /switch <id>       Switch to a session by number, id, or id prefix
   /theme [name]      Set voxel, dark, or light theme
   /voxel             Switch back to the voxel CLI theme
   /shortcuts, /keys  Show keyboard shortcuts
@@ -1185,8 +1360,11 @@ Session Statistics:
 
 **Session:**
   /session           Show session information
-  /history           Show persisted shared session history
-  /artifacts         Show persisted shared session artifacts
+  /session new       Start a fresh isolated backend session
+  /session list      List isolated Voxel CLI sessions
+  /session switch    Switch to a session by number, id, or id prefix
+  /history           Show persisted isolated session history
+  /artifacts         Show persisted isolated session artifacts
   /stats             Show session statistics
   /save <name>       Save conversation
   /load <name>       Load conversation
@@ -2278,6 +2456,124 @@ ${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${p
     }
     
     // ==================== Session Management ====================
+
+    resetLocalSessionState() {
+        this.history = [];
+        this.historyIndex = -1;
+        this.lastResponse = '';
+        this.currentOutput = '';
+        this.sessionStartTime = Date.now();
+        this.sessionFiles = [];
+        this.nextFileId = 1;
+    }
+
+    getSessionDisplayName(session = null) {
+        return String(
+            session?.metadata?.title
+            || session?.metadata?.label
+            || session?.metadata?.name
+            || session?.id
+            || 'Untitled session',
+        ).trim();
+    }
+
+    async handleSessionCommand(args = []) {
+        const subcommand = String(args[0] || '').trim().toLowerCase();
+        const rest = args.slice(1).join(' ').trim();
+
+        if (!subcommand) {
+            await this.printSessionInfo();
+            return;
+        }
+
+        if (['new', 'create', 'start'].includes(subcommand)) {
+            await this.startNewSession(rest);
+            return;
+        }
+
+        if (['list', 'ls', 'sessions'].includes(subcommand)) {
+            await this.listSessions();
+            return;
+        }
+
+        if (['switch', 'use', 'open'].includes(subcommand)) {
+            await this.switchSession(args[1]);
+            return;
+        }
+
+        this.printError('Usage: /session, /session new [name], /session list, or /session switch <id>');
+    }
+
+    async startNewSession(name = '') {
+        try {
+            const sessionName = String(name || '').trim();
+            const session = await api.createSession({
+                title: sessionName || `Voxel CLI ${new Date().toLocaleString()}`,
+            });
+            this.resetLocalSessionState();
+            this.updateSessionInfo();
+            this.printSystem(`Started isolated session ${session.id.slice(0, 8)}...${sessionName ? ` (${sessionName})` : ''}`);
+        } catch (error) {
+            this.printError(`Failed to start new session: ${error.message}`);
+        }
+    }
+
+    async listSessions() {
+        try {
+            const data = await api.getSessionState();
+            const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+
+            if (!sessions.length) {
+                this.printSystem('No Voxel CLI sessions found. Use /new to start one.');
+                return;
+            }
+
+            const activeSessionId = api.sessionId || data.activeSessionId || null;
+            const lines = ['## Voxel CLI Sessions', ''];
+            sessions.forEach((session, index) => {
+                const marker = session.id === activeSessionId ? '*' : ' ';
+                const title = this.getSessionDisplayName(session);
+                const updatedAt = session.updatedAt ? new Date(session.updatedAt).toLocaleString() : 'unknown time';
+                const count = Number(session.messageCount || 0);
+                lines.push(`${marker} ${index + 1}. ${title}`);
+                lines.push(`   ${session.id} | ${count} messages | ${updatedAt}`);
+                lines.push('');
+            });
+            lines.push('Use `/switch <number-or-id>` to activate a session.');
+            this.printAI(lines.join('\n'));
+        } catch (error) {
+            this.printError(`Failed to list sessions: ${error.message}`);
+        }
+    }
+
+    async switchSession(sessionRef = '') {
+        const ref = String(sessionRef || '').trim();
+        if (!ref) {
+            this.printError('Usage: /switch <number-or-session-id>');
+            return;
+        }
+
+        try {
+            const data = await api.getSessionState();
+            const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+            const numericIndex = Number(ref);
+            const session = Number.isInteger(numericIndex) && numericIndex >= 1
+                ? sessions[numericIndex - 1]
+                : sessions.find((candidate) => candidate.id === ref || candidate.id.startsWith(ref));
+
+            if (!session) {
+                this.printError(`Session not found: ${ref}`);
+                return;
+            }
+
+            await api.setActiveSession(session.id);
+            this.resetLocalSessionState();
+            this.updateSessionInfo();
+            this.printSystem(`Switched to isolated session ${session.id.slice(0, 8)}... (${this.getSessionDisplayName(session)})`);
+        } catch (error) {
+            this.printError(`Failed to switch session: ${error.message}`);
+        }
+    }
     
     async printSessionInfo() {
         const elapsed = Math.floor((Date.now() - this.sessionStartTime) / 1000);
@@ -2301,7 +2597,7 @@ ${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${p
         }
 
         this.printSystem(`Session Info:
-  Shared Session: ${api.sessionId || 'none'}
+  Isolated Session: ${api.sessionId || 'new on next request'}
   Duration: ${minutes}m ${seconds}s
   Backend History: ${historyCount}
   Backend Artifacts: ${artifactCount}
@@ -2312,7 +2608,7 @@ ${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${p
 
     async showSessionHistory() {
         if (!api.sessionId) {
-            this.printSystem('No shared session is active yet.');
+            this.printSystem('No isolated session is active yet. Use /new or send a message to create one.');
             return;
         }
 
@@ -2323,7 +2619,7 @@ ${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${p
                 return;
             }
 
-            const lines = ['## Shared Session History', ''];
+            const lines = ['## Isolated Session History', ''];
             messages.forEach((message, index) => {
                 const role = String(message.role || 'unknown').toUpperCase();
                 const timestamp = message.timestamp ? new Date(message.timestamp).toLocaleString() : 'unknown time';
@@ -2340,7 +2636,7 @@ ${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${p
 
     async showSessionArtifacts() {
         if (!api.sessionId) {
-            this.printSystem('No shared session is active yet.');
+            this.printSystem('No isolated session is active yet. Use /new or send a message to create one.');
             return;
         }
 
@@ -2351,7 +2647,7 @@ ${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${p
                 return;
             }
 
-            const lines = ['## Shared Session Artifacts', ''];
+            const lines = ['## Isolated Session Artifacts', ''];
             artifacts.forEach((artifact, index) => {
                 const filename = artifact.filename || artifact.id || `artifact-${index + 1}`;
                 const format = String(artifact.format || 'file').toUpperCase();

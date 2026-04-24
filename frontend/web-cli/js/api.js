@@ -19,6 +19,7 @@ const RETRY_DELAY = 1000;
 const WEB_CLI_TASK_TYPE = 'chat';
 const WEB_CLI_CLIENT_SURFACE = 'web-cli';
 const WEB_CLI_REMOTE_BUILD_AUTONOMY_APPROVED = true;
+const WEB_CLI_SESSION_ISOLATION = true;
 
 class WebCLIAPI {
     constructor() {
@@ -223,8 +224,11 @@ class WebCLIAPI {
         return this.models;
     }
 
-    async *streamChat(message, model = null, mode = 'chat', conversationHistory = []) {
+    async *streamChat(message, model = null, mode = 'chat', conversationHistory = [], options = {}) {
+        await this.ensureSession({ title: options.sessionTitle || 'Voxel CLI' });
+
         const messages = [
+            ...(Array.isArray(options.systemMessages) ? options.systemMessages : []),
             ...conversationHistory,
             { role: 'user', content: message }
         ];
@@ -235,9 +239,13 @@ class WebCLIAPI {
             stream: true,
             taskType: WEB_CLI_TASK_TYPE,
             clientSurface: WEB_CLI_CLIENT_SURFACE,
+            memoryScope: WEB_CLI_CLIENT_SURFACE,
             metadata: {
                 remoteBuildAutonomyApproved: WEB_CLI_REMOTE_BUILD_AUTONOMY_APPROVED,
                 clientSurface: WEB_CLI_CLIENT_SURFACE,
+                memoryScope: WEB_CLI_CLIENT_SURFACE,
+                sessionIsolation: WEB_CLI_SESSION_ISOLATION,
+                ...(options.metadata && typeof options.metadata === 'object' ? options.metadata : {}),
             },
         };
 
@@ -344,12 +352,18 @@ class WebCLIAPI {
      * Simple non-streaming message send (for compatibility)
      * Collects all streaming chunks and returns complete response
      */
-    async sendMessage(message, onChunk = null, model = null) {
+    async sendMessage(message, onChunk = null, model = null, options = {}) {
         const chunks = [];
         let fullContent = '';
         let tokens = 0;
         
-        for await (const chunk of this.streamChat(message, model)) {
+        for await (const chunk of this.streamChat(
+            message,
+            model,
+            options.mode || 'chat',
+            options.conversationHistory || [],
+            options,
+        )) {
             if (chunk.type === 'delta') {
                 fullContent += chunk.content;
                 tokens += 1; // Approximate
@@ -372,6 +386,7 @@ class WebCLIAPI {
 
     async sendCanvasRequest(message, canvasType = 'document', existingContent = '') {
         const baseUrl = API_BASE_URL.replace('/v1', '');
+        await this.ensureSession({ title: 'Voxel Canvas' });
         
         try {
             const response = await this.fetchWithRetry(`${baseUrl}/api/canvas`, {
@@ -402,6 +417,7 @@ class WebCLIAPI {
 
     async sendNotationRequest(notation, helperMode = 'expand', context = '') {
         const baseUrl = API_BASE_URL.replace('/v1', '');
+        await this.ensureSession({ title: 'Voxel Notation' });
         
         try {
             const response = await this.fetchWithRetry(`${baseUrl}/api/notation`, {
@@ -432,6 +448,7 @@ class WebCLIAPI {
 
     async generateImage(prompt, options = {}) {
         const baseUrl = API_BASE_URL.replace('/v1', '');
+        await this.ensureSession({ title: 'Voxel Image' });
         
         const {
             model = null,
@@ -599,6 +616,8 @@ class WebCLIAPI {
     }
 
     async invokeTool(toolId, params = {}) {
+        await this.ensureSession({ title: 'Voxel Tool' });
+
         const response = await this.fetchWithTimeout(
             `${BASE_URL_WITHOUT_API}/api/tools/invoke`,
             {
@@ -649,6 +668,61 @@ class WebCLIAPI {
         }
 
         return response.json();
+    }
+
+    buildSessionMetadata(metadata = {}) {
+        return {
+            ...metadata,
+            mode: WEB_CLI_TASK_TYPE,
+            taskType: WEB_CLI_TASK_TYPE,
+            clientSurface: WEB_CLI_CLIENT_SURFACE,
+            memoryScope: WEB_CLI_CLIENT_SURFACE,
+            sessionIsolation: WEB_CLI_SESSION_ISOLATION,
+        };
+    }
+
+    async createSession(options = {}) {
+        const now = new Date().toISOString();
+        const title = String(options.title || '').trim() || `Voxel CLI ${new Date().toLocaleString()}`;
+        const metadata = this.buildSessionMetadata({
+            title,
+            label: title,
+            createdBy: WEB_CLI_CLIENT_SURFACE,
+            createdAtClient: now,
+            ...(options.metadata && typeof options.metadata === 'object' ? options.metadata : {}),
+        });
+
+        const response = await this.fetchWithTimeout(
+            `${BASE_URL_WITHOUT_API}/api/sessions`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    taskType: WEB_CLI_TASK_TYPE,
+                    clientSurface: WEB_CLI_CLIENT_SURFACE,
+                    memoryScope: WEB_CLI_CLIENT_SURFACE,
+                    metadata,
+                }),
+            },
+            10000
+        );
+
+        if (!response.ok) {
+            throw new Error(`Failed to create session: HTTP ${response.status}`);
+        }
+
+        const session = await response.json();
+        this.sessionId = session?.id || null;
+        return session;
+    }
+
+    async ensureSession(options = {}) {
+        if (this.sessionId) {
+            return this.sessionId;
+        }
+
+        const session = await this.createSession(options);
+        return session?.id || null;
     }
 
     async setActiveSession(sessionId = null) {

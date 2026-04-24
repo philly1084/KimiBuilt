@@ -2381,6 +2381,19 @@ button:focus-visible,
   font-weight: 650;
 }
 
+.database-table > .database-header {
+  align-items: stretch;
+  justify-content: stretch;
+  gap: 0;
+  margin-bottom: 0;
+}
+
+.database-table > .database-header > .database-header-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .database-empty {
   padding: 14px 12px;
   color: var(--nb-text-muted);

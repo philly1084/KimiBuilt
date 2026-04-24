@@ -522,6 +522,63 @@
     };
   }
 
+  function extractFinalAssistantText(payload = {}) {
+    if (!payload || typeof payload !== 'object') {
+      return '';
+    }
+
+    if (payload.type === 'response.completed') {
+      return extractAssistantText(payload.response?.output_text || payload.response?.output || payload.response);
+    }
+
+    if (payload.type === 'done') {
+      return extractAssistantText(
+        payload.message
+        || payload.content
+        || payload.output_text
+        || payload.outputText
+        || payload.output
+        || payload.response
+        || '',
+      );
+    }
+
+    if (payload.object === 'chat.completion') {
+      return extractAssistantText(payload?.choices?.[0]?.message?.content ?? payload?.choices?.[0]?.message ?? payload);
+    }
+
+    if (payload.object === 'response'
+      || Object.prototype.hasOwnProperty.call(payload, 'output_text')
+      || Array.isArray(payload.output)) {
+      return extractAssistantText(payload.output_text || payload.output || payload);
+    }
+
+    return '';
+  }
+
+  function getMissingFinalText(streamedText = '', finalText = '') {
+    const streamed = stripNullCharacters(streamedText || '');
+    const final = stripNullCharacters(finalText || '');
+
+    if (!final) {
+      return '';
+    }
+
+    if (!streamed) {
+      return final;
+    }
+
+    if (final === streamed || streamed.includes(final)) {
+      return '';
+    }
+
+    if (final.startsWith(streamed)) {
+      return final.slice(streamed.length);
+    }
+
+    return final;
+  }
+
   function normalizeGatewayEventPayload(payload = {}, options = {}) {
     if (!payload || typeof payload !== 'object') {
       return [];
@@ -822,6 +879,7 @@
     const decoder = new TextDecoder();
     let buffer = '';
     let sawDone = false;
+    let streamedText = '';
 
     try {
       while (true) {
@@ -863,7 +921,21 @@
           }
 
           const events = normalizeGatewayEventPayload(payload, { allowFinalText: false });
+          const missingFinalText = getMissingFinalText(streamedText, extractFinalAssistantText(payload));
+          if (missingFinalText) {
+            streamedText += missingFinalText;
+            yield {
+              type: 'text_delta',
+              content: missingFinalText,
+              finalChunk: true,
+              raw: payload,
+              ...extractStreamMetadata(payload),
+            };
+          }
           for (const event of events) {
+            if (event.type === 'text_delta' && event.content) {
+              streamedText += event.content;
+            }
             yield event;
           }
         }
@@ -891,7 +963,21 @@
           try {
             const payload = JSON.parse(payloadText);
             const events = normalizeGatewayEventPayload(payload, { allowFinalText: false });
+            const missingFinalText = getMissingFinalText(streamedText, extractFinalAssistantText(payload));
+            if (missingFinalText) {
+              streamedText += missingFinalText;
+              yield {
+                type: 'text_delta',
+                content: missingFinalText,
+                finalChunk: true,
+                raw: payload,
+                ...extractStreamMetadata(payload),
+              };
+            }
             for (const event of events) {
+              if (event.type === 'text_delta' && event.content) {
+                streamedText += event.content;
+              }
               yield event;
             }
           } catch (_error) {

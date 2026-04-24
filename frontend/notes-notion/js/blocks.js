@@ -329,6 +329,12 @@ const Blocks = (function() {
         };
     }
 
+    function replaceDatabaseBlockContent(wrapper, block, isEditable) {
+        const newContent = renderDatabaseBlock(block, isEditable);
+        wrapper.replaceWith(newContent);
+        return newContent;
+    }
+
     function normalizeCalloutContent(content, fallbackIcon = '!') {
         const icon = typeof fallbackIcon === 'string' && fallbackIcon.trim()
             ? fallbackIcon.trim()
@@ -2207,16 +2213,25 @@ const Blocks = (function() {
             const cell = document.createElement('div');
             cell.className = 'database-cell database-header-cell';
             cell.style.cursor = 'pointer';
-            
-            // Add sort indicator
-            let sortIndicator = '';
+            cell.setAttribute('role', 'button');
+            cell.tabIndex = 0;
+            cell.setAttribute('aria-label', `Sort by ${col}`);
+
+            const label = document.createElement('span');
+            label.className = 'database-header-label';
+            label.textContent = col;
+
+            const sortIndicator = document.createElement('span');
+            sortIndicator.className = 'database-sort-indicator';
+            sortIndicator.setAttribute('aria-hidden', 'true');
             if (data.sortColumn === index) {
-                sortIndicator = data.sortDirection === 'asc' ? ' [up]' : ' [down]';
+                sortIndicator.textContent = data.sortDirection === 'asc' ? 'up' : 'down';
                 cell.style.fontWeight = '700';
             }
-            cell.textContent = col + sortIndicator;
-            
-            cell.addEventListener('click', () => {
+            cell.appendChild(label);
+            cell.appendChild(sortIndicator);
+
+            const sortColumn = () => {
                 // Toggle sort
                 if (data.sortColumn === index) {
                     data.sortDirection = data.sortDirection === 'asc' ? 'desc' : 'asc';
@@ -2235,17 +2250,29 @@ const Blocks = (function() {
                         return 0;
                     });
                 }
-                
+
                 block.content = data;
                 // Re-render
-                wrapper.innerHTML = '';
-                const newContent = renderDatabaseBlock(block, isEditable);
-                wrapper.appendChild(newContent);
+                replaceDatabaseBlockContent(wrapper, block, isEditable);
                 if (window.Editor) window.Editor.savePage();
+            };
+
+            cell.addEventListener('click', sortColumn);
+            cell.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    sortColumn();
+                }
             });
-            
+
             header.appendChild(cell);
         });
+        if (isEditable) {
+            const actionSpacer = document.createElement('div');
+            actionSpacer.className = 'database-cell database-action-cell database-header-action-cell';
+            actionSpacer.setAttribute('aria-hidden', 'true');
+            header.appendChild(actionSpacer);
+        }
         table.appendChild(header);
         
         // Rows (editable)
@@ -2296,9 +2323,7 @@ const Blocks = (function() {
                 deleteCell.addEventListener('click', () => {
                     data.rows.splice(rowIndex, 1);
                     block.content = data;
-                    wrapper.innerHTML = '';
-                    const newContent = renderDatabaseBlock(block, isEditable);
-                    wrapper.appendChild(newContent);
+                    replaceDatabaseBlockContent(wrapper, block, isEditable);
                     if (window.Editor) window.Editor.savePage();
                 });
                 rowEl.appendChild(deleteCell);
@@ -2318,9 +2343,7 @@ const Blocks = (function() {
                 data.rows.push(Array(data.columns.length).fill(''));
                 block.content = data;
                 // Re-render
-                wrapper.innerHTML = '';
-                const newContent = renderDatabaseBlock(block, isEditable);
-                wrapper.appendChild(newContent);
+                replaceDatabaseBlockContent(wrapper, block, isEditable);
                 if (window.Editor) window.Editor.savePage();
             });
             table.appendChild(addRow);
@@ -2337,9 +2360,7 @@ const Blocks = (function() {
                     // Add empty cell to each row
                     data.rows.forEach(row => row.push(''));
                     block.content = data;
-                    wrapper.innerHTML = '';
-                    const newContent = renderDatabaseBlock(block, isEditable);
-                    wrapper.appendChild(newContent);
+                    replaceDatabaseBlockContent(wrapper, block, isEditable);
                     if (window.Editor) window.Editor.savePage();
                 }
             });
