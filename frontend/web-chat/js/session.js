@@ -216,9 +216,11 @@ class SessionManager extends EventTarget {
         this.workspaceContext = SESSION_WORKSPACE_CONTEXT;
         this.storageKey = 'kimibuilt_web_chat_sessions_v4';
         this.currentSessionKey = 'kimibuilt_web_chat_current_session';
+        this.deletedSessionsKey = 'kimibuilt_web_chat_deleted_sessions_v1';
         this.version = '4.0';
         this.storageAvailable = this.checkStorageAvailability();
         this.syncedStorageValues = {};
+        this.deletedSessionIds = new Set();
         this.pendingPreferencePatch = {};
         this.preferenceSyncTimer = null;
         this.userPreferencesPromise = null;
@@ -659,10 +661,6 @@ class SessionManager extends EventTarget {
 
     sessionBelongsToCurrentWorkspace(session = {}) {
         const sessionWorkspaceScope = this.getSessionWorkspaceScope(session);
-        if (!sessionWorkspaceScope) {
-            return true;
-        }
-
         const currentWorkspaceScope = this.normalizeWebChatWorkspaceScopeValue(
             this.workspaceContext?.scopeKey || SESSION_MANAGER_CLIENT_SURFACE,
         );
@@ -670,12 +668,21 @@ class SessionManager extends EventTarget {
             return true;
         }
 
+        if (!sessionWorkspaceScope) {
+            return currentWorkspaceScope === SESSION_MANAGER_CLIENT_SURFACE;
+        }
+
         return sessionWorkspaceScope === currentWorkspaceScope;
     }
 
     filterSessionsForCurrentWorkspace(sessions = []) {
         const allowedSessionIds = new Set();
+        const deletedSessionIds = this.getDeletedSessionIds();
         const filteredSessions = (Array.isArray(sessions) ? sessions : []).filter((session) => {
+            if (session?.id && deletedSessionIds.has(session.id)) {
+                return false;
+            }
+
             const belongs = this.sessionBelongsToCurrentWorkspace(session);
             if (belongs && session?.id) {
                 allowedSessionIds.add(session.id);
@@ -690,6 +697,70 @@ class SessionManager extends EventTarget {
         }
 
         return filteredSessions;
+    }
+
+    getDeletedSessionIds() {
+        const deletedSessionIds = new Set(this.deletedSessionIds || []);
+        const rawValue = this.safeStorageGet(this.deletedSessionsKey);
+        if (!rawValue) {
+            return deletedSessionIds;
+        }
+
+        try {
+            const parsed = JSON.parse(rawValue);
+            const entries = Array.isArray(parsed)
+                ? parsed
+                : (Array.isArray(parsed?.ids) ? parsed.ids : []);
+            entries
+                .map((entry) => String(entry || '').trim())
+                .filter(Boolean)
+                .forEach((entry) => deletedSessionIds.add(entry));
+        } catch (_error) {
+            // Keep the in-memory tombstones when the stored payload is unreadable.
+        }
+
+        return deletedSessionIds;
+    }
+
+    saveDeletedSessionIds(sessionIds) {
+        const ids = Array.from(sessionIds instanceof Set || Array.isArray(sessionIds) ? sessionIds : [])
+            .map((entry) => String(entry || '').trim())
+            .filter(Boolean)
+            .slice(-500);
+        this.deletedSessionIds = new Set(ids);
+
+        this.safeStorageSet(this.deletedSessionsKey, JSON.stringify({
+            version: 1,
+            workspaceKey: this.workspaceContext.key,
+            scopeKey: this.workspaceContext.scopeKey,
+            updatedAt: new Date().toISOString(),
+            ids,
+        }));
+    }
+
+    markSessionDeleted(sessionId = '') {
+        const normalizedSessionId = String(sessionId || '').trim();
+        if (!normalizedSessionId) {
+            return;
+        }
+
+        const deletedSessionIds = this.getDeletedSessionIds();
+        deletedSessionIds.add(normalizedSessionId);
+        this.saveDeletedSessionIds(deletedSessionIds);
+    }
+
+    forgetDeletedSession(sessionId = '') {
+        const normalizedSessionId = String(sessionId || '').trim();
+        if (!normalizedSessionId) {
+            return;
+        }
+
+        const deletedSessionIds = this.getDeletedSessionIds();
+        if (!deletedSessionIds.delete(normalizedSessionId)) {
+            return;
+        }
+
+        this.saveDeletedSessionIds(deletedSessionIds);
     }
 
     // ============================================
@@ -715,7 +786,9 @@ class SessionManager extends EventTarget {
 
             const data = await response.json();
             const storedSessions = new Map(this.sessions.map((session) => [session.id, session]));
-            const backendSessions = Array.isArray(data.sessions) ? data.sessions : [];
+            const deletedSessionIds = this.getDeletedSessionIds();
+            const backendSessions = (Array.isArray(data.sessions) ? data.sessions : [])
+                .filter((session) => !session?.id || !deletedSessionIds.has(session.id));
 
             this.sessions = backendSessions.map((session) => {
                 const stored = storedSessions.get(session.id);
@@ -771,6 +844,10 @@ class SessionManager extends EventTarget {
             const knownSessionIds = new Set(this.sessions.map((session) => session.id));
             for (const [sessionId, storedSession] of storedSessions.entries()) {
                 if (knownSessionIds.has(sessionId)) {
+                    continue;
+                }
+                if (deletedSessionIds.has(sessionId)) {
+                    this.sessionMessages.delete(sessionId);
                     continue;
                 }
 
@@ -1180,6 +1257,8 @@ class SessionManager extends EventTarget {
     }
 
     async deleteSession(sessionId) {
+        this.markSessionDeleted(sessionId);
+
         if (!this.isLocalSession(sessionId)) {
             try {
                 await fetch(`${this.apiBaseUrl}/sessions/${sessionId}`, {
@@ -1763,6 +1842,14 @@ class SessionManager extends EventTarget {
 
     migrateIfNeeded() {
         if (!this.storageAvailable) {
+            return;
+        }
+
+        const currentWorkspaceScope = this.normalizeWebChatWorkspaceScopeValue(
+            this.workspaceContext?.scopeKey || SESSION_MANAGER_CLIENT_SURFACE,
+        );
+        if (this.isWebChatWorkspaceScope(currentWorkspaceScope)
+            && currentWorkspaceScope !== SESSION_MANAGER_CLIENT_SURFACE) {
             return;
         }
 

@@ -367,7 +367,7 @@ router.delete('/:id', async (req, res, next) => {
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
-        const deletedScopeKey = session?.metadata?.memoryScope || null;
+        const deletedScopeKey = session?.scopeKey || session?.scope_key || session?.metadata?.memoryScope || null;
         const activeSession = await sessionStore.getActiveOwnedSession(ownerId, deletedScopeKey);
 
         if (typeof sessionStore.isPersistent === 'function' && sessionStore.isPersistent()) {

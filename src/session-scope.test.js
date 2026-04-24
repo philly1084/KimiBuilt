@@ -116,6 +116,20 @@ describe('session scope memory routing', () => {
     expect(sessionMatchesScope(rawWorkspaceTwoSession, 'workspace-2')).toBe(true);
   });
 
+  test('canonicalizes raw workspace memory metadata before routing', () => {
+    expect(buildScopedMemoryMetadata({
+      ownerId: 'phill',
+      memoryScope: 'workspace-2',
+      sourceSurface: 'web-chat',
+      memoryClass: 'conversation',
+      sessionIsolation: false,
+    })).toEqual(expect.objectContaining({
+      memoryScope: 'web-chat-workspace-2',
+      projectKey: 'web-chat-workspace-2',
+      memoryNamespace: SURFACE_LOCAL_MEMORY_NAMESPACE,
+    }));
+  });
+
   test('keeps project-scoped sessions visible inside their explicit workspace', () => {
     const projectWorkspaceSession = {
       id: 'project-session',

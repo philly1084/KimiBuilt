@@ -865,11 +865,19 @@ class SessionStore {
                 normalizedOwnerId,
             );
 
-            if (session && normalizedOwnerId) {
-                await this.setActiveSession(normalizedOwnerId, session.id, normalizedActiveScopeKey);
+            if (session && sessionMatchesScope(session, normalizedActiveScopeKey)) {
+                if (normalizedOwnerId) {
+                    await this.setActiveSession(normalizedOwnerId, session.id, normalizedActiveScopeKey);
+                }
+
+                return session;
             }
 
-            return session;
+            if (!session) {
+                return null;
+            }
+
+            console.warn(`[SessionStore] Ignoring session ${session.id} for requested scope ${normalizedActiveScopeKey}; session scope is ${session.scopeKey || session.metadata?.memoryScope || 'unknown'}`);
         }
 
         if (normalizedOwnerId) {

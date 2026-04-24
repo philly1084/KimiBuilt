@@ -83,6 +83,29 @@ describe('openai-client image model selection', () => {
         ]);
     });
 
+    test('uses an OpenAI-style image catalog on the gateway when the configured image model is gpt-image-2', async () => {
+        process.env.OPENAI_BASE_URL = 'https://gateway.example/v1';
+        process.env.OPENAI_IMAGE_MODEL = 'gpt-image-2';
+        mockModelsList.mockResolvedValue({
+            data: [
+                { id: 'gemini-2.0-flash-exp-image-generation', owned_by: 'google' },
+            ],
+        });
+
+        const { listImageModels } = require('./openai-client');
+        const models = await listImageModels();
+
+        expect(models[0]).toEqual(expect.objectContaining({
+            id: 'gpt-image-2',
+        }));
+        expect(models.map((model) => model.id)).toEqual(expect.arrayContaining([
+            'gpt-image-1.5',
+            'gpt-image-1',
+            'gpt-image-1-mini',
+        ]));
+        expect(models.map((model) => model.id)).not.toContain('gemini-2.0-flash-exp-image-generation');
+    });
+
     test('falls back to official media image models when the gateway key is unavailable', async () => {
         delete process.env.OPENAI_API_KEY;
         delete process.env.OPENAI_BASE_URL;

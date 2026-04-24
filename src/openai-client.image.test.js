@@ -139,4 +139,30 @@ describe('openai-client image generation', () => {
             response_format: 'b64_json',
         }));
     });
+
+    test('ignores a stale Gemini model request when the gateway is configured for OpenAI-style image models', async () => {
+        process.env.OPENAI_BASE_URL = 'https://gateway.example/v1';
+        process.env.OPENAI_IMAGE_MODEL = 'gpt-image-2';
+        global.fetch = jest.fn(async (_url, init = {}) => ({
+            ok: true,
+            json: async () => ({
+                created: 123,
+                data: [{
+                    b64_json: 'aGVsbG8=',
+                }],
+            }),
+        }));
+
+        const { generateImage } = require('./openai-client');
+        await generateImage({
+            prompt: 'Generate a hero image',
+            model: 'gemini-2.0-flash-exp-image-generation',
+        });
+
+        expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual(expect.objectContaining({
+            model: 'gpt-image-2',
+            response_format: 'b64_json',
+        }));
+        expect(global.fetch.mock.calls[0][0]).toBe('https://gateway.example/v1/images/generations');
+    });
 });

@@ -584,6 +584,17 @@ function getOfficialOpenAIConfiguredImageModel(modelId = '', fallbackModel = con
     return isOfficialOpenAIImageModelId(fallback) ? fallback : '';
 }
 
+function shouldUseOfficialOpenAIImageCatalogForGateway(imageProvider = getImageProviderConfig()) {
+    if (!imageProvider || imageProvider.source !== 'gateway') {
+        return false;
+    }
+
+    return Boolean(getOfficialOpenAIConfiguredImageModel(
+        imageProvider.imageModel,
+        config.media.imageModel,
+    ));
+}
+
 async function listImageModels() {
     const imageProvider = getImageProviderConfig();
     const providerFamily = inferProviderFamily({
@@ -603,9 +614,33 @@ async function listImageModels() {
                 .filter((model) => isLikelyImageModel(model))
                 .map((model) => getImageModelMetadata(model.id, model.owned_by || 'openai')),
         );
+        const configuredModel = normalizeModelId(imageProvider.imageModel);
+        const gatewayUsesOfficialOpenAICatalog = shouldUseOfficialOpenAIImageCatalogForGateway(imageProvider);
+
+        if (gatewayUsesOfficialOpenAICatalog) {
+            const discoveredOfficialOpenAIModels = uniqueById(
+                discovered.filter((model) => isOfficialOpenAIImageModelId(model.id)),
+            );
+
+            if (discoveredOfficialOpenAIModels.length > 0) {
+                return sortImageModels(uniqueById([
+                    ...[configuredModel]
+                        .filter(Boolean)
+                        .map((modelId) => getImageModelMetadata(modelId, 'openai')),
+                    ...discoveredOfficialOpenAIModels,
+                ]));
+            }
+
+            return listOfficialImageModels(configuredModel || config.media.imageModel);
+        }
 
         if (discovered.length > 0) {
-            return sortImageModels(discovered);
+            return sortImageModels(uniqueById([
+                ...[configuredModel]
+                    .filter(Boolean)
+                    .map((modelId) => getImageModelMetadata(modelId, 'openai')),
+                ...discovered,
+            ]));
         }
 
         return sortImageModels(uniqueById(
@@ -630,7 +665,9 @@ async function resolveImageModel(requestedModel = null) {
         baseURL: imageProvider.baseURL,
         model: imageProvider.imageModel || requested,
     });
-    const configured = providerFamily === 'openai'
+    const restrictToOfficialOpenAIModels = providerFamily === 'openai'
+        || shouldUseOfficialOpenAIImageCatalogForGateway(imageProvider);
+    const configured = restrictToOfficialOpenAIModels
         ? getOfficialOpenAIConfiguredImageModel(imageProvider.imageModel, config.media.imageModel)
         : normalizeModelId(imageProvider.imageModel);
 
@@ -640,8 +677,8 @@ async function resolveImageModel(requestedModel = null) {
             return { modelId: exactMatch.id, availableModels };
         }
 
-        if (providerFamily === 'openai' && !isOfficialOpenAIImageModelId(requested)) {
-            console.warn(`[OpenAI] Ignoring unsupported requested image model "${requested}" for official OpenAI image generation.`);
+        if (restrictToOfficialOpenAIModels && !isOfficialOpenAIImageModelId(requested)) {
+            console.warn(`[OpenAI] Ignoring unsupported requested image model "${requested}" for OpenAI-style image generation.`);
         } else {
             return { modelId: requested, availableModels };
         }

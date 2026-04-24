@@ -13,13 +13,13 @@ describe('SessionStore recent message continuity', () => {
         expect(session.metadata.agent).toBeUndefined();
     });
 
-    test('defaults newly created sessions to session isolation', async () => {
+    test('defaults newly created sessions to durable memory routing', async () => {
         const store = new SessionStore();
         store.initialized = true;
         store.usePostgres = false;
         const session = await store.create({ mode: 'chat' });
 
-        expect(session.metadata.sessionIsolation).toBe(true);
+        expect(session.metadata.sessionIsolation).toBe(false);
     });
 
     test('appends and trims recent session messages', async () => {
@@ -195,6 +195,31 @@ describe('SessionStore recent message continuity', () => {
 
         expect(resolved.id).not.toBe('notes-session');
         expect(resolved.metadata.memoryScope).toBe('web-chat');
+    });
+
+    test('resolveOwnedSession ignores a stale web-chat session id from another workspace', async () => {
+        const store = new SessionStore();
+        store.initialized = true;
+        store.usePostgres = false;
+
+        await store.create({
+            mode: 'chat',
+            clientSurface: 'web-chat',
+            workspaceKey: 'workspace-1',
+            ownerId: 'phill',
+        }, 'workspace-1-session');
+
+        const resolved = await store.resolveOwnedSession('workspace-1-session', {
+            mode: 'chat',
+            taskType: 'chat',
+            clientSurface: 'web-chat',
+            workspaceKey: 'workspace-2',
+            memoryScope: 'workspace-2',
+        }, 'phill');
+
+        expect(resolved.id).not.toBe('workspace-1-session');
+        expect(resolved.scopeKey).toBe('web-chat-workspace-2');
+        expect(resolved.metadata.memoryScope).toBe('web-chat-workspace-2');
     });
 
     test('list filters sessions by scope key', async () => {

@@ -172,7 +172,7 @@ function resolveClientSurface(value = {}, session = null, fallback = '') {
 }
 
 function isStrongProjectScopeCandidate(candidate = '', { clientSurface = '', taskType = '', mode = '' } = {}) {
-  const normalized = normalizeScopeValue(candidate);
+  const normalized = normalizeWebChatWorkspaceScopeKey(candidate);
   if (!normalized) {
     return false;
   }
@@ -258,7 +258,7 @@ function resolveProjectKey(value = {}, session = null, fallback = '') {
 
   for (const candidate of candidates) {
     if (isStrongProjectScopeCandidate(candidate, context)) {
-      return normalizeScopeValue(candidate);
+      return normalizeWebChatWorkspaceScopeKey(candidate);
     }
   }
 
@@ -270,7 +270,7 @@ function resolveSessionScope(value = {}, session = null) {
   const nested = getPlainObject(source.metadata);
   const sessionMetadata = getPlainObject(session?.metadata);
 
-  return firstNormalizedValue([
+  return normalizeWebChatWorkspaceScopeKey(firstNormalizedValue([
     source.memoryScope,
     source.memory_scope,
     source.projectScope,
@@ -320,7 +320,7 @@ function resolveSessionScope(value = {}, session = null) {
     source.mode,
     nested.mode,
     sessionMetadata.mode,
-  ]) || DEFAULT_SESSION_SCOPE;
+  ]) || DEFAULT_SESSION_SCOPE);
 }
 
 function defaultShareAcrossSurfaces(memoryClass = DEFAULT_MEMORY_CLASS) {
@@ -376,11 +376,11 @@ function resolveMemoryNamespace(value = {}, session = null, fallback = '') {
 function buildScopedMemoryMetadata(metadata = {}, session = null) {
   const source = getPlainObject(metadata);
   const clientSurface = resolveClientSurface(source, session, source.sourceSurface || source.source_surface || '');
-  const memoryScope = firstNormalizedValue([
+  const memoryScope = normalizeWebChatWorkspaceScopeKey(firstNormalizedValue([
     source.memoryScope,
     source.memory_scope,
     resolveSessionScope(source, session),
-  ]) || DEFAULT_SESSION_SCOPE;
+  ]) || DEFAULT_SESSION_SCOPE);
   const projectKey = resolveProjectKey(source, session);
   const memoryClass = normalizeMemoryClass(source.memoryClass || source.memory_class);
   const shareAcrossSurfaces = resolveBooleanValue(source.shareAcrossSurfaces || source.share_across_surfaces);

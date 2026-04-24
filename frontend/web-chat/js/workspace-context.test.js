@@ -52,6 +52,8 @@ describe('workspace-context', () => {
             .toBe('kimibuilt_web_chat_sessions_v4');
         expect(resolveWorkspaceScopedStorageKey('kimibuilt_web_chat_sessions_v4', 'workspace-4'))
             .toBe('kimibuilt_web_chat_sessions_v4::workspace-4');
+        expect(resolveWorkspaceScopedStorageKey('kimibuilt_web_chat_deleted_sessions_v1', 'workspace-4'))
+            .toBe('kimibuilt_web_chat_deleted_sessions_v1::workspace-4');
         expect(resolveWorkspaceScopedStorageKey('kimibuilt_theme', 'workspace-4'))
             .toBe('kimibuilt_theme');
     });

@@ -15,6 +15,7 @@
     const WORKSPACE_LOCAL_STORAGE_KEYS = new Set([
         'kimibuilt_web_chat_sessions_v4',
         'kimibuilt_web_chat_current_session',
+        'kimibuilt_web_chat_deleted_sessions_v1',
         'kimibuilt_message_draft',
         'kimibuilt_message_draft_time',
     ]);

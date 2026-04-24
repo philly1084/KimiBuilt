@@ -25,7 +25,7 @@
     const ACTIVE_WORKSPACE_STORAGE_KEY = 'kimibuilt_web_chat_workspace_host_active';
     const THEME_PRESET_STORAGE_KEY = 'kimibuilt_theme_preset';
     const THEME_MODE_STORAGE_KEY = 'kimibuilt_theme';
-    const WORKSPACE_APP_VERSION = '20260424a';
+    const WORKSPACE_APP_VERSION = '20260424b';
     const API_BASE_URL = window.location.hostname === 'localhost'
         ? 'http://localhost:3000/api'
         : `${window.location.protocol}//${window.location.host}/api`;
@@ -54,7 +54,7 @@
             const storedMode = normalizeThemeMode(localStorage.getItem(THEME_MODE_STORAGE_KEY));
             const storedPreset = normalizeThemePreset(localStorage.getItem(THEME_PRESET_STORAGE_KEY), storedMode);
             return {
-                mode,
+                mode: storedMode,
                 preset: storedPreset,
             };
         } catch (_error) {
