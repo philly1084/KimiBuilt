@@ -435,20 +435,40 @@ function normalizeSessionScopeKey(scopeKey = '') {
   return normalizeScopeValue(scopeKey) || DEFAULT_SESSION_SCOPE;
 }
 
+function normalizeWebChatWorkspaceScopeKey(scopeKey = '') {
+  const normalizedScopeKey = normalizeSessionScopeKey(scopeKey);
+  const workspaceMatch = normalizedScopeKey.match(/^workspace-(\d+)$/);
+
+  if (!workspaceMatch) {
+    return normalizedScopeKey;
+  }
+
+  return workspaceMatch[1] === '1'
+    ? 'web-chat'
+    : `web-chat-workspace-${workspaceMatch[1]}`;
+}
+
 function sessionMatchesScope(session = null, scopeKey = DEFAULT_SESSION_SCOPE) {
   if (!session) {
     return false;
   }
 
-  const normalizedScopeKey = normalizeSessionScopeKey(scopeKey);
+  const normalizedScopeKey = normalizeWebChatWorkspaceScopeKey(scopeKey);
   const metadata = getPlainObject(session?.metadata);
+  const rawSessionScope = session?.scopeKey || session?.scope_key || '';
+  const sessionScope = rawSessionScope
+    ? normalizeWebChatWorkspaceScopeKey(rawSessionScope)
+    : '';
   const explicitWorkspaceScope = firstNormalizedValue([
+    session?.workspaceKey,
+    session?.workspace_key,
     metadata.workspaceKey,
     metadata.workspace_key,
     metadata.workspaceId,
     metadata.workspace_id,
   ]);
   const inferredWorkspaceScope = firstNormalizedValue([
+    sessionScope,
     metadata.memoryScope,
     metadata.memory_scope,
     metadata.projectScope,
@@ -457,10 +477,10 @@ function sessionMatchesScope(session = null, scopeKey = DEFAULT_SESSION_SCOPE) {
   const explicitWebChatWorkspaceScope = [
     explicitWorkspaceScope,
     inferredWorkspaceScope,
-  ].find((candidate) => {
-    const normalized = normalizeSessionScopeKey(candidate);
-    return normalized === 'web-chat' || normalized.startsWith('web-chat-workspace-');
-  }) || null;
+  ]
+    .map((candidate) => normalizeWebChatWorkspaceScopeKey(candidate))
+    .find((candidate) => candidate === 'web-chat' || candidate.startsWith('web-chat-workspace-'))
+    || null;
   const isWebChatWorkspaceScope = normalizedScopeKey === 'web-chat'
     || normalizedScopeKey.startsWith('web-chat-workspace-');
 
@@ -469,7 +489,8 @@ function sessionMatchesScope(session = null, scopeKey = DEFAULT_SESSION_SCOPE) {
   }
 
   const candidateScopes = new Set([
-    explicitWorkspaceScope,
+    sessionScope,
+    normalizeWebChatWorkspaceScopeKey(explicitWorkspaceScope),
     explicitWebChatWorkspaceScope,
     resolveSessionScope(metadata, session),
     resolveClientSurface(metadata, session),
@@ -497,6 +518,7 @@ module.exports = {
   isSessionIsolationEnabled,
   normalizeMemoryClass,
   normalizeSessionScopeKey,
+  normalizeWebChatWorkspaceScopeKey,
   resolveClientSurface,
   resolveMemoryNamespace,
   resolveProjectKey,

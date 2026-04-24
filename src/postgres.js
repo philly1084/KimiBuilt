@@ -61,8 +61,106 @@ class PostgresManager {
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 message_count INTEGER NOT NULL DEFAULT 0,
+                scope_key TEXT NOT NULL DEFAULT 'global',
                 metadata JSONB NOT NULL DEFAULT '{}'::jsonb
             )
+        `);
+
+        await this.query(`
+            ALTER TABLE sessions
+            ADD COLUMN IF NOT EXISTS scope_key TEXT NOT NULL DEFAULT 'global'
+        `);
+
+        await this.query(`
+            UPDATE sessions
+            SET scope_key = CASE
+                WHEN COALESCE(
+                    NULLIF(metadata->>'memoryScope', ''),
+                    NULLIF(metadata->>'memory_scope', ''),
+                    NULLIF(metadata->>'projectScope', ''),
+                    NULLIF(metadata->>'project_scope', ''),
+                    NULLIF(metadata->>'projectId', ''),
+                    NULLIF(metadata->>'project_id', ''),
+                    NULLIF(metadata->>'projectKey', ''),
+                    NULLIF(metadata->>'project_key', ''),
+                    NULLIF(metadata->>'workspaceId', ''),
+                    NULLIF(metadata->>'workspace_id', ''),
+                    NULLIF(metadata->>'workspaceKey', ''),
+                    NULLIF(metadata->>'workspace_key', ''),
+                    NULLIF(metadata->>'namespace', ''),
+                    NULLIF(metadata->>'clientSurface', ''),
+                    NULLIF(metadata->>'client_surface', ''),
+                    NULLIF(metadata->>'taskType', ''),
+                    NULLIF(metadata->>'task_type', ''),
+                    NULLIF(metadata->>'mode', ''),
+                    'global'
+                ) = 'workspace-1'
+                    THEN 'web-chat'
+                WHEN COALESCE(
+                    NULLIF(metadata->>'memoryScope', ''),
+                    NULLIF(metadata->>'memory_scope', ''),
+                    NULLIF(metadata->>'projectScope', ''),
+                    NULLIF(metadata->>'project_scope', ''),
+                    NULLIF(metadata->>'projectId', ''),
+                    NULLIF(metadata->>'project_id', ''),
+                    NULLIF(metadata->>'projectKey', ''),
+                    NULLIF(metadata->>'project_key', ''),
+                    NULLIF(metadata->>'workspaceId', ''),
+                    NULLIF(metadata->>'workspace_id', ''),
+                    NULLIF(metadata->>'workspaceKey', ''),
+                    NULLIF(metadata->>'workspace_key', ''),
+                    NULLIF(metadata->>'namespace', ''),
+                    NULLIF(metadata->>'clientSurface', ''),
+                    NULLIF(metadata->>'client_surface', ''),
+                    NULLIF(metadata->>'taskType', ''),
+                    NULLIF(metadata->>'task_type', ''),
+                    NULLIF(metadata->>'mode', ''),
+                    'global'
+                ) ~ '^workspace-[0-9]+$'
+                    THEN 'web-chat-' || COALESCE(
+                        NULLIF(metadata->>'memoryScope', ''),
+                        NULLIF(metadata->>'memory_scope', ''),
+                        NULLIF(metadata->>'projectScope', ''),
+                        NULLIF(metadata->>'project_scope', ''),
+                        NULLIF(metadata->>'projectId', ''),
+                        NULLIF(metadata->>'project_id', ''),
+                        NULLIF(metadata->>'projectKey', ''),
+                        NULLIF(metadata->>'project_key', ''),
+                        NULLIF(metadata->>'workspaceId', ''),
+                        NULLIF(metadata->>'workspace_id', ''),
+                        NULLIF(metadata->>'workspaceKey', ''),
+                        NULLIF(metadata->>'workspace_key', ''),
+                        NULLIF(metadata->>'namespace', ''),
+                        NULLIF(metadata->>'clientSurface', ''),
+                        NULLIF(metadata->>'client_surface', ''),
+                        NULLIF(metadata->>'taskType', ''),
+                        NULLIF(metadata->>'task_type', ''),
+                        NULLIF(metadata->>'mode', ''),
+                        'global'
+                    )
+                ELSE COALESCE(
+                    NULLIF(metadata->>'memoryScope', ''),
+                    NULLIF(metadata->>'memory_scope', ''),
+                    NULLIF(metadata->>'projectScope', ''),
+                    NULLIF(metadata->>'project_scope', ''),
+                    NULLIF(metadata->>'projectId', ''),
+                    NULLIF(metadata->>'project_id', ''),
+                    NULLIF(metadata->>'projectKey', ''),
+                    NULLIF(metadata->>'project_key', ''),
+                    NULLIF(metadata->>'workspaceId', ''),
+                    NULLIF(metadata->>'workspace_id', ''),
+                    NULLIF(metadata->>'workspaceKey', ''),
+                    NULLIF(metadata->>'workspace_key', ''),
+                    NULLIF(metadata->>'namespace', ''),
+                    NULLIF(metadata->>'clientSurface', ''),
+                    NULLIF(metadata->>'client_surface', ''),
+                    NULLIF(metadata->>'taskType', ''),
+                    NULLIF(metadata->>'task_type', ''),
+                    NULLIF(metadata->>'mode', ''),
+                    'global'
+                )
+            END
+            WHERE scope_key IS NULL OR scope_key = 'global'
         `);
 
         await this.query(`
@@ -132,6 +230,7 @@ class PostgresManager {
         await this.query('CREATE INDEX IF NOT EXISTS idx_artifacts_direction ON artifacts(direction)');
         await this.query('CREATE INDEX IF NOT EXISTS idx_artifacts_mime_type ON artifacts(mime_type)');
         await this.query('CREATE INDEX IF NOT EXISTS idx_artifacts_created_at ON artifacts(created_at DESC)');
+        await this.query('CREATE INDEX IF NOT EXISTS idx_sessions_scope_key_updated_at ON sessions(scope_key, updated_at DESC)');
         await this.query('CREATE INDEX IF NOT EXISTS idx_session_messages_session_id_created_at ON session_messages(session_id, created_at DESC)');
         await this.query('CREATE INDEX IF NOT EXISTS idx_session_runtime_state_updated_at ON session_runtime_state(updated_at DESC)');
 

@@ -148,6 +148,7 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
 router.get('/models', async (_req, res, next) => {
     try {
         const models = await listImageModels();
+        res.set('Cache-Control', 'no-store');
         res.json({ models });
     } catch (err) {
         next(err);

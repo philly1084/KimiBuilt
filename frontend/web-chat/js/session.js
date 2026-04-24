@@ -615,8 +615,20 @@ class SessionManager extends EventTarget {
         return normalized || '';
     }
 
+    normalizeWebChatWorkspaceScopeValue(value = '') {
+        const normalized = this.normalizeWorkspaceScopeValue(value);
+        const workspaceMatch = normalized.match(/^workspace-(\d+)$/);
+        if (!workspaceMatch) {
+            return normalized;
+        }
+
+        return workspaceMatch[1] === '1'
+            ? 'web-chat'
+            : `web-chat-workspace-${workspaceMatch[1]}`;
+    }
+
     isWebChatWorkspaceScope(scope = '') {
-        const normalizedScope = this.normalizeWorkspaceScopeValue(scope);
+        const normalizedScope = this.normalizeWebChatWorkspaceScopeValue(scope);
         return normalizedScope === 'web-chat' || normalizedScope.startsWith('web-chat-workspace-');
     }
 
@@ -636,7 +648,7 @@ class SessionManager extends EventTarget {
         ];
 
         for (const candidate of candidates) {
-            const normalized = this.normalizeWorkspaceScopeValue(candidate);
+            const normalized = this.normalizeWebChatWorkspaceScopeValue(candidate);
             if (this.isWebChatWorkspaceScope(normalized)) {
                 return normalized;
             }
@@ -651,7 +663,7 @@ class SessionManager extends EventTarget {
             return true;
         }
 
-        const currentWorkspaceScope = this.normalizeWorkspaceScopeValue(
+        const currentWorkspaceScope = this.normalizeWebChatWorkspaceScopeValue(
             this.workspaceContext?.scopeKey || SESSION_MANAGER_CLIENT_SURFACE,
         );
         if (!this.isWebChatWorkspaceScope(currentWorkspaceScope)) {
@@ -739,6 +751,9 @@ class SessionManager extends EventTarget {
                     createdAt: session.createdAt,
                     updatedAt: session.updatedAt,
                     metadata: mergedMetadata,
+                    scopeKey: session.scopeKey || session.scope_key || stored?.scopeKey || this.getSessionWorkspaceScope({
+                        metadata: mergedMetadata,
+                    }) || this.workspaceContext.scopeKey,
                     controlState: session.controlState
                         || stored?.controlState
                         || mergedMetadata.controlState
@@ -1133,6 +1148,7 @@ class SessionManager extends EventTarget {
                 taskType: SESSION_MANAGER_TASK_TYPE,
                 clientSurface: SESSION_MANAGER_CLIENT_SURFACE,
             }),
+            scopeKey: backendSession?.scopeKey || backendSession?.scope_key || this.workspaceContext.scopeKey,
             controlState: backendSession?.controlState
                 || backendSession?.metadata?.controlState
                 || {},

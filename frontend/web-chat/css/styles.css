@@ -2597,6 +2597,15 @@ select:focus-visible,
     display: flex;
     align-items: center;
     gap: 0.25rem;
+    flex-wrap: wrap;
+}
+
+.session-scope-label {
+    color: var(--text-muted);
+    max-width: 8rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .session-rename-form {

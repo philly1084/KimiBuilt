@@ -6,7 +6,7 @@ const { config } = require('./config');
 const { stripNullCharacters } = require('./utils/text');
 const {
     buildScopedSessionMetadata,
-    normalizeSessionScopeKey,
+    normalizeWebChatWorkspaceScopeKey,
     resolveSessionScope,
     sessionMatchesScope,
 } = require('./session-scope');
@@ -256,7 +256,7 @@ class SessionStore {
         return Object.fromEntries(
             Object.entries(scopedActiveSessionIds)
                 .map(([scopeKey, sessionId]) => [
-                    normalizeSessionScopeKey(scopeKey),
+                    normalizeWebChatWorkspaceScopeKey(scopeKey),
                     this.normalizeSessionId(sessionId),
                 ])
                 .filter(([, sessionId]) => Boolean(sessionId)),
@@ -349,6 +349,10 @@ class SessionStore {
         });
     }
 
+    buildSessionScopeKey(metadata = {}) {
+        return normalizeWebChatWorkspaceScopeKey(resolveSessionScope(metadata || {}));
+    }
+
     toSession(row) {
         if (!row) return null;
 
@@ -366,6 +370,7 @@ class SessionStore {
             updatedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at,
             messageCount: row.message_count,
             metadata: row.metadata || {},
+            scopeKey: row.scope_key || row.scopeKey || this.buildSessionScopeKey(row.metadata || {}),
             controlState,
         };
     }
@@ -393,15 +398,19 @@ class SessionStore {
 
                         return [
                             session.id,
-                            {
+                            (() => {
+                                const metadata = this.normalizeMetadata(session.metadata || {});
+                                return {
                                 ...session,
-                                metadata: this.normalizeMetadata(session.metadata || {}),
+                                metadata,
+                                scopeKey: session.scopeKey || this.buildSessionScopeKey(metadata),
                                 controlState: this.normalizeControlState(
                                     session.controlState
                                     || session.metadata?.controlState
                                     || {},
                                 ),
-                            },
+                                };
+                            })(),
                         ];
                     })
                     .filter(Boolean),
@@ -507,6 +516,7 @@ class SessionStore {
             updatedAt: now,
             messageCount: 0,
             metadata: normalizedMetadata,
+            scopeKey: this.buildSessionScopeKey(normalizedMetadata),
             controlState: this.normalizeControlState(metadata?.controlState || {}),
         };
 
@@ -521,10 +531,11 @@ class SessionStore {
 
         const result = await postgres.query(
             `
-                INSERT INTO sessions (id, previous_response_id, created_at, updated_at, message_count, metadata)
-                VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+                INSERT INTO sessions (id, previous_response_id, created_at, updated_at, message_count, metadata, scope_key)
+                VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
                 ON CONFLICT (id) DO UPDATE
                 SET metadata = EXCLUDED.metadata,
+                    scope_key = EXCLUDED.scope_key,
                     updated_at = EXCLUDED.updated_at
                 RETURNING *
             `,
@@ -535,6 +546,7 @@ class SessionStore {
                 session.updatedAt,
                 0,
                 JSON.stringify(session.metadata || {}),
+                session.scopeKey,
             ],
         );
 
@@ -703,7 +715,7 @@ class SessionStore {
             }
         }
 
-        const normalizedScopeKey = normalizeSessionScopeKey(scopeKey);
+        const normalizedScopeKey = normalizeWebChatWorkspaceScopeKey(scopeKey);
         const currentState = await this.getUserSessionState(normalizedOwnerId);
         const scopedActiveSessionIds = {
             ...(currentState?.scopedActiveSessionIds || {}),
@@ -742,10 +754,10 @@ class SessionStore {
         }
 
         const state = await this.getUserSessionState(normalizedOwnerId);
-        const normalizedScopeKey = normalizeSessionScopeKey(scopeKey);
+        const normalizedScopeKey = normalizeWebChatWorkspaceScopeKey(scopeKey);
         const activeSessionId = this.normalizeSessionId(
             state?.scopedActiveSessionIds?.[normalizedScopeKey]
-            || (normalizedScopeKey === normalizeSessionScopeKey() ? state?.activeSessionId : null),
+            || (normalizedScopeKey === normalizeWebChatWorkspaceScopeKey() ? state?.activeSessionId : null),
         );
         if (!activeSessionId) {
             return null;
@@ -819,7 +831,7 @@ class SessionStore {
     async getLatestOwnedSession(ownerId = null, options = {}) {
         const normalizedOwnerId = this.normalizeOwnerId(ownerId);
         const normalizedScopeKey = options?.scopeKey
-            ? normalizeSessionScopeKey(options.scopeKey)
+            ? normalizeWebChatWorkspaceScopeKey(options.scopeKey)
             : null;
         const sessions = await this.list(normalizedOwnerId ? {
             ownerId: normalizedOwnerId,
@@ -844,6 +856,7 @@ class SessionStore {
         const normalizedOwnerId = this.normalizeOwnerId(ownerId);
         const normalizedSessionId = this.normalizeSessionId(sessionId);
         const normalizedScopeKey = resolveSessionScope(metadata);
+        const normalizedActiveScopeKey = normalizeWebChatWorkspaceScopeKey(normalizedScopeKey);
 
         if (normalizedSessionId) {
             const session = await this.getOrCreateOwned(
@@ -853,23 +866,23 @@ class SessionStore {
             );
 
             if (session && normalizedOwnerId) {
-                await this.setActiveSession(normalizedOwnerId, session.id, normalizedScopeKey);
+                await this.setActiveSession(normalizedOwnerId, session.id, normalizedActiveScopeKey);
             }
 
             return session;
         }
 
         if (normalizedOwnerId) {
-            const activeSession = await this.getActiveOwnedSession(normalizedOwnerId, normalizedScopeKey);
+            const activeSession = await this.getActiveOwnedSession(normalizedOwnerId, normalizedActiveScopeKey);
             if (activeSession) {
                 return activeSession;
             }
 
             const latestSession = await this.getLatestOwnedSession(normalizedOwnerId, {
-                scopeKey: normalizedScopeKey,
+                scopeKey: normalizedActiveScopeKey,
             });
             if (latestSession) {
-                await this.setActiveSession(normalizedOwnerId, latestSession.id, normalizedScopeKey);
+                await this.setActiveSession(normalizedOwnerId, latestSession.id, normalizedActiveScopeKey);
                 return latestSession;
             }
         }
@@ -879,7 +892,7 @@ class SessionStore {
         );
 
         if (session && normalizedOwnerId) {
-            await this.setActiveSession(normalizedOwnerId, session.id, normalizedScopeKey);
+            await this.setActiveSession(normalizedOwnerId, session.id, normalizedActiveScopeKey);
         }
 
         return session;
@@ -891,16 +904,18 @@ class SessionStore {
         if (!this.usePostgres) {
             const session = this.sessions.get(id);
             if (!session) return null;
+            const nextMetadata = updates.metadata
+                ? this.normalizeMetadata({
+                    ...(session.metadata || {}),
+                    ...updates.metadata,
+                })
+                : session.metadata;
 
             const next = {
                 ...session,
                 ...updates,
-                metadata: updates.metadata
-                    ? this.normalizeMetadata({
-                        ...(session.metadata || {}),
-                        ...updates.metadata,
-                    })
-                    : session.metadata,
+                metadata: nextMetadata,
+                scopeKey: updates.scopeKey || this.buildSessionScopeKey(nextMetadata || {}),
                 controlState: updates.controlState
                     ? this.normalizeControlState(mergeControlState(
                         session.controlState || {},
@@ -924,6 +939,7 @@ class SessionStore {
                 ...updates.metadata,
             })
             : current.metadata;
+        const nextScopeKey = updates.scopeKey || this.buildSessionScopeKey(nextMetadata || {});
         const nextControlState = updates.controlState
             ? this.normalizeControlState(mergeControlState(
                 current.controlState || {},
@@ -937,6 +953,7 @@ class SessionStore {
                 SET previous_response_id = $2,
                     message_count = $3,
                     metadata = $4::jsonb,
+                    scope_key = $5,
                     updated_at = NOW()
                 WHERE id = $1
                 RETURNING *
@@ -946,6 +963,7 @@ class SessionStore {
                 updates.previousResponseId ?? current.previousResponseId,
                 updates.messageCount ?? current.messageCount,
                 JSON.stringify(nextMetadata || {}),
+                nextScopeKey,
             ],
         );
 
@@ -1227,6 +1245,7 @@ class SessionStore {
                     : session.metadata,
                 updatedAt: new Date().toISOString(),
             };
+            next.scopeKey = this.buildSessionScopeKey(next.metadata || {});
             this.sessions.set(id, next);
             await this.persistFallbackState();
             return next;
@@ -1250,11 +1269,17 @@ class SessionStore {
                 SET previous_response_id = $2,
                     message_count = message_count + 1,
                     metadata = COALESCE($3::jsonb, metadata),
+                    scope_key = COALESCE($4, scope_key),
                     updated_at = NOW()
                 WHERE id = $1
                 RETURNING *
             `,
-            [id, responseId, nextMetadata ? JSON.stringify(nextMetadata) : null],
+            [
+                id,
+                responseId,
+                nextMetadata ? JSON.stringify(nextMetadata) : null,
+                nextMetadata ? this.buildSessionScopeKey(nextMetadata) : null,
+            ],
         );
 
         return this.toSession(result.rows[0]);
@@ -1361,7 +1386,7 @@ class SessionStore {
         await this.initialize();
         const ownerId = this.normalizeOwnerId(options?.ownerId);
         const scopeKey = options?.scopeKey
-            ? normalizeSessionScopeKey(options.scopeKey)
+            ? normalizeWebChatWorkspaceScopeKey(options.scopeKey)
             : null;
 
         if (!this.usePostgres) {

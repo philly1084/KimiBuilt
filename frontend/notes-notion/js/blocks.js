@@ -1803,10 +1803,19 @@ const Blocks = (function() {
                             style: block.content.style,
                         });
 
-                        let storedImageUrl = result.url;
+                        const generatedImages = Array.isArray(result.images)
+                            ? result.images
+                            : (Array.isArray(result.data) ? result.data : []);
+                        const primaryImage = generatedImages[0] || null;
+                        let storedImageUrl = result.imageUrl
+                            || result.url
+                            || primaryImage?.imageUrl
+                            || primaryImage?.inlineUrl
+                            || primaryImage?.url
+                            || null;
                         let imageAssetId = block.content.imageAssetId || null;
-                        if (result.url && window.Storage?.saveImageAsset) {
-                            const assetUrl = await window.Storage.saveImageAsset(result.url);
+                        if (storedImageUrl && window.Storage?.saveImageAsset) {
+                            const assetUrl = await window.Storage.saveImageAsset(storedImageUrl);
                             if (assetUrl) {
                                 storedImageUrl = assetUrl;
                                 imageAssetId = String(assetUrl).startsWith('asset://') ? String(assetUrl).slice('asset://'.length) : null;
@@ -1814,9 +1823,12 @@ const Blocks = (function() {
                         }
                         
                         block.content.imageUrl = storedImageUrl;
-                        block.content.generatedImages = Array.isArray(result.images) ? result.images : (Array.isArray(result.data) ? result.data : []);
+                        block.content.generatedImages = generatedImages;
                         block.content.imageAssetId = imageAssetId;
                         block.content._resolvedImageUrl = storedImageUrl && !String(storedImageUrl).startsWith('asset://') ? storedImageUrl : null;
+                        block.content.downloadUrl = result.downloadUrl || primaryImage?.downloadUrl || storedImageUrl || null;
+                        block.content.artifactId = result.artifactId || primaryImage?.artifactId || null;
+                        block.content.selectedArtifactId = result.artifactId || primaryImage?.artifactId || null;
                         block.content.status = 'done';
                         block.content.revisedPrompt = result.revised_prompt;
                         wrapper.innerHTML = '';

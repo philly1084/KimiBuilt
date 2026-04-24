@@ -110,10 +110,6 @@ function inferProviderFamily({
 } = {}) {
     const normalizedModel = String(model || '').trim().toLowerCase();
 
-    if (normalizedModel.includes('gemini')) {
-        return 'gemini';
-    }
-
     try {
         const parsed = new URL(String(baseURL || 'https://api.openai.com/v1'));
         const hostname = String(parsed.hostname || '').toLowerCase();
@@ -133,6 +129,10 @@ function inferProviderFamily({
         }
     } catch (_error) {
         // Fall through to model-based inference.
+    }
+
+    if (normalizedModel.includes('gemini')) {
+        return 'gemini';
     }
 
     if (normalizedModel.includes('groq')) {
@@ -555,7 +555,7 @@ async function listModels() {
 }
 
 function listOfficialImageModels(configuredModel = config.media.imageModel) {
-    const configured = normalizeModelId(configuredModel);
+    const configured = getOfficialOpenAIConfiguredImageModel(configuredModel, config.media.imageModel);
     const modelIds = uniqueById(
         [configured, ...OFFICIAL_OPENAI_IMAGE_MODELS]
             .filter(Boolean)
@@ -563,6 +563,25 @@ function listOfficialImageModels(configuredModel = config.media.imageModel) {
     ).map((model) => getImageModelMetadata(model.id, 'openai'));
 
     return sortImageModels(modelIds);
+}
+
+function isOfficialOpenAIImageModelId(modelId = '') {
+    const normalized = normalizeModelId(modelId).toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /^(gpt-image(?:-[a-z0-9.]+)?|dall-e-\d+)$/i.test(normalized);
+}
+
+function getOfficialOpenAIConfiguredImageModel(modelId = '', fallbackModel = config.media.imageModel) {
+    const normalized = normalizeModelId(modelId);
+    if (isOfficialOpenAIImageModelId(normalized)) {
+        return normalized;
+    }
+
+    const fallback = normalizeModelId(fallbackModel);
+    return isOfficialOpenAIImageModelId(fallback) ? fallback : '';
 }
 
 async function listImageModels() {
@@ -607,7 +626,13 @@ async function resolveImageModel(requestedModel = null) {
     const imageProvider = getImageProviderConfig();
     const availableModels = await listImageModels();
     const requested = normalizeModelId(requestedModel);
-    const configured = normalizeModelId(imageProvider.imageModel);
+    const providerFamily = inferProviderFamily({
+        baseURL: imageProvider.baseURL,
+        model: imageProvider.imageModel || requested,
+    });
+    const configured = providerFamily === 'openai'
+        ? getOfficialOpenAIConfiguredImageModel(imageProvider.imageModel, config.media.imageModel)
+        : normalizeModelId(imageProvider.imageModel);
 
     if (requested) {
         const exactMatch = availableModels.find((model) => model.id === requested);
@@ -615,7 +640,12 @@ async function resolveImageModel(requestedModel = null) {
             return { modelId: exactMatch.id, availableModels };
         }
 
-        return { modelId: requested, availableModels };
+        if (providerFamily === 'openai' && !isOfficialOpenAIImageModelId(requested)) {
+            console.warn(`[OpenAI] Ignoring unsupported requested image model "${requested}" for official OpenAI image generation.`);
+        } else {
+            return { modelId: requested, availableModels };
+        }
+
     }
 
     if (configured) {

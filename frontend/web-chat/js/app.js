@@ -4187,10 +4187,10 @@ class ChatApp {
             return;
         }
 
-        // Regular image generation - open modal with prompt pre-filled
-        const input = document.getElementById('image-prompt-input');
-        if (input) input.value = args;
-        uiHelpers.openImageModal();
+        void this.generateImage({
+            prompt: args,
+            source: 'generate',
+        });
     }
 
     /**
@@ -6742,8 +6742,22 @@ class ChatApp {
         }
     }
 
-    async generateImage() {
-        const options = uiHelpers.getImageGenerationOptions();
+    async generateImage(optionsOverride = null) {
+        const overrideOptions = optionsOverride && typeof optionsOverride === 'object'
+            ? { ...optionsOverride }
+            : null;
+        const preferredModelId = uiHelpers.getPreferredImageModelId();
+        const preferredModel = uiHelpers.getImageModelMetadata(
+            overrideOptions?.model || preferredModelId,
+        );
+        const options = overrideOptions
+            ? {
+                ...overrideOptions,
+                model: overrideOptions.model || preferredModel.id || '',
+                size: overrideOptions.size || preferredModel.sizes?.[0] || 'auto',
+                source: overrideOptions.source || 'generate',
+            }
+            : uiHelpers.getImageGenerationOptions();
         
         if (!options.prompt) {
             uiHelpers.showToast('Please enter a prompt', 'warning');

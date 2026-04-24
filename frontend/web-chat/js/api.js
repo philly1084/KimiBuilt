@@ -1591,6 +1591,7 @@ class OpenAIAPIClient extends EventTarget {
                     'Accept': 'application/json',
                 }),
                 credentials: 'same-origin',
+                cache: 'no-store',
             });
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}`);

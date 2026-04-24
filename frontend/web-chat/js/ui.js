@@ -4085,6 +4085,13 @@ class UIHelpers {
             const input = document.getElementById('image-prompt-input');
             if (input) input.focus();
         }, 100);
+
+        const modelSelect = document.getElementById('image-model-select');
+        const preferredModelId = this.getPreferredImageModelId();
+        if (modelSelect && preferredModelId) {
+            modelSelect.value = preferredModelId;
+        }
+        this.setImageSource('generate');
         
         this.loadImageModels();
 
@@ -4207,12 +4214,19 @@ class UIHelpers {
 
             const modelSelect = document.getElementById('image-model-select');
             if (modelSelect && this.availableImageModels.length > 0) {
+                const currentValue = modelSelect.value;
+                const currentModel = this.availableImageModels.find((model) => model.id === currentValue) || { id: currentValue };
+                const preferredModelId = this.getPreferredImageModelId(this.availableImageModels);
+                const preferredModel = this.availableImageModels.find((model) => model.id === preferredModelId) || { id: preferredModelId };
                 modelSelect.innerHTML = this.availableImageModels
                     .map((model) => `<option value="${model.id}">${model.name || model.id || 'Gateway Default'}</option>` )
                     .join('');
 
-                if (!this.availableImageModels.find((model) => model.id === modelSelect.value)) {
-                    modelSelect.value = this.getPreferredImageModelId();
+                if (!this.availableImageModels.find((model) => model.id === currentValue)
+                    || this.getImageModelPreferenceRank(currentModel) > this.getImageModelPreferenceRank(preferredModel)) {
+                    modelSelect.value = preferredModelId;
+                } else {
+                    modelSelect.value = currentValue;
                 }
 
                 this.updateImageOptionsForModel(modelSelect.value);
@@ -6032,6 +6046,40 @@ class UIHelpers {
         }
     }
 
+    getSessionScopeLabel(session = {}) {
+        const metadata = session?.metadata && typeof session.metadata === 'object' && !Array.isArray(session.metadata)
+            ? session.metadata
+            : {};
+        const rawScope = String(
+            session.scopeKey
+            || metadata.workspaceKey
+            || metadata.workspace_key
+            || metadata.memoryScope
+            || metadata.memory_scope
+            || metadata.projectScope
+            || metadata.project_scope
+            || '',
+        ).trim();
+
+        if (!rawScope) {
+            return '';
+        }
+
+        const normalized = rawScope.toLowerCase();
+        const workspaceMatch = normalized.match(/(?:web-chat-)?workspace-(\d+)$/);
+        if (workspaceMatch) {
+            return `Workspace ${workspaceMatch[1]}`;
+        }
+
+        if (normalized === 'web-chat') {
+            return 'Workspace 1';
+        }
+
+        return rawScope
+            .replace(/[-_]+/g, ' ')
+            .replace(/\b\w/g, (char) => char.toUpperCase());
+    }
+
     renderSessionsList(sessions, currentSessionId) {
         if (sessions.length === 0) {
             this.renamingSessionId = null;
@@ -6059,6 +6107,7 @@ class UIHelpers {
             const modeClass = session.mode || 'chat';
             const timeAgo = sessionManager.formatTimestamp(session.updatedAt);
             const messageCount = sessionManager.getMessages(session.id)?.length || 0;
+            const scopeLabel = this.getSessionScopeLabel(session);
             const workloadSummary = session.workloadSummary || { queued: 0, running: 0, failed: 0 };
             const workloadBadge = workloadSummary.running > 0
                 ? `${workloadSummary.running} running`
@@ -6105,7 +6154,10 @@ class UIHelpers {
                                 ${workloadBadge ? `<span class="session-workload-badge">${this.escapeHtml(workloadBadge)}</span>` : ''}
                             </div>
                             <div class="session-meta">
-                                ${timeAgo} | ${messageCount} message${messageCount !== 1 ? 's' : ''}
+                                <span>${timeAgo}</span>
+                                <span aria-hidden="true">|</span>
+                                <span>${messageCount} message${messageCount !== 1 ? 's' : ''}</span>
+                                ${scopeLabel ? `<span aria-hidden="true">|</span><span class="session-scope-label">${this.escapeHtml(scopeLabel)}</span>` : ''}
                             </div>
                         `}
                     </div>

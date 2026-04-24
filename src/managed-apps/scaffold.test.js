@@ -48,6 +48,9 @@ describe('managed app scaffold', () => {
         expect(workflow.content).toContain('"buildStatus":"$build_status"');
         expect(workflow.content).toContain('"deployRequested":true');
         expect(workflow.content).toContain('--post-file="$payload_file"');
+        expect(workflow.content).toContain('BusyBox wget cannot disable TLS verification');
+        expect(workflow.content).toContain('http_url="http://${target_url#https://}"');
+        expect(workflow.content).toContain('KimiBuilt notification via wget failed; leaving the build result intact.');
         expect(workflow.content).not.toContain('--method=POST');
         expect(workflow.content).not.toContain('--body-file="$payload_file"');
         expect(workflow.content).not.toContain('uses: actions/checkout@v4');

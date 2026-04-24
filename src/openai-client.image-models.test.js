@@ -104,6 +104,7 @@ describe('openai-client image model selection', () => {
     });
 
     test('uses the official OpenAI image catalog when the configured base URL is OpenAI', async () => {
+        process.env.OPENAI_IMAGE_MODEL = 'gemini-2.0-flash-exp-image-generation';
         mockModelsList.mockResolvedValue({
             data: [
                 { id: 'gemini-2.0-flash-exp-image-generation', owned_by: 'google' },

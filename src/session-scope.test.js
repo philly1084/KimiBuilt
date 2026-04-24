@@ -102,6 +102,20 @@ describe('session scope memory routing', () => {
     expect(sessionMatchesScope(workspaceTwoSession, 'web-chat-workspace-2')).toBe(true);
   });
 
+  test('maps raw legacy workspace keys to durable web-chat workspace scopes', () => {
+    const rawWorkspaceTwoSession = {
+      id: 'raw-workspace-2-session',
+      metadata: {
+        clientSurface: 'web-chat',
+        workspaceKey: 'workspace-2',
+      },
+    };
+
+    expect(sessionMatchesScope(rawWorkspaceTwoSession, 'web-chat')).toBe(false);
+    expect(sessionMatchesScope(rawWorkspaceTwoSession, 'web-chat-workspace-2')).toBe(true);
+    expect(sessionMatchesScope(rawWorkspaceTwoSession, 'workspace-2')).toBe(true);
+  });
+
   test('keeps project-scoped sessions visible inside their explicit workspace', () => {
     const projectWorkspaceSession = {
       id: 'project-session',

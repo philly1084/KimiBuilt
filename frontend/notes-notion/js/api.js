@@ -117,6 +117,89 @@ const API = (function() {
         ];
     }
 
+    function buildArtifactDisplayUrl(path = '', { inline = false } = {}) {
+        const normalizedPath = String(path || '').trim();
+        if (!normalizedPath) {
+            return '';
+        }
+
+        try {
+            const url = new URL(normalizedPath, window.location.origin);
+            if (inline) {
+                url.searchParams.set('inline', '1');
+            }
+            return url.toString();
+        } catch (_error) {
+            return '';
+        }
+    }
+
+    function normalizeGeneratedImage(image = {}) {
+        if (!image || typeof image !== 'object') {
+            return null;
+        }
+
+        const downloadUrl = buildArtifactDisplayUrl(image.downloadPath || image.downloadUrl || '');
+        const inlineUrl = downloadUrl
+            ? buildArtifactDisplayUrl(
+                image.inlinePath || image.downloadPath || image.downloadUrl || '',
+                { inline: true },
+            )
+            : '';
+
+        let imageUrl = inlineUrl || buildArtifactDisplayUrl(image.url || '') || image.url || '';
+        if (!imageUrl && typeof image.b64_json === 'string' && !/\[truncated \d+ chars\]/.test(image.b64_json)) {
+            imageUrl = `data:image/png;base64,${image.b64_json}`;
+        }
+
+        if (!imageUrl) {
+            return null;
+        }
+
+        return {
+            ...image,
+            imageUrl,
+            inlineUrl: inlineUrl || imageUrl,
+            downloadUrl: downloadUrl || buildArtifactDisplayUrl(image.url || '') || image.url || '',
+            artifactId: image.artifactId || null,
+            filename: image.filename || null,
+        };
+    }
+
+    function getImageModelPreferenceRank(model = {}) {
+        const normalizedId = String(model?.id || '').trim().toLowerCase();
+        const preferredOrder = [
+            'gpt-image-2',
+            'gpt-image-1.5',
+            'gpt-image-1',
+            'gpt-image-1-mini',
+            'dall-e-3',
+            'dall-e-2',
+        ];
+        const preferredIndex = preferredOrder.indexOf(normalizedId);
+        if (preferredIndex !== -1) {
+            return preferredIndex;
+        }
+
+        if (/^(gpt-image|dall-e-)/i.test(normalizedId)) {
+            return preferredOrder.length;
+        }
+
+        return preferredOrder.length + 100;
+    }
+
+    function sortImageModelsForDisplay(models = []) {
+        const list = Array.isArray(models) ? [...models] : [];
+        return list.sort((left, right) => {
+            const rankDelta = getImageModelPreferenceRank(left) - getImageModelPreferenceRank(right);
+            if (rankDelta !== 0) {
+                return rankDelta;
+            }
+
+            return String(left?.name || left?.id || '').localeCompare(String(right?.name || right?.id || ''));
+        });
+    }
+
     function buildMessages(message, context = []) {
         if (Array.isArray(context) && context.length > 0) {
             return [...context, { role: 'user', content: message }];
@@ -295,6 +378,7 @@ const API = (function() {
             const response = await fetch(`${baseUrl}/api/images/models`, {
                 headers: { 'Accept': 'application/json' },
                 credentials: 'same-origin',
+                cache: 'no-store',
             });
 
             if (!response.ok) {
@@ -302,10 +386,10 @@ const API = (function() {
             }
 
             const data = await response.json();
-            return data.models || [];
+            return sortImageModelsForDisplay(data.models || []);
         } catch (error) {
             console.warn('Failed to fetch image models:', error.message);
-            return getDefaultImageModels();
+            return sortImageModelsForDisplay(getDefaultImageModels());
         }
     }
     
@@ -495,16 +579,22 @@ const API = (function() {
                 currentSessionId = data.sessionId || data.session_id;
             }
             const images = Array.isArray(data.data) ? data.data : [];
-            const firstImage = images[0] || {};
-            const imageUrl = firstImage.url || (firstImage.b64_json ? `data:image/png;base64,${firstImage.b64_json}` : null);
+            const normalizedImages = images
+                .map((image) => normalizeGeneratedImage(image))
+                .filter(Boolean);
+            const firstImage = normalizedImages[0] || null;
             
             return {
-                data: images,
-                images,
+                data: normalizedImages,
+                images: normalizedImages,
                 artifacts: Array.isArray(data.artifacts) ? data.artifacts : [],
-                count: images.length,
-                url: imageUrl,
-                revised_prompt: firstImage.revised_prompt,
+                count: normalizedImages.length,
+                url: firstImage?.imageUrl || null,
+                imageUrl: firstImage?.imageUrl || null,
+                downloadUrl: firstImage?.downloadUrl || null,
+                artifactId: firstImage?.artifactId || null,
+                filename: firstImage?.filename || null,
+                revised_prompt: firstImage?.revisedPrompt || firstImage?.revised_prompt || null,
                 created: data.created,
                 model: data.model || params.model,
                 size: data.size || params.size,

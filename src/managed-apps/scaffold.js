@@ -204,11 +204,16 @@ jobs:
           if [ -n "\${header_secret:-}" ]; then
             curl_flags+=(-H "X-KimiBuilt-Webhook-Secret: $header_secret")
           fi
+          insecure_requested=0
           if [ "\${KIMIBUILT_BUILD_EVENTS_INSECURE:-0}" = "1" ] || [ "\${KIMIBUILT_BUILD_EVENTS_INSECURE:-0}" = "true" ]; then
+            insecure_requested=1
             curl_flags+=(-k)
           fi
           if command -v curl >/dev/null 2>&1; then
-            curl "\${curl_flags[@]}" "$target_url"
+            if curl "\${curl_flags[@]}" "$target_url"; then
+              exit 0
+            fi
+            echo "KimiBuilt notification via curl failed; leaving the build result intact." >&2
             exit 0
           fi
           if command -v wget >/dev/null 2>&1; then
@@ -216,11 +221,25 @@ jobs:
             if [ -n "\${header_secret:-}" ]; then
               wget_headers+=(--header "X-KimiBuilt-Webhook-Secret: $header_secret")
             fi
-            wget -qO- "\${wget_headers[@]}" --post-file="$payload_file" "$target_url" >/dev/null
+            if wget -qO- "\${wget_headers[@]}" --post-file="$payload_file" "$target_url" >/dev/null; then
+              exit 0
+            fi
+            if [ "$insecure_requested" = "1" ]; then
+              case "$target_url" in
+                https://*)
+                  http_url="http://\${target_url#https://}"
+                  echo "BusyBox wget cannot disable TLS verification; trying $http_url because KIMIBUILT_BUILD_EVENTS_INSECURE is set." >&2
+                  if wget -qO- "\${wget_headers[@]}" --post-file="$payload_file" "$http_url" >/dev/null; then
+                    exit 0
+                  fi
+                  ;;
+              esac
+            fi
+            echo "KimiBuilt notification via wget failed; leaving the build result intact." >&2
             exit 0
           fi
           echo "curl or wget is required to notify KimiBuilt." >&2
-          exit 1
+          exit 0
 `;
 }
 
