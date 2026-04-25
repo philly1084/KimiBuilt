@@ -1,0 +1,34 @@
+const parser = require('./model-output-parser');
+
+describe('model-output-parser', () => {
+    test('unwraps common model response envelopes before markdown repair', () => {
+        const normalized = parser.normalizeModelOutputMarkdown({
+            model: 'example-model',
+            result: '```json\n{"content":"<final>Summary | Item | Value | |---|---| | A | B |</final>","metadata":{"provider":"example"}}\n```',
+        });
+
+        expect(normalized).toContain('### Summary');
+        expect(normalized).toContain('| Item | Value |');
+        expect(normalized).toContain('| A | B |');
+    });
+
+    test('extracts OpenAI-style content parts', () => {
+        const normalized = parser.normalizeModelOutputMarkdown({
+            content: [
+                { type: 'output_text', text: 'Why it works Crispy outside. --- Ingredients | Item | Quantity | |---|---| | Potatoes | 2 lbs |' },
+            ],
+        });
+
+        expect(normalized).toContain('### Why it works');
+        expect(normalized).toContain('### Ingredients');
+        expect(normalized).toContain('| Potatoes | 2 lbs |');
+    });
+
+    test('keeps fenced code blocks intact while repairing surrounding prose', () => {
+        const normalized = parser.normalizeModelOutputMarkdown('Summary: useful\n\n```js\nconst table = \"| not markdown |\";\n```\n\nIngredients | Item | Quantity | |---|---| | A | B |');
+
+        expect(normalized).toContain('```js\nconst table = "| not markdown |";\n```');
+        expect(normalized).toContain('### Ingredients');
+        expect(normalized).toContain('| A | B |');
+    });
+});

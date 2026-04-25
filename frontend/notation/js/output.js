@@ -48,7 +48,9 @@ const OutputManager = {
      * @param {Array} data.suggestions - Suggestions
      */
     display(data) {
-        this.currentResult = data.result || '';
+        this.currentResult = window.KimiBuiltModelOutputParser?.normalizeModelOutputMarkdown
+            ? window.KimiBuiltModelOutputParser.normalizeModelOutputMarkdown(data.result || data)
+            : (data.result || '');
         this.currentMode = data.mode || 'expand';
         this.annotations = data.annotations || [];
         this.suggestions = data.suggestions || [];
@@ -282,6 +284,9 @@ const OutputManager = {
      * @private
      */
     _looksLikeMarkdown(text) {
+        const normalizedText = window.KimiBuiltModelOutputParser?.normalizeModelOutputMarkdown
+            ? window.KimiBuiltModelOutputParser.normalizeModelOutputMarkdown(text)
+            : text;
         const markdownPatterns = [
             /^#{1,6}\s/m,           // Headers
             /\*\*|__/,              // Bold
@@ -296,7 +301,7 @@ const OutputManager = {
             /^---$/m                // Horizontal rules
         ];
 
-        return markdownPatterns.some(pattern => pattern.test(text));
+        return markdownPatterns.some(pattern => pattern.test(normalizedText));
     },
 
     /**
@@ -306,6 +311,9 @@ const OutputManager = {
      * @private
      */
     _renderMarkdown(text) {
+        const normalizedText = window.KimiBuiltModelOutputParser?.normalizeModelOutputMarkdown
+            ? window.KimiBuiltModelOutputParser.normalizeModelOutputMarkdown(text)
+            : text;
         if (typeof marked !== 'undefined') {
             // Configure marked options
             marked.setOptions({
@@ -314,11 +322,11 @@ const OutputManager = {
                 headerIds: true,
                 mangle: false
             });
-            return marked.parse(text);
+            return marked.parse(normalizedText);
         }
         
         // Fallback: simple formatting
-        return this._renderPlainText(text);
+        return this._renderPlainText(normalizedText);
     },
 
     /**

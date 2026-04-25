@@ -416,6 +416,34 @@ body[data-theme="voxel"] .line-output.error {
     background: rgba(244, 201, 93, 0.08);
 }
 
+.markdown-content table {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    margin: 14px 0;
+    overflow-x: auto;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.markdown-content th,
+.markdown-content td {
+    padding: 8px 10px;
+    border: 1px solid rgba(155, 216, 255, 0.22);
+    text-align: left;
+    vertical-align: top;
+}
+
+.markdown-content th {
+    color: #ffffff;
+    background: rgba(155, 216, 255, 0.12);
+    font-weight: 800;
+}
+
+.markdown-content tr:nth-child(even) td {
+    background: rgba(255, 255, 255, 0.03);
+}
+
 .markdown-content a {
     color: #9bd8ff;
     text-decoration: underline;

@@ -2168,6 +2168,10 @@ class UIHelpers {
     }
 
     normalizeStructuredAssistantMarkdown(source = '') {
+        if (window.KimiBuiltModelOutputParser?.normalizeStructuredMarkdown) {
+            return window.KimiBuiltModelOutputParser.normalizeStructuredMarkdown(source);
+        }
+
         return String(source || '')
             .split(/(```[\s\S]*?```)/g)
             .map((segment) => {
@@ -2362,6 +2366,9 @@ class UIHelpers {
         }
 
         const tableSectionLabels = [
+            'Summary',
+            'Result',
+            'Results',
             'Ingredients',
             'Preparation',
             'Variations',
@@ -3212,7 +3219,10 @@ class UIHelpers {
             };
         }
 
-        const surveyRenderPlan = this.buildSurveyRenderPlan(content, message);
+        const modelNormalizedContent = window.KimiBuiltModelOutputParser?.normalizeModelOutputMarkdown
+            ? window.KimiBuiltModelOutputParser.normalizeModelOutputMarkdown(content, { model: message?.model || '' })
+            : content;
+        const surveyRenderPlan = this.buildSurveyRenderPlan(modelNormalizedContent, message);
         const normalizedMarkdown = this.normalizeInlineHtmlAssistantMarkdown(
             this.normalizeStructuredAssistantMarkdown(surveyRenderPlan.markdown),
         );

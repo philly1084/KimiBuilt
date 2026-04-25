@@ -293,17 +293,21 @@ class DocumentHandler extends CanvasTypeHandler {
             this.marked = marked;
         }
 
+        const normalizedContent = window.KimiBuiltModelOutputParser?.normalizeModelOutputMarkdown
+            ? window.KimiBuiltModelOutputParser.normalizeModelOutputMarkdown(content)
+            : content;
+
         if (this.marked) {
             try {
-                return this.marked.parse(content);
+                return this.marked.parse(normalizedContent);
             } catch (error) {
                 console.error('Markdown parse error:', error);
-                return `<pre>${this.escapeHtml(content)}</pre>`;
+                return `<pre>${this.escapeHtml(normalizedContent)}</pre>`;
             }
         }
 
         // Fallback: simple HTML conversion
-        return this.simpleMarkdownToHtml(content);
+        return this.simpleMarkdownToHtml(normalizedContent);
     }
 
     /**

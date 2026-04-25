@@ -2053,7 +2053,10 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
     
     renderMarkdown(text) {
         const codeBlocks = [];
-        let source = String(text || '').replace(/\r\n?/g, '\n');
+        let source = window.KimiBuiltModelOutputParser?.normalizeModelOutputMarkdown
+            ? window.KimiBuiltModelOutputParser.normalizeModelOutputMarkdown(text)
+            : String(text || '');
+        source = String(source || '').replace(/\r\n?/g, '\n');
         
         // Code blocks (including mermaid)
         source = source.replace(/```([^\n`]*)\n([\s\S]*?)```/g, (match, lang, code) => {
@@ -2119,6 +2122,7 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
             || /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)
             || /^\s*[-*+]\s+/.test(line)
             || /^\s*\d+[.)]\s+/.test(line)
+            || /^\|.+\|$/.test(line)
             || /^>\s?/.test(line)
             || /^__CODE_BLOCK_\d+__$/.test(line.trim())
         );
@@ -2149,6 +2153,23 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
             if (/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
                 blocks.push('<hr>');
                 i += 1;
+                continue;
+            }
+
+            if (/^\|.+\|$/.test(trimmed) && i + 1 < lines.length && /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[i + 1])) {
+                const headerCells = this.parseMarkdownTableRow(trimmed);
+                i += 2;
+                const rows = [];
+                while (i < lines.length && /^\|.+\|$/.test(lines[i].trim())) {
+                    rows.push(this.parseMarkdownTableRow(lines[i].trim()));
+                    i += 1;
+                }
+                blocks.push(`
+                    <table>
+                        <thead><tr>${headerCells.map((cell) => `<th>${this.renderInlineMarkdown(cell)}</th>`).join('')}</tr></thead>
+                        <tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${this.renderInlineMarkdown(cell)}</td>`).join('')}</tr>`).join('')}</tbody>
+                    </table>
+                `);
                 continue;
             }
 
@@ -2192,6 +2213,15 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
         }
 
         return blocks.join('');
+    }
+
+    parseMarkdownTableRow(line) {
+        return String(line || '')
+            .trim()
+            .replace(/^\|/, '')
+            .replace(/\|$/, '')
+            .split('|')
+            .map((cell) => cell.trim());
     }
 
     renderInlineMarkdown(text) {
