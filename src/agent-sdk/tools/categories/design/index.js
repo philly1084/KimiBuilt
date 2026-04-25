@@ -51,8 +51,22 @@ function registerDesignTools() {
 
 function getTriggerPatterns(toolId) {
   const patterns = {
-    'architecture-design': ['design architecture', 'system design', 'create architecture', 'architecture diagram'],
-    'uml-generate': ['generate uml', 'class diagram', 'sequence diagram', 'create diagram'],
+    'architecture-design': [
+      'design architecture',
+      'system design',
+      'create architecture',
+      'architecture diagram',
+      'technical design doc',
+      'high level design document'
+    ],
+    'uml-generate': [
+      'generate uml',
+      'class diagram',
+      'sequence diagram',
+      'create diagram',
+      'document design diagram',
+      'design spec diagram'
+    ],
     'api-design': ['design api', 'create api', 'api spec', 'openapi', 'rest api design'],
     'graph-diagram': [
       'complex graph',
@@ -62,9 +76,13 @@ function getTriggerPatterns(toolId) {
       'generate svg diagram',
       'multiple graph images',
       'document diagram',
+      'document design visual',
+      'design document chart',
       'flowchart image',
       'network graph',
-      'chart image'
+      'chart image',
+      'embed diagram in markdown',
+      'design tool for docs'
     ]
   };
   return patterns[toolId] || [toolId];
