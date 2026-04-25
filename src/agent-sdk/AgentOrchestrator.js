@@ -25,6 +25,7 @@ const REMOTE_BUILD_EXECUTION_PROFILE = 'remote-build';
 const REMOTE_BUILD_TOOL_ALLOWLIST = new Set([
   'ssh-execute',
   'remote-command',
+  'remote-cli-agent',
   'k3s-deploy',
   'web-search',
   'web-fetch',

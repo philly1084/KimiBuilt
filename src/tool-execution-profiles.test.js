@@ -41,6 +41,7 @@ describe('tool execution profiles', () => {
         const toolIds = getAllowedToolIdsForProfile(REMOTE_BUILD_EXECUTION_PROFILE);
 
         expect(toolIds).toContain('remote-command');
+        expect(toolIds).toContain('remote-cli-agent');
         expect(toolIds).toContain('k3s-deploy');
         expect(toolIds).toContain('git-safe');
         expect(toolIds).toContain('tool-doc-read');

@@ -219,7 +219,7 @@ function inferExecutionProfile(payload = {}) {
     const text = String(payload?.memoryInput || '').trim() || extractRuntimeText(payload?.input || '');
     const normalized = String(text || '').toLowerCase();
     const controlState = getSessionControlState(payload?.session || { metadata: payload?.metadata || {} });
-    const stickyRemoteIntent = ['ssh-execute', 'remote-command'].includes(
+    const stickyRemoteIntent = ['ssh-execute', 'remote-command', 'remote-cli-agent'].includes(
         String(controlState.lastToolIntent || '').trim().toLowerCase(),
     );
     const stickyRemoteTarget = Boolean(

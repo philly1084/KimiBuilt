@@ -97,6 +97,7 @@ const TOOL_SUPPORT = {
   'graph-diagram': { status: 'stable', notes: ['Batch graph/diagram utility with native graph JSON, Mermaid, DOT, SVG, HTML, and persisted SVG image artifacts.', 'When GPT-5.5 or newer is the caller model, prefer direct SVG output for custom document visuals.'] },
   'ssh-execute': { status: 'requires_setup', notes: ['Requires SSH target credentials or cluster secret configuration.'] },
   'remote-command': { status: 'requires_setup', notes: ['Requires SSH target credentials or cluster secret configuration.', 'Optimized for Ubuntu/Linux host and k3s cluster operations in this project.'] },
+  'remote-cli-agent': { status: 'requires_setup', notes: ['Server-side OpenAI Agents SDK integration for the remote-cli Streamable HTTP MCP gateway.', 'Requires REMOTE_CLI_MCP_URL or GATEWAY_URL plus REMOTE_CLI_MCP_BEARER_TOKEN or N8N_API_KEY in the trusted backend runtime.'] },
   'k3s-deploy': { status: 'requires_setup', notes: ['Requires SSH target credentials and kubectl/git on the remote host.'] },
   'docker-exec': { status: 'requires_setup', notes: ['Requires explicit Docker CLI/socket access in the backend runtime; not part of the default remote host lane.'] },
   'code-sandbox': { status: 'requires_setup', notes: ['Execute mode requires Docker image pull/run capability in the backend runtime.', 'Project mode can persist previewable frontend bundles without Docker.'] },

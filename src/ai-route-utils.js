@@ -907,7 +907,7 @@ function formatSshTarget(target = {}) {
 
 function isRemoteCommandToolId(toolId = '') {
     const normalized = String(toolId || '').trim().toLowerCase();
-    return normalized === 'ssh-execute' || normalized === 'remote-command';
+    return normalized === 'ssh-execute' || normalized === 'remote-command' || normalized === 'remote-cli-agent';
 }
 
 function canonicalizeRemoteToolId(toolId = '') {

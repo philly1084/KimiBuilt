@@ -550,6 +550,37 @@ const config = {
         ),
     },
 
+    remoteCliMcp: {
+        enabled: process.env.REMOTE_CLI_MCP_ENABLED !== 'false',
+        url: process.env.REMOTE_CLI_MCP_URL || (
+            process.env.GATEWAY_URL
+                ? `${String(process.env.GATEWAY_URL).replace(/\/+$/, '')}/mcp`
+                : ''
+        ),
+        name: process.env.REMOTE_CLI_MCP_NAME || 'remote-cli',
+        apiKey: process.env.REMOTE_CLI_MCP_BEARER_TOKEN
+            || process.env.N8N_API_KEY
+            || process.env.OPENAI_API_KEY
+            || '',
+        timeoutMs: Math.max(
+            1000,
+            parseInt(process.env.REMOTE_CLI_MCP_TIMEOUT_MS, 10) || 60000,
+        ),
+        defaultTargetId: process.env.REMOTE_CLI_DEFAULT_TARGET_ID || 'prod',
+        defaultCwd: process.env.REMOTE_CLI_DEFAULT_CWD
+            || process.env.OPENCODE_REMOTE_DEFAULT_WORKSPACE
+            || process.env.KIMIBUILT_DEPLOY_TARGET_DIR
+            || '',
+        agentModel: process.env.REMOTE_CLI_AGENT_MODEL || process.env.OPENAI_MODEL || 'gpt-4o',
+        agentApiKey: process.env.REMOTE_CLI_AGENT_OPENAI_API_KEY || process.env.OPENAI_API_KEY || '',
+        agentBaseURL: process.env.REMOTE_CLI_AGENT_OPENAI_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
+        agentApiMode: process.env.REMOTE_CLI_AGENT_OPENAI_API_MODE || process.env.OPENAI_API_MODE || 'auto',
+        maxTurns: Math.max(
+            1,
+            Math.min(parseInt(process.env.REMOTE_CLI_AGENT_MAX_TURNS, 10) || 20, 80),
+        ),
+    },
+
     kubernetes: {
         enabled: process.env.KUBERNETES_IN_CLUSTER_ENABLED !== 'false',
         serviceHost: process.env.KUBERNETES_SERVICE_HOST || 'kubernetes.default.svc',

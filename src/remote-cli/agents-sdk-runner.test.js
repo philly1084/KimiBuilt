@@ -1,0 +1,136 @@
+'use strict';
+
+const {
+  RemoteCliAgentsSdkRunner,
+  buildRemoteCliInstructions,
+  resolveAgentsApiMode,
+} = require('./agents-sdk-runner');
+
+describe('RemoteCliAgentsSdkRunner', () => {
+  test('builds remote CLI instructions with target defaults and polling guidance', () => {
+    const instructions = buildRemoteCliInstructions({
+      targetId: 'prod',
+      cwd: '/srv/apps/my-app',
+      sessionId: 'sess_123',
+      waitMs: 30000,
+    });
+
+    expect(instructions).toContain('Use remote_code_run for coding tasks.');
+    expect(instructions).toContain('Default targetId: prod');
+    expect(instructions).toContain('Default cwd: /srv/apps/my-app');
+    expect(instructions).toContain('remote_code_status');
+    expect(instructions).toContain('sess_123');
+  });
+
+  test('uses chat mode automatically for custom gateway base URLs', () => {
+    expect(resolveAgentsApiMode({
+      requestedMode: 'auto',
+      baseURL: 'http://n8n-openai-cli-gateway/v1',
+    })).toBe('chat');
+    expect(resolveAgentsApiMode({
+      requestedMode: 'auto',
+      baseURL: 'https://api.openai.com/v1',
+    })).toBe('responses');
+  });
+
+  test('connects Streamable HTTP MCP with bearer auth and closes it after the run', async () => {
+    const calls = {
+      apiModes: [],
+      mcpOptions: null,
+      agentConfig: null,
+      runnerConfig: null,
+      runnerInput: null,
+      connected: false,
+      closed: false,
+    };
+
+    class FakeMCPServerStreamableHttp {
+      constructor(options) {
+        calls.mcpOptions = options;
+        this.sessionId = 'mcp-session-1';
+      }
+
+      async connect() {
+        calls.connected = true;
+      }
+
+      async close() {
+        calls.closed = true;
+      }
+    }
+
+    class FakeAgent {
+      constructor(config) {
+        calls.agentConfig = config;
+      }
+    }
+
+    class FakeOpenAIProvider {
+      constructor(config) {
+        this.config = config;
+      }
+    }
+
+    class FakeRunner {
+      constructor(config) {
+        calls.runnerConfig = config;
+      }
+
+      async run(_agent, input, options) {
+        calls.runnerInput = { input, options };
+        return { finalOutput: 'fixed tests' };
+      }
+    }
+
+    const runner = new RemoteCliAgentsSdkRunner({
+      config: {
+        enabled: true,
+        url: 'https://gateway.example.com/mcp',
+        name: 'remote-cli',
+        apiKey: 'gateway-secret',
+        agentApiKey: 'openai-secret',
+        agentBaseURL: 'http://gateway.example.com/v1',
+        agentApiMode: 'chat',
+        agentModel: 'gpt-4o',
+        defaultTargetId: 'prod',
+        defaultCwd: '/srv/apps/my-app',
+        timeoutMs: 60000,
+        maxTurns: 20,
+      },
+      sdkLoader: () => ({
+        Agent: FakeAgent,
+        MCPServerStreamableHttp: FakeMCPServerStreamableHttp,
+        OpenAIProvider: FakeOpenAIProvider,
+        Runner: FakeRunner,
+        setOpenAIAPI: (mode) => calls.apiModes.push(mode),
+      }),
+    });
+
+    const result = await runner.run({
+      task: 'Fix the failing tests',
+      waitMs: 30000,
+    });
+
+    expect(calls.mcpOptions).toMatchObject({
+      url: 'https://gateway.example.com/mcp',
+      name: 'remote-cli',
+      cacheToolsList: true,
+      timeout: 60000,
+    });
+    expect(calls.mcpOptions.requestInit.headers.Authorization).toBe('Bearer gateway-secret');
+    expect(calls.agentConfig.mcpServers).toHaveLength(1);
+    expect(calls.agentConfig.instructions).toContain('Default targetId: prod');
+    expect(calls.runnerConfig.model).toBe('gpt-4o');
+    expect(calls.runnerInput.input).toContain('Fix the failing tests');
+    expect(calls.runnerInput.options.maxTurns).toBe(20);
+    expect(calls.apiModes).toEqual(['chat']);
+    expect(calls.connected).toBe(true);
+    expect(calls.closed).toBe(true);
+    expect(result).toMatchObject({
+      finalOutput: 'fixed tests',
+      mcpSessionId: 'mcp-session-1',
+      targetId: 'prod',
+      cwd: '/srv/apps/my-app',
+    });
+  });
+});

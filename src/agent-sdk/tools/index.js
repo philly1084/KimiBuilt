@@ -75,6 +75,7 @@ const { registerSandboxTools } = require('./categories/sandbox');
 const { SSHExecuteTool } = require('./categories/ssh/SSHExecuteTool');
 const { DockerExecTool } = require('./categories/ssh/DockerExecTool');
 const { K3sDeployTool } = require('./categories/ssh/K3sDeployTool');
+const { RemoteCliAgentTool } = require('./categories/ssh/RemoteCliAgentTool');
 const { GitLocalTool } = require('./categories/system/GitLocalTool');
 
 function normalizeCandidateUrl(value = '') {
@@ -1110,6 +1111,7 @@ class ToolManager {
         }),
         new DockerExecTool(),
         new K3sDeployTool(),
+        new RemoteCliAgentTool(),
       ];
 
       tools.forEach(tool => {
@@ -3601,6 +3603,18 @@ class ToolManager {
         'systemctl',
         'ingress',
         'deployment logs',
+      ],
+      'remote-cli-agent': [
+        'remote cli agent',
+        'remote code run',
+        'remote_code_run',
+        'remote code status',
+        'remote coding agent',
+        'agents sdk remote cli',
+        'streamable http mcp',
+        'mcp remote cli',
+        'build on remote server',
+        'remote server coding task',
       ],
       'docker-exec': ['docker', 'container', 'run in container', 'docker exec'],
       'k3s-deploy': [

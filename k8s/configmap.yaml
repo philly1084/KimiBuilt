@@ -9,6 +9,13 @@ data:
   OPENAI_BASE_URL: "http://n8n-openai-cli-gateway.n8n-openai-gateway.svc.cluster.local/v1"
   OPENAI_MODEL: "gpt-4o"
   OPENAI_IMAGE_MODEL: "gpt-image-2"
+  # Server-side Agents SDK MCP connection for remote CLI coding agents.
+  REMOTE_CLI_MCP_URL: "http://n8n-openai-cli-gateway.n8n-openai-gateway.svc.cluster.local/mcp"
+  REMOTE_CLI_MCP_NAME: "remote-cli"
+  REMOTE_CLI_DEFAULT_TARGET_ID: "prod"
+  REMOTE_CLI_DEFAULT_CWD: "/srv/apps/my-app"
+  REMOTE_CLI_AGENT_OPENAI_API_MODE: "chat"
+  REMOTE_CLI_AGENT_MAX_TURNS: "20"
 
   # The official OpenAI media endpoint remains available for video generation and image fallback.
   OPENAI_MEDIA_BASE_URL: "https://api.openai.com/v1"

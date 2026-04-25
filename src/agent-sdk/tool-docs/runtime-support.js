@@ -1,6 +1,7 @@
 const { spawn } = require('child_process');
 const settingsController = require('../../routes/admin/settings.controller');
 const { remoteRunnerService } = require('../../remote-runner/service');
+const { remoteCliAgentsSdkRunner } = require('../../remote-cli/agents-sdk-runner');
 
 const CACHE_TTL_MS = 15000;
 
@@ -215,6 +216,27 @@ async function getRuntimeSupport(toolId) {
                 runnerWorkspace,
                 runnerShell: runner?.metadata?.shell || '',
                 runnerCapabilities: runner?.capabilities || [],
+            },
+        };
+    }
+
+    if (toolId === 'remote-cli-agent') {
+        const publicConfig = remoteCliAgentsSdkRunner.getPublicConfig();
+        const ready = publicConfig.enabled !== false && publicConfig.configured;
+        return {
+            status: ready ? 'stable' : 'requires_setup',
+            notes: ready
+                ? [
+                    `Remote CLI MCP server ${publicConfig.name} is configured at ${publicConfig.url}.`,
+                    `Default target is ${publicConfig.defaultTargetId}${publicConfig.defaultCwd ? ` with cwd ${publicConfig.defaultCwd}` : ''}.`,
+                ]
+                : [
+                    'Remote CLI MCP needs REMOTE_CLI_MCP_URL or GATEWAY_URL.',
+                    'Remote CLI MCP needs REMOTE_CLI_MCP_BEARER_TOKEN or N8N_API_KEY in the backend environment.',
+                ],
+            runtime: {
+                ready,
+                ...publicConfig,
             },
         };
     }

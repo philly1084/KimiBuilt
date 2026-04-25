@@ -23,6 +23,7 @@ const {
 } = require('../session-scope');
 const { clusterStateRegistry } = require('../cluster-state-registry');
 const { remoteRunnerService } = require('../remote-runner/service');
+const { remoteCliAgentsSdkRunner } = require('../remote-cli/agents-sdk-runner');
 const {
   DEFAULT_EXECUTION_PROFILE,
   NOTES_EXECUTION_PROFILE,
@@ -191,6 +192,22 @@ function buildToolRuntime(toolId, options = {}) {
       shell: runnerDetails?.shell || '',
       transportPreference: runner ? 'runner-first' : 'ssh',
       commandCatalog: REMOTE_CLI_COMMAND_CATALOG.filter((entry) => ['kubectl-inspect', 'rollout', 'https-verify'].includes(entry.id)),
+    };
+  }
+
+  if (toolId === 'remote-cli-agent') {
+    const publicConfig = remoteCliAgentsSdkRunner.getPublicConfig();
+    return {
+      configured: publicConfig.configured,
+      provider: 'openai-agents-sdk-streamable-http-mcp',
+      serverName: publicConfig.name,
+      url: publicConfig.url,
+      defaultTargetId: publicConfig.defaultTargetId,
+      defaultCwd: publicConfig.defaultCwd,
+      agentModel: publicConfig.agentModel,
+      timeoutMs: publicConfig.timeoutMs,
+      maxTurns: publicConfig.maxTurns,
+      serverSideOnly: true,
     };
   }
 
