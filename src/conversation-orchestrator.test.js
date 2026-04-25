@@ -8205,7 +8205,7 @@ describe('ConversationOrchestrator', () => {
         expect(toolPolicy.candidateToolIds).toContain('remote-command');
         expect(runtimeInstructions).toContain('verify architecture with `uname -m`');
         expect(runtimeInstructions).toContain('`find`/`grep -R` for `rg`');
-        expect(runtimeInstructions).toContain('`docker compose` for `docker-compose`');
+        expect(runtimeInstructions).toContain('do not assume Docker exists on the host');
         expect(runtimeInstructions).toContain('Hydrated remote ops guidance from local project docs:');
         expect(runtimeInstructions).toContain('K3s ships an embedded `kubectl`.');
         expect(runtimeInstructions).toContain('Lane 1: repo-managed manifests with k3s-deploy');

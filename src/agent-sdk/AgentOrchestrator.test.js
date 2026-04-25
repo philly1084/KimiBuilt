@@ -268,7 +268,7 @@ describe('AgentOrchestrator', () => {
 
         expect(toolIds).toContain('web-search');
         expect(toolIds).toContain('code-sandbox');
-        expect(toolIds).toContain('docker-exec');
+        expect(toolIds).not.toContain('docker-exec');
         expect(toolIds).not.toContain('ssh-execute'); // SSH requires valid config
     });
 
@@ -332,7 +332,7 @@ describe('AgentOrchestrator', () => {
         );
 
         expect(toolIds).toContain('ssh-execute');
-        expect(toolIds).toContain('docker-exec');
+        expect(toolIds).not.toContain('docker-exec');
         expect(toolIds).toContain('web-search');
         expect(toolIds).not.toContain('architecture-design');
     });

@@ -1289,7 +1289,7 @@ class ToolManager {
           properties: {
             path: {
               type: 'string',
-              description: 'Local file path in this runtime. For remote hosts or container-only paths, use remote-command or docker-exec instead.'
+              description: 'Local file path in this runtime. For remote hosts or deployed servers, use remote-command or k3s-deploy instead.'
             },
             content: {
               type: 'string',

@@ -16,7 +16,7 @@ const DEFAULT_AGENT_NOTES_MARKDOWN = `# Carryover Notes
 - Use \`remote-command\` for kubectl inspection, logs, service status, network checks, package installs, one-off repairs, and post-deploy verification.
 - Assume \`kubectl\` should talk to k3s. If context is missing, prefer \`export KUBECONFIG=/etc/rancher/k3s/k3s.yaml\` or \`k3s kubectl\`.
 - Prefer non-interactive commands. Avoid editors, interactive shells, \`watch\`, or anything that needs a TTY.
-- Do not assume \`rg\`, \`docker-compose\`, \`ifconfig\`, or \`netstat\` exist on the server. Prefer \`find\` and \`grep -R\`, \`docker compose\`, \`ip addr\`, and \`ss -tulpn\`.
+- Do not assume \`rg\`, Docker, \`docker-compose\`, \`ifconfig\`, or \`netstat\` exist on the server. Prefer \`find\` and \`grep -R\`, \`kubectl\` or \`k3s kubectl\`, \`ip addr\`, and \`ss -tulpn\`.
 - For k3s triage, a common sequence is \`kubectl get pods -A -o wide\`, \`kubectl describe ...\`, \`kubectl logs ... --previous\`, \`kubectl rollout status ...\`, then \`systemctl status k3s\` and \`journalctl -u k3s --no-pager -n 200\` if control-plane health is suspect.
 
 ## Phil

@@ -26,7 +26,6 @@ const REMOTE_BUILD_TOOL_ALLOWLIST = new Set([
   'ssh-execute',
   'remote-command',
   'k3s-deploy',
-  'docker-exec',
   'web-search',
   'web-fetch',
   'web-scrape',
@@ -830,6 +829,11 @@ class AgentOrchestrator {
 
       if (toolId === 'ssh-execute' || toolId === 'remote-command' || toolId === 'k3s-deploy') {
         return hasRemoteOpsIntent && hasUsableSshDefaults;
+      }
+
+      if (toolId === 'docker-exec') {
+        return /\b(docker|container)\b/.test(combinedPrompt)
+          && /\b(docker (?:is )?(?:available|configured|enabled)|use docker|docker exec)\b/.test(combinedPrompt);
       }
 
       return true;

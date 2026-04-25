@@ -8225,7 +8225,7 @@ class ConversationOrchestrator extends EventEmitter {
             if ((explicitK3sDeployIntent || workflowNeedsDeployLane) && allowedToolIds.includes('k3s-deploy')) {
                 candidates.add('k3s-deploy');
             }
-            if (allowedToolIds.includes('docker-exec')) {
+            if (allowedToolIds.includes('docker-exec') && /\b(docker|container)\b/i.test(planningPrompt || '')) {
                 candidates.add('docker-exec');
             }
             if (allowedToolIds.includes('code-sandbox') && hasExplicitLocalSandboxIntent(prompt)) {
@@ -9138,7 +9138,7 @@ class ConversationOrchestrator extends EventEmitter {
             'If a multi-job cron request omits exact times, you may pass one derived sub-request per job with conservative defaults in local time, such as daily at 9:00 AM for checks and every Monday at 2:00 AM for updates.',
             'Use `remote-command` for host cron only when the user explicitly asks to inspect or modify the server\'s own crontab.',
             'Every `file-write` step must include both `params.path` and the full file body as `params.content` in the same step.',
-            '`file-write` is for local runtime files only. For remote hosts, deployed servers, or container-only paths, use `remote-command` or `docker-exec` instead.',
+            '`file-write` is for local runtime files only. For remote hosts or deployed servers, use `remote-command` or `k3s-deploy` instead. Do not use `docker-exec` for the host unless the user explicitly says Docker is available there.',
             'Do not return a `file-write` step that only points at a previous artifact or earlier file. If the full content is not already available in the prompt or recent transcript, choose a different tool or return no `file-write` step.',
             ...(toolPolicy.sessionIsolation
                 ? [
@@ -9203,7 +9203,7 @@ class ConversationOrchestrator extends EventEmitter {
                     'Assume a Linux server and prefer Ubuntu-friendly commands unless tool results prove otherwise.',
                     'For remote-build work, verify architecture with uname -m before installing binaries and prefer arm64/aarch64 assets when applicable.',
                     'For Kubernetes troubleshooting, if a pod describe or status result shows CrashLoopBackOff, an init container failure, or Exit Code > 0, the next step is usually kubectl logs for the failing container or init container rather than asking the user what to run next.',
-                    'Prefer common built-ins and standard utilities. If a nonstandard tool may be missing, use a fallback such as find/grep instead of rg, ss instead of netstat, ip addr instead of ifconfig, and docker compose instead of docker-compose.',
+                    'Prefer common built-ins and standard utilities. If a nonstandard tool may be missing, use a fallback such as find/grep instead of rg, ss instead of netstat, and ip addr instead of ifconfig. Prefer kubectl or k3s kubectl for host workloads; do not assume Docker exists on the host.',
                 ]
                 : remoteToolId
                     ? [
@@ -9211,7 +9211,7 @@ class ConversationOrchestrator extends EventEmitter {
                         `Do not claim ${remoteToolId} is unavailable; call it when SSH or remote-build work is requested and let the tool return the actual missing-target or credential error if configuration is incomplete.`,
                         'do not repeat the same command back-to-back without an intervening fix or new reason.',
                         'For Kubernetes pod failures, follow describe/status output with kubectl logs for the failing container before handing work back to the user.',
-                        'When planning server commands, prefer Ubuntu-friendly standard utilities and avoid assuming rg, ifconfig, netstat, or docker-compose are installed.',
+                        'When planning server commands, prefer Ubuntu-friendly standard utilities and avoid assuming rg, Docker, ifconfig, netstat, or docker-compose are installed.',
                       ]
                     : []),
         ].join('\n');
@@ -9948,7 +9948,7 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('For Kubernetes pod failures, follow describe/status output with `kubectl logs` for the failing container or init container instead of asking the user to run that next step.');
             parts.push('For remote website or HTML updates, prefer the remote file, ConfigMap, or deployed content as the source of truth unless the user explicitly provided a local artifact or path.');
             parts.push('If the user asks for a fresh replacement page, generate the full HTML and write it remotely instead of blocking on a missing local artifact.');
-            parts.push('Use fallbacks when common extras are missing: `find`/`grep -R` for `rg`, `ss -tulpn` for `netstat`, `ip addr` for `ifconfig`, and `docker compose` for `docker-compose`.');
+            parts.push('Use fallbacks when common extras are missing: `find`/`grep -R` for `rg`, `ss -tulpn` for `netstat`, and `ip addr` for `ifconfig`. Prefer `kubectl` or `k3s kubectl` for host workloads and do not assume Docker exists on the host.');
         } else if (remoteToolId) {
             parts.push(`${remoteToolId} is available for this request even if the target is not currently verified in the prompt context.`);
             parts.push(`Do not claim the SSH tool is unavailable. Try ${remoteToolId} for explicit SSH or remote-build work and report the concrete tool error if the runtime lacks a configured target.`);

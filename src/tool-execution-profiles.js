@@ -57,7 +57,6 @@ const PROFILE_TOOL_ALLOWLISTS = Object.freeze({
     [REMOTE_BUILD_EXECUTION_PROFILE]: Object.freeze([
         'remote-command',
         'k3s-deploy',
-        'docker-exec',
         ...BASE_SHARED_TOOL_IDS,
         'code-sandbox',
     ]),

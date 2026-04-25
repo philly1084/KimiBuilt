@@ -206,7 +206,6 @@ const AUTO_TOOL_ALLOWLIST = new Set([
     'ssh-execute',
     'remote-command',
     'k3s-deploy',
-    'docker-exec',
     'code-sandbox',
     'security-scan',
     ...PROMOTED_LOCAL_TOOL_IDS,
@@ -2516,7 +2515,7 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
         selectedIds.add('git-safe');
     }
 
-    if (/\b(docker|container)\b/i.test(normalizedPrompt)) {
+    if (availableToolIds.has('docker-exec') && /\b(docker|container)\b/i.test(normalizedPrompt)) {
         selectedIds.add('docker-exec');
     }
 
@@ -2800,7 +2799,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
     if (automaticTools.some((entry) => entry.id === 'file-write')) {
         guidance.push('- Use `file-write` to create or update local runtime files when the user asks for filesystem changes.');
         guidance.push('- Every `file-write` call must include both a `path` and the full file body as `content` in the same call. Do not call `file-write` with only a path.');
-        guidance.push('- For remote hosts, deployed servers, or container-only paths, use `remote-command` or `docker-exec` instead of `file-write`.');
+        guidance.push('- For remote hosts or deployed servers, use `remote-command` or `k3s-deploy` instead of `file-write`. Do not use `docker-exec` for the host unless the user explicitly says Docker is available there.');
     }
 
     if (!sessionIsolation && automaticTools.some((entry) => entry.id === 'agent-notes-write')) {
@@ -2886,7 +2885,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
     }
 
     if (automaticTools.some((entry) => entry.id === 'docker-exec')) {
-        guidance.push('- Use `docker-exec` for commands that must run inside an existing Docker container.');
+        guidance.push('- Use `docker-exec` only for commands that must run inside an existing Docker container and only when Docker access is explicitly configured.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'k3s-deploy')) {
