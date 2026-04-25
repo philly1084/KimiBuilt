@@ -358,12 +358,28 @@ class Planner {
    * @param {Object} toolRegistry - Registry of available tools
    * @param {Object} llmClient - LLM client for analysis
    */
-  constructor(toolRegistry, llmClient) {
+  constructor(toolRegistry, llmClient, options = {}) {
     /** @type {Object} Tool registry */
     this.toolRegistry = toolRegistry;
     
     /** @type {Object} LLM client */
     this.llmClient = llmClient;
+
+    const planningLimits = options.planningLimits || {};
+    /** @type {Object} Guardrails for conversational planning quotas */
+    this.planningLimits = {
+      minSteps: Number.isFinite(planningLimits.minSteps) ? Math.max(1, planningLimits.minSteps) : 2,
+      maxSteps: Number.isFinite(planningLimits.maxSteps) ? Math.max(2, planningLimits.maxSteps) : 8,
+      maxEstimatedTokens: Number.isFinite(planningLimits.maxEstimatedTokens)
+        ? Math.max(1000, planningLimits.maxEstimatedTokens)
+        : 9000,
+      maxTokensPerStep: Number.isFinite(planningLimits.maxTokensPerStep)
+        ? Math.max(200, planningLimits.maxTokensPerStep)
+        : 2400,
+      maxConsecutiveToolCalls: Number.isFinite(planningLimits.maxConsecutiveToolCalls)
+        ? Math.max(1, planningLimits.maxConsecutiveToolCalls)
+        : 2,
+    };
   }
   
   /**
@@ -684,7 +700,8 @@ class Planner {
   async planConversationalAgent(task, plan, analysis) {
     const availableTools = Array.isArray(task.tools) ? task.tools : [];
     if (availableTools.length > 0 && typeof this.llmClient?.complete === 'function') {
-      const plannedSteps = await this.createConversationStepsFromModel(task, availableTools);
+      const quota = this.buildConversationQuota(task, analysis, availableTools);
+      const plannedSteps = await this.createConversationStepsFromModel(task, availableTools, quota);
       if (plannedSteps.length > 0) {
         let previousStepId = null;
         for (const step of plannedSteps) {
@@ -716,17 +733,40 @@ class Planner {
     });
   }
 
-  async createConversationStepsFromModel(task, availableTools = []) {
+  buildConversationQuota(task, analysis, availableTools = []) {
+    const taskMaxSteps = Number(task?.constraints?.maxSteps);
+    const taskMaxTokens = Number(task?.constraints?.maxTokens);
+    const baseMaxSteps = Number.isFinite(taskMaxSteps) && taskMaxSteps > 0
+      ? taskMaxSteps
+      : this.planningLimits.maxSteps;
+    const baseMaxTokens = Number.isFinite(taskMaxTokens) && taskMaxTokens > 0
+      ? taskMaxTokens
+      : this.planningLimits.maxEstimatedTokens;
+
+    const estimated = Number(analysis?.estimatedSteps) || 2;
+    const toolPressure = availableTools.length > 2 ? 1 : 0;
+    const requestedSteps = Math.max(this.planningLimits.minSteps, estimated + toolPressure);
+    const maxSteps = Math.min(baseMaxSteps, Math.max(this.planningLimits.minSteps, requestedSteps + 2));
+
+    return {
+      maxSteps,
+      maxEstimatedTokens: baseMaxTokens,
+      maxTokensPerStep: Math.min(this.planningLimits.maxTokensPerStep, baseMaxTokens),
+      maxConsecutiveToolCalls: this.planningLimits.maxConsecutiveToolCalls,
+    };
+  }
+
+  async createConversationStepsFromModel(task, availableTools = [], quota = null) {
     try {
       const planText = await this.llmClient.complete(
-        this.buildConversationPlanningPrompt(task, availableTools),
+        this.buildConversationPlanningPrompt(task, availableTools, quota),
         {
           temperature: 0,
           maxTokens: 1200,
         },
       );
       const planSpec = this.parseConversationPlan(planText);
-      return this.normalizeConversationSteps(planSpec, availableTools);
+      return this.normalizeConversationSteps(planSpec, availableTools, quota);
     } catch (error) {
       console.warn('[Planner] Failed to create model conversation plan:', error.message);
       return [];
@@ -744,7 +784,7 @@ class Planner {
     return JSON.parse(candidate);
   }
 
-  buildConversationPlanningPrompt(task, availableTools = []) {
+  buildConversationPlanningPrompt(task, availableTools = [], quota = null) {
     const tools = this.toolRegistry?.list?.()
       ?.filter((tool) => availableTools.includes(tool.id))
       ?.map((tool) => ({
@@ -757,6 +797,8 @@ class Planner {
       'Create a short execution plan for this assistant turn.',
       'Return only JSON with this shape: {"steps":[{"type":"tool-call|llm-call","description":"...","tool":"tool-id","params":{},"prompt":"...","resultKey":"...","optional":false,"continueOnError":false}]}',
       'Use only the listed tools. Add an llm-call as the last step to produce the user-facing response.',
+      `Plan quota: max ${quota?.maxSteps || this.planningLimits.maxSteps} steps, max ${quota?.maxEstimatedTokens || this.planningLimits.maxEstimatedTokens} estimated tokens total.`,
+      `Avoid more than ${quota?.maxConsecutiveToolCalls || this.planningLimits.maxConsecutiveToolCalls} consecutive tool-call steps without an llm-call.`,
       '',
       'User request:',
       task.objective || '',
@@ -766,10 +808,16 @@ class Planner {
     ].join('\n');
   }
 
-  normalizeConversationSteps(planSpec, availableTools = []) {
+  normalizeConversationSteps(planSpec, availableTools = [], quota = null) {
     const requestedSteps = Array.isArray(planSpec?.steps) ? planSpec.steps : [];
+    const activeQuota = {
+      maxSteps: quota?.maxSteps || this.planningLimits.maxSteps,
+      maxEstimatedTokens: quota?.maxEstimatedTokens || this.planningLimits.maxEstimatedTokens,
+      maxTokensPerStep: quota?.maxTokensPerStep || this.planningLimits.maxTokensPerStep,
+      maxConsecutiveToolCalls: quota?.maxConsecutiveToolCalls || this.planningLimits.maxConsecutiveToolCalls,
+    };
 
-    return requestedSteps
+    const normalized = requestedSteps
       .map((step, index) => {
         const normalizedType = step?.type === 'tool-call' ? 'tool-call' : 'llm-call';
         const tool = typeof step?.tool === 'string' ? step.tool.trim() : '';
@@ -786,10 +834,51 @@ class Planner {
           resultKey: typeof step?.resultKey === 'string' && step.resultKey.trim() ? step.resultKey.trim() : null,
           optional: Boolean(step?.optional),
           continueOnError: Boolean(step?.continueOnError),
-          estimatedTokens: Number.isFinite(step?.estimatedTokens) ? step.estimatedTokens : 1000,
+          estimatedTokens: Number.isFinite(step?.estimatedTokens)
+            ? Math.min(Math.max(100, step.estimatedTokens), activeQuota.maxTokensPerStep)
+            : 1000,
         };
       })
       .filter(Boolean);
+
+    const withCheckpoints = [];
+    let consecutiveToolCalls = 0;
+    for (const step of normalized) {
+      if (step.type === 'tool-call') {
+        consecutiveToolCalls += 1;
+      } else {
+        consecutiveToolCalls = 0;
+      }
+      withCheckpoints.push(step);
+      if (consecutiveToolCalls >= activeQuota.maxConsecutiveToolCalls) {
+        withCheckpoints.push({
+          type: 'llm-call',
+          description: 'Summarize interim progress before continuing',
+          prompt: 'Summarize tool findings and decide the next best action.',
+          resultKey: null,
+          params: {},
+          optional: true,
+          continueOnError: true,
+          estimatedTokens: 400,
+        });
+        consecutiveToolCalls = 0;
+      }
+    }
+
+    let estimatedTotal = 0;
+    const constrained = [];
+    for (const step of withCheckpoints) {
+      if (constrained.length >= activeQuota.maxSteps) {
+        break;
+      }
+      if ((estimatedTotal + (step.estimatedTokens || 0)) > activeQuota.maxEstimatedTokens) {
+        break;
+      }
+      constrained.push(step);
+      estimatedTotal += step.estimatedTokens || 0;
+    }
+
+    return constrained;
   }
 
   buildConversationSynthesisPrompt() {
