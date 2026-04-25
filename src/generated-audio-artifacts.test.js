@@ -5,6 +5,12 @@ jest.mock('./artifacts/artifact-service', () => ({
     },
 }));
 
+jest.mock('fs/promises', () => ({
+    mkdir: jest.fn(),
+    writeFile: jest.fn(),
+    readFile: jest.fn(),
+}));
+
 jest.mock('./session-store', () => ({
     sessionStore: {
         update: jest.fn(),
@@ -13,6 +19,7 @@ jest.mock('./session-store', () => ({
 
 const { artifactService } = require('./artifacts/artifact-service');
 const { sessionStore } = require('./session-store');
+const fs = require('fs/promises');
 const { persistGeneratedAudio } = require('./generated-audio-artifacts');
 
 describe('generated-audio-artifacts', () => {
@@ -35,6 +42,9 @@ describe('generated-audio-artifacts', () => {
             metadata: {},
         });
         sessionStore.update.mockResolvedValue({});
+        fs.mkdir.mockResolvedValue(undefined);
+        fs.writeFile.mockResolvedValue(undefined);
+        fs.readFile.mockResolvedValue(Buffer.from('RIFF-test-audio'));
     });
 
     test('persists generated audio as a session artifact and returns reusable URLs', async () => {
@@ -70,6 +80,41 @@ describe('generated-audio-artifacts', () => {
             artifactId: 'artifact-audio-1',
             downloadUrl: '/api/artifacts/artifact-audio-1/download',
             inlinePath: '/api/artifacts/artifact-audio-1/download?inline=1',
+        }));
+    });
+
+    test('falls back to local audio artifacts when Postgres artifacts are unavailable', async () => {
+        const error = new Error('Artifacts require Postgres to be configured');
+        error.statusCode = 503;
+        artifactService.createStoredArtifact.mockRejectedValue(error);
+
+        const result = await persistGeneratedAudio({
+            sessionId: 'session-1',
+            sourceMode: 'chat',
+            text: 'This is the local narration.',
+            title: 'Local brief',
+            provider: 'piper',
+            voice: {
+                id: 'piper-female-natural',
+            },
+            audioBuffer: Buffer.from('RIFF-local-audio'),
+            mimeType: 'audio/wav',
+        });
+
+        expect(fs.mkdir).toHaveBeenCalledWith(expect.stringContaining('generated-audio'), { recursive: true });
+        expect(fs.writeFile).toHaveBeenCalledWith(
+            expect.stringMatching(/audio-local-.+\.wav$/),
+            Buffer.from('RIFF-local-audio'),
+        );
+        expect(result.artifact).toEqual(expect.objectContaining({
+            id: expect.stringMatching(/^audio-local-/),
+            filename: 'local-brief.wav',
+            downloadUrl: expect.stringContaining('/api/artifacts/audio-local-'),
+        }));
+        expect(result.audio).toEqual(expect.objectContaining({
+            artifactId: expect.stringMatching(/^audio-local-/),
+            downloadUrl: expect.stringContaining('/api/artifacts/audio-local-'),
+            inlinePath: expect.stringContaining('?inline=1'),
         }));
     });
 });

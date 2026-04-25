@@ -964,7 +964,6 @@ class UIHelpers {
                     }
                 }
                 const escapedCode = this.escapeHtml(htmlSource);
-                const escapedAttrCode = this.escapeHtmlAttr(htmlSource);
                 const filenameBase = this.createFriendlyFilenameBaseFromHtml(htmlSource, 'preview');
                 const leadInHtml = leadIn ? `<p>${this.escapeHtml(leadIn)}</p>` : '';
 
@@ -973,25 +972,25 @@ class UIHelpers {
                         <div class="code-header">
                             <span class="code-language">html</span>
                             <div class="code-actions">
-                                <button class="code-copy-btn" onclick="uiHelpers.copyCode(this)" data-code="${escapedAttrCode}" aria-label="Copy HTML code">
+                                <button class="code-copy-btn" onclick="uiHelpers.copyInlineHtml(this)" aria-label="Copy HTML code">
                                     <i data-lucide="copy" class="w-3.5 h-3.5" aria-hidden="true"></i>
                                     <span>Copy</span>
                                 </button>
-                                <button class="code-copy-btn" onclick="uiHelpers.downloadInlineHtml(this)" data-code="${escapedAttrCode}" data-filename="${filenameBase}.html" aria-label="Download HTML preview">
+                                <button class="code-copy-btn" onclick="uiHelpers.downloadInlineHtml(this)" data-filename="${filenameBase}.html" aria-label="Download HTML preview">
                                     <i data-lucide="download" class="w-3.5 h-3.5" aria-hidden="true"></i>
                                     <span>HTML</span>
                                 </button>
                             </div>
                         </div>
+                        <textarea class="html-preview-source" aria-hidden="true" style="display:none">${escapedCode}</textarea>
                         <div class="html-preview-wrapper">
                             <div class="html-preview-toolbar">
                                 <span class="html-preview-label">Live preview</span>
                             </div>
-                            <div class="html-preview-surface" data-html-preview="${escapedAttrCode}">
+                            <div class="html-preview-surface">
                                 <div class="html-preview-placeholder">Rendering preview...</div>
                             </div>
                         </div>
-                        <pre class="html-source-block"><code class="language-markup">${escapedCode}</code></pre>
                     </div>
                 `;
             }
@@ -5732,7 +5731,7 @@ class UIHelpers {
     }
 
     async copyCode(button) {
-        const code = button.dataset.code;
+        const code = button?.dataset?.code || '';
         
         try {
             await navigator.clipboard.writeText(code);
@@ -5756,6 +5755,53 @@ class UIHelpers {
         } catch (err) {
             console.error('Failed to copy code:', err);
             this.showToast('Failed to copy code', 'error');
+        }
+    }
+
+    getInlineHtmlSourceFromElement(element) {
+        const block = element?.closest?.('.html-code-block');
+        const sourceEl = block?.querySelector?.('.html-preview-source');
+        const source = sourceEl && 'value' in sourceEl
+            ? sourceEl.value
+            : (sourceEl?.textContent || element?.dataset?.code || '');
+        return String(source || '').trim();
+    }
+
+    getInlineHtmlSourceSignature(source = '') {
+        const normalized = String(source || '');
+        return [
+            normalized.length,
+            normalized.slice(0, 64),
+            normalized.slice(-64),
+        ].join(':');
+    }
+
+    async copyInlineHtml(button) {
+        const source = this.getInlineHtmlSourceFromElement(button);
+        if (!source) {
+            this.showToast('No HTML source to copy', 'error');
+            return;
+        }
+
+        try {
+            await navigator.clipboard.writeText(source);
+
+            const originalHTML = button.innerHTML;
+            button.classList.add('copied');
+            button.innerHTML = `
+                <i data-lucide="check" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                <span>Copied!</span>
+            `;
+            this.reinitializeIcons(button);
+
+            setTimeout(() => {
+                button.classList.remove('copied');
+                button.innerHTML = originalHTML;
+                this.reinitializeIcons(button);
+            }, 2000);
+        } catch (error) {
+            console.error('Failed to copy HTML:', error);
+            this.showToast('Failed to copy HTML', 'error');
         }
     }
 
@@ -5985,7 +6031,7 @@ class UIHelpers {
     }
 
     async downloadInlineHtml(button) {
-        const source = String(button?.dataset?.code || '').trim();
+        const source = this.getInlineHtmlSourceFromElement(button);
         if (!source) {
             this.showToast('No HTML source to download', 'error');
             return;
@@ -6004,8 +6050,9 @@ class UIHelpers {
     renderHtmlPreviews(container = document) {
         const targets = Array.from(container.querySelectorAll('.html-preview-surface'));
         targets.forEach((target) => {
-            const source = String(target.dataset.htmlPreview || '');
-            if (!source || target.dataset.htmlRenderedSource === source) {
+            const source = this.getInlineHtmlSourceFromElement(target);
+            const sourceSignature = this.getInlineHtmlSourceSignature(source);
+            if (!source || target.dataset.htmlRenderedSource === sourceSignature) {
                 return;
             }
 
@@ -6017,7 +6064,7 @@ class UIHelpers {
 
             target.innerHTML = '';
             target.appendChild(iframe);
-            target.dataset.htmlRenderedSource = source;
+            target.dataset.htmlRenderedSource = sourceSignature;
         });
     }
 

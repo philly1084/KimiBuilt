@@ -31,8 +31,17 @@ jest.mock('../runtime-tool-manager', () => ({
     ensureRuntimeToolManager: jest.fn(),
 }));
 
+jest.mock('../generated-audio-artifacts', () => ({
+    getLocalGeneratedAudioArtifact: jest.fn(),
+    isLocalGeneratedAudioArtifactId: jest.fn(() => false),
+}));
+
 const { sessionStore } = require('../session-store');
 const { artifactService } = require('../artifacts/artifact-service');
+const {
+    getLocalGeneratedAudioArtifact,
+    isLocalGeneratedAudioArtifactId,
+} = require('../generated-audio-artifacts');
 const artifactsRouter = require('./artifacts');
 
 describe('/api/artifacts route', () => {
@@ -49,6 +58,8 @@ describe('/api/artifacts route', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        isLocalGeneratedAudioArtifactId.mockReturnValue(false);
+        getLocalGeneratedAudioArtifact.mockResolvedValue(null);
     });
 
     test('blocks artifact fetch when the artifact session is not owned by the user', async () => {
@@ -81,6 +92,29 @@ describe('/api/artifacts route', () => {
 
         expect(response.status).toBe(200);
         expect(response.text).toBe('hello');
+    });
+
+    test('serves local generated audio fallback downloads without Postgres artifacts', async () => {
+        isLocalGeneratedAudioArtifactId.mockReturnValue(true);
+        getLocalGeneratedAudioArtifact.mockResolvedValue({
+            id: 'audio-local-test',
+            sessionId: 'session-1',
+            filename: 'podcast.wav',
+            mimeType: 'audio/wav',
+            contentBuffer: Buffer.from('wav-bytes'),
+        });
+        sessionStore.getOwned.mockResolvedValue({
+            id: 'session-1',
+            metadata: { ownerId: 'phill' },
+        });
+
+        const response = await request(buildApp()).get('/api/artifacts/audio-local-test/download');
+
+        expect(response.status).toBe(200);
+        expect(response.headers['content-type']).toContain('audio/wav');
+        expect(response.headers['content-disposition']).toContain('podcast.wav');
+        expect(response.body).toEqual(Buffer.from('wav-bytes'));
+        expect(artifactService.getArtifact).not.toHaveBeenCalled();
     });
 
     test('applies preview-safe headers to inline artifact downloads', async () => {

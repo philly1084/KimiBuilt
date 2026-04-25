@@ -6,6 +6,10 @@ const { parseMultipartRequest } = require('../utils/multipart');
 const { validate } = require('../middleware/validate');
 const { ensureRuntimeToolManager } = require('../runtime-tool-manager');
 const {
+    getLocalGeneratedAudioArtifact,
+    isLocalGeneratedAudioArtifactId,
+} = require('../generated-audio-artifacts');
+const {
     buildFrontendBundlePreviewUrl,
     createFrontendBundleArchive,
     getArtifactFrontendBundle,
@@ -118,6 +122,16 @@ function getRequestOwnerId(req) {
 }
 
 async function getOwnedArtifact(req, artifactId, options = {}) {
+    if (isLocalGeneratedAudioArtifactId(artifactId)) {
+        const localArtifact = await getLocalGeneratedAudioArtifact(artifactId, options);
+        if (!localArtifact) {
+            return null;
+        }
+
+        const session = await sessionStore.getOwned(localArtifact.sessionId, getRequestOwnerId(req));
+        return session ? localArtifact : null;
+    }
+
     const artifact = await artifactService.getArtifact(artifactId, options);
     if (!artifact) {
         return null;
