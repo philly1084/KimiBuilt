@@ -20,6 +20,26 @@ describe('remote runner protocol', () => {
     }));
   });
 
+  test('preserves normalized runner CLI inventory in metadata', () => {
+    expect(normalizeRunnerRegistration({
+      runnerId: 'deploy-1',
+      metadata: {
+        cli_tools: [
+          { command: 'kubectl', bin: '/usr/local/bin/kubectl' },
+          { name: 'kubectl', path: '/duplicate/ignored' },
+          { name: 'rg', available: false },
+        ],
+        available_cli_tools: ['git'],
+      },
+    }).metadata).toEqual(expect.objectContaining({
+      cliTools: [
+        { name: 'kubectl', available: true, path: '/usr/local/bin/kubectl' },
+        { name: 'rg', available: false, path: '' },
+      ],
+      availableCliTools: ['git', 'kubectl'],
+    }));
+  });
+
   test('requires command jobs to include a command', () => {
     expect(() => normalizeCommandJob({})).toThrow('job.command is required');
   });

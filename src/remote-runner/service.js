@@ -7,6 +7,7 @@ const {
   createId,
   normalizeCommandJob,
   normalizeJobResult,
+  normalizeRunnerMetadata,
   normalizeRunnerRegistration,
   normalizeText,
 } = require('./protocol');
@@ -107,7 +108,7 @@ class RemoteRunnerService extends EventEmitter {
       runner.hostIdentity = { ...runner.hostIdentity, ...payload.hostIdentity };
     }
     if (payload.metadata && typeof payload.metadata === 'object') {
-      runner.metadata = { ...runner.metadata, ...payload.metadata };
+      runner.metadata = normalizeRunnerMetadata({ ...runner.metadata, ...payload.metadata });
     }
     this.runners.set(runnerId, runner);
     this.emit('runner:heartbeat', this.serializeRunner(runner));

@@ -33,6 +33,42 @@ const maxOutputChars = Math.max(1000, Number(process.env.KIMIBUILT_RUNNER_MAX_OU
 const defaultCwd = normalizeText(process.env.KIMIBUILT_RUNNER_DEFAULT_CWD || process.env.DIRECT_CLI_WORKSPACE || '');
 const workspaceRoot = normalizeText(process.env.DIRECT_CLI_WORKSPACE || defaultCwd);
 const configuredShell = normalizeText(process.env.KIMIBUILT_RUNNER_SHELL || '');
+const cliToolNames = String(process.env.KIMIBUILT_RUNNER_CLI_TOOLS || [
+  'bash',
+  'sh',
+  'node',
+  'npm',
+  'npx',
+  'git',
+  'kubectl',
+  'k3s',
+  'helm',
+  'docker',
+  'buildctl',
+  'curl',
+  'wget',
+  'jq',
+  'yq',
+  'python3',
+  'python',
+  'tar',
+  'gzip',
+  'unzip',
+  'rsync',
+  'ssh',
+  'scp',
+  'systemctl',
+  'journalctl',
+  'ss',
+  'ip',
+  'getent',
+  'dig',
+  'nslookup',
+  'openssl',
+].join(','))
+  .split(',')
+  .map((entry) => normalizeText(entry))
+  .filter(Boolean);
 
 if (!token) {
   console.error('[Runner] KIMIBUILT_REMOTE_RUNNER_TOKEN is required');
@@ -80,6 +116,71 @@ function resolveRunnerShell() {
 
 const runnerShell = resolveRunnerShell();
 
+function isExecutable(filePath = '') {
+  try {
+    fs.accessSync(filePath, fs.constants.X_OK);
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function findExecutable(binaryName = '') {
+  const normalized = normalizeText(binaryName);
+  if (!normalized) {
+    return '';
+  }
+
+  if (normalized.includes(path.sep) || (process.platform === 'win32' && /[\\/]/.test(normalized))) {
+    return isExecutable(normalized) ? normalized : '';
+  }
+
+  const pathEntries = String(process.env.PATH || '')
+    .split(path.delimiter)
+    .map((entry) => normalizeText(entry))
+    .filter(Boolean);
+  const extensions = process.platform === 'win32'
+    ? String(process.env.PATHEXT || '.EXE;.CMD;.BAT')
+      .split(';')
+      .map((entry) => normalizeText(entry).toLowerCase())
+      .filter(Boolean)
+    : [''];
+
+  for (const pathEntry of pathEntries) {
+    for (const extension of extensions) {
+      const candidate = path.join(pathEntry, process.platform === 'win32' && extension && !normalized.toLowerCase().endsWith(extension)
+        ? `${normalized}${extension}`
+        : normalized);
+      if (isExecutable(candidate)) {
+        return candidate;
+      }
+    }
+  }
+
+  return '';
+}
+
+function buildCliToolInventory() {
+  const seen = new Set();
+  return cliToolNames
+    .filter((name) => {
+      const key = name.toLowerCase();
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    })
+    .map((name) => {
+      const toolPath = findExecutable(name);
+      return {
+        name,
+        available: Boolean(toolPath),
+        path: toolPath,
+      };
+    });
+}
+
 function resolveJobCwd(requestedCwd = '') {
   const candidate = normalizeText(requestedCwd || defaultCwd);
   if (!candidate) {
@@ -103,10 +204,13 @@ function buildHostIdentity() {
 }
 
 function buildRunnerMetadata() {
+  const cliTools = buildCliToolInventory();
   return {
     defaultCwd: defaultCwd || '',
     workspace: workspaceRoot || '',
     shell: runnerShell,
+    cliTools,
+    availableCliTools: cliTools.filter((tool) => tool.available).map((tool) => tool.name),
     buildkitHostConfigured: Boolean(normalizeText(process.env.BUILDKIT_HOST || '')),
     dockerConfigConfigured: Boolean(normalizeText(process.env.DOCKER_CONFIG || '')),
     kubernetesConfigured: Boolean(normalizeText(process.env.KUBECONFIG || process.env.KUBERNETES_SERVICE_HOST || '')),

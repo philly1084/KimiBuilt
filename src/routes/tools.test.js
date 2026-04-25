@@ -4,8 +4,17 @@ const express = require('express');
 const request = require('supertest');
 
 const toolsRouter = require('./tools');
+const { remoteRunnerService } = require('../remote-runner/service');
 
 describe('/api/tools routes', () => {
+    beforeEach(() => {
+        remoteRunnerService.runners.clear();
+    });
+
+    afterEach(() => {
+        remoteRunnerService.runners.clear();
+    });
+
     function buildApp() {
         const app = express();
         app.use(express.json());
@@ -43,6 +52,34 @@ describe('/api/tools routes', () => {
         expect(response.status).toBe(200);
         expect(response.body.data.runtime.source).toBeDefined();
         expect(response.body.data.runtime.runnerAvailable).toBe(false);
+    });
+
+    test('remote-command tool details expose online runner CLI inventory', async () => {
+        const app = buildApp();
+        remoteRunnerService.registerRunner({
+            runnerId: 'server-runner',
+            capabilities: ['inspect', 'deploy'],
+            metadata: {
+                defaultCwd: '/srv/kimibuilt',
+                shell: '/bin/bash',
+                cliTools: [
+                    { name: 'kubectl', available: true, path: '/usr/local/bin/kubectl' },
+                    { name: 'git', available: true, path: '/usr/bin/git' },
+                    { name: 'rg', available: false, path: '' },
+                ],
+            },
+        }, { readyState: 1, send: jest.fn() });
+
+        const response = await request(app).get('/api/tools/remote-command');
+
+        expect(response.status).toBe(200);
+        expect(response.body.data.runtime.runnerAvailable).toBe(true);
+        expect(response.body.data.runtime.availableCliTools).toEqual(expect.arrayContaining(['kubectl', 'git']));
+        expect(response.body.data.runtime.cliTools).toEqual(expect.arrayContaining([
+            expect.objectContaining({ name: 'kubectl', path: '/usr/local/bin/kubectl' }),
+            expect.objectContaining({ name: 'rg', available: false }),
+        ]));
+        expect(response.body.meta.runtime.remoteRunner.availableCliTools).toEqual(expect.arrayContaining(['kubectl', 'git']));
     });
 
     test('managed-app details and invocation are disabled', async () => {

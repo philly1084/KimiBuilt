@@ -23,7 +23,6 @@ const settingsController = require('../routes/admin/settings.controller');
 const DEFAULT_EXECUTION_PROFILE = 'default';
 const REMOTE_BUILD_EXECUTION_PROFILE = 'remote-build';
 const REMOTE_BUILD_TOOL_ALLOWLIST = new Set([
-  'ssh-execute',
   'remote-command',
   'remote-cli-agent',
   'k3s-deploy',
@@ -828,7 +827,7 @@ class AgentOrchestrator {
         return false;
       }
 
-      if (toolId === 'ssh-execute' || toolId === 'remote-command' || toolId === 'k3s-deploy') {
+      if (toolId === 'remote-command' || toolId === 'k3s-deploy') {
         return hasRemoteOpsIntent && hasUsableSshDefaults;
       }
 

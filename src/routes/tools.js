@@ -72,6 +72,7 @@ function buildRuntimeSummary(toolManager, options = {}) {
     ? settingsController.getEffectiveGiteaConfig()
     : {};
   const healthyRunner = remoteRunnerService.getHealthyRunner();
+  const runnerCliTools = buildRunnerCliTools(healthyRunner);
   return {
     source: 'backend',
     toolManagerInitialized: Boolean(toolManager?.initialized),
@@ -122,8 +123,36 @@ function buildRuntimeSummary(toolManager, options = {}) {
       shell: healthyRunner?.metadata?.shell || '',
       capabilities: healthyRunner?.capabilities || [],
       allowedRoots: healthyRunner?.allowedRoots || [],
+      cliTools: runnerCliTools,
+      availableCliTools: runnerCliTools.filter((tool) => tool.available).map((tool) => tool.name),
     },
   };
+}
+
+function buildRunnerCliTools(runner = null) {
+  const metadata = runner?.metadata || {};
+  const cliTools = Array.isArray(metadata.cliTools) ? metadata.cliTools : [];
+  const availableNames = new Set(
+    (Array.isArray(metadata.availableCliTools) ? metadata.availableCliTools : [])
+      .map((name) => String(name || '').trim())
+      .filter(Boolean),
+  );
+
+  if (cliTools.length > 0) {
+    return cliTools
+      .map((tool) => ({
+        name: String(tool?.name || '').trim(),
+        available: tool?.available !== false,
+        path: String(tool?.path || '').trim(),
+      }))
+      .filter((tool) => tool.name);
+  }
+
+  return Array.from(availableNames).map((name) => ({
+    name,
+    available: true,
+    path: '',
+  }));
 }
 
 function buildRunnerRuntimeDetails(runner = null) {
@@ -131,6 +160,7 @@ function buildRunnerRuntimeDetails(runner = null) {
     return null;
   }
 
+  const cliTools = buildRunnerCliTools(runner);
   return {
     runnerId: runner.runnerId,
     displayName: runner.displayName || runner.runnerId,
@@ -143,6 +173,8 @@ function buildRunnerRuntimeDetails(runner = null) {
     kubernetesConfigured: Boolean(runner.metadata?.kubernetesConfigured),
     imagePrefix: runner.metadata?.imagePrefix || '',
     hostIdentity: runner.hostIdentity || {},
+    cliTools,
+    availableCliTools: cliTools.filter((tool) => tool.available).map((tool) => tool.name),
   };
 }
 
@@ -160,6 +192,8 @@ function buildToolRuntime(toolId, options = {}) {
       runner: runnerDetails,
       defaultWorkspace: runnerDetails?.defaultWorkspace || '',
       shell: runnerDetails?.shell || '',
+      cliTools: runnerDetails?.cliTools || [],
+      availableCliTools: runnerDetails?.availableCliTools || [],
       transportPreference: runner ? 'runner-first' : 'ssh',
       commandCatalog: REMOTE_CLI_COMMAND_CATALOG,
     };
@@ -190,6 +224,8 @@ function buildToolRuntime(toolId, options = {}) {
       runner: runnerDetails,
       defaultWorkspace: runnerDetails?.defaultWorkspace || '',
       shell: runnerDetails?.shell || '',
+      cliTools: runnerDetails?.cliTools || [],
+      availableCliTools: runnerDetails?.availableCliTools || [],
       transportPreference: runner ? 'runner-first' : 'ssh',
       commandCatalog: REMOTE_CLI_COMMAND_CATALOG.filter((entry) => ['kubectl-inspect', 'rollout', 'https-verify'].includes(entry.id)),
     };

@@ -263,16 +263,23 @@ describe('AgentOrchestrator', () => {
             description: 'Run commands over SSH',
             handler: async () => ({}),
         }));
+        orchestrator.registerTool(new ToolDefinition({
+            id: 'remote-command',
+            name: 'Remote Command',
+            description: 'Run commands through the remote CLI lane',
+            handler: async () => ({}),
+        }));
 
         const toolIds = orchestrator.getConversationToolIds('Inspect the Traefik resources for this cluster.', 'Use the current setup.');
 
         expect(toolIds).toContain('web-search');
         expect(toolIds).toContain('code-sandbox');
         expect(toolIds).not.toContain('docker-exec');
+        expect(toolIds).not.toContain('remote-command'); // Remote CLI requires valid config
         expect(toolIds).not.toContain('ssh-execute'); // SSH requires valid config
     });
 
-    test('remote build profile narrows the available tool set and enables ssh only with usable config', () => {
+    test('remote build profile narrows the available tool set and enables remote CLI only with usable config', () => {
         jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
             enabled: true,
             host: '10.0.0.5',
@@ -319,6 +326,12 @@ describe('AgentOrchestrator', () => {
             handler: async () => ({}),
         }));
         orchestrator.registerTool(new ToolDefinition({
+            id: 'remote-command',
+            name: 'Remote Command',
+            description: 'Run commands through the remote CLI lane',
+            handler: async () => ({}),
+        }));
+        orchestrator.registerTool(new ToolDefinition({
             id: 'architecture-design',
             name: 'Architecture Design',
             description: 'Generate design docs',
@@ -331,7 +344,8 @@ describe('AgentOrchestrator', () => {
             { executionProfile: 'remote-build' },
         );
 
-        expect(toolIds).toContain('ssh-execute');
+        expect(toolIds).toContain('remote-command');
+        expect(toolIds).not.toContain('ssh-execute');
         expect(toolIds).not.toContain('docker-exec');
         expect(toolIds).toContain('web-search');
         expect(toolIds).not.toContain('architecture-design');

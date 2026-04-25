@@ -17,6 +17,60 @@ function uniqueStrings(values = []) {
   ));
 }
 
+function normalizeCliToolInventory(value = []) {
+  const entries = Array.isArray(value) ? value : [];
+  const seen = new Set();
+  return entries
+    .map((entry) => {
+      if (typeof entry === 'string') {
+        return {
+          name: normalizeText(entry),
+          available: true,
+          path: '',
+        };
+      }
+
+      if (!entry || typeof entry !== 'object') {
+        return null;
+      }
+
+      return {
+        name: normalizeText(entry.name || entry.id || entry.command),
+        available: entry.available !== false,
+        path: normalizeText(entry.path || entry.bin || entry.executable),
+      };
+    })
+    .filter((entry) => {
+      if (!entry?.name) {
+        return false;
+      }
+      const key = entry.name.toLowerCase();
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+}
+
+function normalizeRunnerMetadata(metadata = {}) {
+  if (!metadata || typeof metadata !== 'object') {
+    return {};
+  }
+
+  const cliTools = normalizeCliToolInventory(metadata.cliTools || metadata.cli_tools || []);
+  const availableCliTools = uniqueStrings([
+    ...uniqueStrings(metadata.availableCliTools || metadata.available_cli_tools),
+    ...cliTools.filter((tool) => tool.available).map((tool) => tool.name),
+  ]);
+
+  return {
+    ...metadata,
+    ...(cliTools.length > 0 ? { cliTools } : {}),
+    ...(availableCliTools.length > 0 ? { availableCliTools } : {}),
+  };
+}
+
 function createId(prefix = 'id') {
   return `${prefix}-${crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex')}`;
 }
@@ -47,7 +101,7 @@ function normalizeRunnerRegistration(input = {}) {
       : {},
     capabilities: capabilities.length > 0 ? capabilities : ['inspect'],
     allowedRoots: uniqueStrings(input.allowedRoots),
-    metadata: input.metadata && typeof input.metadata === 'object' ? { ...input.metadata } : {},
+    metadata: normalizeRunnerMetadata(input.metadata),
   };
 }
 
@@ -109,8 +163,10 @@ module.exports = {
   isApproved,
   isDangerousCommand,
   normalizeCommandJob,
+  normalizeCliToolInventory,
   normalizeJobResult,
   normalizeRunnerRegistration,
+  normalizeRunnerMetadata,
   normalizeText,
   truncateText,
   uniqueStrings,

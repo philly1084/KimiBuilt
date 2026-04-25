@@ -70,6 +70,7 @@ function buildPlannerPromptSurface() {
     'Use file-write only for local runtime files. For remote hosts or deployed servers, use remote-command or k3s-deploy instead. Do not plan docker-exec for the host unless the user explicitly says Docker is available there.',
     'Do not plan a file-write step that only points at an earlier artifact or previous file when the full content is not already available in the prompt or recent transcript.',
     'Treat "remote CLI", "direct CLI", and "remote command" as aliases for the `remote-command` tool. Do not use the local execution sandbox for those requests.',
+    'For remote server, SSH, host, k3s, Kubernetes, and kubectl work, use remote-command as the primary remote CLI lane. Do not choose legacy raw SSH tooling when remote-command is available.',
     'When an SSH runtime target is already available, prefer trying remote-command before asking the user for host details again.',
     'Only ask for SSH connection details after an actual tool failure shows the target is missing or incorrect.',
     'For remote reconnect or baseline checks, assume Ubuntu/Linux and prefer a concrete command such as: hostname && uname -m && (test -f /etc/os-release && sed -n \'1,3p\' /etc/os-release || true) && uptime',
@@ -80,6 +81,10 @@ function buildPlannerPromptSurface() {
     'For public website deployment requests that omit the hostname, prefer the saved deploy default public domain and otherwise fall back to demoserver2.buzz instead of inventing a random host.',
     'When the user asks for kubectl, k3s, Rancher, or remote deployment command help, prefer tool-doc-read for remote-command or k3s-deploy before improvising a command catalog from memory.',
     'Do not repeat the same remote-command call back-to-back without an intervening fix or new reason. Re-running a verification command after a fix is allowed.',
+    'For Kubernetes deployment creation from remote-command, prefer repo manifests or kubectl create ... --dry-run=client -o yaml | kubectl apply -f - generators over hand-authored manifest heredocs inside a shell command.',
+    'Before applying hand-authored Kubernetes YAML from a remote shell, run kubectl apply --dry-run=server -f <file> or kubectl apply --dry-run=client -f <file> and fix decoding or YAML parse errors before live apply.',
+    'If Kubernetes reports strict decoding error: unknown field, error converting YAML to JSON, or unknown flag: --add, switch to validated manifests, kubectl create generators, or the documented remote-command web workload pattern instead of retrying the same manifest style.',
+    'Do not use kubectl set --add; when adding volumes use kubectl set volume --add with the subcommand or use kubectl patch with a valid strategic merge patch.',
   ].join('\n');
 }
 

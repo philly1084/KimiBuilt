@@ -6,9 +6,11 @@ jest.mock('./routes/admin/settings.controller', () => ({
 
 const settingsController = require('./routes/admin/settings.controller');
 const config = require('./config');
+const { remoteRunnerService } = require('./remote-runner/service');
 const {
     ConversationOrchestrator,
     HarnessRunState,
+    buildDeterministicRecoveryPlanFromFailure,
     classifyToolExecutionResult,
     filterRepeatedPlanStepsWithReport,
 } = require('./conversation-orchestrator');
@@ -133,6 +135,71 @@ describe('HarnessRunState', () => {
         }));
     });
 
+    test('builds deterministic kubectl recovery after malformed manifest failures', () => {
+        const plan = buildDeterministicRecoveryPlanFromFailure({
+            objective: 'Make another site that is a live calendar on the cluster.',
+            executionProfile: 'remote-build',
+            toolPolicy: {
+                candidateToolIds: ['remote-command'],
+                allowedToolIds: ['remote-command'],
+            },
+            toolEvents: [{
+                toolCall: {
+                    function: {
+                        name: 'remote-command',
+                        arguments: JSON.stringify({
+                            command: 'kubectl apply -f /tmp/live-calendar.yaml',
+                        }),
+                    },
+                },
+                result: {
+                    success: false,
+                    error: 'Deployment in version "v1" cannot be handled as a Deployment: strict decoding error: unknown field "spec.app"',
+                },
+            }],
+        });
+
+        expect(plan).toHaveLength(1);
+        expect(plan[0]).toEqual(expect.objectContaining({
+            tool: 'remote-command',
+            reason: expect.stringContaining('known-good kubectl generators'),
+        }));
+        expect(plan[0].params.command).toContain('app=\'live-calendar\'');
+        expect(plan[0].params.command).toContain('kubectl create deployment "$app"');
+        expect(plan[0].params.command).toContain('kubectl patch deployment "$app"');
+        expect(plan[0].params.command).toContain('kubectl rollout status deployment/"$app"');
+        expect(plan[0].params.command).not.toContain('kubectl set --add');
+    });
+
+    test('recovers invalid kubectl set --add syntax with a patch-based static site command', () => {
+        const plan = buildDeterministicRecoveryPlanFromFailure({
+            objective: 'create a live calendar site',
+            executionProfile: 'remote-build',
+            toolPolicy: {
+                candidateToolIds: ['remote-command'],
+                allowedToolIds: ['remote-command'],
+            },
+            toolEvents: [{
+                toolCall: {
+                    function: {
+                        name: 'remote-command',
+                        arguments: JSON.stringify({
+                            command: 'kubectl set --add volume deployment/live-calendar -n web',
+                        }),
+                    },
+                },
+                result: {
+                    success: false,
+                    error: "error: unknown flag: --add\nSee 'kubectl set --help' for usage.",
+                },
+            }],
+        });
+
+        expect(plan).toHaveLength(1);
+        expect(plan[0].params.command).toContain('kubectl patch deployment "$app"');
+        expect(plan[0].params.command).toContain('kubectl exec -n "$ns" deployment/"$app"');
+    });
+
     test('tracks completion criteria, evidence, and resumeable control state', () => {
         const harness = new HarnessRunState({
             objective: 'Deploy the app and verify it is live.',
@@ -245,6 +312,7 @@ describe('HarnessRunState', () => {
 describe('ConversationOrchestrator', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        remoteRunnerService.runners.clear();
         config.config.runtime.judgmentV2Enabled = false;
         config.config.runtime.plannerModel = '';
         config.config.runtime.synthesisModel = '';
@@ -282,6 +350,10 @@ describe('ConversationOrchestrator', () => {
             ingressClassName: 'traefik',
             tlsClusterIssuer: 'letsencrypt-prod',
         });
+    });
+
+    afterEach(() => {
+        remoteRunnerService.runners.clear();
     });
 
     test('uses a plain model response when no tools are selected', async () => {
@@ -405,6 +477,72 @@ describe('ConversationOrchestrator', () => {
         });
 
         expect(toolPolicy.candidateToolIds).toContain('user-checkpoint');
+    });
+
+    test('default profile routes explicit remote server work to remote-command', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['remote-command', 'file-read', 'file-write', 'code-sandbox', 'web-search'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Inspect the remote server and check kubectl pods.',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+
+        expect(toolPolicy.allowedToolIds).toContain('remote-command');
+        expect(toolPolicy.candidateToolIds).toContain('remote-command');
+        expect(toolPolicy.candidateToolIds).not.toContain('code-sandbox');
+    });
+
+    test('remote-build policy exposes online runner CLI inventory to planners', () => {
+        remoteRunnerService.registerRunner({
+            runnerId: 'actual-server-cli',
+            capabilities: ['inspect', 'deploy'],
+            metadata: {
+                defaultCwd: '/srv/kimibuilt',
+                shell: '/bin/bash',
+                cliTools: [
+                    { name: 'kubectl', available: true, path: '/usr/local/bin/kubectl' },
+                    { name: 'git', available: true, path: '/usr/bin/git' },
+                    { name: 'rg', available: false, path: '' },
+                ],
+            },
+        }, { readyState: 1, send: jest.fn() });
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['remote-command', 'k3s-deploy', 'tool-doc-read'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Use remote-build to inspect kubectl pods on the server.',
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+        });
+
+        expect(toolPolicy.remoteCliInventorySummary).toContain('Runner actual-server-cli is online');
+        expect(toolPolicy.remoteCliInventorySummary).toContain('kubectl=/usr/local/bin/kubectl');
+        expect(toolPolicy.remoteCliInventorySummary).toContain('git=/usr/bin/git');
+        expect(toolPolicy.remoteCliInventorySummary).toContain('rg');
     });
 
     test('restores harness completion state for a continuation turn', async () => {

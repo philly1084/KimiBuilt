@@ -38,6 +38,7 @@ const {
     persistForegroundTurnMessages,
     resolveForegroundTurn,
 } = require('./foreground-turn-state');
+const { remoteRunnerService } = require('./remote-runner/service');
 const {
     buildScopedMemoryMetadata,
     buildScopedSessionMetadata,
@@ -187,6 +188,7 @@ function buildHydratedRemoteOpsGuidanceText() {
         '3. Logs',
         '4. Rollout and restart',
         '5. Service and ingress checks',
+        '6. Deploy a simple web workload with kubectl',
         '7. TLS, cert-manager, and DNS checks',
         '8. k3s service health',
         '10. Host files, repo, and search',
@@ -3194,6 +3196,237 @@ function buildRemoteConfigMapApplyCommand(htmlBody = '', configMapName = 'websit
     ].join('\n');
 }
 
+function normalizeKubernetesResourceName(value = '', fallback = 'site') {
+    const normalized = String(value || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9-]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 50);
+
+    return normalized || fallback;
+}
+
+function inferStaticSiteAppName(objective = '', command = '') {
+    const source = `${objective || ''}\n${command || ''}`.toLowerCase();
+    const namedMatch = source.match(/\b(live-[a-z0-9-]+|[a-z0-9-]+-(?:calendar|site|web|app)|(?:calendar|site|web)-[a-z0-9-]+)\b/i);
+    if (namedMatch?.[1]) {
+        return normalizeKubernetesResourceName(namedMatch[1], 'live-site');
+    }
+
+    if (/\bcalendar\b/.test(source)) {
+        return 'live-calendar';
+    }
+
+    if (/\bgame\b/.test(source)) {
+        return 'game-site';
+    }
+
+    return 'live-site';
+}
+
+function extractLikelyPublicHost(text = '', fallbackHost = '') {
+    const candidates = String(text || '').match(/\b[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\b/ig) || [];
+    const ignoredSuffixes = /\.(?:ya?ml|json|html?|js|css|svc|local)$/i;
+    const match = candidates.find((candidate) => !ignoredSuffixes.test(candidate)
+        && !candidate.includes('cluster.local')
+        && !candidate.startsWith('api.'));
+    return match || fallbackHost;
+}
+
+function extractKubernetesNamespaceFromText(text = '', fallbackNamespace = 'web') {
+    const source = String(text || '');
+    const flagMatch = source.match(/(?:^|\s)-n\s+['"]?([a-z0-9-]+)['"]?/i)
+        || source.match(/(?:^|\s)--namespace(?:=|\s+)['"]?([a-z0-9-]+)['"]?/i);
+    if (flagMatch?.[1]) {
+        return normalizeKubernetesResourceName(flagMatch[1], fallbackNamespace);
+    }
+
+    const yamlMatch = source.match(/namespace:\s*['"]?([a-z0-9-]+)['"]?/i);
+    if (yamlMatch?.[1]) {
+        return normalizeKubernetesResourceName(yamlMatch[1], fallbackNamespace);
+    }
+
+    return fallbackNamespace;
+}
+
+function isKubernetesManifestAuthoringFailure(error = '') {
+    const normalized = String(error || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\bstrict decoding error:\s*unknown field\b/.test(normalized)
+        || /\berror converting yaml to json\b/.test(normalized)
+        || /\byaml:\s*line\s+\d+:/i.test(normalized)
+        || /\bdeployment in version "v1" cannot be handled as a deployment\b/i.test(normalized)
+        || /\bservice in version "v1" cannot be handled as a service\b/i.test(normalized)
+        || /\bingress in version "v1" cannot be handled as an ingress\b/i.test(normalized);
+}
+
+function isKubectlInvalidMutationSyntaxFailure(error = '') {
+    const normalized = String(error || '').trim().toLowerCase();
+    return /\berror:\s*unknown flag:\s*--add\b/.test(normalized)
+        || /\bsee 'kubectl set --help' for usage\b/.test(normalized);
+}
+
+function buildStaticSiteHtmlForRecovery({ appName = 'live-site', title = 'Live Site' } = {}) {
+    const safeTitle = String(title || 'Live Site').replace(/[<>&]/g, '');
+    const safeAppName = String(appName || 'live-site').replace(/[<>&]/g, '');
+    return [
+        '<!doctype html>',
+        '<html lang="en">',
+        '<head>',
+        '  <meta charset="utf-8">',
+        '  <meta name="viewport" content="width=device-width,initial-scale=1">',
+        `  <title>${safeTitle}</title>`,
+        '  <style>',
+        '    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#101418;color:#f6f2e8;}',
+        '    main{min-height:100vh;display:grid;place-items:center;padding:32px;}',
+        '    section{width:min(760px,100%);border:1px solid #37505c;background:#17212b;padding:28px;}',
+        '    h1{margin:0 0 12px;font-size:clamp(2rem,8vw,4.5rem);letter-spacing:0;}',
+        '    time{display:block;color:#8be9d2;font-size:1.2rem;margin-top:18px;}',
+        '    .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:24px;}',
+        '    .grid span{aspect-ratio:1;border:1px solid #37505c;display:grid;place-items:center;background:#111923;}',
+        '  </style>',
+        '</head>',
+        '<body>',
+        '  <main>',
+        '    <section>',
+        `      <h1>${safeTitle}</h1>`,
+        `      <p>${safeAppName} is running from the k3s cluster.</p>`,
+        '      <time id="now"></time>',
+        '      <div class="grid" aria-label="calendar preview">',
+        '        <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span>',
+        '        <span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span><span>14</span>',
+        '        <span>15</span><span>16</span><span>17</span><span>18</span><span>19</span><span>20</span><span>21</span>',
+        '        <span>22</span><span>23</span><span>24</span><span>25</span><span>26</span><span>27</span><span>28</span>',
+        '      </div>',
+        '    </section>',
+        '  </main>',
+        '  <script>setInterval(()=>{document.getElementById("now").textContent=new Date().toLocaleString();},1000);</script>',
+        '</body>',
+        '</html>',
+    ].join('\n');
+}
+
+function buildKubectlStaticSiteRecoveryCommand({ objective = '', failedCommand = '', errorText = '' } = {}) {
+    const source = [objective, failedCommand, errorText].join('\n');
+    const app = inferStaticSiteAppName(objective, failedCommand);
+    const namespace = extractKubernetesNamespaceFromText(source, 'web');
+    const domain = String(config.deploy.defaultPublicDomain || 'demoserver2.buzz').trim() || 'demoserver2.buzz';
+    const host = extractLikelyPublicHost(source, `${app}.${domain}`);
+    const ingressClass = String(config.deploy.defaultIngressClassName || 'traefik').trim() || 'traefik';
+    const issuer = String(config.deploy.defaultTlsClusterIssuer || 'letsencrypt-prod').trim() || 'letsencrypt-prod';
+    const title = app === 'live-calendar' ? 'Live Calendar' : app.split('-').map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`).join(' ');
+    const configMapName = `${app}-html`;
+    const tlsSecretName = `${app}-tls`;
+    const htmlEncoded = Buffer.from(buildStaticSiteHtmlForRecovery({ appName: app, title }), 'utf8').toString('base64');
+    const patch = JSON.stringify({
+        spec: {
+            template: {
+                spec: {
+                    volumes: [
+                        {
+                            name: 'html',
+                            configMap: {
+                                name: configMapName,
+                            },
+                        },
+                    ],
+                    containers: [
+                        {
+                            name: app,
+                            volumeMounts: [
+                                {
+                                    name: 'html',
+                                    mountPath: '/usr/share/nginx/html/index.html',
+                                    subPath: 'index.html',
+                                },
+                            ],
+                        },
+                    ],
+                },
+            },
+        },
+    });
+
+    return [
+        'set -e',
+        'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml',
+        `ns=${shellQuote(namespace)}`,
+        `app=${shellQuote(app)}`,
+        `cm=${shellQuote(configMapName)}`,
+        `host=${shellQuote(host)}`,
+        `ingress_class=${shellQuote(ingressClass)}`,
+        `issuer=${shellQuote(issuer)}`,
+        `tls_secret=${shellQuote(tlsSecretName)}`,
+        'tmp_html=$(mktemp)',
+        "cat <<'__KIMI_STATIC_SITE_HTML_B64__' | base64 -d > \"$tmp_html\"",
+        htmlEncoded,
+        '__KIMI_STATIC_SITE_HTML_B64__',
+        'kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -',
+        'kubectl create configmap "$cm" -n "$ns" --from-file=index.html="$tmp_html" --dry-run=client -o yaml | kubectl apply -f -',
+        'kubectl create deployment "$app" --image=nginx:1.27-alpine --replicas=1 -n "$ns" --dry-run=client -o yaml | kubectl apply -f -',
+        `kubectl patch deployment "$app" -n "$ns" --type=strategic -p ${shellQuote(patch)}`,
+        'kubectl expose deployment "$app" --name "$app" --port=80 --target-port=80 -n "$ns" --dry-run=client -o yaml | kubectl apply -f -',
+        'kubectl create ingress "$app" --class="$ingress_class" --rule="$host/*=$app:80,tls=$tls_secret" --annotation="cert-manager.io/cluster-issuer=$issuer" -n "$ns" --dry-run=client -o yaml | kubectl apply -f -',
+        'rm -f "$tmp_html"',
+        'kubectl rollout status deployment/"$app" -n "$ns" --timeout=180s',
+        'kubectl get deployment,svc,ingress -n "$ns" -o wide',
+        'kubectl exec -n "$ns" deployment/"$app" -- sed -n "1,24p" /usr/share/nginx/html/index.html',
+    ].join('\n');
+}
+
+function getRunnerCliTools(runner = null) {
+    const metadata = runner?.metadata || {};
+    const cliTools = Array.isArray(metadata.cliTools) ? metadata.cliTools : [];
+    if (cliTools.length > 0) {
+        return cliTools
+            .map((tool) => ({
+                name: String(tool?.name || '').trim(),
+                available: tool?.available !== false,
+                path: String(tool?.path || '').trim(),
+            }))
+            .filter((tool) => tool.name);
+    }
+
+    return (Array.isArray(metadata.availableCliTools) ? metadata.availableCliTools : [])
+        .map((name) => String(name || '').trim())
+        .filter(Boolean)
+        .map((name) => ({
+            name,
+            available: true,
+            path: '',
+        }));
+}
+
+function summarizeRemoteRunnerCliTools(runner = null) {
+    if (!runner) {
+        return '';
+    }
+
+    const cliTools = getRunnerCliTools(runner);
+    const available = cliTools
+        .filter((tool) => tool.available)
+        .map((tool) => tool.path ? `${tool.name}=${tool.path}` : tool.name)
+        .slice(0, 24);
+    const missing = cliTools
+        .filter((tool) => tool.available === false)
+        .map((tool) => tool.name)
+        .slice(0, 12);
+    const workspace = runner.metadata?.defaultCwd || runner.metadata?.workspace || '';
+    const shell = runner.metadata?.shell || '';
+    const parts = [
+        `Runner ${runner.runnerId || 'unknown'} is online.`,
+        workspace ? `Workspace: ${workspace}.` : '',
+        shell ? `Shell: ${shell}.` : '',
+        available.length > 0 ? `Available CLI tools: ${available.join(', ')}.` : '',
+        missing.length > 0 ? `Missing or unavailable common tools: ${missing.join(', ')}.` : '',
+    ].filter(Boolean);
+
+    return parts.join(' ');
+}
+
 function parseKubernetesInitContainerFailure(output = '') {
     const text = String(output || '');
     if (!text || !/Init Containers:/.test(text) || !/(CrashLoopBackOff|Exit Code:\s*[1-9])/.test(text)) {
@@ -3481,6 +3714,22 @@ function buildDeterministicRecoveryPlanFromFailure({
     const args = parseToolCallArguments(failedEvent?.toolCall?.function?.arguments || '{}');
     const command = String(args.command || '').trim();
     const combined = [objective, command, errorText].join('\n');
+
+    if ((isKubernetesManifestAuthoringFailure(errorText) || isKubectlInvalidMutationSyntaxFailure(errorText))
+        && /\b(kubectl|deployment|service|ingress|configmap|calendar|website|site)\b/i.test(combined)) {
+        return [{
+            tool: remoteToolId,
+            reason: 'Recover from malformed Kubernetes YAML or invalid kubectl mutation syntax by using known-good kubectl generators, ConfigMap mounting, rollout status, and body verification.',
+            params: {
+                command: buildKubectlStaticSiteRecoveryCommand({
+                    objective,
+                    failedCommand: command,
+                    errorText,
+                }),
+            },
+        }];
+    }
+
     const initFailure = parseKubernetesInitContainerFailure(combined);
     if (initFailure) {
         return [{
@@ -8186,6 +8435,17 @@ class ConversationOrchestrator extends EventEmitter {
         const clusterRegistrySummary = shouldIncludeClusterRegistry
             ? clusterStateRegistry.buildPromptSummary({ maxDeployments: 3, maxRecentActivity: 3 })
             : '';
+        const shouldIncludeRemoteCliInventory = executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
+            || hasReachableSshTarget
+            || explicitK3sDeployIntent
+            || hasRemoteInfraToolUsageIntent(prompt)
+            || /\b(remote cli|direct cli|remote command|ssh|server|host|cluster|k3s|k8s|kubernetes|kubectl)\b/.test(prompt);
+        const healthyRemoteRunner = shouldIncludeRemoteCliInventory
+            ? remoteRunnerService.getHealthyRunner()
+            : null;
+        const remoteCliInventorySummary = shouldIncludeRemoteCliInventory
+            ? summarizeRemoteRunnerCliTools(healthyRemoteRunner)
+            : '';
         const managedAppsSummary = normalizeInlineText(toolContext?.managedAppsSummary || '');
         const repositoryPath = String(
             toolContext?.repositoryPath
@@ -8541,6 +8801,7 @@ class ConversationOrchestrator extends EventEmitter {
             workflow: effectiveWorkflowSeed,
             projectPlan: effectiveProjectPlanSeed,
             clusterRegistrySummary,
+            remoteCliInventorySummary,
             managedAppsSummary,
             toolDescriptions: Object.fromEntries(
                 allowedToolIds.map((toolId) => [
@@ -9153,6 +9414,9 @@ class ConversationOrchestrator extends EventEmitter {
             'Cluster registry memory:',
             toolPolicy.clusterRegistrySummary || '(none)',
             '',
+            'Remote CLI runtime inventory:',
+            toolPolicy.remoteCliInventorySummary || '(no remote runner CLI inventory reported)',
+            '',
             'Supplemental recalled context:',
             Array.isArray(contextMessages) && contextMessages.length > 0 ? contextMessages.join('\n') : '(none)',
             '',
@@ -9185,8 +9449,14 @@ class ConversationOrchestrator extends EventEmitter {
             'Do not invent SSH hosts, usernames, file paths, or credentials.',
             'Every `remote-command` step must include a non-empty `params.command` string.',
             'Treat "remote CLI", "direct CLI", and "remote command" as aliases for `remote-command`; do not route those phrases to a local shell or code sandbox.',
+            'For remote server, SSH, host, k3s, Kubernetes, and kubectl work, use `remote-command` as the primary remote CLI lane. Do not choose legacy raw SSH tooling when `remote-command` is available.',
+            'When remote CLI runtime inventory is present, prefer commands and fallbacks that match the actual CLI tools reported by the online remote runner.',
             '`managed-app` is disabled. Use `remote-command` for direct remote CLI work, `git-safe` for repository save/push work, and `k3s-deploy` when deployment is the planned next step.',
             'Keep `remote-command` for kubectl, host inspection, package installs, logs, restarts, deployments, DNS, TLS, and other infrastructure operations.',
+            'For Kubernetes deployment creation from `remote-command`, prefer repo manifests or `kubectl create ... --dry-run=client -o yaml | kubectl apply -f -` generators over hand-authored manifest heredocs inside a shell command.',
+            'Before applying hand-authored Kubernetes YAML from a remote shell, run `kubectl apply --dry-run=server -f <file>` or `kubectl apply --dry-run=client -f <file>` and fix decoding or YAML parse errors before a live apply.',
+            'If Kubernetes reports `strict decoding error: unknown field`, `error converting YAML to JSON`, or `unknown flag: --add`, do not retry the same manifest style. Switch to validated manifests, `kubectl create` generators, or the documented remote-command web workload pattern.',
+            'Do not use `kubectl set --add`; when adding volumes use `kubectl set volume --add` with the subcommand or use `kubectl patch` with a valid strategic merge patch.',
             'Every `agent-workload` step must use the deferred workload schema only: `{"tool":"agent-workload","reason":"why","params":{"action":"create_from_scenario","request":"the full original user request","timezone":"IANA/Zone"}}`.',
             'Do not parse the schedule, cron, or remote command yourself for `agent-workload`; pass the full original request and let the runtime canonicalize it.',
             'Do not use `command`, `name`, `schedule`, or remote-command style fields inside `agent-workload` params.',
@@ -9949,6 +10219,11 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('Treat the cluster registry as durable context from earlier verified remote tool runs. Use it to avoid starting from scratch, but still re-verify rollout, ingress, TLS, and public reachability before claiming a deployment is live.');
         }
 
+        if (toolPolicy?.remoteCliInventorySummary) {
+            parts.push(`Remote CLI runtime inventory:\n${toolPolicy.remoteCliInventorySummary}`);
+            parts.push('Use `remote-command` to run commands through the online remote runner and prefer commands that match the reported remote CLI inventory.');
+        }
+
         if (shouldHydrateRemoteOpsGuidance({
             objective,
             instructions: baseInstructions,
@@ -10518,6 +10793,7 @@ class ConversationOrchestrator extends EventEmitter {
 module.exports = {
     ConversationOrchestrator,
     HarnessRunState,
+    buildDeterministicRecoveryPlanFromFailure,
     classifyToolExecutionResult,
     filterRepeatedPlanStepsWithReport,
     normalizeExecutionProfile,

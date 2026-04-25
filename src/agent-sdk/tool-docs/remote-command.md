@@ -6,6 +6,7 @@ Aliases: `remote CLI`, `direct CLI`, `remote command`, and `remote runner` all r
 
 Remote CLI agent pipeline:
 - Treat this tool as the default programming lane for remote inspect, edit, build, test, deploy verification, and cluster troubleshooting.
+- Route remote server, SSH, host, k3s, Kubernetes, and kubectl work through this `remote-command` remote CLI lane when it is available. Legacy raw SSH tools should be a compatibility fallback, not the planner's first choice.
 - Prefer the remote runner whenever a healthy runner exists. Use SSH only when no healthy runner exists or an explicit host override is required.
 - When the runner reports a default workspace, treat that path as the remote desktop/workbench. The direct CLI runner defaults to `/workspace`.
 - Build and creation work should happen inside the persistent workspace unless the user names another target.
@@ -157,6 +158,8 @@ kubectl logs -n kube-system deployment/traefik --tail=200
 
 Use this only for ad hoc or diagnostic deployments. For repo-managed manifests, prefer `k3s-deploy`.
 
+Prefer generators for ad hoc resources instead of hand-authoring large YAML heredocs in a remote shell. If you do write a manifest file, validate it with `kubectl apply --dry-run=server -f <file>` or `kubectl apply --dry-run=client -f <file>` before live `kubectl apply`. A `strict decoding error: unknown field` or `error converting YAML to JSON` means the manifest shape or indentation is wrong; switch to a validated manifest or generator pipeline instead of retrying similar YAML.
+
 ```bash
 set -e
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
@@ -173,6 +176,8 @@ kubectl create ingress "$app" --class="$class" --rule="$host/*=$app:80,tls=$app-
 kubectl rollout status deployment/"$app" -n "$ns" --timeout=180s
 kubectl get svc,ingress -n "$ns"
 ```
+
+For static HTML served from nginx, create the ConfigMap from a real file and mount it with `kubectl patch` or the full `kubectl set volume --add` subcommand. Do not use `kubectl set --add`; that flag only belongs to subcommands such as `kubectl set volume`.
 
 ### 7. Direct CLI image build with BuildKit
 

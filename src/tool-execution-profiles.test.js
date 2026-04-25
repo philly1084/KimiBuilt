@@ -24,6 +24,7 @@ describe('tool execution profiles', () => {
             'api-design',
             'schema-generate',
             'migration-create',
+            'remote-command',
         ]));
     });
 

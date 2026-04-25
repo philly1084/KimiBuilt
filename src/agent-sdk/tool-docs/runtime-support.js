@@ -16,6 +16,48 @@ function appendNote(notes, message) {
     }
 }
 
+function getRunnerCliTools(runner = null) {
+    const metadata = runner?.metadata || {};
+    const cliTools = Array.isArray(metadata.cliTools) ? metadata.cliTools : [];
+    if (cliTools.length > 0) {
+        return cliTools
+            .map((tool) => ({
+                name: String(tool?.name || '').trim(),
+                available: tool?.available !== false,
+                path: String(tool?.path || '').trim(),
+            }))
+            .filter((tool) => tool.name);
+    }
+
+    return (Array.isArray(metadata.availableCliTools) ? metadata.availableCliTools : [])
+        .map((name) => String(name || '').trim())
+        .filter(Boolean)
+        .map((name) => ({
+            name,
+            available: true,
+            path: '',
+        }));
+}
+
+function formatRunnerCliToolsNote(cliTools = []) {
+    const available = cliTools
+        .filter((tool) => tool.available)
+        .map((tool) => tool.path ? `${tool.name}=${tool.path}` : tool.name)
+        .slice(0, 18);
+    const missing = cliTools
+        .filter((tool) => tool.available === false)
+        .map((tool) => tool.name)
+        .slice(0, 10);
+    if (available.length === 0 && missing.length === 0) {
+        return '';
+    }
+
+    return [
+        available.length > 0 ? `Remote runner CLI tools available: ${available.join(', ')}.` : '',
+        missing.length > 0 ? `Common CLI tools not reported on the runner: ${missing.join(', ')}.` : '',
+    ].filter(Boolean).join(' ');
+}
+
 function probeCommand(command, args = [], options = {}) {
     const timeout = options.timeout || 5000;
 
@@ -183,10 +225,16 @@ async function getRuntimeSupport(toolId) {
     if (toolId === 'ssh-execute' || toolId === 'remote-command') {
         const runner = remoteRunnerService.getHealthyRunner();
         const runnerWorkspace = runner?.metadata?.defaultCwd || runner?.metadata?.workspace || '';
+        const runnerCliTools = getRunnerCliTools(runner);
+        const runnerCliToolsNote = formatRunnerCliToolsNote(runnerCliTools);
         return {
             status: (runner || snapshot.ssh.ready) ? 'stable' : 'requires_setup',
             notes: runner
-                ? [`Remote runner ${runner.runnerId} is online${runnerWorkspace ? ` with workspace ${runnerWorkspace}` : ''}.`, ...snapshot.ssh.notes]
+                ? [
+                    `Remote runner ${runner.runnerId} is online${runnerWorkspace ? ` with workspace ${runnerWorkspace}` : ''}.`,
+                    runnerCliToolsNote,
+                    ...snapshot.ssh.notes,
+                ].filter(Boolean)
                 : snapshot.ssh.notes,
             runtime: {
                 ...snapshot.ssh,
@@ -196,6 +244,8 @@ async function getRuntimeSupport(toolId) {
                 runnerWorkspace,
                 runnerShell: runner?.metadata?.shell || '',
                 runnerCapabilities: runner?.capabilities || [],
+                runnerCliTools,
+                runnerAvailableCliTools: runnerCliTools.filter((tool) => tool.available).map((tool) => tool.name),
             },
         };
     }
@@ -203,10 +253,16 @@ async function getRuntimeSupport(toolId) {
     if (toolId === 'k3s-deploy') {
         const runner = remoteRunnerService.getHealthyRunner('', { requiredProfile: 'deploy' });
         const runnerWorkspace = runner?.metadata?.defaultCwd || runner?.metadata?.workspace || '';
+        const runnerCliTools = getRunnerCliTools(runner);
+        const runnerCliToolsNote = formatRunnerCliToolsNote(runnerCliTools);
         return {
             status: (runner || snapshot.ssh.ready) ? 'stable' : 'requires_setup',
             notes: runner
-                ? [`Remote runner ${runner.runnerId} is online for deploy operations${runnerWorkspace ? ` with workspace ${runnerWorkspace}` : ''}.`, ...snapshot.ssh.notes]
+                ? [
+                    `Remote runner ${runner.runnerId} is online for deploy operations${runnerWorkspace ? ` with workspace ${runnerWorkspace}` : ''}.`,
+                    runnerCliToolsNote,
+                    ...snapshot.ssh.notes,
+                ].filter(Boolean)
                 : snapshot.ssh.notes,
             runtime: {
                 ...snapshot.ssh,
@@ -216,6 +272,8 @@ async function getRuntimeSupport(toolId) {
                 runnerWorkspace,
                 runnerShell: runner?.metadata?.shell || '',
                 runnerCapabilities: runner?.capabilities || [],
+                runnerCliTools,
+                runnerAvailableCliTools: runnerCliTools.filter((tool) => tool.available).map((tool) => tool.name),
             },
         };
     }
