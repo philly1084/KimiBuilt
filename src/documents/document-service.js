@@ -2113,8 +2113,9 @@ class DocumentService {
   }
 
   renderTableHtml(table = {}) {
-    const headers = Array.isArray(table.headers) ? table.headers : [];
-    const rows = Array.isArray(table.rows) ? table.rows : [];
+    const normalizedTable = table && typeof table === 'object' ? table : {};
+    const headers = Array.isArray(normalizedTable.headers) ? normalizedTable.headers : [];
+    const rows = Array.isArray(normalizedTable.rows) ? normalizedTable.rows : [];
     if (headers.length === 0 && rows.length === 0) {
       return '';
     }
@@ -2125,7 +2126,7 @@ class DocumentService {
 
     return `
       <div class="document-table-wrap">
-        ${table.caption ? `<p class="document-table-caption">${this.escapeHtml(table.caption)}</p>` : ''}
+        ${normalizedTable.caption ? `<p class="document-table-caption">${this.escapeHtml(normalizedTable.caption)}</p>` : ''}
         <table>
           <thead>${headerRow}</thead>
           <tbody>
