@@ -300,6 +300,7 @@ describe('ai-route-utils', () => {
     test('inferRequestedOutputFormat auto-selects html for interactive research documents', () => {
         expect(inferRequestedOutputFormat('Do some research on AI browser tools and make it an interactive document with filters.')).toBe('html');
         expect(inferRequestedOutputFormat('Create a source-backed research dashboard about local robotics grants.')).toBe('html');
+        expect(inferRequestedOutputFormat('Build a research page comparing leading AI coding agents with citations.')).toBe('html');
         expect(inferRequestedOutputFormat('Do some research on AI browser tools.')).toBeNull();
     });
 
