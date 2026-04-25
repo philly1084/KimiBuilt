@@ -5,6 +5,9 @@ class PostgresManager {
     constructor() {
         this.pool = null;
         this.enabled = Boolean(config.postgres.url || config.postgres.password);
+        this.initialized = false;
+        this.unavailableReason = this.enabled ? null : 'Postgres is not configured';
+        this.lastError = null;
     }
 
     getConnectionConfig() {
@@ -40,13 +43,75 @@ class PostgresManager {
         return this.pool;
     }
 
+    isAuthOrConfigError(error = {}) {
+        const code = String(error.code || '').trim();
+        const message = String(error.message || '').toLowerCase();
+
+        return [
+            '28P01', // invalid_password
+            '28000', // invalid_authorization_specification
+            '3D000', // invalid_catalog_name
+            '08004', // rejected connection
+        ].includes(code)
+            || /password authentication failed|no pg_hba\.conf entry|database .* does not exist|role .* does not exist|invalid authorization|authentication failed/.test(message);
+    }
+
+    sanitizeUnavailableReason(error = {}) {
+        const message = String(error.message || '').trim();
+        if (!message) {
+            return 'Postgres persistence is unavailable';
+        }
+        if (/password authentication failed/i.test(message)) {
+            return `Postgres password authentication failed for user "${config.postgres.user}"`;
+        }
+        return message.replace(/postgres(?:ql)?:\/\/[^@\s]+@/gi, 'postgres://***@');
+    }
+
+    async disable(error = null) {
+        this.enabled = false;
+        this.initialized = false;
+        this.lastError = error || null;
+        this.unavailableReason = this.sanitizeUnavailableReason(error);
+
+        const pool = this.pool;
+        this.pool = null;
+        if (pool) {
+            try {
+                await pool.end();
+            } catch (poolError) {
+                console.warn('[Postgres] Failed to close disabled pool:', poolError.message);
+            }
+        }
+    }
+
+    getStatus() {
+        return {
+            enabled: this.enabled,
+            initialized: this.initialized,
+            unavailableReason: this.unavailableReason,
+        };
+    }
+
     async query(text, params = []) {
         const pool = this.getPool();
         if (!pool) {
-            throw new Error('Postgres is not configured');
+            const error = new Error(this.unavailableReason || 'Postgres is not configured');
+            error.statusCode = 503;
+            throw error;
         }
 
-        return pool.query(text, params);
+        try {
+            return await pool.query(text, params);
+        } catch (error) {
+            if (this.isAuthOrConfigError(error)) {
+                await this.disable(error);
+                const unavailable = new Error(this.unavailableReason);
+                unavailable.statusCode = 503;
+                unavailable.cause = error;
+                throw unavailable;
+            }
+            throw error;
+        }
     }
 
     async initialize() {
@@ -54,7 +119,8 @@ class PostgresManager {
             return false;
         }
 
-        await this.query(`
+        try {
+            await this.query(`
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
                 previous_response_id TEXT,
@@ -425,6 +491,15 @@ class PostgresManager {
         await this.query('CREATE INDEX IF NOT EXISTS idx_managed_app_build_runs_owner_created_at ON managed_app_build_runs(owner_id, created_at DESC)');
         await this.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_managed_app_build_runs_external_run_id ON managed_app_build_runs(external_run_id) WHERE external_run_id IS NOT NULL');
         await this.query('CREATE INDEX IF NOT EXISTS idx_managed_app_build_runs_commit_sha ON managed_app_build_runs(app_id, commit_sha)');
+
+            this.initialized = true;
+            this.unavailableReason = null;
+            this.lastError = null;
+        } catch (error) {
+            await this.disable(error);
+            console.warn(`[Postgres] Persistence disabled: ${this.unavailableReason}`);
+            return false;
+        }
 
         return true;
     }

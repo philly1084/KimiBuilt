@@ -479,6 +479,46 @@ class SessionStore {
         return writeTask;
     }
 
+    isPostgresUnavailableError(error = {}) {
+        return Boolean(error?.statusCode === 503 && !postgres.enabled);
+    }
+
+    async switchToFallbackStorage(error = null) {
+        if (!this.usePostgres || !this.isPostgresUnavailableError(error)) {
+            return false;
+        }
+
+        this.usePostgres = false;
+        await this.loadFallbackState();
+        console.warn(`[SessionStore] Postgres unavailable, switching to file-backed sessions at ${this.fallbackStoragePath}: ${error.message}`);
+        return true;
+    }
+
+    async persistFallbackSession(session = null) {
+        if (!session?.id) {
+            return null;
+        }
+
+        const normalizedMetadata = this.normalizeMetadata(session.metadata || {});
+        const fallbackSession = {
+            id: session.id,
+            previousResponseId: session.previousResponseId || null,
+            createdAt: session.createdAt || new Date().toISOString(),
+            updatedAt: session.updatedAt || new Date().toISOString(),
+            messageCount: Number(session.messageCount || 0),
+            metadata: normalizedMetadata,
+            scopeKey: session.scopeKey || this.buildSessionScopeKey(normalizedMetadata),
+            controlState: this.normalizeControlState(session.controlState || {}),
+        };
+
+        this.sessions.set(fallbackSession.id, fallbackSession);
+        if (!this.sessionMessages.has(fallbackSession.id)) {
+            this.sessionMessages.set(fallbackSession.id, []);
+        }
+        await this.persistFallbackState();
+        return fallbackSession;
+    }
+
     async initialize() {
         if (this.initialized) return;
 
@@ -529,43 +569,50 @@ class SessionStore {
             return session;
         }
 
-        const result = await postgres.query(
-            `
-                INSERT INTO sessions (id, previous_response_id, created_at, updated_at, message_count, metadata, scope_key)
-                VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
-                ON CONFLICT (id) DO UPDATE
-                SET metadata = EXCLUDED.metadata,
-                    scope_key = EXCLUDED.scope_key,
-                    updated_at = EXCLUDED.updated_at
-                RETURNING *
-            `,
-            [
-                id,
-                null,
-                session.createdAt,
-                session.updatedAt,
-                0,
-                JSON.stringify(session.metadata || {}),
-                session.scopeKey,
-            ],
-        );
+        try {
+            const result = await postgres.query(
+                `
+                    INSERT INTO sessions (id, previous_response_id, created_at, updated_at, message_count, metadata, scope_key)
+                    VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+                    ON CONFLICT (id) DO UPDATE
+                    SET metadata = EXCLUDED.metadata,
+                        scope_key = EXCLUDED.scope_key,
+                        updated_at = EXCLUDED.updated_at
+                    RETURNING *
+                `,
+                [
+                    id,
+                    null,
+                    session.createdAt,
+                    session.updatedAt,
+                    0,
+                    JSON.stringify(session.metadata || {}),
+                    session.scopeKey,
+                ],
+            );
 
-        await postgres.query(
-            `
-                INSERT INTO session_runtime_state (session_id, state)
-                VALUES ($1, $2::jsonb)
-                ON CONFLICT (session_id) DO NOTHING
-            `,
-            [
-                id,
-                JSON.stringify(session.controlState || {}),
-            ],
-        );
+            await postgres.query(
+                `
+                    INSERT INTO session_runtime_state (session_id, state)
+                    VALUES ($1, $2::jsonb)
+                    ON CONFLICT (session_id) DO NOTHING
+                `,
+                [
+                    id,
+                    JSON.stringify(session.controlState || {}),
+                ],
+            );
 
-        return this.toSession({
-            ...result.rows[0],
-            control_state: session.controlState,
-        });
+            return this.toSession({
+                ...result.rows[0],
+                control_state: session.controlState,
+            });
+        } catch (error) {
+            if (await this.switchToFallbackStorage(error)) {
+                return this.persistFallbackSession(session);
+            }
+            throw error;
+        }
     }
 
     async get(id) {
@@ -575,17 +622,24 @@ class SessionStore {
             return this.sessions.get(id) || null;
         }
 
-        const result = await postgres.query(
-            `
-                SELECT sessions.*, session_runtime_state.state AS control_state
-                FROM sessions
-                LEFT JOIN session_runtime_state
-                    ON session_runtime_state.session_id = sessions.id
-                WHERE sessions.id = $1
-            `,
-            [id],
-        );
-        return this.toSession(result.rows[0]);
+        try {
+            const result = await postgres.query(
+                `
+                    SELECT sessions.*, session_runtime_state.state AS control_state
+                    FROM sessions
+                    LEFT JOIN session_runtime_state
+                        ON session_runtime_state.session_id = sessions.id
+                    WHERE sessions.id = $1
+                `,
+                [id],
+            );
+            return this.toSession(result.rows[0]);
+        } catch (error) {
+            if (await this.switchToFallbackStorage(error)) {
+                return this.sessions.get(id) || null;
+            }
+            throw error;
+        }
     }
 
     async getOrCreate(id, metadata = {}) {
@@ -653,16 +707,23 @@ class SessionStore {
             return this.userSessionState.get(normalizedOwnerId) || null;
         }
 
-        const result = await postgres.query(
-            `
-                SELECT owner_id, active_session_id, scoped_active_session_ids, preferences, updated_at
-                FROM user_session_state
-                WHERE owner_id = $1
-            `,
-            [normalizedOwnerId],
-        );
+        try {
+            const result = await postgres.query(
+                `
+                    SELECT owner_id, active_session_id, scoped_active_session_ids, preferences, updated_at
+                    FROM user_session_state
+                    WHERE owner_id = $1
+                `,
+                [normalizedOwnerId],
+            );
 
-        return this.toUserSessionState(result.rows[0]);
+            return this.toUserSessionState(result.rows[0]);
+        } catch (error) {
+            if (await this.switchToFallbackStorage(error)) {
+                return this.userSessionState.get(normalizedOwnerId) || null;
+            }
+            throw error;
+        }
     }
 
     async persistUserSessionState(state = {}) {
@@ -677,26 +738,35 @@ class SessionStore {
             return nextState;
         }
 
-        const result = await postgres.query(
-            `
-                INSERT INTO user_session_state (owner_id, active_session_id, scoped_active_session_ids, preferences, updated_at)
-                VALUES ($1, $2, $3::jsonb, $4::jsonb, NOW())
-                ON CONFLICT (owner_id) DO UPDATE
-                SET active_session_id = EXCLUDED.active_session_id,
-                    scoped_active_session_ids = EXCLUDED.scoped_active_session_ids,
-                    preferences = EXCLUDED.preferences,
-                    updated_at = NOW()
-                RETURNING owner_id, active_session_id, scoped_active_session_ids, preferences, updated_at
-            `,
-            [
-                nextState.ownerId,
-                nextState.activeSessionId,
-                JSON.stringify(nextState.scopedActiveSessionIds || {}),
-                JSON.stringify(nextState.preferences || {}),
-            ],
-        );
+        try {
+            const result = await postgres.query(
+                `
+                    INSERT INTO user_session_state (owner_id, active_session_id, scoped_active_session_ids, preferences, updated_at)
+                    VALUES ($1, $2, $3::jsonb, $4::jsonb, NOW())
+                    ON CONFLICT (owner_id) DO UPDATE
+                    SET active_session_id = EXCLUDED.active_session_id,
+                        scoped_active_session_ids = EXCLUDED.scoped_active_session_ids,
+                        preferences = EXCLUDED.preferences,
+                        updated_at = NOW()
+                    RETURNING owner_id, active_session_id, scoped_active_session_ids, preferences, updated_at
+                `,
+                [
+                    nextState.ownerId,
+                    nextState.activeSessionId,
+                    JSON.stringify(nextState.scopedActiveSessionIds || {}),
+                    JSON.stringify(nextState.preferences || {}),
+                ],
+            );
 
-        return this.toUserSessionState(result.rows[0]);
+            return this.toUserSessionState(result.rows[0]);
+        } catch (error) {
+            if (await this.switchToFallbackStorage(error)) {
+                this.userSessionState.set(nextState.ownerId, nextState);
+                await this.persistFallbackState();
+                return nextState;
+            }
+            throw error;
+        }
     }
 
     async setActiveSession(ownerId = null, sessionId = null, scopeKey = null) {
@@ -959,46 +1029,54 @@ class SessionStore {
             ))
             : this.normalizeControlState(current.controlState || {});
 
-        const result = await postgres.query(
-            `
-                UPDATE sessions
-                SET previous_response_id = $2,
-                    message_count = $3,
-                    metadata = $4::jsonb,
-                    scope_key = $5,
-                    updated_at = NOW()
-                WHERE id = $1
-                RETURNING *
-            `,
-            [
-                id,
-                updates.previousResponseId ?? current.previousResponseId,
-                updates.messageCount ?? current.messageCount,
-                JSON.stringify(nextMetadata || {}),
-                nextScopeKey,
-            ],
-        );
-
-        if (updates.controlState) {
-            await postgres.query(
+        try {
+            const result = await postgres.query(
                 `
-                    INSERT INTO session_runtime_state (session_id, state, updated_at)
-                    VALUES ($1, $2::jsonb, NOW())
-                    ON CONFLICT (session_id) DO UPDATE
-                    SET state = $2::jsonb,
+                    UPDATE sessions
+                    SET previous_response_id = $2,
+                        message_count = $3,
+                        metadata = $4::jsonb,
+                        scope_key = $5,
                         updated_at = NOW()
+                    WHERE id = $1
+                    RETURNING *
                 `,
                 [
                     id,
-                    JSON.stringify(nextControlState || {}),
+                    updates.previousResponseId ?? current.previousResponseId,
+                    updates.messageCount ?? current.messageCount,
+                    JSON.stringify(nextMetadata || {}),
+                    nextScopeKey,
                 ],
             );
-        }
 
-        return this.toSession({
-            ...result.rows[0],
-            control_state: nextControlState,
-        });
+            if (updates.controlState) {
+                await postgres.query(
+                    `
+                        INSERT INTO session_runtime_state (session_id, state, updated_at)
+                        VALUES ($1, $2::jsonb, NOW())
+                        ON CONFLICT (session_id) DO UPDATE
+                        SET state = $2::jsonb,
+                            updated_at = NOW()
+                    `,
+                    [
+                        id,
+                        JSON.stringify(nextControlState || {}),
+                    ],
+                );
+            }
+
+            return this.toSession({
+                ...result.rows[0],
+                control_state: nextControlState,
+            });
+        } catch (error) {
+            if (await this.switchToFallbackStorage(error)) {
+                await this.persistFallbackSession(current);
+                return this.update(id, updates);
+            }
+            throw error;
+        }
     }
 
     async getControlState(sessionOrId) {
@@ -1039,25 +1117,33 @@ class SessionStore {
             return nextControlState;
         }
 
-        await postgres.query(
-            `
-                INSERT INTO session_runtime_state (session_id, state, updated_at)
-                VALUES ($1, $2::jsonb, NOW())
-                ON CONFLICT (session_id) DO UPDATE
-                SET state = $2::jsonb,
-                    updated_at = NOW()
-            `,
-            [
-                id,
-                JSON.stringify(nextControlState || {}),
-            ],
-        );
+        try {
+            await postgres.query(
+                `
+                    INSERT INTO session_runtime_state (session_id, state, updated_at)
+                    VALUES ($1, $2::jsonb, NOW())
+                    ON CONFLICT (session_id) DO UPDATE
+                    SET state = $2::jsonb,
+                        updated_at = NOW()
+                `,
+                [
+                    id,
+                    JSON.stringify(nextControlState || {}),
+                ],
+            );
 
-        await this.update(id, {
-            metadata: legacyMetadata,
-        });
+            await this.update(id, {
+                metadata: legacyMetadata,
+            });
 
-        return nextControlState;
+            return nextControlState;
+        } catch (error) {
+            if (await this.switchToFallbackStorage(error)) {
+                await this.persistFallbackSession(current);
+                return this.updateControlState(id, controlState);
+            }
+            throw error;
+        }
     }
 
     async getRecentMessages(sessionOrId, limit = MAX_RECENT_MESSAGES) {
@@ -1088,43 +1174,46 @@ class SessionStore {
             return this.get(id);
         }
 
-        if (this.usePostgres) {
-            const current = await this.get(id);
-            if (!current) {
-                return null;
-            }
-
-            for (const message of storedMessages) {
-                await postgres.query(
-                    `
-                        INSERT INTO session_messages (id, session_id, role, content, created_at, metadata)
-                        VALUES ($1, $2, $3, $4, $5, $6::jsonb)
-                    `,
-                    [
-                        message.id,
-                        id,
-                        message.role,
-                        message.content,
-                        message.timestamp,
-                        JSON.stringify(message.metadata || {}),
-                    ],
-                );
-            }
-
-            return this.update(id, {
-                metadata: {
-                    recentMessages: this.buildCompactionAwareRecentMessages(
-                        await this.loadAllSessionMessages(id),
-                        MAX_RECENT_MESSAGES,
-                        current?.metadata?.sessionCompaction || null,
-                    ),
-                },
-            });
-        }
-
         const current = await this.get(id);
         if (!current) {
             return null;
+        }
+
+        if (this.usePostgres) {
+            try {
+                for (const message of storedMessages) {
+                    await postgres.query(
+                        `
+                            INSERT INTO session_messages (id, session_id, role, content, created_at, metadata)
+                            VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+                        `,
+                        [
+                            message.id,
+                            id,
+                            message.role,
+                            message.content,
+                            message.timestamp,
+                            JSON.stringify(message.metadata || {}),
+                        ],
+                    );
+                }
+
+                return this.update(id, {
+                    metadata: {
+                        recentMessages: this.buildCompactionAwareRecentMessages(
+                            await this.loadAllSessionMessages(id),
+                            MAX_RECENT_MESSAGES,
+                            current?.metadata?.sessionCompaction || null,
+                        ),
+                    },
+                });
+            } catch (error) {
+                if (await this.switchToFallbackStorage(error)) {
+                    await this.persistFallbackSession(current);
+                    return this.appendMessages(id, storedMessages);
+                }
+                throw error;
+            }
         }
 
         const existingMessages = this.sessionMessages.get(id) || [];
@@ -1158,51 +1247,59 @@ class SessionStore {
         }
 
         if (this.usePostgres) {
-            const result = await postgres.query(
-                `
-                    INSERT INTO session_messages (id, session_id, role, content, created_at, metadata)
-                    VALUES ($1, $2, $3, $4, $5, $6::jsonb)
-                    ON CONFLICT (id) DO UPDATE
-                    SET role = EXCLUDED.role,
-                        content = EXCLUDED.content,
-                        created_at = EXCLUDED.created_at,
-                        metadata = EXCLUDED.metadata
-                    WHERE session_messages.session_id = EXCLUDED.session_id
-                    RETURNING id, role, content, created_at, metadata
-                `,
-                [
-                    storedMessage.id,
-                    id,
-                    storedMessage.role,
-                    storedMessage.content,
-                    storedMessage.timestamp,
-                    JSON.stringify(storedMessage.metadata || {}),
-                ],
-            );
+            try {
+                const result = await postgres.query(
+                    `
+                        INSERT INTO session_messages (id, session_id, role, content, created_at, metadata)
+                        VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+                        ON CONFLICT (id) DO UPDATE
+                        SET role = EXCLUDED.role,
+                            content = EXCLUDED.content,
+                            created_at = EXCLUDED.created_at,
+                            metadata = EXCLUDED.metadata
+                        WHERE session_messages.session_id = EXCLUDED.session_id
+                        RETURNING id, role, content, created_at, metadata
+                    `,
+                    [
+                        storedMessage.id,
+                        id,
+                        storedMessage.role,
+                        storedMessage.content,
+                        storedMessage.timestamp,
+                        JSON.stringify(storedMessage.metadata || {}),
+                    ],
+                );
 
-            if (result.rowCount === 0) {
-                return null;
+                if (result.rowCount === 0) {
+                    return null;
+                }
+
+                await this.update(id, {
+                    metadata: {
+                        recentMessages: this.buildCompactionAwareRecentMessages(
+                            await this.loadAllSessionMessages(id),
+                            MAX_RECENT_MESSAGES,
+                            current?.metadata?.sessionCompaction || null,
+                        ),
+                    },
+                });
+
+                return this.toClientMessage({
+                    id: result.rows[0].id,
+                    role: result.rows[0].role,
+                    content: result.rows[0].content,
+                    timestamp: result.rows[0].created_at instanceof Date
+                        ? result.rows[0].created_at.toISOString()
+                        : result.rows[0].created_at,
+                    metadata: result.rows[0].metadata || {},
+                });
+            } catch (error) {
+                if (await this.switchToFallbackStorage(error)) {
+                    await this.persistFallbackSession(current);
+                    return this.upsertMessage(id, storedMessage);
+                }
+                throw error;
             }
-
-            await this.update(id, {
-                metadata: {
-                    recentMessages: this.buildCompactionAwareRecentMessages(
-                        await this.loadAllSessionMessages(id),
-                        MAX_RECENT_MESSAGES,
-                        current?.metadata?.sessionCompaction || null,
-                    ),
-                },
-            });
-
-            return this.toClientMessage({
-                id: result.rows[0].id,
-                role: result.rows[0].role,
-                content: result.rows[0].content,
-                timestamp: result.rows[0].created_at instanceof Date
-                    ? result.rows[0].created_at.toISOString()
-                    : result.rows[0].created_at,
-                metadata: result.rows[0].metadata || {},
-            });
         }
 
         const existingMessages = this.sessionMessages.get(id) || [];
@@ -1275,26 +1372,39 @@ class SessionStore {
             });
         }
 
-        const result = await postgres.query(
-            `
-                UPDATE sessions
-                SET previous_response_id = $2,
-                    message_count = message_count + 1,
-                    metadata = COALESCE($3::jsonb, metadata),
-                    scope_key = COALESCE($4, scope_key),
-                    updated_at = NOW()
-                WHERE id = $1
-                RETURNING *
-            `,
-            [
-                id,
-                responseId,
-                nextMetadata ? JSON.stringify(nextMetadata) : null,
-                nextMetadata ? this.buildSessionScopeKey(nextMetadata) : null,
-            ],
-        );
+        try {
+            const result = await postgres.query(
+                `
+                    UPDATE sessions
+                    SET previous_response_id = $2,
+                        message_count = message_count + 1,
+                        metadata = COALESCE($3::jsonb, metadata),
+                        scope_key = COALESCE($4, scope_key),
+                        updated_at = NOW()
+                    WHERE id = $1
+                    RETURNING *
+                `,
+                [
+                    id,
+                    responseId,
+                    nextMetadata ? JSON.stringify(nextMetadata) : null,
+                    nextMetadata ? this.buildSessionScopeKey(nextMetadata) : null,
+                ],
+            );
 
-        return this.toSession(result.rows[0]);
+            return this.toSession(result.rows[0]);
+        } catch (error) {
+            if (await this.switchToFallbackStorage(error)) {
+                await this.persistFallbackSession({
+                    id,
+                    metadata: nextMetadata || {},
+                    previousResponseId: null,
+                    messageCount: 0,
+                });
+                return this.recordResponse(id, responseId, metadataUpdates);
+            }
+            throw error;
+        }
     }
 
     async loadAllSessionMessages(sessionId) {
@@ -1306,25 +1416,31 @@ class SessionStore {
         }
 
         if (this.usePostgres) {
-            const result = await postgres.query(
-                `
-                    SELECT id, role, content, created_at, metadata
-                    FROM session_messages
-                    WHERE session_id = $1
-                    ORDER BY created_at ASC
-                `,
-                [normalizedSessionId],
-            );
+            try {
+                const result = await postgres.query(
+                    `
+                        SELECT id, role, content, created_at, metadata
+                        FROM session_messages
+                        WHERE session_id = $1
+                        ORDER BY created_at ASC
+                    `,
+                    [normalizedSessionId],
+                );
 
-            return result.rows
-                .map((row) => this.toClientMessage({
-                    id: row?.id,
-                    role: ['user', 'assistant', 'system', 'tool'].includes(row?.role) ? row.role : null,
-                    content: stripNullCharacters(row?.content || '').trim(),
-                    timestamp: row?.created_at instanceof Date ? row.created_at.toISOString() : row?.created_at,
-                    metadata: row?.metadata || {},
-                }))
-                .filter((row) => row.role && row.content);
+                return result.rows
+                    .map((row) => this.toClientMessage({
+                        id: row?.id,
+                        role: ['user', 'assistant', 'system', 'tool'].includes(row?.role) ? row.role : null,
+                        content: stripNullCharacters(row?.content || '').trim(),
+                        timestamp: row?.created_at instanceof Date ? row.created_at.toISOString() : row?.created_at,
+                        metadata: row?.metadata || {},
+                    }))
+                    .filter((row) => row.role && row.content);
+            } catch (error) {
+                if (!(await this.switchToFallbackStorage(error))) {
+                    throw error;
+                }
+            }
         }
 
         return (this.sessionMessages.get(normalizedSessionId) || [])
@@ -1390,8 +1506,18 @@ class SessionStore {
             return deleted;
         }
 
-        const result = await postgres.query('DELETE FROM sessions WHERE id = $1', [id]);
-        return result.rowCount > 0;
+        try {
+            const result = await postgres.query('DELETE FROM sessions WHERE id = $1', [id]);
+            return result.rowCount > 0;
+        } catch (error) {
+            if (await this.switchToFallbackStorage(error)) {
+                this.sessionMessages.delete(id);
+                const deleted = this.sessions.delete(id);
+                await this.persistFallbackState();
+                return deleted;
+            }
+            throw error;
+        }
     }
 
     async list(options = {}) {
@@ -1417,33 +1543,40 @@ class SessionStore {
                 });
         }
 
-        const result = ownerId
-            ? await postgres.query(
-                `
-                    SELECT sessions.*, session_runtime_state.state AS control_state
-                    FROM sessions
-                    LEFT JOIN session_runtime_state
-                        ON session_runtime_state.session_id = sessions.id
-                    WHERE COALESCE(sessions.metadata->>'ownerId', '') = ''
-                       OR sessions.metadata->>'ownerId' = $1
-                    ORDER BY sessions.updated_at DESC
-                `,
-                [ownerId],
-            )
-            : await postgres.query(
-                `
-                    SELECT sessions.*, session_runtime_state.state AS control_state
-                    FROM sessions
-                    LEFT JOIN session_runtime_state
-                        ON session_runtime_state.session_id = sessions.id
-                    ORDER BY sessions.updated_at DESC
-                `,
-            );
+        try {
+            const result = ownerId
+                ? await postgres.query(
+                    `
+                        SELECT sessions.*, session_runtime_state.state AS control_state
+                        FROM sessions
+                        LEFT JOIN session_runtime_state
+                            ON session_runtime_state.session_id = sessions.id
+                        WHERE COALESCE(sessions.metadata->>'ownerId', '') = ''
+                           OR sessions.metadata->>'ownerId' = $1
+                        ORDER BY sessions.updated_at DESC
+                    `,
+                    [ownerId],
+                )
+                : await postgres.query(
+                    `
+                        SELECT sessions.*, session_runtime_state.state AS control_state
+                        FROM sessions
+                        LEFT JOIN session_runtime_state
+                            ON session_runtime_state.session_id = sessions.id
+                        ORDER BY sessions.updated_at DESC
+                    `,
+                );
 
-        const sessions = result.rows.map((row) => this.toSession(row));
-        return scopeKey
-            ? sessions.filter((session) => sessionMatchesScope(session, scopeKey))
-            : sessions;
+            const sessions = result.rows.map((row) => this.toSession(row));
+            return scopeKey
+                ? sessions.filter((session) => sessionMatchesScope(session, scopeKey))
+                : sessions;
+        } catch (error) {
+            if (await this.switchToFallbackStorage(error)) {
+                return this.list(options);
+            }
+            throw error;
+        }
     }
 
     async listMessages(id, limit = MAX_RECENT_MESSAGES, ownerId = null) {
@@ -1455,27 +1588,33 @@ class SessionStore {
         const normalizedLimit = Math.max(0, limit);
 
         if (this.usePostgres) {
-            const result = await postgres.query(
-                `
-                    SELECT id, role, content, created_at, metadata
-                    FROM session_messages
-                    WHERE session_id = $1
-                    ORDER BY created_at DESC
-                    LIMIT $2
-                `,
-                [session.id, normalizedLimit],
-            );
+            try {
+                const result = await postgres.query(
+                    `
+                        SELECT id, role, content, created_at, metadata
+                        FROM session_messages
+                        WHERE session_id = $1
+                        ORDER BY created_at DESC
+                        LIMIT $2
+                    `,
+                    [session.id, normalizedLimit],
+                );
 
-            return result.rows
-                .map((row) => this.toClientMessage({
-                    id: row?.id,
-                    role: ['user', 'assistant', 'system', 'tool'].includes(row?.role) ? row.role : null,
-                    content: stripNullCharacters(row?.content || '').trim(),
-                    timestamp: row?.created_at instanceof Date ? row.created_at.toISOString() : row?.created_at,
-                    metadata: row?.metadata || {},
-                }))
-                .filter((row) => row.role && row.content)
-                .reverse();
+                return result.rows
+                    .map((row) => this.toClientMessage({
+                        id: row?.id,
+                        role: ['user', 'assistant', 'system', 'tool'].includes(row?.role) ? row.role : null,
+                        content: stripNullCharacters(row?.content || '').trim(),
+                        timestamp: row?.created_at instanceof Date ? row.created_at.toISOString() : row?.created_at,
+                        metadata: row?.metadata || {},
+                    }))
+                    .filter((row) => row.role && row.content)
+                    .reverse();
+            } catch (error) {
+                if (!(await this.switchToFallbackStorage(error))) {
+                    throw error;
+                }
+            }
         }
 
         const transcript = this.sessionMessages.get(session.id) || [];
@@ -1495,7 +1634,7 @@ class SessionStore {
     }
 
     isPersistent() {
-        return this.usePostgres;
+        return this.usePostgres && postgres.enabled;
     }
 }
 
