@@ -93,6 +93,35 @@ describe('OpenAIClient provider sessions', () => {
     ]);
   });
 
+  test('chatNonStreaming enables the shared conversation executor for CLI tasks', async () => {
+    mockChatCompletionsCreate.mockResolvedValue({
+      id: 'resp-1',
+      session_id: 'session-1',
+      choices: [
+        {
+          message: {
+            content: 'done',
+          },
+        },
+      ],
+    });
+
+    const client = new OpenAIClient();
+    const response = await client.chatNonStreaming('fix the server', 'session-1', 'gpt-5.4-mini');
+
+    expect(response.content).toBe('done');
+    expect(mockChatCompletionsCreate).toHaveBeenCalledWith(expect.objectContaining({
+      enableConversationExecutor: true,
+      taskType: 'chat',
+      clientSurface: 'cli',
+      metadata: expect.objectContaining({
+        clientSurface: 'cli',
+        enableConversationExecutor: true,
+        remoteBuildAutonomyApproved: true,
+      }),
+    }));
+  });
+
   test('createProviderSession posts the expected provider session body', async () => {
     global.fetch.mockResolvedValue({
       ok: true,

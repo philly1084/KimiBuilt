@@ -829,6 +829,21 @@ function hasExplicitCheckpointRequestText(text = '') {
     return /\b(ask me first|check with me|run it by me|before you start|before doing|before making|before major work|before major changes?|before implementation|which direction|which approach|choose a direction|help me choose|decision|trade-?off|options?|questionnaire|questionnaires|ask me (?:some|a few|a couple of)? questions?|start with (?:questions?|a questionnaire|questionnaires))\b/.test(normalized);
 }
 
+function hasHighImpactDecisionGateText(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        /\b(design choice|product choice|product decision|architecture decision|architectural decision)\b/,
+        /\b(which|choose|pick|decide|select)\b[\s\S]{0,40}\b(approach|architecture|design|direction|stack|framework|provider|strategy)\b/,
+        /\b(trade-?off|tradeoffs?|pros and cons)\b[\s\S]{0,50}\b(approach|architecture|design|direction|stack|framework|provider|strategy)\b/,
+        /\b(ask me first|check with me|run it by me)\b/,
+        /\bbefore\b[\s\S]{0,30}\b(major work|major changes?|implementation|architecture|deploy(?:ment)?)\b/,
+    ].some((pattern) => pattern.test(normalized));
+}
+
 function hasDiscoveryPlanningIntentText(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -1103,8 +1118,9 @@ function buildScoredCandidateToolMap({
         .filter(Boolean)));
 
     if (classification) {
+        const hasHighImpactDecisionGate = hasHighImpactDecisionGateText(normalizedPrompt);
         adjustCandidateToolScore(scoreMap, USER_CHECKPOINT_TOOL_ID, classification.checkpointNeed === 'required' && canUseUserCheckpoint ? 1.6 : 0, 'The classifier requires a user decision before major work.');
-        if (classification.checkpointNeed === 'optional' && canUseUserCheckpoint) {
+        if (classification.checkpointNeed === 'optional' && canUseUserCheckpoint && hasHighImpactDecisionGate) {
             adjustCandidateToolScore(scoreMap, USER_CHECKPOINT_TOOL_ID, 0.18, 'The classifier found ambiguity, but execution should continue with reasonable assumptions unless a real decision gate appears.');
         }
 
@@ -1237,7 +1253,7 @@ function buildScoredCandidateToolMap({
         adjustCandidateToolScore(scoreMap, 'security-scan', 1.0, 'Security review intent is explicit.');
     }
 
-    if (classificationConfidence < 0.72) {
+    if (classificationConfidence < 0.72 && hasHighImpactDecisionGateText(normalizedPrompt)) {
         adjustCandidateToolScore(scoreMap, USER_CHECKPOINT_TOOL_ID, canUseUserCheckpoint ? 0.12 : 0, 'Lower classifier confidence can justify a checkpoint only when the decision is high-impact.');
     }
 
@@ -8402,7 +8418,11 @@ class ConversationOrchestrator extends EventEmitter {
             }
         }
 
-        if (canUseUserCheckpoint && (candidates.size > 0 || hasExplicitCheckpointRequestText(prompt) || hasSubstantialWorkIntentText(prompt))) {
+        if (canUseUserCheckpoint && (
+            hasExplicitCheckpointRequestText(prompt)
+            || hasHighImpactDecisionGateText(prompt)
+            || classification?.checkpointNeed === 'required'
+        )) {
             candidates.add(USER_CHECKPOINT_TOOL_ID);
         }
 
@@ -9109,6 +9129,8 @@ class ConversationOrchestrator extends EventEmitter {
                 : []),
             'Every `user-checkpoint` step must include either a non-empty `params.question` with concise choice `params.options`, or a short `params.steps` questionnaire.',
             'Use `user-checkpoint` when one high-impact user decision would materially change the plan, implementation scope, architecture, or final output before major work.',
+            'Do not use `user-checkpoint` for routine autonomous build steps such as inspecting files, reading logs, applying edits, running tests, redeploying, restarting, or verifying output.',
+            'For implementation, remote-build, deployment, and debugging work, proceed with the next obvious tool step unless the next step is a design/product/architecture choice, requires missing secrets, is destructive, or follows repeated hard failures without a recovery path.',
             'On web-chat, treat `user-checkpoint` as the primary quick way to involve the user when one concise decision or direction check would help.',
             'On web-chat, prefer `user-checkpoint` over asking a blocking multiple-choice question in plain assistant text because it renders as an inline survey card with clickable options.',
             'Do not mention checkpoint quotas, budgets, remaining counts, or internal runtime policy to the user.',
@@ -9190,7 +9212,7 @@ class ConversationOrchestrator extends EventEmitter {
                     'Keep moving through setup, inspection, verification, and routine fixes without asking for confirmation between each step.',
                     'Prefer the next distinct action that most directly advances the original ask, not the safest-sounding minimal action.',
                     'Keep going until the goal is reached, a real blocker appears, or the autonomous runtime budget is exhausted.',
-                    'Stop only when blocked by missing secrets, DNS/domain values, ambiguous product decisions, destructive resets/wipes, repeated tool failures, or an exhausted autonomy budget.',
+                    'Stop only when blocked by missing secrets, DNS/domain values, explicit design/product/architecture choices, destructive resets/wipes, repeated hard tool failures with no credible recovery path, or an exhausted autonomy budget.',
                     'When verified remote tool results already exist, do not repeat the same command back-to-back without an intervening fix or new reason, and do not return {"steps":[]} unless the task is truly complete or genuinely blocked.',
                     'If the last remote step was only an initial inspection, return the next distinct remote step instead of ending the plan.',
                 ]

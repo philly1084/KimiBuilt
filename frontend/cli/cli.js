@@ -56,6 +56,7 @@ const MODES = ['chat', 'canvas', 'notation'];
 const THEMES = ['default', 'minimal', 'colorful', 'dark'];
 const DEFAULT_PROMPT = chalk.green.bold('You> ');
 const PROVIDER_LOCAL_COMMAND_PREFIX = '/.';
+const REMOTE_BUILD_EXECUTION_PROFILE = 'remote-build';
 const PROVIDER_ALIASES = {
   codex: 'codex-cli',
   gemini: 'gemini-cli',
@@ -1384,6 +1385,7 @@ async function loadRemoteToolCatalog() {
     category: 'ssh',
     taskType: 'chat',
     clientSurface: 'cli',
+    executionProfile: REMOTE_BUILD_EXECUTION_PROFILE,
   });
 
   if (currentSessionId && !String(currentSessionId).startsWith('local_')) {
@@ -1410,9 +1412,10 @@ function printRemotePlan() {
   console.log(chalk.cyan.bold('\nRemote CLI Plan\n'));
   console.log(chalk.gray('  1. /remote status - confirm remote runner health and fallback target.'));
   console.log(chalk.gray('  2. /remote tools - choose a catalog command.'));
-  console.log(chalk.gray('  3. /remote run <command> - execute one purposeful inspect, fix, or verify batch.'));
-  console.log(chalk.gray('  4. Continue normal build/test failures while the next step is still on plan.'));
-  console.log(chalk.gray('  5. Stop for sudo/package installs, secrets, destructive deletes, force push, repeated failures, missing credentials, or unclear recovery.\n'));
+  console.log(chalk.gray('  3. /remote <tool-id> - run a catalog entry such as baseline, kubectl-inspect, logs, rollout, build, or test.'));
+  console.log(chalk.gray('  4. /remote run <command> - execute one purposeful inspect, fix, or verify batch.'));
+  console.log(chalk.gray('  5. Continue normal build/test failures while the next step is still on plan.'));
+  console.log(chalk.gray('  6. Stop for sudo/package installs, secrets, destructive deletes, force push, repeated failures, missing credentials, or unclear recovery.\n'));
   console.log(chalk.gray('Raw expert access: /remote run hostname && whoami && uname -m\n'));
 }
 
@@ -1458,6 +1461,7 @@ async function invokeRemoteCommand(command, options = {}) {
       sessionId: currentSessionId,
       taskType: 'chat',
       clientSurface: 'cli',
+      executionProfile: REMOTE_BUILD_EXECUTION_PROFILE,
       model: currentModel || null,
     },
   });
@@ -1480,6 +1484,19 @@ function buildHttpsVerifyCommand(host) {
   return `host=${JSON.stringify(normalized)}
 getent ahosts "$host" || true
 curl -fsSIL --max-time 20 "https://$host"`;
+}
+
+function resolveCatalogEntry(catalog = [], subcommand = '') {
+  const normalized = String(subcommand || '').trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  return (Array.isArray(catalog) ? catalog : []).find((entry) => {
+    const id = String(entry?.id || '').trim().toLowerCase();
+    const label = String(entry?.label || '').trim().toLowerCase().replace(/\s+/g, '-');
+    return id === normalized || label === normalized;
+  }) || null;
 }
 
 async function handleRemote(argString = '') {
@@ -1524,6 +1541,25 @@ async function handleRemote(argString = '') {
       return;
     }
 
+    const { catalog } = await loadRemoteToolCatalog();
+    const catalogEntry = resolveCatalogEntry(catalog, subcommand);
+    if (catalogEntry) {
+      const command = String(catalogEntry.command || '').trim();
+      if (!command) {
+        spinner.fail(`Remote catalog entry '${catalogEntry.id}' has no command.`);
+        return;
+      }
+
+      const result = await invokeRemoteCommand(command, {
+        profile: catalogEntry.profile || 'inspect',
+        workflowAction: `remote-cli-${catalogEntry.id || subcommand}`,
+        timeout: 120000,
+      });
+      spinner.stop();
+      printRemoteResult(result);
+      return;
+    }
+
     if (subcommand === 'run') {
       if (!rest) {
         spinner.fail('Usage: /remote run <command>');
@@ -1550,7 +1586,7 @@ async function handleRemote(argString = '') {
       return;
     }
 
-    spinner.fail('Usage: /remote status | /remote tools | /remote plan | /remote run <command> | /remote verify [host]');
+    spinner.fail('Usage: /remote status | /remote tools | /remote plan | /remote <catalog-id> | /remote run <command> | /remote verify [host]');
   } catch (err) {
     spinner.fail(chalk.red(`Remote ${subcommand} failed: ${err.message}`));
   }
@@ -1842,6 +1878,7 @@ Remote CLI Commands:
   /remote status                Show remote runner and fallback target state
   /remote tools                 Show the remote command catalog
   /remote plan                  Show the remote CLI build loop
+  /remote baseline              Run a catalog command by ID
   /remote run <command>         Execute a curated remote-command call
   /remote verify [host]         Verify DNS and HTTPS from the remote host
 

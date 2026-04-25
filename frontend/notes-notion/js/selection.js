@@ -598,8 +598,8 @@ const Selection = (function() {
         const y = e.clientY;
         
         // Keep menu on screen
-        const menuWidth = 180;
-        const menuHeight = 220;
+        const menuWidth = 220;
+        const menuHeight = 320;
         
         let posX = x;
         let posY = y;
@@ -661,6 +661,12 @@ const Selection = (function() {
                 case 'turn-into':
                     showTurnIntoMenu(blockId);
                     break;
+                case 'swap-blank':
+                    showSwapBlankMenu(blockId);
+                    break;
+                case 'wipe-block':
+                    if (callbacks.onWipeBlock) callbacks.onWipeBlock(blockId);
+                    break;
                 case 'color':
                     showColorPicker(blockId);
                     break;
@@ -681,6 +687,24 @@ const Selection = (function() {
                 window.SlashMenu.setCallback((type) => {
                     if (callbacks.onTurnInto) {
                         callbacks.onTurnInto(blockId, type);
+                    }
+                });
+            }
+        }
+    }
+
+    /**
+     * Show a block selector for destructive blank swaps.
+     */
+    function showSwapBlankMenu(blockId) {
+        if (window.SlashMenu) {
+            const block = document.querySelector(`.block[data-block-id="${blockId}"]`);
+            if (block) {
+                const rect = block.getBoundingClientRect();
+                window.SlashMenu.show(rect.left + 100, rect.top);
+                window.SlashMenu.setCallback((type) => {
+                    if (callbacks.onSwapBlank) {
+                        callbacks.onSwapBlank(blockId, type);
                     }
                 });
             }
@@ -867,3 +891,4 @@ const Selection = (function() {
     };
 })();
 
+window.Selection = Selection;

@@ -3028,4 +3028,5 @@ const Blocks = (function() {
     };
 })();
 
+window.Blocks = Blocks;
 

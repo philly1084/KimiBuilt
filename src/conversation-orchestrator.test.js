@@ -316,6 +316,67 @@ describe('ConversationOrchestrator', () => {
         );
     });
 
+    test('remote-build policy keeps routine build work autonomous instead of adding checkpoints', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['remote-command', 'user-checkpoint', 'tool-doc-read'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Build the site on the remote server, fix any test failures, deploy it, and verify HTTPS.',
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+            toolContext: {
+                userCheckpointPolicy: {
+                    enabled: true,
+                    remaining: 3,
+                },
+            },
+        });
+
+        expect(toolPolicy.candidateToolIds).toContain('remote-command');
+        expect(toolPolicy.candidateToolIds).not.toContain('user-checkpoint');
+    });
+
+    test('remote-build policy still allows checkpoints for explicit design decisions', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['remote-command', 'user-checkpoint', 'tool-doc-read'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Before implementation, help me choose which architecture approach to use for the server build.',
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+            toolContext: {
+                userCheckpointPolicy: {
+                    enabled: true,
+                    remaining: 3,
+                },
+            },
+        });
+
+        expect(toolPolicy.candidateToolIds).toContain('user-checkpoint');
+    });
+
     test('restores harness completion state for a continuation turn', async () => {
         const llmClient = {
             createResponse: jest.fn().mockResolvedValue(buildResponse('Continuing from the saved harness state.', 'resp_harness_resume')),

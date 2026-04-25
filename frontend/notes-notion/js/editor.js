@@ -1514,6 +1514,58 @@ const Editor = (function() {
 
         focusBlock(blockId);
     }
+
+    /**
+     * Swap a block shell to a new type and wipe content/type-specific state.
+     * Keeps the existing block ID so agents can keep targeting the same block.
+     */
+    function swapBlockType(blockId, newType = 'text') {
+        if (!currentPage) return null;
+
+        const location = findBlockLocation(blockId);
+        if (!location) return null;
+
+        const blockTypes = window.Blocks?.getBlockTypes?.() || {};
+        const targetType = blockTypes[newType] ? newType : 'text';
+        const previousCreatedAt = location.block.createdAt || Date.now();
+        const freshBlock = Blocks.createBlock(targetType, '');
+
+        flushActiveBlockContent({ scheduleSave: false, updateWorkspace: false });
+        saveToHistory();
+
+        Object.keys(location.block).forEach((key) => {
+            if (key !== 'id') {
+                delete location.block[key];
+            }
+        });
+
+        Object.assign(location.block, {
+            ...freshBlock,
+            id: blockId,
+            type: targetType,
+            createdAt: previousCreatedAt,
+            children: [],
+            formatting: {},
+            color: null,
+            textColor: null,
+            updatedAt: Date.now(),
+        });
+
+        if (document.activeElement?.closest?.('.block')) {
+            document.activeElement.blur();
+        }
+
+        refreshEditor();
+        autoSave();
+        focusBlock(blockId, 'start');
+
+        return location.block;
+    }
+
+    function wipeBlock(blockId) {
+        const block = getBlock(blockId);
+        return swapBlockType(blockId, block?.type || 'text');
+    }
     
     /**
      * Update block content from DOM
@@ -2162,6 +2214,8 @@ const Editor = (function() {
         deleteBlock,
         duplicateBlock,
         convertBlockType,
+        swapBlockType,
+        wipeBlock,
         indentBlock,
         unindentBlock,
         setBlockColor,

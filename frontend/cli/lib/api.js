@@ -180,11 +180,13 @@ class OpenAIClient {
       model: selectedModel,
       messages,
       stream: true,
+      enableConversationExecutor: true,
       taskType: CLI_TASK_TYPE,
       clientSurface: CLI_CLIENT_SURFACE,
       metadata: {
         remoteBuildAutonomyApproved: CLI_REMOTE_BUILD_AUTONOMY_APPROVED,
         clientSurface: CLI_CLIENT_SURFACE,
+        enableConversationExecutor: true,
       },
     };
     
@@ -298,11 +300,13 @@ class OpenAIClient {
       model: selectedModel,
       messages,
       stream: false,
+      enableConversationExecutor: true,
       taskType: CLI_TASK_TYPE,
       clientSurface: CLI_CLIENT_SURFACE,
       metadata: {
         remoteBuildAutonomyApproved: CLI_REMOTE_BUILD_AUTONOMY_APPROVED,
         clientSurface: CLI_CLIENT_SURFACE,
+        enableConversationExecutor: true,
       },
     };
     

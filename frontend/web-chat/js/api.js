@@ -1894,13 +1894,19 @@ class OpenAIAPIClient extends EventTarget {
         return response.json();
     }
 
-    async getAvailableTools(category = null) {
+    async getAvailableTools(category = null, options = {}) {
         const params = new URLSearchParams();
         if (category) {
             params.set('category', category);
         }
         params.set('taskType', WEB_CHAT_API_TASK_TYPE);
         params.set('clientSurface', WEB_CHAT_API_CLIENT_SURFACE);
+        if (options.executionProfile) {
+            params.set('executionProfile', String(options.executionProfile));
+        }
+        if (options.includeAll === true) {
+            params.set('includeAll', 'true');
+        }
         if (this.currentSessionId && !String(this.currentSessionId).startsWith('local_')) {
             params.set('sessionId', this.currentSessionId);
         }
@@ -1922,6 +1928,24 @@ class OpenAIAPIClient extends EventTarget {
         };
     }
 
+    async getRemoteToolCatalog() {
+        const response = await this.getAvailableTools('ssh', {
+            executionProfile: 'remote-build',
+        });
+        const tools = Array.isArray(response?.tools) ? response.tools : [];
+        const remoteTool = tools.find((tool) => tool.id === 'remote-command')
+            || tools.find((tool) => Array.isArray(tool?.runtime?.commandCatalog))
+            || null;
+
+        return {
+            tools,
+            runtime: response?.meta?.runtime || null,
+            remoteTool,
+            catalog: remoteTool?.runtime?.commandCatalog || [],
+            meta: response?.meta || {},
+        };
+    }
+
     async getToolDoc(toolId) {
         const response = await fetch(`${BASE_URL_WITHOUT_API}/api/tools/docs/${encodeURIComponent(toolId)}`, {
             method: 'GET',
@@ -1936,7 +1960,7 @@ class OpenAIAPIClient extends EventTarget {
         return data.data || null;
     }
 
-    async invokeTool(toolId, params = {}) {
+    async invokeTool(toolId, params = {}, options = {}) {
         const response = await fetch(`${BASE_URL_WITHOUT_API}/api/tools/invoke`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1947,15 +1971,20 @@ class OpenAIAPIClient extends EventTarget {
                 model: this.currentModel || null,
                 taskType: WEB_CHAT_API_TASK_TYPE,
                 clientSurface: WEB_CHAT_API_CLIENT_SURFACE,
+                ...(options.executionProfile ? { executionProfile: options.executionProfile } : {}),
                 metadata: buildWorkspaceAwareMetadata({
                     clientSurface: WEB_CHAT_API_CLIENT_SURFACE,
                     ...buildClientClockMetadata(),
+                    ...(options.metadata && typeof options.metadata === 'object'
+                        ? options.metadata
+                        : {}),
                 }),
             }),
         });
 
         if (!response.ok) {
-            throw new Error(`Tool invocation failed: HTTP ${response.status}`);
+            const payload = await this.parseErrorPayload(response);
+            throw new Error(payload?.error?.message || payload?.error || payload?.message || `Tool invocation failed: HTTP ${response.status}`);
         }
 
         const data = await response.json();
@@ -1966,6 +1995,26 @@ class OpenAIAPIClient extends EventTarget {
             result: data.data,
             sessionId: data.sessionId || this.currentSessionId || null,
         };
+    }
+
+    async invokeRemoteCommand(command, options = {}) {
+        const normalizedCommand = String(command || '').trim();
+        if (!normalizedCommand) {
+            throw new Error('Remote command is required.');
+        }
+
+        return this.invokeTool('remote-command', {
+            command: normalizedCommand,
+            profile: options.profile || 'build',
+            workflowAction: options.workflowAction || 'web-chat-remote-manual-run',
+            timeout: options.timeout || 120000,
+        }, {
+            executionProfile: 'remote-build',
+            metadata: {
+                remoteBuildAutonomyApproved: true,
+                remoteCommandSource: 'web-chat',
+            },
+        });
     }
 
     async getSessionWorkloads(sessionId) {
@@ -1984,7 +2033,7 @@ class OpenAIAPIClient extends EventTarget {
 
         const data = await response.json();
         return {
-            available: true,
+            available: data.available !== false,
             workloads: data.workloads || [],
         };
     }

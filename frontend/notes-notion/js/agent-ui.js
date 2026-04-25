@@ -13,6 +13,7 @@ const AgentUI = (function() {
         { id: 'summarize', label: 'Summarize page', title: 'Summarize the entire page' },
         { id: 'restructure', label: 'Restructure sections', title: 'Rework the page section by section' },
         { id: 'polish_layout', label: 'Polish layout', title: 'Make the page feel more designed' },
+        { id: 'layout_catalog', label: 'Pick layout', title: 'Show indexed page layout options' },
         { id: 'multi_pass', label: 'Work in passes', title: 'Plan, expand, and apply the page in multiple passes' },
         { id: 'brief', label: 'Turn into brief', title: 'Convert the page into an executive brief' },
         { id: 'grammar', label: 'Fix grammar', title: 'Fix grammar and spelling' }
@@ -267,6 +268,7 @@ const AgentUI = (function() {
             expand: 'Expand on the last paragraph with more details and examples.',
             restructure: 'Restructure this page section by section. Reuse strong blocks, replace weak ones, and improve the block flow.',
             polish_layout: 'Polish this page so it feels designed. Improve the hierarchy, add stronger support blocks where needed, and tighten the section rhythm.',
+            layout_catalog: 'Show me 2-3 best-fit indexed design layouts from the Notes layout catalog, then recommend which one to apply to this page.',
             multi_pass: 'Work through this page in multiple passes. First decide the best section structure, then expand each section, then apply the final page edits.',
             brief: 'Turn this page into an executive brief with a clear lead, key takeaways, and next steps.'
         };
@@ -416,8 +418,9 @@ const AgentUI = (function() {
 
     function renderLiveDesignOptionButtons() {
         const options = getLiveDesignOptions();
+        const layouts = getIndexedLayouts(4);
         if (!options.length) {
-            return '';
+            return renderIndexedLayoutButtons(layouts);
         }
 
         return `
@@ -431,6 +434,47 @@ const AgentUI = (function() {
                             title="${escapeHtmlAttr(option.description || option.title || '')}"
                         >
                             ${escapeHtml(option.label || option.title || 'Pattern')}
+                        </button>
+                    `).join('')}
+                </div>
+            </div>
+            ${renderIndexedLayoutButtons(layouts)}
+        `;
+    }
+
+    function getIndexedLayouts(limit = 4) {
+        try {
+            return window.NotesLayoutCatalog?.getPageLayouts?.().slice(0, limit) || [];
+        } catch (error) {
+            console.warn('AgentUI: failed to read layout catalog', error);
+            return [];
+        }
+    }
+
+    function renderIndexedLayoutButtons(layouts = []) {
+        if (!layouts.length) {
+            return '';
+        }
+
+        return `
+            <div class="agent-layout-library">
+                <div class="agent-layout-library-header">
+                    <span>Indexed layouts</span>
+                    <small>Pick a starting structure</small>
+                </div>
+                <div class="agent-layout-grid">
+                    ${layouts.map((layout) => `
+                        <button
+                            type="button"
+                            class="agent-layout-card agent-design-option-btn"
+                            data-prompt="${escapeHtmlAttr(layout.prompt || '')}"
+                            title="${escapeHtmlAttr(layout.bestFor || '')}"
+                        >
+                            <span class="agent-layout-index">${layout.index}</span>
+                            <span class="agent-layout-copy">
+                                <strong>${escapeHtml(layout.name)}</strong>
+                                <small>${escapeHtml(layout.bestFor)}</small>
+                            </span>
                         </button>
                     `).join('')}
                 </div>

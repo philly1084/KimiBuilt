@@ -1415,6 +1415,20 @@ const Agent = (function() {
         ].join('\n')).join('\n\n');
     }
 
+    function buildIndexedLayoutCatalogGuidance() {
+        if (!window.NotesLayoutCatalog?.buildIndexedGuide) {
+            return 'No indexed layout catalog is loaded. Use the best-fit page templates and visual recipes above.';
+        }
+
+        const layoutGuide = window.NotesLayoutCatalog.buildIndexedGuide();
+        const starterGuide = window.NotesLayoutCatalog.buildStarterGuide?.(10) || '';
+        return [
+            'Indexed page layouts agents can reference by number or ID:',
+            layoutGuide,
+            starterGuide ? `Blank block starters for wipe-and-swap edits:\n${starterGuide}` : '',
+        ].filter(Boolean).join('\n\n');
+    }
+
     function buildBlockDesignPatternChecklist(question = '', pageContext = null, templateMatches = []) {
         const leadPattern = selectNotesBlockDesignPatterns(question, pageContext, templateMatches, { limit: 1 })[0] || null;
         if (!leadPattern) {
@@ -2927,6 +2941,9 @@ ${blockPatternGuidance}
 PAGE DESIGN MANUAL:
 ${designManual}
 
+INDEXED DESIGN LAYOUT CATALOG:
+${buildIndexedLayoutCatalogGuidance()}
+
 BLOCK OPPORTUNITIES FOR THIS REQUEST:
 ${blockOpportunities}
 
@@ -3083,6 +3100,9 @@ ${designSchemeGuidance}
 
 PAGE DESIGN MANUAL:
 ${designManual}
+
+INDEXED DESIGN LAYOUT CATALOG:
+${buildIndexedLayoutCatalogGuidance()}
 
 BLOCK OPPORTUNITIES FOR THIS REQUEST:
 ${blockOpportunities}
@@ -9259,6 +9279,7 @@ Silently verify the lead cluster, section order, and final polish before returni
         getPageContext,
         getFullPageContent,
         getBlockDesignOptions: getLiveBlockDesignOptions,
+        getDesignLayoutCatalog: () => window.NotesLayoutCatalog?.getPageLayouts?.() || [],
         getOutline,
         getPageMetadata,
         

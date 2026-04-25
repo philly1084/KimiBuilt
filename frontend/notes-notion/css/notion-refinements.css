@@ -2938,3 +2938,234 @@ button:focus-visible,
   transform: translateX(14px);
   pointer-events: none;
 }
+
+/* ============================================
+   Notes Design System Pass
+   ============================================ */
+
+:root {
+  --notes-paper: #fffdf8;
+  --notes-paper-soft: #f6f3eb;
+  --notes-ink: #1f2933;
+  --notes-rule: rgba(67, 56, 44, 0.13);
+  --notes-accent: #2f7d6d;
+  --notes-accent-warm: #b26b35;
+  --notes-accent-soft: rgba(47, 125, 109, 0.1);
+}
+
+[data-theme='dark'] {
+  --notes-paper: #111820;
+  --notes-paper-soft: #17222c;
+  --notes-ink: #eef2f6;
+  --notes-rule: rgba(209, 213, 219, 0.13);
+  --notes-accent: #6bc7b6;
+  --notes-accent-warm: #e3a05f;
+  --notes-accent-soft: rgba(107, 199, 182, 0.14);
+}
+
+body {
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--notes-paper-soft), transparent 8%) 0%, var(--notes-paper) 34%),
+    var(--notes-paper);
+}
+
+.main-content {
+  background:
+    linear-gradient(90deg, transparent 0, transparent calc(50% - 520px), color-mix(in oklab, var(--notes-rule), transparent 35%) calc(50% - 520px), transparent calc(50% - 519px)),
+    linear-gradient(90deg, transparent 0, transparent calc(50% + 520px), color-mix(in oklab, var(--notes-rule), transparent 35%) calc(50% + 520px), transparent calc(50% + 521px)),
+    var(--notes-paper);
+}
+
+.breadcrumbs {
+  background: color-mix(in oklab, var(--notes-paper), transparent 7%);
+  border-bottom: 1px solid color-mix(in oklab, var(--notes-rule), transparent 20%);
+  backdrop-filter: blur(18px);
+}
+
+.page-header {
+  padding-top: 44px;
+}
+
+.page-icon-btn {
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.58), rgba(255, 255, 255, 0)),
+    var(--notes-accent-soft);
+  border-color: color-mix(in oklab, var(--notes-accent), transparent 72%);
+  box-shadow: 0 16px 34px -30px color-mix(in oklab, var(--notes-accent), black 20%);
+}
+
+.page-title {
+  color: var(--notes-ink);
+  letter-spacing: 0;
+}
+
+.page-workspace {
+  max-width: 1160px;
+}
+
+.editor {
+  padding-top: 18px;
+}
+
+.block {
+  border-radius: 8px;
+}
+
+.block:hover,
+.block:focus-within,
+.block.selected {
+  background: color-mix(in oklab, var(--notes-accent-soft), transparent 32%);
+  border-color: color-mix(in oklab, var(--notes-accent), transparent 82%);
+  box-shadow: 0 16px 35px -32px color-mix(in oklab, var(--notes-accent), black 28%);
+}
+
+.block-input {
+  letter-spacing: 0;
+}
+
+.block[data-type='heading_1'] .block-input,
+.block[data-type='heading_2'] .block-input,
+.block[data-type='heading_3'] .block-input {
+  letter-spacing: 0;
+}
+
+.block[data-type='callout'] .callout-block,
+.database-table,
+.bookmark-block,
+.image-block,
+.mermaid-block,
+.math-container {
+  border-radius: 8px;
+  border-color: color-mix(in oklab, var(--notes-rule), var(--border-color) 55%);
+}
+
+.context-menu-item-warning {
+  color: var(--notes-accent-warm);
+}
+
+.agent-chat-container {
+  max-width: 560px;
+  height: min(720px, calc(100vh - 48px));
+  border-radius: 8px;
+}
+
+.agent-chat-header {
+  background:
+    linear-gradient(135deg, color-mix(in oklab, var(--notes-accent), black 12%), color-mix(in oklab, var(--notes-accent-warm), black 6%));
+}
+
+.agent-empty-state {
+  align-items: stretch;
+  text-align: left;
+  padding: 28px 22px;
+}
+
+.agent-empty-icon {
+  align-self: flex-start;
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in oklab, var(--notes-accent), white 8%), color-mix(in oklab, var(--notes-accent-warm), white 4%));
+}
+
+.agent-live-design-options,
+.agent-layout-library {
+  width: 100%;
+  margin-top: 16px;
+}
+
+.agent-layout-library-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: var(--text-primary);
+}
+
+.agent-layout-library-header span {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.agent-layout-library-header small {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.agent-layout-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.agent-layout-card {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 10px;
+  width: 100%;
+  min-height: 74px;
+  padding: 10px;
+  border: 1px solid color-mix(in oklab, var(--notes-rule), transparent 10%);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--panel-surface), var(--notes-paper-soft) 22%);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.agent-layout-card:hover {
+  border-color: color-mix(in oklab, var(--notes-accent), transparent 44%);
+  background: color-mix(in oklab, var(--notes-accent-soft), var(--panel-surface) 76%);
+}
+
+.agent-layout-index {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: var(--notes-accent-soft);
+  color: var(--notes-accent);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.agent-layout-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.agent-layout-copy strong {
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.agent-layout-copy small {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.agent-composer-design-tray {
+  border-top-color: color-mix(in oklab, var(--notes-rule), transparent 15%);
+}
+
+.agent-composer-design-btn {
+  border-radius: 8px;
+}
+
+@media (max-width: 640px) {
+  .main-content {
+    background: var(--notes-paper);
+  }
+
+  .agent-layout-grid {
+    grid-template-columns: 1fr;
+  }
+}

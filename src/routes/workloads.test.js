@@ -19,15 +19,17 @@ describe('/api workload routes', () => {
         return app;
     }
 
-    test('returns 503 when deferred workloads are unavailable', async () => {
+    test('returns an unavailable empty list when deferred workloads are unavailable', async () => {
         const app = buildApp({
             isAvailable: jest.fn(() => false),
         });
 
         const response = await request(app).get('/api/sessions/session-1/workloads');
 
-        expect(response.status).toBe(503);
-        expect(response.body.error.message).toContain('Postgres');
+        expect(response.status).toBe(200);
+        expect(response.body.available).toBe(false);
+        expect(response.body.workloads).toEqual([]);
+        expect(response.body.message).toContain('Postgres');
     });
 
     test('creates a workload for a session', async () => {

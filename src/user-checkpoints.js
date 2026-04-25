@@ -471,6 +471,8 @@ function buildUserCheckpointInstructions(policy = {}) {
         'If the user asks you to ask them a survey, questionnaire, inline survey card, or checkpoint card, call `user-checkpoint` directly instead of replying with sample survey text, markdown checkboxes, or an offer to turn it into a card later.',
         'Prefer a reasonable stated assumption over asking a checkpoint when the choice is low-risk or easily reversible.',
         'Use a checkpoint only when the answer would materially change the plan, architecture, implementation scope, or final output.',
+        'For build, implementation, deployment, server, and debugging work, do not use a checkpoint for routine next steps such as inspecting logs, editing files, running tests, applying a fix, redeploying, or verifying. Keep executing until the work completes or a hard blocker appears.',
+        'Treat missing credentials or secrets, destructive actions, unrecoverable repeated tool failures, and explicit design/product/architecture choices as valid checkpoint reasons.',
         'Do not use a checkpoint for small clarifications or details you can infer reasonably.',
         'Keep the checkpoint concise: one card with one visible step at a time. Prefer 1 question by default, or a short 2 to 4 step questionnaire when the user explicitly wants structured intake or back-and-forth.',
         'Supported step types are single-choice, multi-choice, text, date, time, and datetime. For choice steps, use 2 to 4 strong options and keep the optional free-text path available when helpful.',

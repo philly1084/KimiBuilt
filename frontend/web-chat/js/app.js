@@ -340,7 +340,7 @@ class ChatApp {
             chunks: [],
         };
         this.workloadsOpen = false;
-        this.workloadsAvailable = true;
+        this.workloadsAvailable = null;
         this.currentSessionWorkloads = [];
         this.workloadRunsById = new Map();
         this.hiddenCompletedWorkloadCount = 0;
@@ -1243,6 +1243,10 @@ class ChatApp {
             const allWorkloads = Array.isArray(result.workloads) ? result.workloads : [];
             this.workloadRunsById = new Map();
 
+            if (!this.workloadsAvailable) {
+                this.pauseWorkloadSocket();
+            }
+
             if (this.workloadsAvailable && allWorkloads.length > 0) {
                 const runs = await Promise.all(allWorkloads.map((workload) =>
                     apiClient.getWorkloadRuns(workload.id, 6)
@@ -1264,6 +1268,10 @@ class ChatApp {
             this.hiddenCompletedWorkloadCount = Math.max(0, allWorkloads.length - this.currentSessionWorkloads.length);
 
             this.renderWorkloadsPanel();
+            if (this.workloadsAvailable) {
+                this.workloadSocketPaused = false;
+                this.subscribeToSessionUpdates(sessionId);
+            }
             return this.currentSessionWorkloads;
         } catch (error) {
             console.error('Failed to load workloads:', error);
@@ -1380,7 +1388,7 @@ class ChatApp {
             return;
         }
 
-        if (!this.workloadsAvailable) {
+        if (this.workloadsAvailable === false) {
             this.workloadsEmpty.textContent = 'Deferred workloads require Postgres-backed persistence.';
             this.workloadsEmpty.classList.remove('hidden');
             this.workloadsList.innerHTML = '';
@@ -2305,6 +2313,10 @@ class ChatApp {
     }
 
     async connectWorkloadSocket() {
+        if (this.workloadsAvailable !== true) {
+            return;
+        }
+
         if (this.workloadSocketPaused || this.isAppBackgrounded()) {
             return;
         }
@@ -2421,7 +2433,7 @@ class ChatApp {
             : null;
         this.pendingWorkloadSessionId = normalizedSessionId;
 
-        if (this.workloadSocketPaused || this.isAppBackgrounded()) {
+        if (this.workloadsAvailable !== true || this.workloadSocketPaused || this.isAppBackgrounded()) {
             return;
         }
 
@@ -4436,6 +4448,9 @@ class ChatApp {
                     uiHelpers.showToast('Please provide a search query. Example: /unsplash sunset', 'warning');
                 }
                 break;
+            case 'remote':
+                this.handleRemoteCommand(args);
+                break;
             case 'clear':
                 this.clearCurrentSession();
                 break;
@@ -4447,6 +4462,223 @@ class ChatApp {
                 break;
             default:
                 uiHelpers.showToast(`Unknown command: /${cmd}. Try /help for available commands.`, 'warning');
+        }
+    }
+
+    buildRemotePlanContent() {
+        return [
+            '## Remote CLI Plan',
+            '',
+            '1. `/remote status` - confirm remote runner health and fallback target.',
+            '2. `/remote tools` - choose a catalog command.',
+            '3. `/remote <tool-id>` - run a catalog entry such as `baseline`, `kubectl-inspect`, `logs`, `rollout`, `build`, or `test`.',
+            '4. `/remote run <command>` - execute one purposeful inspect, fix, or verify batch.',
+            '5. Continue normal build/test failures while the next step is still on plan.',
+            '6. Stop for sudo/package installs, secrets, destructive deletes, force push, repeated failures, missing credentials, or unclear recovery.',
+            '',
+            'Raw expert access: `/remote run hostname && whoami && uname -m`',
+        ].join('\n');
+    }
+
+    buildRemoteHttpsVerifyCommand(host) {
+        const normalized = String(host || '').trim() || 'demoserver2.buzz';
+        if (!/^[a-z0-9.-]+(?::[0-9]{1,5})?$/i.test(normalized)) {
+            throw new Error('Host must be a domain, IP address, or host:port without shell characters.');
+        }
+
+        return `host=${JSON.stringify(normalized)}
+getent ahosts "$host" || true
+curl -fsSIL --max-time 20 "https://$host"`;
+    }
+
+    resolveRemoteCatalogEntry(catalog = [], subcommand = '') {
+        const normalized = String(subcommand || '').trim().toLowerCase();
+        if (!normalized) {
+            return null;
+        }
+
+        return (Array.isArray(catalog) ? catalog : []).find((entry) => {
+            const id = String(entry?.id || '').trim().toLowerCase();
+            const label = String(entry?.label || '').trim().toLowerCase().replace(/\s+/g, '-');
+            return id === normalized || label === normalized;
+        }) || null;
+    }
+
+    unwrapRemoteResult(invocation = {}) {
+        const envelope = invocation?.result || {};
+        return envelope?.data || envelope?.result || envelope;
+    }
+
+    formatRemoteStatus(remoteCatalog = {}) {
+        const runtime = remoteCatalog?.runtime || {};
+        const runner = runtime.remoteRunner || {};
+        const ssh = runtime.sshDefaults || {};
+        const deploy = runtime.deployDefaults || {};
+        const remoteTool = remoteCatalog?.remoteTool || {};
+
+        return [
+            '## Remote CLI Status',
+            '',
+            `- Remote runner: ${runner.healthy ? 'healthy' : 'not healthy'} (enabled=${runner.enabled ? 'yes' : 'no'}, preferred=${runner.preferred ? 'yes' : 'no'})`,
+            `- Remote-command: ${remoteTool?.runtime?.configured ? 'configured' : 'not configured'} via ${remoteTool?.runtime?.source || 'unknown'}`,
+            `- Default target: ${remoteTool?.runtime?.defaultTarget || 'none'}`,
+            `- SSH fallback: ${ssh.configured ? `${ssh.username || 'unknown'}@${ssh.host}:${ssh.port || 22}` : 'not configured'}`,
+            `- Deploy defaults: namespace=${deploy.namespace || 'unset'}, deployment=${deploy.deployment || 'unset'}, domain=${deploy.publicDomain || 'unset'}`,
+        ].join('\n');
+    }
+
+    formatRemoteTools(remoteCatalog = {}) {
+        const catalog = Array.isArray(remoteCatalog.catalog) ? remoteCatalog.catalog : [];
+        if (catalog.length === 0) {
+            return 'No remote CLI command catalog is available.';
+        }
+
+        return [
+            '## Remote CLI Tools',
+            '',
+            ...catalog.map((entry) => {
+                const id = String(entry?.id || '').trim();
+                const profile = String(entry?.profile || 'inspect').trim();
+                const description = String(entry?.description || entry?.purpose || 'Remote command pattern.').trim();
+                return `- \`${id}\` (${profile}) - ${description}`;
+            }),
+        ].join('\n');
+    }
+
+    formatRemoteResult(result = {}, title = 'Remote CLI Result') {
+        const exitCode = Number.isFinite(Number(result.exitCode)) ? Number(result.exitCode) : 'unknown';
+        const stdout = String(result.stdout || result.output || '').trim();
+        const stderr = String(result.stderr || '').trim();
+        const metadata = [];
+
+        metadata.push(`Exit code: \`${exitCode}\``);
+        if (result.transport || result.source || result.runnerId) {
+            metadata.push(`Transport: \`${result.transport || result.source || 'remote'}${result.runnerId ? `:${result.runnerId}` : ''}\``);
+        }
+        if (result.cwd || result.workspacePath) {
+            metadata.push(`Workspace: \`${result.cwd || result.workspacePath}\``);
+        }
+
+        const sections = [
+            `## ${title}`,
+            '',
+            ...metadata.map((line) => `- ${line}`),
+        ];
+
+        if (stdout) {
+            sections.push('', '### STDOUT', '```text', stdout, '```');
+        }
+        if (stderr) {
+            sections.push('', '### STDERR', '```text', stderr, '```');
+        }
+        if (!stdout && !stderr) {
+            sections.push('', '```json', JSON.stringify(result, null, 2), '```');
+        }
+
+        return sections.join('\n');
+    }
+
+    async handleRemoteCommand(argString = '') {
+        if (!sessionManager.currentSessionId) {
+            await this.createNewSession();
+        }
+
+        const sessionId = sessionManager.currentSessionId;
+        const trimmed = String(argString || '').trim();
+        const [rawSubcommand, ...restParts] = trimmed.split(/\s+/).filter(Boolean);
+        const subcommand = String(rawSubcommand || 'plan').toLowerCase();
+        const rest = restParts.join(' ').trim();
+
+        uiHelpers.hideWelcomeMessage();
+        const userMessage = {
+            role: 'user',
+            content: `/remote${trimmed ? ` ${trimmed}` : ''}`,
+            timestamp: new Date().toISOString(),
+        };
+        sessionManager.addMessage(sessionId, userMessage);
+        this.messagesContainer.appendChild(uiHelpers.renderMessage(userMessage));
+        uiHelpers.scrollToBottom();
+
+        try {
+            let assistantContent = '';
+
+            if (subcommand === 'plan' || subcommand === 'help' || subcommand === '?') {
+                assistantContent = this.buildRemotePlanContent();
+            } else {
+                const remoteCatalog = await apiClient.getRemoteToolCatalog();
+
+                if (subcommand === 'status') {
+                    assistantContent = this.formatRemoteStatus(remoteCatalog);
+                } else if (subcommand === 'tools') {
+                    assistantContent = this.formatRemoteTools(remoteCatalog);
+                } else if (subcommand === 'run') {
+                    if (!rest) {
+                        throw new Error('Usage: /remote run <command>');
+                    }
+                    const invocation = await apiClient.invokeRemoteCommand(rest, {
+                        profile: 'build',
+                        workflowAction: 'web-chat-remote-manual-run',
+                        timeout: 120000,
+                    });
+                    if (invocation?.sessionId) {
+                        this.syncBackendSession(invocation.sessionId);
+                    }
+                    assistantContent = this.formatRemoteResult(this.unwrapRemoteResult(invocation));
+                } else if (subcommand === 'verify') {
+                    const command = this.buildRemoteHttpsVerifyCommand(rest);
+                    const invocation = await apiClient.invokeRemoteCommand(command, {
+                        profile: 'inspect',
+                        workflowAction: 'web-chat-remote-https-verify',
+                        timeout: 60000,
+                    });
+                    if (invocation?.sessionId) {
+                        this.syncBackendSession(invocation.sessionId);
+                    }
+                    assistantContent = this.formatRemoteResult(this.unwrapRemoteResult(invocation), 'Remote HTTPS Verify');
+                } else {
+                    const catalogEntry = this.resolveRemoteCatalogEntry(remoteCatalog.catalog, subcommand);
+                    if (!catalogEntry) {
+                        throw new Error('Usage: /remote status | /remote tools | /remote plan | /remote <catalog-id> | /remote run <command> | /remote verify [host]');
+                    }
+                    const command = String(catalogEntry.command || '').trim();
+                    if (!command) {
+                        throw new Error(`Remote catalog entry '${catalogEntry.id || subcommand}' has no command.`);
+                    }
+                    const invocation = await apiClient.invokeRemoteCommand(command, {
+                        profile: catalogEntry.profile || 'inspect',
+                        workflowAction: `web-chat-remote-${catalogEntry.id || subcommand}`,
+                        timeout: 120000,
+                    });
+                    if (invocation?.sessionId) {
+                        this.syncBackendSession(invocation.sessionId);
+                    }
+                    assistantContent = this.formatRemoteResult(
+                        this.unwrapRemoteResult(invocation),
+                        `Remote ${catalogEntry.label || catalogEntry.id || subcommand}`,
+                    );
+                }
+            }
+
+            const assistantMessage = {
+                role: 'assistant',
+                content: assistantContent,
+                timestamp: new Date().toISOString(),
+            };
+            sessionManager.addMessage(sessionId, assistantMessage);
+            this.messagesContainer.appendChild(uiHelpers.renderMessage(assistantMessage));
+            uiHelpers.reinitializeIcons(this.messagesContainer);
+            uiHelpers.scrollToBottom();
+            this.updateSessionInfo();
+        } catch (error) {
+            const assistantMessage = {
+                role: 'assistant',
+                content: `**Remote CLI error:** ${error.message}`,
+                timestamp: new Date().toISOString(),
+            };
+            sessionManager.addMessage(sessionId, assistantMessage);
+            this.messagesContainer.appendChild(uiHelpers.renderMessage(assistantMessage));
+            uiHelpers.scrollToBottom();
+            this.updateSessionInfo();
         }
     }
 

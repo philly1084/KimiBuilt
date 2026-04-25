@@ -20,6 +20,16 @@ function handleUnavailable(res) {
     });
 }
 
+function handleUnavailableList(req, res) {
+    return res.json({
+        sessionId: req.params.id,
+        workloads: [],
+        count: 0,
+        available: false,
+        message: 'Deferred workloads require an active Postgres-backed session store',
+    });
+}
+
 router.post('/sessions/:id/workloads', async (req, res, next) => {
     try {
         const service = getService(req);
@@ -42,7 +52,7 @@ router.get('/sessions/:id/workloads', async (req, res, next) => {
     try {
         const service = getService(req);
         if (!service?.isAvailable()) {
-            return handleUnavailable(res);
+            return handleUnavailableList(req, res);
         }
 
         const workloads = await service.listSessionWorkloads(req.params.id, getOwnerId(req));

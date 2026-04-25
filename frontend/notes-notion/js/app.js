@@ -179,6 +179,27 @@
                 }
 
                 Editor.convertBlockType(blockId, type);
+            },
+            onSwapBlank: (blockId, type) => {
+                const typeName = Blocks.getBlockTypes?.()?.[type]?.name || type;
+                const confirmed = window.confirm(`Swap this block to a blank ${typeName} block? Current content and block-specific settings will be cleared.`);
+                if (!confirmed) {
+                    return;
+                }
+
+                Editor.swapBlockType(blockId, type);
+                Sidebar.showToast(`Swapped to blank ${typeName}`, 'success');
+            },
+            onWipeBlock: (blockId) => {
+                const block = Editor.getBlock?.(blockId);
+                const typeName = Blocks.getBlockTypes?.()?.[block?.type]?.name || 'block';
+                const confirmed = window.confirm(`Wipe this ${typeName} block? Current content and block-specific settings will be cleared.`);
+                if (!confirmed) {
+                    return;
+                }
+
+                Editor.wipeBlock(blockId);
+                Sidebar.showToast(`Wiped ${typeName}`, 'success');
             }
         });
         
