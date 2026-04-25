@@ -32,6 +32,7 @@
     const state = {
         artifacts: [],
         selectedArtifactIds: [],
+        selectedArtifactIdsBySession: new Map(),
         outputFormat: '',
         lastDone: null,
     };
@@ -43,6 +44,51 @@
     function isCurrentSessionId(sessionId = '') {
         const normalizedSessionId = String(sessionId || '').trim();
         return Boolean(normalizedSessionId) && normalizedSessionId === getCurrentSessionId();
+    }
+
+    function getSelectionScopeKey(sessionId = getCurrentSessionId()) {
+        const normalizedSessionId = String(sessionId || '').trim();
+        return normalizedSessionId || '__no-session__';
+    }
+
+    function getSelectedArtifactIds(sessionId = getCurrentSessionId()) {
+        const key = getSelectionScopeKey(sessionId);
+        const selected = state.selectedArtifactIdsBySession.get(key);
+        if (!Array.isArray(selected)) {
+            return [];
+        }
+        return [...new Set(selected.map((entry) => String(entry || '').trim()).filter(Boolean))];
+    }
+
+    function setSelectedArtifactIds(nextIds = [], sessionId = getCurrentSessionId()) {
+        const key = getSelectionScopeKey(sessionId);
+        const normalized = [...new Set((Array.isArray(nextIds) ? nextIds : [])
+            .map((entry) => String(entry || '').trim())
+            .filter(Boolean))];
+        if (normalized.length > 0) {
+            state.selectedArtifactIdsBySession.set(key, normalized);
+        } else {
+            state.selectedArtifactIdsBySession.delete(key);
+        }
+        state.selectedArtifactIds = getSelectedArtifactIds();
+        return state.selectedArtifactIds;
+    }
+
+    function addSelectedArtifactId(id, sessionId = getCurrentSessionId()) {
+        const normalizedId = String(id || '').trim();
+        if (!normalizedId) return getSelectedArtifactIds(sessionId);
+        const next = getSelectedArtifactIds(sessionId);
+        if (!next.includes(normalizedId)) {
+            next.push(normalizedId);
+        }
+        return setSelectedArtifactIds(next, sessionId);
+    }
+
+    function removeSelectedArtifactId(id, sessionId = getCurrentSessionId()) {
+        const normalizedId = String(id || '').trim();
+        if (!normalizedId) return getSelectedArtifactIds(sessionId);
+        const next = getSelectedArtifactIds(sessionId).filter((entry) => entry !== normalizedId);
+        return setSelectedArtifactIds(next, sessionId);
     }
 
     function injectStyles() {
@@ -298,6 +344,7 @@
         const sessionId = getCurrentSessionId();
         if (!sessionId || window.sessionManager?.isLocalSession?.(sessionId)) {
             state.artifacts = [];
+            setSelectedArtifactIds([]);
             renderSelectedChips();
             return;
         }
@@ -318,6 +365,9 @@
                 return;
             }
             state.artifacts = data.artifacts || [];
+            const availableIds = new Set(state.artifacts.map((artifact) => String(artifact?.id || '').trim()).filter(Boolean));
+            const filteredSelection = getSelectedArtifactIds(sessionId).filter((id) => availableIds.has(id));
+            setSelectedArtifactIds(filteredSelection, sessionId);
 
             // Sync with file manager if available
             if (window.fileManager) {
@@ -433,6 +483,7 @@
     function renderSelectedChips() {
         const container = document.getElementById('artifact-selected-chips');
         if (!container) return;
+        state.selectedArtifactIds = getSelectedArtifactIds();
 
         if (state.selectedArtifactIds.length === 0) {
             container.innerHTML = '';
@@ -877,7 +928,7 @@
             }
 
             if (state.selectedArtifactIds.length > 0) {
-                nextRequestOptions.artifactIds = [...state.selectedArtifactIds];
+                nextRequestOptions.artifactIds = [...getSelectedArtifactIds()];
             }
 
             const explicitOutputFormat = String(state.outputFormat || '').trim();
@@ -956,7 +1007,7 @@
                     completedArtifactState.artifacts.forEach((artifact) => {
                         window.fileManager?.addFile?.(artifact, { sessionId });
                     });
-                    state.selectedArtifactIds = [];
+                    setSelectedArtifactIds([]);
                     renderSelectedChips();
                 }
                 state.lastDone = null;
@@ -993,14 +1044,14 @@
         if (!window.sessionManager) return;
         
         window.sessionManager.addEventListener('sessionCreated', () => {
-            state.selectedArtifactIds = [];
             state.artifacts = [];
+            setSelectedArtifactIds([]);
             renderSelectedChips();
             fetchArtifacts();
         });
         
         window.sessionManager.addEventListener('sessionSwitched', () => {
-            state.selectedArtifactIds = [];
+            setSelectedArtifactIds(getSelectedArtifactIds());
             renderSelectedChips();
             fetchArtifacts();
         });
@@ -1010,8 +1061,8 @@
         });
         
         window.sessionManager.addEventListener('sessionDeleted', () => {
-            state.selectedArtifactIds = [];
             state.artifacts = [];
+            setSelectedArtifactIds([]);
             renderSelectedChips();
         });
     }
@@ -1137,15 +1188,13 @@
     // Create global artifact manager for external access
     window.artifactManager = {
         deselectArtifact: (id) => {
-            state.selectedArtifactIds = state.selectedArtifactIds.filter(artifactId => artifactId !== id);
+            removeSelectedArtifactId(id);
             renderSelectedChips();
         },
         
         selectArtifact: (id) => {
-            if (!state.selectedArtifactIds.includes(id)) {
-                state.selectedArtifactIds.push(id);
-                renderSelectedChips();
-            }
+            addSelectedArtifactId(id);
+            renderSelectedChips();
         },
         
         downloadArtifact: async (id, filename) => {
@@ -1188,8 +1237,9 @@
         },
         
         addToContext: (id) => {
-            if (!state.selectedArtifactIds.includes(id)) {
-                state.selectedArtifactIds.push(id);
+            const before = getSelectedArtifactIds().length;
+            addSelectedArtifactId(id);
+            if (getSelectedArtifactIds().length > before) {
                 renderSelectedChips();
                 if (window.uiHelpers?.showToast) {
                     uiHelpers.showToast('File added to context', 'success');
@@ -1208,9 +1258,9 @@
         buildGalleryMarkup: buildArtifactGalleryMarkup,
         buildGalleryMessage: buildArtifactGalleryMessage,
         refresh: fetchArtifacts,
-        getSelectedIds: () => [...state.selectedArtifactIds],
+        getSelectedIds: () => [...getSelectedArtifactIds()],
         clearSelection: () => {
-            state.selectedArtifactIds = [];
+            setSelectedArtifactIds([]);
             renderSelectedChips();
         }
     };
