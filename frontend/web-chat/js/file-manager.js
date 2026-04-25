@@ -7,6 +7,8 @@
 class FileManager {
   constructor() {
     this.files = [];
+    this.filesBySession = new Map();
+    this.activeSessionId = '';
     this.modalElement = null;
     this.isOpen = false;
     this.downloadQueue = new Map(); // Track ongoing downloads
@@ -45,6 +47,7 @@ class FileManager {
     });
 
     window.sessionManager.addEventListener('sessionSwitched', () => {
+      this.applySessionFiles(this.getSessionId());
       this.refreshFiles();
     });
 
@@ -55,6 +58,19 @@ class FileManager {
     window.sessionManager.addEventListener('sessionDeleted', () => {
       this.refreshFiles();
     });
+  }
+
+  applySessionFiles(sessionId) {
+    const normalizedSessionId = String(sessionId || '').trim();
+    this.activeSessionId = normalizedSessionId;
+    if (!normalizedSessionId || window.sessionManager?.isLocalSession?.(normalizedSessionId)) {
+      this.files = [];
+    } else {
+      this.files = (this.filesBySession.get(normalizedSessionId) || []).map(file => ({ ...file }));
+    }
+    if (this.isOpen) {
+      this.renderFiles();
+    }
   }
 
   /**
@@ -676,6 +692,7 @@ class FileManager {
    */
   async loadFiles() {
     const sessionId = this.getSessionId();
+    this.activeSessionId = String(sessionId || '').trim();
     if (!sessionId || window.sessionManager?.isLocalSession?.(sessionId)) {
       this.files = [];
       this.renderFiles();
@@ -683,12 +700,13 @@ class FileManager {
     }
 
     try {
-      const response = await fetch(`/api/sessions/${sessionId}/artifacts`);
+      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/artifacts`);
       if (response.status === 404 || response.status === 503) {
         if (this.getSessionId() !== sessionId) {
           return;
         }
         this.files = [];
+        this.filesBySession.set(sessionId, []);
         this.renderFiles();
         return;
       }
@@ -700,11 +718,13 @@ class FileManager {
       }
       this.files = (data.artifacts || []).map(f => ({
         ...f,
+        sessionId,
         category: this.getFileCategory(f.filename),
         selected: false,
         status: 'ready', // ready, downloading, error, success
         progress: 0
       }));
+      this.filesBySession.set(sessionId, this.files.map(file => ({ ...file })));
       
       this.renderFiles();
     } catch (error) {
@@ -959,7 +979,8 @@ class FileManager {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), this.downloadTimeoutMs);
 
-      const response = await fetch(file.downloadUrl || `/api/artifacts/${fileId}/download`, {
+      const downloadTarget = this.resolveApiUrl(file.downloadUrl || `/api/artifacts/${encodeURIComponent(fileId)}/download`);
+      const response = await fetch(downloadTarget, {
         credentials: 'same-origin',
         signal: controller.signal
       });
@@ -1097,7 +1118,7 @@ class FileManager {
     if (!confirm(`Delete "${file.filename}"?`)) return;
 
     try {
-      const response = await fetch(`/api/artifacts/${fileId}`, {
+      const response = await fetch(`/api/artifacts/${encodeURIComponent(fileId)}`, {
         method: 'DELETE'
       });
 
@@ -1164,6 +1185,7 @@ class FileManager {
     this.isOpen = true;
     this.modalElement.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
+    this.applySessionFiles(this.getSessionId());
     
     // Load files
     await this.loadFiles();
@@ -1206,15 +1228,32 @@ class FileManager {
    * Add a file to the list (for generated files)
    */
   addFile(file, options = {}) {
-    const targetSessionId = String(options.sessionId || file?.sessionId || file?.session_id || '').trim();
     const currentSessionId = String(this.getSessionId() || '').trim();
+    const targetSessionId = String(options.sessionId || file?.sessionId || file?.session_id || currentSessionId).trim();
     if (targetSessionId && currentSessionId && targetSessionId !== currentSessionId) {
+      const scopedFiles = this.filesBySession.get(targetSessionId) || [];
+      const existingIndex = scopedFiles.findIndex(f => f.id === file.id);
+      const enrichedFile = {
+        ...file,
+        sessionId: targetSessionId,
+        category: this.getFileCategory(file.filename),
+        selected: false,
+        status: 'ready',
+        progress: 0
+      };
+      if (existingIndex >= 0) {
+        scopedFiles[existingIndex] = enrichedFile;
+      } else {
+        scopedFiles.unshift(enrichedFile);
+      }
+      this.filesBySession.set(targetSessionId, scopedFiles);
       return;
     }
 
     const existingIndex = this.files.findIndex(f => f.id === file.id);
     const enrichedFile = {
       ...file,
+      sessionId: targetSessionId || currentSessionId,
       category: this.getFileCategory(file.filename),
       selected: false,
       status: 'ready',
@@ -1226,10 +1265,20 @@ class FileManager {
     } else {
       this.files.unshift(enrichedFile);
     }
+    this.filesBySession.set(currentSessionId, this.files.map(entry => ({ ...entry })));
     
     if (this.isOpen) {
       this.renderFiles();
     }
+  }
+
+  resolveApiUrl(urlPath = '') {
+    const normalized = String(urlPath || '').trim();
+    if (!normalized) return '';
+    if (/^https?:\/\//i.test(normalized) || normalized.startsWith('blob:') || normalized.startsWith('data:')) {
+      return normalized;
+    }
+    return normalized.startsWith('/') ? normalized : `/${normalized}`;
   }
 }
 

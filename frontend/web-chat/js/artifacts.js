@@ -40,6 +40,17 @@
         return String(window.sessionManager?.currentSessionId || window.apiClient?.getSessionId?.() || '').trim();
     }
 
+    function resolveApiUrl(urlPath = '', { absolute = false } = {}) {
+        const normalized = String(urlPath || '').trim();
+        if (!normalized) return '';
+        if (/^https?:\/\//i.test(normalized) || normalized.startsWith('blob:') || normalized.startsWith('data:')) {
+            return normalized;
+        }
+
+        const relativePath = normalized.startsWith('/') ? normalized : `/${normalized}`;
+        return absolute ? `${API_BASE}${relativePath}` : relativePath;
+    }
+
     function isCurrentSessionId(sessionId = '') {
         const normalizedSessionId = String(sessionId || '').trim();
         return Boolean(normalizedSessionId) && normalizedSessionId === getCurrentSessionId();
@@ -418,7 +429,7 @@
         formData.append('mode', 'chat');
         formData.append('file', file);
 
-        const response = await fetch(`${API_BASE}/api/artifacts/upload`, {
+        const response = await fetch(resolveApiUrl('/api/artifacts/upload', { absolute: true }), {
             method: 'POST',
             body: formData,
         });
@@ -610,15 +621,11 @@
         const preferSandbox = options && options.sandbox === true;
 
         if (preferSandbox && artifact?.sandboxUrl) {
-            return absolute
-                ? `${API_BASE}${artifact.sandboxUrl}`
-                : artifact.sandboxUrl;
+            return resolveApiUrl(artifact.sandboxUrl, { absolute });
         }
 
         if (artifact?.previewUrl) {
-            return absolute
-                ? `${API_BASE}${artifact.previewUrl}`
-                : artifact.previewUrl;
+            return resolveApiUrl(artifact.previewUrl, { absolute });
         }
 
         const format = String(artifact?.format || '').toLowerCase();
@@ -633,7 +640,7 @@
         }
 
         const inlinePath = `${artifact.downloadUrl}?inline=1`;
-        return absolute ? `${API_BASE}${inlinePath}` : inlinePath;
+        return resolveApiUrl(inlinePath, { absolute });
     }
 
     function shouldRenderInlineArtifactPreview(artifact) {
@@ -655,7 +662,7 @@
         const mermaidSource = mermaidArtifact ? getMermaidSourceFromArtifact(artifact) : '';
         const mermaidBaseName = getArtifactBaseName(artifact.filename);
         const mermaidDownloadUrl = mermaidArtifact && artifact?.downloadUrl
-            ? `${API_BASE}${artifact.downloadUrl}`
+            ? resolveApiUrl(artifact.downloadUrl, { absolute: true })
             : '';
         const htmlPreviewUrl = getArtifactPreviewUrl(artifact);
         const inlineHtmlPreview = shouldRenderInlineArtifactPreview(artifact);
@@ -1158,8 +1165,8 @@
             
             // Fallback download
             try {
-                const downloadPath = artifact?.bundleDownloadUrl || artifact?.downloadUrl || `/api/artifacts/${id}/download`;
-                const response = await fetch(`${API_BASE}${downloadPath}`);
+                const downloadPath = artifact?.bundleDownloadUrl || artifact?.downloadUrl || `/api/artifacts/${encodeURIComponent(id)}/download`;
+                const response = await fetch(resolveApiUrl(downloadPath, { absolute: true }));
                 if (!response.ok) throw new Error('Download failed');
                 
                 const blob = await response.blob();
