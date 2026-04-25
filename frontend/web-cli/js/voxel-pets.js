@@ -167,8 +167,79 @@
         return { x, y, z, depth, color, classes };
     }
 
-    function petCells(petValue) {
+    function upscaleCells(cells, scale = 1) {
+        const factor = Math.max(1, Math.floor(Number(scale) || 1));
+        if (factor === 1) {
+            return cells.slice();
+        }
+
+        const output = [];
+        cells.forEach((cell) => {
+            for (let yy = 0; yy < factor; yy++) {
+                for (let xx = 0; xx < factor; xx++) {
+                    output.push(cube(
+                        (cell.x * factor) + xx,
+                        (cell.y * factor) + yy,
+                        cell.color,
+                        cell.classes,
+                        Number(cell.z || 0) * factor,
+                        Math.max(0.35, Number(cell.depth || 1) * (0.75 / factor)),
+                    ));
+                }
+            }
+        });
+        return output;
+    }
+
+    function addHighDetailAccents(cells = [], pet = {}) {
+        const accentCells = [];
+        const add = (x, y, color, classes = '', z = 0, depth = 0.44) => {
+            accentCells.push(cube(x, y, color, classes, z, depth));
+        };
+
+        const p = 'var(--voxel-pet-primary)';
+        const s = 'var(--voxel-pet-secondary)';
+        const a = 'var(--voxel-pet-accent)';
+        const dark = '#061013';
+        const glow = 'rgba(255, 255, 255, 0.85)';
+
+        add(9, 9, dark, 'detail', 9, 0.35);
+        add(14, 9, dark, 'detail', 9, 0.35);
+        add(10, 9, glow, 'shine detail', 10, 0.3);
+        add(15, 9, glow, 'shine detail', 10, 0.3);
+        add(11, 12, s, 'detail', 8, 0.36);
+        add(12, 12, s, 'detail', 8, 0.36);
+
+        if (pet.species === 'dragon' || pet.species === 'lizard') {
+            add(10, 2, a, 'detail spark', 9, 0.34);
+            add(13, 2, a, 'detail spark', 9, 0.34);
+            add(11, 3, s, 'detail', 8, 0.34);
+            add(12, 3, s, 'detail', 8, 0.34);
+        }
+
+        if (pet.trait === 'builder' || pet.trait === 'tinker') {
+            add(4, 17, a, 'tool detail', 9, 0.34);
+            add(19, 17, a, 'tool detail', 9, 0.34);
+        }
+
+        if (pet.trait === 'guardian' || pet.trait === 'warden') {
+            add(7, 12, a, 'badge detail', 9, 0.34);
+            add(16, 12, a, 'badge detail', 9, 0.34);
+        }
+
+        if (pet.eyes === 'scan') {
+            for (let x = 8; x <= 15; x++) {
+                add(x, 8, dark, 'eye detail', 9, 0.34);
+            }
+        }
+
+        cells.push(...accentCells);
+        return cells;
+    }
+
+    function petCells(petValue, options = {}) {
         const pet = normalize(petValue);
+        const detailLevel = options.detailLevel === 'high' ? 'high' : 'normal';
         const p = 'var(--voxel-pet-primary)';
         const s = 'var(--voxel-pet-secondary)';
         const a = 'var(--voxel-pet-accent)';
@@ -252,6 +323,10 @@
             cells.push(cube(9, 3, s, 'spark', 3, 0.55), cube(10, 3, a, 'spark', 3, 0.55));
         }
 
+        if (detailLevel === 'high') {
+            return addHighDetailAccents(upscaleCells(cells, 2), pet);
+        }
+
         return cells;
     }
 
@@ -259,7 +334,7 @@
         const pet = normalize(petValue);
         const variant = ['full', 'mini', 'peek'].includes(options.variant) ? options.variant : 'full';
         const variantCube = {
-            full: 18,
+            full: 9,
             mini: 5,
             peek: 6,
         };
@@ -277,14 +352,19 @@
         wrapper.style.setProperty('--voxel-pet-primary', pet.palette.primary);
         wrapper.style.setProperty('--voxel-pet-secondary', pet.palette.secondary);
         wrapper.style.setProperty('--voxel-pet-accent', pet.palette.accent);
-        wrapper.style.width = `${cubeSize * 15}px`;
-        wrapper.style.height = `${cubeSize * 13}px`;
+        const detailLevel = variant === 'full' ? 'high' : 'normal';
+        const cells = petCells(pet, { detailLevel });
+        const maxX = cells.reduce((max, cell) => Math.max(max, cell.x), 0);
+        const maxY = cells.reduce((max, cell) => Math.max(max, cell.y), 0);
+        wrapper.style.width = `${(maxX + 3) * cubeSize}px`;
+        wrapper.style.height = `${(maxY + 3) * cubeSize}px`;
+        wrapper.style.setProperty('--pet-yaw', `${Number(options.yaw || 0)}deg`);
 
         const shadow = document.createElement('div');
         shadow.className = 'voxel-shadow';
         wrapper.appendChild(shadow);
 
-        petCells(pet).forEach((cell) => {
+        cells.forEach((cell) => {
             const maxDepth = variant === 'full' ? 3 : 2;
             const depthPx = Math.max(1, Math.min(maxDepth, Math.ceil((cell.depth || 1) * (cubeSize / 7))));
             const node = document.createElement('span');

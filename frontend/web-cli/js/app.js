@@ -449,10 +449,14 @@ class CodeCLIApp {
             return;
         }
 
+        const isTravelAction = ['scout', 'guard', 'idle', 'dance'].includes(String(action || '').toLowerCase());
+        const renderedAction = isTravelAction ? 'roam' : action;
+        const directionYaw = placement === 'stream' ? 18 : -18;
         const nodes = [this.voxel.renderElement(this.voxelPet, {
-            action,
+            action: renderedAction,
             variant: 'peek',
             decorative: true,
+            yaw: directionYaw,
         })];
         const thought = String(options.thought || '').trim();
         if (thought) {
