@@ -518,4 +518,85 @@ describe('DocumentService', () => {
       expect.stringContaining('Do not simply recycle'),
     ]));
   });
+
+  test('assembles multiple source types into a structured html document', async () => {
+    const service = new DocumentService({
+      responses: {
+        create: jest.fn(),
+      },
+    });
+
+    const document = await service.assemble([
+      {
+        type: 'notes',
+        title: 'Discovery Notes',
+        text: '# Insight\nCustomers want faster handoffs.\n\n# Risk\nSupport load may rise.',
+      },
+      {
+        type: 'canvas',
+        title: 'Canvas Summary',
+        sections: [
+          {
+            heading: 'Flow',
+            content: 'User -> auth -> dashboard',
+            bullets: ['Keep login fast'],
+          },
+        ],
+      },
+    ], {
+      format: 'html',
+      title: 'Launch Plan',
+    });
+
+    expect(document.mimeType).toBe('text/html');
+    expect(String(document.content)).toContain('Source Map');
+    expect(String(document.content)).toContain('Discovery Notes');
+    expect(String(document.content)).toContain('Insight');
+    expect(String(document.content)).toContain('Risk');
+    expect(String(document.content)).toContain('User -&gt; auth -&gt; dashboard');
+    expect(document.metadata).toEqual(expect.objectContaining({
+      assembled: true,
+      sourceCount: 2,
+      sources: expect.arrayContaining([
+        expect.objectContaining({
+          title: 'Discovery Notes',
+          sectionCount: 2,
+        }),
+        expect.objectContaining({
+          title: 'Canvas Summary',
+          sectionCount: 1,
+        }),
+      ]),
+    }));
+  });
+
+  test('converts stored html documents to markdown using extracted text', async () => {
+    const service = new DocumentService({
+      responses: {
+        create: jest.fn(),
+      },
+    });
+
+    service.storeDocument({
+      id: 'doc-html-1',
+      filename: 'brief.html',
+      mimeType: 'text/html',
+      metadata: { format: 'html', title: 'Brief' },
+      content: '<!DOCTYPE html><html><body><h1>Brief</h1><p>Decision-ready summary.</p></body></html>',
+      previewHtml: '<!DOCTYPE html><html><body><h1>Brief</h1><p>Decision-ready summary.</p></body></html>',
+      extractedText: '# Brief\nDecision-ready summary.',
+    });
+
+    const converted = await service.convertStoredDocument('doc-html-1', 'md');
+
+    expect(converted.mimeType).toBe('text/markdown');
+    expect(converted.filename).toMatch(/\.md$/);
+    expect(String(converted.content)).toContain('# Brief');
+    expect(String(converted.content)).toContain('Decision-ready summary.');
+    expect(converted.metadata).toEqual(expect.objectContaining({
+      convertedFrom: 'html',
+      convertedTo: 'md',
+      sourceDocumentId: 'doc-html-1',
+    }));
+  });
 });

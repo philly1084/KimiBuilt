@@ -9,7 +9,7 @@ const { XlsxGenerator } = require('./generators/xlsx-generator');
 const { TemplateEngine } = require('./template-engine');
 const { AIDocumentGenerator } = require('./ai-document-generator');
 const { ensureHtmlDocument, renderPdfViaBrowser } = require('../artifacts/artifact-renderer');
-const { createUniqueFilename, stripHtml } = require('../utils/text');
+const { createUniqueFilename, normalizeWhitespace, stripHtml } = require('../utils/text');
 const {
   BLUEPRINTS,
   normalizeDocumentType,
@@ -424,34 +424,46 @@ class DocumentService {
    * @returns {Promise<Object>} Assembled document
    */
   async assemble(sources, options = {}) {
-    // TODO: Implement document assembly from multiple sources
-    // For now, combine text sources into a single document
-    const combined = sources.map(s => s.content || s.text || '').join('\n\n');
+    const normalizedSources = this.normalizeAssemblySources(sources);
+    if (normalizedSources.length === 0) {
+      throw new Error('At least one source with content is required to assemble a document.');
+    }
+
     const format = this.normalizeCreationFormat(options.format || 'html');
+    const content = this.buildAssembledDocumentContent(normalizedSources, options);
+    const combined = content.sections.map((section) => [
+      section.heading,
+      section.content,
+      Array.isArray(section.bullets) ? section.bullets.join('\n') : '',
+    ].filter(Boolean).join('\n')).join('\n\n');
 
     const document = await this.renderDocument({
       format,
-      content: {
-        title: options.title || 'document',
-        sections: [{
-          heading: options.title || 'Document',
-          content: combined,
-          level: 1,
-        }],
+      content,
+      title: content.title || options.title || 'document',
+      options: {
+        ...options,
+        documentType: options.documentType || content.documentType || 'report',
       },
-      title: options.title || 'document',
-      options,
       rawText: combined,
     });
 
     return this.storeGeneratedDocument({
       document,
-      filename: this.generateFilename(options.title || 'document', format),
+      filename: this.generateFilename(content.title || options.title || 'document', format),
       metadata: {
+        ...(document.metadata || {}),
         format,
         generatedAt: new Date().toISOString(),
-        sourceCount: sources.length,
-        ...(document.metadata || {}),
+        assembled: true,
+        sourceCount: normalizedSources.length,
+        sources: normalizedSources.map((source) => ({
+          id: source.id,
+          type: source.type,
+          title: source.title,
+          sectionCount: source.sections.length,
+          textLength: source.textLength,
+        })),
       },
     });
   }
@@ -488,6 +500,50 @@ class DocumentService {
         convertedTo: toFormat,
         convertedAt: new Date().toISOString()
       }
+    });
+  }
+
+  async convertStoredDocument(documentId, toFormat, options = {}) {
+    const sourceDocument = this.getDocument(documentId);
+    if (!sourceDocument) {
+      const error = new Error(`Document not found: ${documentId}`);
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const targetFormat = this.normalizeCreationFormat(toFormat || 'html');
+    const sourceFormat = this.inferStoredDocumentFormat(sourceDocument);
+    if (!targetFormat) {
+      throw new Error('Target document format is required.');
+    }
+
+    if (sourceFormat === targetFormat) {
+      return sourceDocument;
+    }
+
+    const content = this.storedDocumentToContent(sourceDocument, options);
+    const document = await this.renderDocument({
+      format: targetFormat,
+      content,
+      title: content.title || 'converted',
+      options: {
+        ...options,
+        documentType: options.documentType || content.documentType || 'document',
+      },
+      rawText: content.sections.map((section) => `${section.heading}\n${section.content || ''}`).join('\n\n'),
+    });
+
+    return this.storeGeneratedDocument({
+      document,
+      filename: this.generateFilename(content.title || 'converted', targetFormat),
+      metadata: {
+        ...(document.metadata || {}),
+        format: targetFormat,
+        convertedFrom: sourceFormat || sourceDocument.mimeType || 'unknown',
+        convertedTo: targetFormat,
+        sourceDocumentId: sourceDocument.id,
+        convertedAt: new Date().toISOString(),
+      },
     });
   }
 
@@ -1697,6 +1753,295 @@ class DocumentService {
     }).join('\n');
   }
 
+  normalizeAssemblySources(sources = []) {
+    if (!Array.isArray(sources)) {
+      return [];
+    }
+
+    return sources
+      .map((source, index) => this.normalizeAssemblySource(source, index))
+      .filter((source) => source.sections.length > 0);
+  }
+
+  normalizeAssemblySource(source = {}, index = 0) {
+    if (typeof source === 'string') {
+      const title = `Source ${index + 1}`;
+      const sections = this.parseTextIntoSections(source, title);
+      return {
+        id: `source-${index + 1}`,
+        type: 'text',
+        title,
+        sections,
+        textLength: sections.reduce((total, section) => total + String(section.content || '').length, 0),
+      };
+    }
+
+    const normalizedSource = source && typeof source === 'object' ? source : {};
+    const contentObject = normalizedSource.content && typeof normalizedSource.content === 'object' && !Buffer.isBuffer(normalizedSource.content)
+      ? normalizedSource.content
+      : null;
+    const title = String(
+      normalizedSource.title
+      || normalizedSource.name
+      || normalizedSource.heading
+      || contentObject?.title
+      || normalizedSource.filename
+      || `Source ${index + 1}`,
+    ).trim();
+    const type = String(
+      normalizedSource.type
+      || normalizedSource.sourceType
+      || normalizedSource.format
+      || normalizedSource.mimeType
+      || 'source',
+    ).trim().toLowerCase();
+    const explicitSections = Array.isArray(normalizedSource.sections)
+      ? normalizedSource.sections
+      : (Array.isArray(contentObject?.sections) ? contentObject.sections : []);
+    const sections = explicitSections.length > 0
+      ? explicitSections.map((section, sectionIndex) => this.normalizeAssemblySection(section, title, sectionIndex)).filter(Boolean)
+      : this.parseTextIntoSections(this.extractAssemblySourceText(normalizedSource), title);
+    const textLength = sections.reduce((total, section) => total
+      + String(section.content || '').length
+      + (Array.isArray(section.bullets) ? section.bullets.join('').length : 0), 0);
+
+    return {
+      id: String(normalizedSource.id || normalizedSource.sourceId || `source-${index + 1}`),
+      type,
+      title,
+      sections,
+      textLength,
+    };
+  }
+
+  normalizeAssemblySection(section = {}, fallbackHeading = 'Source', index = 0) {
+    if (typeof section === 'string') {
+      return {
+        heading: fallbackHeading,
+        content: normalizeWhitespace(section),
+        level: 1,
+      };
+    }
+
+    if (!section || typeof section !== 'object') {
+      return null;
+    }
+
+    const content = normalizeWhitespace(
+      section.content
+      || section.text
+      || section.body
+      || section.markdown
+      || '',
+    );
+    const bullets = Array.isArray(section.bullets)
+      ? section.bullets.map((bullet) => String(bullet || '').trim()).filter(Boolean)
+      : [];
+
+    if (!content && bullets.length === 0 && !section.table && !section.chart && !section.stats?.length && !section.callout) {
+      return null;
+    }
+
+    return {
+      heading: String(section.heading || section.title || `${fallbackHeading} ${index + 1}`).trim(),
+      content,
+      level: Math.min(Math.max(Number(section.level) || 1, 1), 6),
+      bullets,
+      callout: section.callout || null,
+      stats: Array.isArray(section.stats) ? section.stats : [],
+      table: section.table || null,
+      chart: section.chart || null,
+    };
+  }
+
+  extractAssemblySourceText(source = {}) {
+    const contentObject = source.content && typeof source.content === 'object' && !Buffer.isBuffer(source.content)
+      ? source.content
+      : null;
+    const raw = [
+      source.text,
+      source.extractedText,
+      source.markdown,
+      source.body,
+      typeof source.content === 'string' || Buffer.isBuffer(source.content) ? source.content : '',
+      source.html,
+      source.previewHtml,
+      contentObject?.text,
+      contentObject?.content,
+      contentObject?.body,
+      source.data ? JSON.stringify(source.data, null, 2) : '',
+    ].find((value) => value != null && String(value).trim());
+
+    if (!raw) {
+      return '';
+    }
+
+    const text = Buffer.isBuffer(raw) ? raw.toString('utf8') : String(raw);
+    return this.looksLikeHtml(text) ? stripHtml(text) : normalizeWhitespace(text);
+  }
+
+  parseTextIntoSections(text = '', fallbackHeading = 'Source') {
+    const normalized = normalizeWhitespace(text);
+    if (!normalized) {
+      return [];
+    }
+
+    const lines = normalized.split('\n');
+    const sections = [];
+    let current = null;
+
+    lines.forEach((line) => {
+      const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
+      if (headingMatch) {
+        if (current) {
+          sections.push(current);
+        }
+        current = {
+          heading: headingMatch[2].trim(),
+          content: '',
+          level: Math.min(6, headingMatch[1].length),
+        };
+        return;
+      }
+
+      if (!current) {
+        current = {
+          heading: fallbackHeading,
+          content: '',
+          level: 1,
+        };
+      }
+      current.content = current.content ? `${current.content}\n${line}` : line;
+    });
+
+    if (current) {
+      sections.push(current);
+    }
+
+    return sections.map((section, index) => this.normalizeAssemblySection(section, fallbackHeading, index)).filter(Boolean);
+  }
+
+  buildAssembledDocumentContent(sources = [], options = {}) {
+    const title = String(options.title || options.name || '').trim()
+      || (sources.length === 1 ? sources[0].title : 'Assembled Document');
+    const sections = [];
+
+    if (options.includeSourceOverview !== false && sources.length > 1) {
+      sections.push({
+        heading: 'Source Map',
+        content: `This document combines ${sources.length} sources into a single structured artifact.`,
+        level: 1,
+        bullets: sources.map((source) => `${source.title} (${source.type || 'source'}): ${source.sections.length} section${source.sections.length === 1 ? '' : 's'}`),
+      });
+    }
+
+    sources.forEach((source) => {
+      if (source.sections.length > 1) {
+        sections.push({
+          heading: source.title,
+          content: `Assembled from ${source.type || 'source'} input.`,
+          level: 1,
+        });
+      }
+
+      source.sections.forEach((section) => {
+        const heading = source.sections.length === 1
+          ? (section.heading && section.heading !== 'Source' ? section.heading : source.title)
+          : section.heading;
+        sections.push({
+          ...section,
+          heading,
+          level: source.sections.length > 1 ? Math.min(6, (Number(section.level) || 1) + 1) : section.level,
+        });
+      });
+    });
+
+    return {
+      title,
+      subtitle: options.subtitle || `${sources.length} source${sources.length === 1 ? '' : 's'} assembled`,
+      theme: options.theme || options.style || 'editorial',
+      documentType: options.documentType || 'report',
+      sections,
+      metadata: {
+        assembled: true,
+        sourceCount: sources.length,
+      },
+    };
+  }
+
+  inferStoredDocumentFormat(document = {}) {
+    const explicitFormat = this.normalizeCreationFormat(document.metadata?.format || document.format || '');
+    if (explicitFormat) {
+      return explicitFormat;
+    }
+
+    const filenameMatch = String(document.filename || '').toLowerCase().match(/\.([a-z0-9]+)$/);
+    if (filenameMatch) {
+      return this.normalizeCreationFormat(filenameMatch[1]);
+    }
+
+    const mimeType = String(document.mimeType || '').toLowerCase();
+    if (mimeType.includes('html')) return 'html';
+    if (mimeType.includes('markdown')) return 'md';
+    if (mimeType.includes('pdf')) return 'pdf';
+    if (mimeType.includes('presentation')) return 'pptx';
+    if (mimeType.includes('spreadsheet')) return 'xlsx';
+    return '';
+  }
+
+  storedDocumentToContent(document = {}, options = {}) {
+    const title = String(
+      options.title
+      || document.metadata?.title
+      || String(document.filename || '').replace(/\.[^.]+$/, '')
+      || 'Converted Document',
+    ).trim();
+    const previewHtml = typeof document.previewHtml === 'string' && document.previewHtml.trim()
+      ? document.previewHtml
+      : (document.preview?.type === 'html' ? document.preview.content : '');
+    const text = normalizeWhitespace(
+      document.extractedText
+      || (previewHtml ? stripHtml(previewHtml) : '')
+      || this.extractTextFromStoredDocumentBuffer(document),
+    );
+
+    if (!text) {
+      throw new Error('Stored document does not include extractable text or an HTML preview for conversion.');
+    }
+
+    return {
+      title,
+      subtitle: options.subtitle || `Converted from ${document.filename || document.id || 'stored document'}`,
+      theme: options.theme || 'editorial',
+      documentType: options.documentType || 'document',
+      sections: this.parseTextIntoSections(text, title),
+    };
+  }
+
+  extractTextFromStoredDocumentBuffer(document = {}) {
+    const format = this.inferStoredDocumentFormat(document);
+    if (format && !['html', 'md', 'markdown', 'txt'].includes(format)) {
+      return '';
+    }
+
+    const buffer = Buffer.isBuffer(document.contentBuffer)
+      ? document.contentBuffer
+      : (Buffer.isBuffer(document.content) ? document.content : null);
+    const text = buffer
+      ? buffer.toString('utf8')
+      : (typeof document.content === 'string' ? document.content : '');
+
+    if (!text || /\u0000/.test(text)) {
+      return '';
+    }
+
+    return this.looksLikeHtml(text) ? stripHtml(text) : text;
+  }
+
+  looksLikeHtml(text = '') {
+    return /<\/?[a-z][\s\S]*>/i.test(String(text || ''));
+  }
+
   templateToContent(template = {}, options = {}) {
     const values = template?.values || template?.variables || {};
     const blueprintId = normalizeDocumentType(template?.blueprint || template?.id || options.documentType || 'document');
@@ -2138,7 +2483,8 @@ class DocumentService {
   }
 
   renderChartHtml(chart = {}) {
-    const series = Array.isArray(chart.series) ? chart.series : [];
+    const normalizedChart = chart && typeof chart === 'object' ? chart : {};
+    const series = Array.isArray(normalizedChart.series) ? normalizedChart.series : [];
     if (series.length === 0) {
       return '';
     }
@@ -2146,8 +2492,8 @@ class DocumentService {
     const maxValue = Math.max(...series.map((point) => Number(point.value) || 0), 1);
     return `
       <div class="document-chart">
-        ${chart.title ? `<h4>${this.escapeHtml(chart.title)}</h4>` : ''}
-        ${chart.summary ? `<p>${this.escapeHtml(chart.summary)}</p>` : ''}
+        ${normalizedChart.title ? `<h4>${this.escapeHtml(normalizedChart.title)}</h4>` : ''}
+        ${normalizedChart.summary ? `<p>${this.escapeHtml(normalizedChart.summary)}</p>` : ''}
         <div class="chart-stack">
           ${series.map((point) => `
             <div class="chart-row">

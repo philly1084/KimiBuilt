@@ -420,4 +420,42 @@ describe('/api/documents route', () => {
     }));
     expect(response.body.downloadUrl).toBe('/api/artifacts/artifact-pptx-1/download');
   });
+
+  test('converts a stored generated document through the document service', async () => {
+    const documentService = {
+      convertStoredDocument: jest.fn().mockResolvedValue({
+        id: 'doc-md-1',
+        filename: 'brief.md',
+        mimeType: 'text/markdown',
+        size: 512,
+        metadata: {
+          format: 'md',
+          convertedFrom: 'html',
+          sourceDocumentId: 'doc-html-1',
+        },
+        preview: null,
+        downloadUrl: '/api/documents/doc-md-1/download',
+      }),
+    };
+
+    const response = await request(buildApp(documentService))
+      .post('/api/documents/convert')
+      .send({
+        documentId: 'doc-html-1',
+        toFormat: 'markdown',
+      });
+
+    expect(response.status).toBe(200);
+    expect(documentService.convertStoredDocument).toHaveBeenCalledWith('doc-html-1', 'md');
+    expect(response.body.document).toEqual(expect.objectContaining({
+      id: 'doc-md-1',
+      filename: 'brief.md',
+      format: 'md',
+      metadata: expect.objectContaining({
+        convertedFrom: 'html',
+        sourceDocumentId: 'doc-html-1',
+      }),
+    }));
+    expect(response.body.downloadUrl).toBe('/api/documents/doc-md-1/download');
+  });
 });

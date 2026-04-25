@@ -765,12 +765,38 @@ router.post('/assemble', validate(assembleSchema), async (req, res, next) => {
 router.post('/convert', validate(convertSchema), async (req, res, next) => {
   try {
     const { documentId, toFormat } = req.body;
-    
-    // TODO: Implement document retrieval and conversion
-    res.status(501).json({
-      error: { message: 'Document conversion not yet implemented' }
+
+    const documentService = req.app.locals.documentService;
+    if (typeof documentService?.convertStoredDocument !== 'function') {
+      return res.status(503).json({
+        error: { message: 'Document conversion is not available' }
+      });
+    }
+
+    const requestedFormat = normalizeDocumentCreationFormat(toFormat);
+    const document = await documentService.convertStoredDocument(documentId, requestedFormat);
+
+    res.json({
+      success: true,
+      document: {
+        id: document.id,
+        filename: document.filename,
+        mimeType: document.mimeType,
+        size: document.size,
+        sizeBytes: document.sizeBytes || document.size || 0,
+        format: document.format || document.metadata?.format || requestedFormat,
+        metadata: document.metadata,
+        preview: document.preview || null,
+        downloadUrl: document.downloadUrl || `/api/documents/${document.id}/download`,
+      },
+      downloadUrl: document.downloadUrl || `/api/documents/${document.id}/download`,
     });
   } catch (err) {
+    if (err?.statusCode === 404) {
+      return res.status(404).json({
+        error: { message: err.message }
+      });
+    }
     next(err);
   }
 });
