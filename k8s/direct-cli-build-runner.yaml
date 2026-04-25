@@ -246,28 +246,20 @@ spec:
         runAsGroup: 1001
         fsGroup: 1001
         fsGroupChangePolicy: OnRootMismatch
-      initContainers:
-        - name: install-kubectl
-          image: bitnami/kubectl:1.30.4
-          imagePullPolicy: IfNotPresent
-          securityContext:
-            runAsUser: 0
-          command:
-            - /bin/sh
-            - -ec
-            - |
-              cp /opt/bitnami/kubectl/bin/kubectl /tools/kubectl
-              chmod 0755 /tools/kubectl
-          volumeMounts:
-            - name: tools
-              mountPath: /tools
       containers:
         - name: runner
           image: ghcr.io/philly1084/kimibuilt:latest
           imagePullPolicy: Always
           command:
-            - node
-            - /app/bin/kimibuilt-runner.js
+            - /bin/sh
+            - -ec
+            - |
+              mkdir -p /tmp/tools
+              if [ ! -x /tmp/tools/kubectl ]; then
+                curl -fsSL -o /tmp/tools/kubectl https://dl.k8s.io/release/v1.30.4/bin/linux/arm64/kubectl
+                chmod 0755 /tmp/tools/kubectl
+              fi
+              exec node /app/bin/kimibuilt-runner.js
           envFrom:
             - configMapRef:
                 name: kimibuilt-direct-runner
@@ -277,11 +269,8 @@ spec:
             - name: KUBECONFIG
               value: /etc/rancher/k3s/k3s.yaml
             - name: PATH
-              value: /tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+              value: /tmp/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
           volumeMounts:
-            - name: tools
-              mountPath: /tools
-              readOnly: true
             - name: kubeconfig
               mountPath: /etc/rancher/k3s
               readOnly: true
@@ -304,8 +293,6 @@ spec:
             capabilities:
               drop: ["ALL"]
       volumes:
-        - name: tools
-          emptyDir: {}
         - name: kubeconfig
           configMap:
             name: kimibuilt-direct-runner-kubeconfig
