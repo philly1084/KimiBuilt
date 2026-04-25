@@ -355,6 +355,12 @@ function shouldSuppressWebChatImplicitHtmlArtifact({
     return hasPlanningConversationIntent(text);
 }
 
+function isArtifactStorageAvailable() {
+    return typeof artifactService.isEnabled === 'function'
+        ? artifactService.isEnabled()
+        : false;
+}
+
 function isWebsiteDesignExampleRequest(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -1336,6 +1342,7 @@ module.exports = {
     shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
     shouldSuppressWebChatImplicitHtmlArtifact,
+    isArtifactStorageAvailable,
     isWebsiteDesignExampleRequest,
     normalizeReasoningEffort,
     resolveReasoningEffort,

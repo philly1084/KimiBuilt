@@ -1775,7 +1775,9 @@ const Agent = (function() {
         const type = canonicalizeBlockType(block.type || 'text');
         const content = Object.prototype.hasOwnProperty.call(block, 'content')
             ? block.content
-            : (Object.prototype.hasOwnProperty.call(block, 'text') ? block.text : '');
+            : (Object.prototype.hasOwnProperty.call(block, 'text')
+                ? block.text
+                : (block.prompt || block.caption || block.url || block.imageUrl || block.title || block.description || ''));
 
         if (typeof content === 'string') {
             return stripUnsafeNullCharacters(content);
@@ -4297,14 +4299,24 @@ GUIDELINES:
             : (hasExplicitText ? normalized.text : '');
 
         if (typeof contentValue === 'string') {
-            const inferred = inferMarkdownLikeSingleLineBlock(contentValue, type);
-            if (inferred && (type === 'text' || inferred.type === type || ['heading_1', 'heading_2', 'heading_3', 'bulleted_list', 'numbered_list', 'todo', 'quote', 'callout', 'divider'].includes(inferred.type))) {
-                type = inferred.type;
-                normalized.content = inferred.content;
+            if ((type === 'text' || type === 'code' || type === 'mermaid') && looksLikeMermaidSource(contentValue)) {
+                const mermaidSource = normalizeMermaidSourceText(contentValue);
+                type = 'mermaid';
+                normalized.content = {
+                    text: mermaidSource,
+                    diagramType: detectMermaidDiagramType(mermaidSource),
+                };
                 delete normalized.text;
             } else {
-                normalized.content = normalizeMarkdownTextForBlockType(type, contentValue);
-                delete normalized.text;
+                const inferred = inferMarkdownLikeSingleLineBlock(contentValue, type);
+                if (inferred && (type === 'text' || inferred.type === type || ['heading_1', 'heading_2', 'heading_3', 'bulleted_list', 'numbered_list', 'todo', 'quote', 'callout', 'divider'].includes(inferred.type))) {
+                    type = inferred.type;
+                    normalized.content = inferred.content;
+                    delete normalized.text;
+                } else {
+                    normalized.content = normalizeMarkdownTextForBlockType(type, contentValue);
+                    delete normalized.text;
+                }
             }
         } else if (type === 'todo' && contentValue && typeof contentValue === 'object') {
             normalized.content = {
@@ -4441,6 +4453,17 @@ GUIDELINES:
                 }
                 if (index < lines.length) {
                     index += 1;
+                }
+                if (/^mermaid$/i.test(language)) {
+                    const mermaidSource = normalizeMermaidSourceText(codeLines.join('\n'));
+                    blocks.push({
+                        type: 'mermaid',
+                        content: {
+                            text: mermaidSource,
+                            diagramType: detectMermaidDiagramType(mermaidSource),
+                        },
+                    });
+                    continue;
                 }
                 blocks.push({
                     type: 'code',
@@ -5175,17 +5198,21 @@ Silently verify the lead cluster, section order, and final polish before returni
                 return { text: String(value || ''), displayMode: true };
             case 'mermaid':
                 if (value && typeof value === 'object') {
+                    const mermaidSource = normalizeMermaidSourceText(value.text || value.content || value.code || value.source || '');
                     return {
-                        text: String(value.text || ''),
-                        diagramType: value.diagramType || 'flowchart',
+                        text: mermaidSource,
+                        diagramType: value.diagramType || detectMermaidDiagramType(mermaidSource),
                         _showEditor: false
                     };
                 }
-                return {
-                    text: String(value || ''),
-                    diagramType: 'flowchart',
-                    _showEditor: false
-                };
+                {
+                    const mermaidSource = normalizeMermaidSourceText(value);
+                    return {
+                        text: mermaidSource,
+                        diagramType: detectMermaidDiagramType(mermaidSource),
+                        _showEditor: false
+                    };
+                }
             case 'ai':
                 if (value && typeof value === 'object') {
                     return {
@@ -5323,6 +5350,11 @@ Silently verify the lead cluster, section order, and final polish before returni
             equation: 'math',
             formula: 'math',
             diagram: 'mermaid',
+            drawing: 'ai_image',
+            drawings: 'ai_image',
+            draw: 'ai_image',
+            sketch: 'ai_image',
+            illustration: 'ai_image',
             aiimage: 'ai_image',
             image_generation: 'ai_image',
             imagegeneration: 'ai_image',
@@ -5683,6 +5715,12 @@ Silently verify the lead cluster, section order, and final polish before returni
             'callout',
             'divider',
             'mermaid',
+            'diagram',
+            'drawing',
+            'drawings',
+            'draw',
+            'sketch',
+            'illustration',
             'image',
             'ai_image',
             'bookmark',
@@ -6081,12 +6119,12 @@ Silently verify the lead cluster, section order, and final polish before returni
     }
 
     function hasLooseNotesBlockTypeMarker(text = '') {
-        return /"\s*type\s*"\s*:\s*"\s*(?:text|heading\s*(?:[_-]|\s)?\s*[123]|bulleted\s*(?:[_-]|\s)?\s*list|numbered\s*(?:[_-]|\s)?\s*list|todo|code|quote|callout|divider|mermaid|image|ai\s*(?:[_-]|\s)?\s*image|bookmark|database|ai|toggle|math)\s*"/i.test(String(text || ''));
+        return /"\s*type\s*"\s*:\s*"\s*(?:text|heading\s*(?:[_-]|\s)?\s*[123]|bulleted\s*(?:[_-]|\s)?\s*list|numbered\s*(?:[_-]|\s)?\s*list|todo|code|quote|callout|divider|mermaid|diagram|drawing|drawings|draw|sketch|illustration|image|ai\s*(?:[_-]|\s)?\s*image|bookmark|database|ai|toggle|math)\s*"/i.test(String(text || ''));
     }
 
     function findStructuredMarkerIndex(text = '') {
         const value = String(text || '');
-        return value.search(/```+\s*notes\s*(?:[_-]|\s)\s*actions|```+\s*json|"\s*assistant\s*(?:[_-]|\s)?\s*reply\s*"\s*:|"\s*notes\s*(?:[_-]|\s)?\s*actions\s*"\s*:|"\s*(?:actions|operations|edits)\s*"\s*:|"\s*action\s*"\s*:\s*"\s*(?:replace|append|prepend)\s*(?:[_-]|\s)?\s*content\s*"|"\s*type\s*"\s*:\s*"\s*function\s*"|"\s*name\s*"\s*:\s*"\s*update_notes_page\s*"|"\s*type\s*"\s*:\s*"\s*(?:text|heading\s*(?:[_-]|\s)?\s*[123]|bulleted\s*(?:[_-]|\s)?\s*list|numbered\s*(?:[_-]|\s)?\s*list|todo|code|quote|callout|divider|mermaid|image|ai\s*(?:[_-]|\s)?\s*image|bookmark|database|ai|toggle|math)\s*"/i);
+        return value.search(/```+\s*notes\s*(?:[_-]|\s)\s*actions|```+\s*json|"\s*assistant\s*(?:[_-]|\s)?\s*reply\s*"\s*:|"\s*notes\s*(?:[_-]|\s)?\s*actions\s*"\s*:|"\s*(?:actions|operations|edits)\s*"\s*:|"\s*action\s*"\s*:\s*"\s*(?:replace|append|prepend)\s*(?:[_-]|\s)?\s*content\s*"|"\s*type\s*"\s*:\s*"\s*function\s*"|"\s*name\s*"\s*:\s*"\s*update_notes_page\s*"|"\s*type\s*"\s*:\s*"\s*(?:text|heading\s*(?:[_-]|\s)?\s*[123]|bulleted\s*(?:[_-]|\s)?\s*list|numbered\s*(?:[_-]|\s)?\s*list|todo|code|quote|callout|divider|mermaid|diagram|drawing|drawings|draw|sketch|illustration|image|ai\s*(?:[_-]|\s)?\s*image|bookmark|database|ai|toggle|math)\s*"/i);
     }
 
     function hasHighConfidenceRecoveredBlocks(blocks = []) {
@@ -7506,7 +7544,7 @@ Silently verify the lead cluster, section order, and final polish before returni
                     content += `${indent}> ${block.content}\n\n`;
                     break;
                 case 'code':
-                    content += `${indent}\`\`\`\n${block.content}\n\`\`\`\n\n`;
+                    content += `${indent}\`\`\`${block.content?.language && block.content.language !== 'plain' ? block.content.language : ''}\n${block.content?.text || block.content || ''}\n\`\`\`\n\n`;
                     break;
                 case 'divider':
                     content += `${indent}---\n\n`;
@@ -7563,13 +7601,13 @@ Silently verify the lead cluster, section order, and final polish before returni
                     content += `${indent}---\n\n`;
                     break;
                 case 'callout':
-                    content += `${indent}! ${block.content}\n\n`;
+                    content += `${indent}! ${block.content?.text || block.content}\n\n`;
                     break;
                 case 'mermaid':
-                    content += `${indent}\`\`\`mermaid\n${block.content}\n\`\`\`\n\n`;
+                    content += `${indent}\`\`\`mermaid\n${block.content?.text || block.content || ''}\n\`\`\`\n\n`;
                     break;
                 case 'ai':
-                    content += `${indent}> AI block: ${block.content}\n\n`;
+                    content += `${indent}> AI block: ${block.content?.prompt || block.content?.result || block.content || ''}\n\n`;
                     break;
                 default:
                     content += `${indent}${block.content}\n\n`;

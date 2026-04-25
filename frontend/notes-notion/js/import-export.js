@@ -623,6 +623,8 @@ const ImportExport = (function() {
             case 'math':
                 const mathText = typeof block.content === 'object' ? block.content.text : content;
                 return `<p style="text-align: center; font-family: 'Times New Roman', serif; font-style: italic;">${escapeHtml(mathText)}</p>`;
+            case 'mermaid':
+                return `<pre class="mermaid">${escapeHtml(content)}</pre>`;
             default:
                 return content ? `<p>${escapeHtml(content)}</p>` : '';
         }
@@ -730,6 +732,9 @@ const ImportExport = (function() {
             case 'math':
                 const mathText = typeof block.content === 'object' ? block.content.text : content;
                 md = `${indent}$$\n${mathText}\n$$\n\n`;
+                break;
+            case 'mermaid':
+                md = `${indent}\`\`\`mermaid\n${content}\n\`\`\`\n\n`;
                 break;
             default:
                 md = content ? `${indent}${content}\n\n` : '';
@@ -1530,10 +1535,17 @@ const ImportExport = (function() {
             if (line.startsWith('```')) {
                 if (inCodeBlock) {
                     // End code block
-                    page.blocks.push(Blocks.createBlock('code', { 
-                        text: codeBlock, 
-                        language: codeLanguage 
-                    }));
+                    if (/^mermaid$/i.test(codeLanguage)) {
+                        page.blocks.push(Blocks.createBlock('mermaid', {
+                            text: codeBlock,
+                            diagramType: detectMermaidDiagramType(codeBlock)
+                        }));
+                    } else {
+                        page.blocks.push(Blocks.createBlock('code', { 
+                            text: codeBlock, 
+                            language: codeLanguage 
+                        }));
+                    }
                     codeBlock = null;
                     inCodeBlock = false;
                 } else {
@@ -1617,10 +1629,17 @@ const ImportExport = (function() {
 
         // Handle pending code block
         if (inCodeBlock && codeBlock !== null) {
-            page.blocks.push(Blocks.createBlock('code', { 
-                text: codeBlock, 
-                language: codeLanguage 
-            }));
+            if (/^mermaid$/i.test(codeLanguage)) {
+                page.blocks.push(Blocks.createBlock('mermaid', {
+                    text: codeBlock,
+                    diagramType: detectMermaidDiagramType(codeBlock)
+                }));
+            } else {
+                page.blocks.push(Blocks.createBlock('code', { 
+                    text: codeBlock, 
+                    language: codeLanguage 
+                }));
+            }
         }
 
         // Extract title from first heading if not set
@@ -1859,6 +1878,19 @@ const ImportExport = (function() {
         }
         
         return '';
+    }
+
+    function detectMermaidDiagramType(text) {
+        const normalized = String(text || '').trim().toLowerCase();
+        if (normalized.startsWith('sequencediagram')) return 'sequence';
+        if (normalized.startsWith('classdiagram')) return 'class';
+        if (normalized.startsWith('statediagram')) return 'state';
+        if (normalized.startsWith('erdiagram')) return 'er';
+        if (normalized.startsWith('gantt')) return 'gantt';
+        if (normalized.startsWith('pie')) return 'pie';
+        if (normalized.startsWith('mindmap')) return 'mindmap';
+        if (normalized.startsWith('gitgraph')) return 'gitgraph';
+        return 'flowchart';
     }
 
     /**

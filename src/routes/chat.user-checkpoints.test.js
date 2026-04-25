@@ -56,6 +56,7 @@ jest.mock('../ai-route-utils', () => ({
     shouldSuppressNotesSurfaceArtifact: jest.fn(() => false),
     shouldSuppressImplicitMermaidArtifact: jest.fn(() => false),
     shouldSuppressWebChatImplicitHtmlArtifact: jest.fn(() => false),
+    isArtifactStorageAvailable: jest.fn(() => true),
     stripInjectedNotesPageEditDirective: jest.fn((text) => text),
     resolveReasoningEffort: jest.fn(() => null),
     resolveSshRequestContext: jest.fn((text) => ({ effectivePrompt: text })),

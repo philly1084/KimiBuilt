@@ -1462,8 +1462,12 @@ function buildFrontendBundleGenerationInstructions({
 }
 
 class ArtifactService {
+    isEnabled() {
+        return Boolean(postgres.enabled);
+    }
+
     ensureEnabled() {
-        if (!postgres.enabled) {
+        if (!this.isEnabled()) {
             const error = new Error('Artifacts require Postgres to be configured');
             error.statusCode = 503;
             throw error;

@@ -16,6 +16,7 @@ const {
     shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
     shouldSuppressWebChatImplicitHtmlArtifact,
+    isArtifactStorageAvailable,
     stripInjectedNotesPageEditDirective,
     resolveSshRequestContext,
     extractSshSessionMetadataFromToolEvents,
@@ -884,6 +885,7 @@ router.post('/chat/completions', async (req, res, next) => {
         });
         const chatControlState = getSessionControlState(session);
         console.log(`[OpenAICompat] chat/completions routing sessionId=${sessionId} profile=${effectiveExecutionProfile} stickyRemote=${Boolean(chatControlState?.lastToolIntent || chatControlState?.lastSshTarget?.host || chatControlState?.lastRemoteObjective)} lastRemoteObjective=${JSON.stringify(chatControlState?.lastRemoteObjective || '')}`);
+        const outputFormatProvided = Boolean(output_format);
         let effectiveOutputFormat = output_format
             || inferRequestedOutputFormat(artifactIntentText)
             || inferOutputFormatFromTranscript(messages, session);
@@ -891,7 +893,7 @@ router.post('/chat/completions', async (req, res, next) => {
             taskType,
             text: artifactIntentText,
             outputFormat: effectiveOutputFormat,
-            outputFormatProvided: Boolean(output_format),
+            outputFormatProvided,
         })) {
             effectiveOutputFormat = null;
         }
@@ -899,7 +901,7 @@ router.post('/chat/completions', async (req, res, next) => {
             taskType,
             text: artifactIntentText,
             outputFormat: effectiveOutputFormat,
-            outputFormatProvided: Boolean(output_format),
+            outputFormatProvided,
         })) {
             effectiveOutputFormat = null;
         }
@@ -907,8 +909,12 @@ router.post('/chat/completions', async (req, res, next) => {
             clientSurface,
             text: artifactIntentText,
             outputFormat: effectiveOutputFormat,
-            outputFormatProvided: Boolean(output_format),
+            outputFormatProvided,
         })) {
+            effectiveOutputFormat = null;
+        }
+        if (effectiveOutputFormat && !outputFormatProvided && !isArtifactStorageAvailable()) {
+            console.warn('[OpenAICompat] Artifact storage unavailable; handling implicit artifact request as normal chat.');
             effectiveOutputFormat = null;
         }
         const recentMessagesForWorkloadPreflight = effectiveOutputFormat
@@ -1730,6 +1736,7 @@ router.post('/responses', async (req, res, next) => {
             memoryScope,
             ...(sessionIsolation ? { sessionIsolation: true } : {}),
         };
+        const outputFormatProvided = Boolean(output_format);
         let effectiveOutputFormat = output_format
             || inferRequestedOutputFormat(artifactIntentText)
             || inferOutputFormatFromTranscript(normalizedInputMessages, session);
@@ -1737,7 +1744,7 @@ router.post('/responses', async (req, res, next) => {
             taskType,
             text: artifactIntentText,
             outputFormat: effectiveOutputFormat,
-            outputFormatProvided: Boolean(output_format),
+            outputFormatProvided,
         })) {
             effectiveOutputFormat = null;
         }
@@ -1745,7 +1752,7 @@ router.post('/responses', async (req, res, next) => {
             taskType,
             text: artifactIntentText,
             outputFormat: effectiveOutputFormat,
-            outputFormatProvided: Boolean(output_format),
+            outputFormatProvided,
         })) {
             effectiveOutputFormat = null;
         }
@@ -1753,8 +1760,12 @@ router.post('/responses', async (req, res, next) => {
             clientSurface,
             text: artifactIntentText,
             outputFormat: effectiveOutputFormat,
-            outputFormatProvided: Boolean(output_format),
+            outputFormatProvided,
         })) {
+            effectiveOutputFormat = null;
+        }
+        if (effectiveOutputFormat && !outputFormatProvided && !isArtifactStorageAvailable()) {
+            console.warn('[OpenAICompat] Artifact storage unavailable; handling implicit artifact request as normal response.');
             effectiveOutputFormat = null;
         }
         const recentMessagesForWorkloadPreflight = effectiveOutputFormat

@@ -797,6 +797,59 @@ Approved page plan:
         ]);
     });
 
+    test('converts fenced Mermaid markdown into native mermaid blocks', () => {
+        const agent = loadAgent();
+        const responseText = JSON.stringify({
+            assistant_reply: 'Added the flow.',
+            content: [
+                '# Auth Flow',
+                '',
+                '```mermaid',
+                'flowchart TD',
+                '    User --> Login',
+                '    Login --> Dashboard',
+                '```',
+            ].join('\n'),
+        });
+
+        const parsed = agent._extractNotesActionPlan(responseText);
+        const mermaidBlock = parsed.actions[0].blocks.find((block) => block.type === 'mermaid');
+
+        expect(mermaidBlock).toEqual(expect.objectContaining({
+            type: 'mermaid',
+            content: expect.objectContaining({
+                diagramType: 'flowchart',
+                text: expect.stringContaining('flowchart TD'),
+            }),
+        }));
+    });
+
+    test('normalizes drawing-style block aliases into ai_image blocks', () => {
+        const agent = loadAgent();
+        const parsed = agent._extractNotesActionPlan(JSON.stringify([
+            {
+                type: 'drawing',
+                prompt: 'A clean dashboard sketch',
+                source: 'ai',
+            },
+        ]));
+
+        expect(parsed.actions[0].blocks[0]).toEqual(expect.objectContaining({
+            type: 'drawing',
+            prompt: 'A clean dashboard sketch',
+        }));
+
+        const normalizedActions = agent._normalizeStructuredPageActions(parsed.actions, 'Add this drawing to the page.', {
+            blockCount: 0,
+            outline: [],
+        });
+
+        expect(normalizedActions[0].blocks[0]).toEqual(expect.objectContaining({
+            type: 'ai_image',
+            prompt: 'A clean dashboard sketch',
+        }));
+    });
+
     test('suppresses inferred html artifacts for notes page build requests unless file delivery is explicit', () => {
         const agent = loadAgent();
         const context = {

@@ -880,9 +880,9 @@
                 nextRequestOptions.artifactIds = [...state.selectedArtifactIds];
             }
 
-            const inferredOutputFormat = state.outputFormat || inferRequestedOutputFormat(messages);
-            if (inferredOutputFormat) {
-                nextRequestOptions.outputFormat = inferredOutputFormat;
+            const explicitOutputFormat = String(state.outputFormat || '').trim();
+            if (explicitOutputFormat) {
+                nextRequestOptions.outputFormat = explicitOutputFormat;
             }
 
             for await (const chunk of originalStreamChat(messages, model, signal, reasoningEffort, nextRequestOptions)) {

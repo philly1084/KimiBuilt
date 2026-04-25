@@ -15,6 +15,7 @@ const {
     shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
     shouldSuppressWebChatImplicitHtmlArtifact,
+    isArtifactStorageAvailable,
     stripInjectedNotesPageEditDirective,
     resolveSshRequestContext,
     extractSshSessionMetadataFromToolEvents,
@@ -475,6 +476,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 maxApps: 4,
             })
             : '';
+        const outputFormatProvided = Boolean(outputFormat);
         let effectiveOutputFormat = outputFormat
             || inferRequestedOutputFormat(artifactIntentText)
             || inferOutputFormatFromSession(artifactIntentText, session);
@@ -482,7 +484,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             taskType,
             text: artifactIntentText,
             outputFormat: effectiveOutputFormat,
-            outputFormatProvided: Boolean(outputFormat),
+            outputFormatProvided,
         })) {
             effectiveOutputFormat = null;
         }
@@ -490,7 +492,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             taskType,
             text: artifactIntentText,
             outputFormat: effectiveOutputFormat,
-            outputFormatProvided: Boolean(outputFormat),
+            outputFormatProvided,
         })) {
             effectiveOutputFormat = null;
         }
@@ -498,8 +500,12 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             clientSurface,
             text: artifactIntentText,
             outputFormat: effectiveOutputFormat,
-            outputFormatProvided: Boolean(outputFormat),
+            outputFormatProvided,
         })) {
+            effectiveOutputFormat = null;
+        }
+        if (effectiveOutputFormat && !outputFormatProvided && !isArtifactStorageAvailable()) {
+            console.warn('[ChatRoute] Artifact storage unavailable; handling implicit artifact request as normal chat.');
             effectiveOutputFormat = null;
         }
         const recentMessagesForWorkloadPreflight = effectiveOutputFormat

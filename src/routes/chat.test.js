@@ -59,6 +59,7 @@ jest.mock('../ai-route-utils', () => ({
     shouldSuppressNotesSurfaceArtifact: jest.fn(() => false),
     shouldSuppressImplicitMermaidArtifact: jest.fn(() => false),
     shouldSuppressWebChatImplicitHtmlArtifact: jest.fn(() => false),
+    isArtifactStorageAvailable: jest.fn(() => true),
     stripInjectedNotesPageEditDirective: jest.fn((text) => text),
     resolveReasoningEffort: jest.fn(() => null),
     resolveSshRequestContext: jest.fn(),
@@ -134,6 +135,7 @@ describe('/api/chat route', () => {
         shouldSuppressNotesSurfaceArtifact.mockReturnValue(false);
         shouldSuppressImplicitMermaidArtifact.mockReturnValue(false);
         routeUtils.shouldSuppressWebChatImplicitHtmlArtifact.mockReturnValue(false);
+        routeUtils.isArtifactStorageAvailable.mockReturnValue(true);
         stripInjectedNotesPageEditDirective.mockImplementation((text) => text);
         resolveSshRequestContext.mockReturnValue({});
         resolveReasoningEffort.mockReturnValue(null);
@@ -303,6 +305,50 @@ describe('/api/chat route', () => {
             text: 'Create a Mermaid diagram for the auth flow inside this page',
             outputFormatProvided: false,
         }));
+    });
+
+    test('falls back to normal chat for implicit web-chat artifacts when storage is unavailable', async () => {
+        const routeUtils = require('../ai-route-utils');
+        ensureRuntimeToolManager.mockResolvedValue({
+            getTool: jest.fn(),
+        });
+        routeUtils.inferRequestedOutputFormat.mockReturnValue('html');
+        routeUtils.isArtifactStorageAvailable.mockReturnValue(false);
+        resolveSshRequestContext.mockReturnValue({
+            effectivePrompt: 'Build me a simple HTML questionnaire page.',
+        });
+        executeConversationRuntime.mockResolvedValue({
+            handledPersistence: true,
+            response: {
+                id: 'resp-chat-fallback-1',
+                model: 'gpt-test',
+                output: [{
+                    type: 'message',
+                    content: [{ text: 'Returned through normal runtime' }],
+                }],
+                metadata: {
+                    toolEvents: [],
+                },
+            },
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use('/api/chat', chatRouter);
+
+        const response = await request(app)
+            .post('/api/chat')
+            .send({
+                sessionId: 'session-1',
+                message: 'Build me a simple HTML questionnaire page.',
+                stream: false,
+                metadata: { clientSurface: 'web-chat' },
+            });
+
+        expect(response.status).toBe(200);
+        expect(response.body.message).toBe('Returned through normal runtime');
+        expect(generateOutputArtifactFromPrompt).not.toHaveBeenCalled();
+        expect(executeConversationRuntime).toHaveBeenCalled();
     });
 
     test('suppresses direct PDF artifact generation for notes page-edit requests', async () => {
