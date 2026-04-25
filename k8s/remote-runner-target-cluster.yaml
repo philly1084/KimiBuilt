@@ -138,6 +138,7 @@ spec:
             - /bin/sh
             - -ec
             - |
+              export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
               mkdir -p /tmp/tools
               if [ ! -x /tmp/tools/kubectl ]; then
                 curl -fsSL -o /tmp/tools/kubectl https://dl.k8s.io/release/v1.30.4/bin/linux/arm64/kubectl
