@@ -5601,7 +5601,10 @@ class ChatApp {
         }
 
         try {
-            const url = new URL(normalizedPath, window.location.origin);
+            const apiBase = typeof API_BASE_URL === 'string' && API_BASE_URL
+                ? API_BASE_URL.replace(/\/v1\/?$/i, '')
+                : window.location.origin;
+            const url = new URL(normalizedPath, apiBase);
             if (inline) {
                 url.searchParams.set('inline', '1');
             }
@@ -5659,10 +5662,14 @@ class ChatApp {
             return null;
         }
 
-        const downloadUrl = this.buildArtifactUrl(image.downloadPath || image.downloadUrl || '');
+        const artifactId = image.artifactId || image.artifact_id || '';
+        const fallbackDownloadPath = artifactId ? `/api/artifacts/${encodeURIComponent(artifactId)}/download` : '';
+        const downloadUrl = this.buildArtifactUrl(
+            image.downloadPath || image.downloadUrl || fallbackDownloadPath || '',
+        );
         const inlineUrl = downloadUrl
             ? this.buildArtifactUrl(
-                image.inlinePath || image.downloadPath || image.downloadUrl || '',
+                image.inlinePath || image.inlineUrl || image.downloadPath || image.downloadUrl || fallbackDownloadPath || '',
                 { inline: true },
             )
             : '';
@@ -5684,7 +5691,7 @@ class ChatApp {
             prompt: fallbackPrompt,
             model: image.model || fallbackModel || '',
             downloadUrl,
-            artifactId: image.artifactId || '',
+            artifactId,
             filename: image.filename || '',
             source: 'generated',
         };

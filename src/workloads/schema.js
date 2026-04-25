@@ -11,31 +11,13 @@ const VALID_TRIGGER_TYPES = new Set(['manual', 'once', 'cron']);
 const VALID_STAGE_CONDITIONS = new Set(['always', 'on_success', 'on_failure']);
 const BLOCKED_AUTONOMOUS_TOOL_IDS = new Set([
     'remote-command',
-    'managed-app',
     'k3s-deploy',
     'docker-exec',
 ]);
-const VALID_EXECUTION_TOOLS = new Set(['remote-command', 'ssh-execute', 'managed-app']);
+const VALID_EXECUTION_TOOLS = new Set(['remote-command', 'ssh-execute']);
 
 function sanitizeText(value = '') {
     return String(value || '').trim();
-}
-
-function normalizeManagedAppAction(value = '') {
-    const normalized = sanitizeText(value).toLowerCase();
-    if (!normalized) {
-        return '';
-    }
-
-    if (['diagnose', 'diagnostic', 'diagnostics'].includes(normalized)) {
-        return 'doctor';
-    }
-
-    if (['repair', 'repair-runner', 'repair-runners'].includes(normalized)) {
-        return 'reconcile';
-    }
-
-    return normalized;
 }
 
 function validateWorkloadPayload(payload = {}, options = {}) {
@@ -199,80 +181,6 @@ function normalizeExecution(execution = null, options = {}) {
     const rawParams = execution.params && typeof execution.params === 'object' && !Array.isArray(execution.params)
         ? execution.params
         : {};
-
-    if (normalizedTool === 'managed-app') {
-        const action = normalizeManagedAppAction(rawParams.action || execution.action || '');
-        const validManagedAppActions = new Set(['create', 'update', 'deploy', 'inspect', 'doctor', 'reconcile', 'list']);
-        if (!validManagedAppActions.has(action)) {
-            throw new Error(`execution.params.action must be one of: ${Array.from(validManagedAppActions).join(', ')}`);
-        }
-
-        const prompt = sanitizeText(rawParams.prompt || execution.prompt || options.defaultPrompt || '');
-        if ((action === 'create' || action === 'update') && !prompt) {
-            throw new Error('execution.params.prompt is required for managed-app create/update structured workload execution');
-        }
-
-        const appRef = sanitizeText(
-            rawParams.appRef
-            || rawParams.app
-            || rawParams.id
-            || rawParams.slug
-            || execution.appRef
-            || execution.app
-            || execution.id
-            || execution.slug
-            || '',
-        );
-        if (['update', 'deploy', 'inspect'].includes(action) && !appRef) {
-            throw new Error(`execution.params.appRef is required for managed-app ${action} structured workload execution`);
-        }
-
-        const deployTarget = sanitizeText(
-            rawParams.deployTarget
-            || rawParams.deploymentTarget
-            || rawParams.target
-            || execution.deployTarget
-            || execution.deploymentTarget
-            || execution.target
-            || '',
-        ).toLowerCase();
-        if (deployTarget && !['ssh', 'remote', 'remote-ssh', 'remote_ssh'].includes(deployTarget)) {
-            throw new Error('execution.params.deployTarget must resolve to "ssh" for managed-app');
-        }
-
-        const params = {
-            action,
-        };
-        const model = sanitizeText(rawParams.model || execution.model || '');
-        const requestedAction = sanitizeText(rawParams.requestedAction || execution.requestedAction || '');
-        const sourcePrompt = sanitizeText(rawParams.sourcePrompt || execution.sourcePrompt || prompt || '');
-        const limit = Number(rawParams.limit || execution.limit || 0);
-
-        if (appRef) {
-            params.appRef = appRef;
-        }
-        if (prompt) {
-            params.prompt = prompt;
-            params.sourcePrompt = sourcePrompt;
-        }
-        if (requestedAction) {
-            params.requestedAction = requestedAction;
-        }
-        if (deployTarget) {
-            params.deployTarget = 'ssh';
-        }
-        if (model) {
-            params.model = model;
-        }
-        if (Number.isFinite(limit) && limit > 0) {
-            params.limit = Math.trunc(limit);
-        }
-
-        return {
-            tool: normalizedTool,
-            params,
-        };
-    }
 
     const command = sanitizeText(rawParams.command || execution.command || '');
     if (!command) {

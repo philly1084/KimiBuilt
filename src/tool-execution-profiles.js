@@ -39,7 +39,6 @@ const BASE_SHARED_TOOL_IDS = Object.freeze([
     'agent-notes-write',
     'agent-delegate',
     'agent-workload',
-    'managed-app',
     'document-workflow',
     'deep-research-presentation',
     'user-checkpoint',

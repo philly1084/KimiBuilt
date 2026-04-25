@@ -1285,9 +1285,7 @@ function shouldAutoUseTool(toolId, prompt = '', skill = null, options = {}) {
     }
 
     if (toolId === 'managed-app') {
-        const managedAppService = options?.managedAppService || options?.toolContext?.managedAppService;
-        return Boolean(managedAppService?.isAvailable?.())
-            && hasManagedAppIntent(prompt);
+        return false;
     }
 
     if (toolId === 'agent-workload') {
@@ -2510,10 +2508,6 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
         selectedIds.add(remoteToolId);
     }
 
-    if (hasManagedAppIntent(prompt) && availableToolIds.has('managed-app')) {
-        selectedIds.add('managed-app');
-    }
-
     if (hasExplicitK3sDeployIntent(prompt)) {
         selectedIds.add('k3s-deploy');
     }
@@ -2626,10 +2620,6 @@ function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = [], o
             || canonicalWorkload?.trigger?.type === 'once'
         )) {
         return 'agent-workload';
-    }
-
-    if (availableToolIds.has('managed-app') && hasManagedAppIntent(prompt)) {
-        return 'managed-app';
     }
 
     if (explicitK3sDeployIntent && availableToolIds.has('k3s-deploy')) {
@@ -2907,16 +2897,6 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Keep `remote-command` available for one-off server configuration and troubleshooting, but use `git-safe` plus `k3s-deploy` when the user wants code pushed to GitHub and then deployed.');
         guidance.push('- Prefer immutable deploys: push code, let CI build artifacts or images, then deploy those results into k3s instead of hand-editing the live server.');
         guidance.push('- Never initialize a new Git repository on the remote host or adopt an arbitrary web root as the canonical project unless the user explicitly asked for that server-local workflow.');
-    }
-
-    if (automaticTools.some((entry) => entry.id === 'managed-app')) {
-        guidance.push('- Use `managed-app` only for explicit managed-app catalog/control-plane work, Gitea/ACT runner platform work, or apps already tied to a managed-app record.');
-        guidance.push('- For generic remote website/app builds, prefer `remote-command` through the remote CLI runner; do not route those through managed-app just because the target is remote.');
-        guidance.push('- `managed-app create` should allocate the repo, image repo, namespace, and ingress host instead of improvising those names in chat.');
-        guidance.push('- `managed-app deploy` should use the authoritative managed app record, the latest successful image tag, and the app\'s configured deployment target instead of guessing the cluster target from scratch.');
-        if (executionProfile === 'remote-build') {
-            guidance.push('- In `remote-build` sessions, treat the remote CLI runner as the default app sandbox and build environment unless the user explicitly asks for the managed-app/Gitea control plane.');
-        }
     }
 
     if (automaticTools.some((entry) => entry.id === 'code-sandbox')) {

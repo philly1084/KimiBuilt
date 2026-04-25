@@ -819,25 +819,6 @@ function buildRemoteCliImplementationCommand(workflow = null) {
     ].filter(Boolean).join('\n');
 }
 
-function buildManagedAppAuthoringPlanStep(workflow = null) {
-    const objective = normalizeText(workflow?.objective);
-    const requestedAction = workflow?.lane === 'repo-then-deploy' ? 'deploy' : 'build';
-
-    return {
-        tool: 'managed-app',
-        reason: workflow?.lane === 'repo-then-deploy'
-            ? 'Implement the app changes through the managed app control plane and queue the remote Gitea build/deploy flow.'
-            : 'Implement the requested app changes through the managed app control plane.',
-        params: {
-            action: 'create',
-            prompt: objective,
-            sourcePrompt: objective,
-            requestedAction,
-            deployTarget: 'ssh',
-        },
-    };
-}
-
 function buildGitCommitMessage(workflow = null) {
     const objective = truncateText(workflow?.objective || 'update deployment workflow', 72);
     return `KimiBuilt: ${objective || 'update deployment workflow'}`;
@@ -1099,11 +1080,10 @@ function evaluateEndToEndBuilderWorkflow({
 
     if ((currentWorkflow.lane === 'repo-only' || currentWorkflow.lane === 'repo-then-deploy')
         && !currentWorkflow.progress.implemented
-        && !candidateToolIds.has(remoteTool)
-        && !candidateToolIds.has('managed-app')) {
+        && !candidateToolIds.has(remoteTool)) {
         return buildBlockedWorkflowState(
             currentWorkflow,
-            `Repository implementation is required before this workflow can continue. \`${remoteTool}\` is not ready for the selected remote CLI target, and \`managed-app\` is not available as a fallback.`,
+            `Repository implementation is required before this workflow can continue. \`${remoteTool}\` is not ready for the selected remote CLI target.`,
         );
     }
 
@@ -1201,12 +1181,6 @@ function buildEndToEndWorkflowPlan({
                 ...(currentWorkflow.workspacePath ? { workingDirectory: currentWorkflow.workspacePath } : {}),
             },
         }];
-    }
-
-    if ((currentWorkflow.lane === 'repo-only' || currentWorkflow.lane === 'repo-then-deploy')
-        && !currentWorkflow.progress.implemented
-        && candidateToolIds.has('managed-app')) {
-        return [buildManagedAppAuthoringPlanStep(currentWorkflow)];
     }
 
     if (currentWorkflow.lane === 'repo-only') {

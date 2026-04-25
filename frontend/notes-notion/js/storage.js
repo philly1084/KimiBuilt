@@ -180,7 +180,9 @@ const Storage = (function() {
         if (String(sourceUrl).startsWith('asset://')) return String(sourceUrl);
 
         try {
-            const response = await fetch(sourceUrl);
+            const response = await fetch(sourceUrl, {
+                credentials: 'include',
+            });
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}`);
             }

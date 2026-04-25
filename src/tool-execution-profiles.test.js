@@ -42,13 +42,13 @@ describe('tool execution profiles', () => {
 
         expect(toolIds).toContain('remote-command');
         expect(toolIds).toContain('k3s-deploy');
-        expect(toolIds).toContain('managed-app');
         expect(toolIds).toContain('git-safe');
         expect(toolIds).toContain('tool-doc-read');
         expect(toolIds).toContain('web-search');
         expect(toolIds).toContain('web-fetch');
         expect(toolIds).toContain('web-scrape');
         expect(toolIds).toContain('code-sandbox');
+        expect(toolIds).not.toContain('managed-app');
         expect(toolIds).not.toContain('opencode-run');
         expect(toolIds).not.toContain('code-execute');
         expect(HIDDEN_FRONTEND_TOOL_IDS).toContain('code-execute');

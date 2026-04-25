@@ -112,8 +112,8 @@ describe('workload schema', () => {
         });
     });
 
-    test('normalizes structured managed-app execution payloads', () => {
-        const workload = validateWorkloadPayload({
+    test('rejects structured managed-app execution payloads', () => {
+        expect(() => validateWorkloadPayload({
             sessionId: 'session-1',
             title: 'Fix the repo',
             prompt: 'Fix the failing build in this repo.',
@@ -135,73 +135,7 @@ describe('workload schema', () => {
         }, {
             ownerId: 'phill',
             sessionId: 'session-1',
-        });
-
-        expect(workload.execution).toEqual({
-            tool: 'managed-app',
-            params: {
-                action: 'update',
-                prompt: 'Fix the failing build in this repo.',
-                sourcePrompt: 'Fix the failing build in this repo.',
-                appRef: 'kimibuilt',
-                deployTarget: 'ssh',
-            },
-        });
-    });
-
-    test('normalizes managed-app doctor and reconcile aliases in structured execution payloads', () => {
-        const doctorWorkload = validateWorkloadPayload({
-            sessionId: 'session-1',
-            title: 'Diagnose the managed app platform',
-            prompt: 'Diagnose why Gitea actions are waiting.',
-            trigger: {
-                type: 'manual',
-            },
-            execution: {
-                tool: 'managed-app',
-                params: {
-                    action: 'diagnose',
-                },
-            },
-        }, {
-            ownerId: 'phill',
-            sessionId: 'session-1',
-        });
-
-        const reconcileWorkload = validateWorkloadPayload({
-            sessionId: 'session-1',
-            title: 'Repair the managed app platform',
-            prompt: 'Repair the Gitea runner platform.',
-            trigger: {
-                type: 'manual',
-            },
-            execution: {
-                tool: 'managed-app',
-                params: {
-                    action: 'repair',
-                },
-            },
-        }, {
-            ownerId: 'phill',
-            sessionId: 'session-1',
-        });
-
-        expect(doctorWorkload.execution).toEqual({
-            tool: 'managed-app',
-            params: {
-                action: 'doctor',
-                prompt: 'Diagnose why Gitea actions are waiting.',
-                sourcePrompt: 'Diagnose why Gitea actions are waiting.',
-            },
-        });
-        expect(reconcileWorkload.execution).toEqual({
-            tool: 'managed-app',
-            params: {
-                action: 'reconcile',
-                prompt: 'Repair the Gitea runner platform.',
-                sourcePrompt: 'Repair the Gitea runner platform.',
-            },
-        });
+        })).toThrow('execution.tool must be one of: remote-command, ssh-execute');
     });
 
     test('preserves structured execution on follow-up stages', () => {

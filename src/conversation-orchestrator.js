@@ -104,6 +104,7 @@ const NORMAL_PROFILE_MAX_REPLANS = 1;
 const REMOTE_BUILD_MAX_REPLANS = 3;
 const DOCUMENT_WORKFLOW_TOOL_ID = 'document-workflow';
 const DEEP_RESEARCH_PRESENTATION_TOOL_ID = 'deep-research-presentation';
+const DISABLED_AUTONOMOUS_TOOL_IDS = new Set(['managed-app']);
 const AUTONOMY_CONTINUATION_CHECKPOINT_ID_PREFIX = 'checkpoint-autonomy-continue';
 const REMOTE_COMMAND_DOC_PATH = path.join(__dirname, 'agent-sdk', 'tool-docs', 'remote-command.md');
 const K3S_PLAYBOOK_DOC_PATH = path.join(__dirname, '..', 'k8s', 'K3S_RANCHER_PLAYBOOK.md');
@@ -1119,13 +1120,11 @@ function buildScoredCandidateToolMap({
         switch (classification.taskFamily) {
         case 'remote-ops':
             adjustCandidateToolScore(scoreMap, remoteToolId, 1.25, 'Remote operations should start with the trusted remote tool.');
-            adjustCandidateToolScore(scoreMap, 'managed-app', hasManagedAppIntent ? 1.1 : 0.2, 'Managed app platform and deployment operations use the managed app control plane when explicitly targeted.');
             adjustCandidateToolScore(scoreMap, 'k3s-deploy', workflowNeedsDeployLane || explicitK3sDeployIntent ? 0.95 : 0, 'The active remote workflow includes deployment work.');
             adjustCandidateToolScore(scoreMap, 'git-safe', explicitGitIntent || workflowNeedsDeployLane ? 0.55 : 0, 'Git save/publish flow is relevant to the remote task.');
             break;
         case 'repo-work':
             adjustCandidateToolScore(scoreMap, remoteToolId, executionProfile === REMOTE_BUILD_EXECUTION_PROFILE ? 1.25 : 0, 'Remote CLI repository work should use the trusted remote command lane.');
-            adjustCandidateToolScore(scoreMap, 'managed-app', hasManagedAppIntent ? 0.9 : 0.2, 'Managed app work is secondary unless the managed app catalog is explicitly targeted.');
             adjustCandidateToolScore(scoreMap, 'git-safe', explicitGitIntent ? 0.75 : 0.3, 'Repository work may end with a save/push step.');
             break;
         case 'research':
@@ -1203,9 +1202,6 @@ function buildScoredCandidateToolMap({
     }
     if (workflowNeedsRepoLane && remoteToolId) {
         adjustCandidateToolScore(scoreMap, remoteToolId, 1.05, 'Repository work in remote-build mode should use the remote CLI lane.');
-    }
-    if (hasManagedAppIntent) {
-        adjustCandidateToolScore(scoreMap, 'managed-app', 1.1, 'Managed app deployment and platform operations use the dedicated control plane only when explicitly relevant.');
     }
     if (explicitGitIntent || workflowNeedsDeployLane) {
         adjustCandidateToolScore(scoreMap, 'git-safe', 0.75, 'Git state or save flow is relevant.');
@@ -1303,7 +1299,7 @@ function shouldAllowDirectAction(action = null, { toolPolicy = {}, toolEvents = 
     }
 
     if (classification.preferredExecutionPath === 'plan-first') {
-        return ['web-search', 'web-fetch', 'web-scrape', 'managed-app', 'agent-workload'].includes(action.tool);
+        return ['web-search', 'web-fetch', 'web-scrape', 'agent-workload'].includes(action.tool);
     }
 
     return true;
@@ -7999,6 +7995,7 @@ class ConversationOrchestrator extends EventEmitter {
         toolEvents = [],
     }) {
         const baseAllowedToolIds = (PROFILE_TOOL_ALLOWLISTS[executionProfile] || PROFILE_TOOL_ALLOWLISTS[DEFAULT_EXECUTION_PROFILE])
+            .filter((toolId) => !DISABLED_AUTONOMOUS_TOOL_IDS.has(toolId))
             .filter((toolId) => toolManager?.getTool?.(toolId));
         const requested = Array.isArray(requestedToolIds)
             ? requestedToolIds.map((toolId) => String(toolId || '').trim()).filter(Boolean)
@@ -9086,11 +9083,7 @@ class ConversationOrchestrator extends EventEmitter {
             'Only use tools listed above.',
             'Do not invent SSH hosts, usernames, file paths, or credentials.',
             'Every `remote-command` step must include a non-empty `params.command` string.',
-            'Use `managed-app` only for explicit managed-app catalog/control-plane work, Gitea/ACT runner platform work, or apps already tied to a managed-app record.',
-            'For generic remote website/app builds, prefer `remote-command` through the remote CLI runner; do not route those through managed-app just because the target is remote.',
-            'Every `managed-app` step must include a valid `params.action`. For `create` or `update`, include a non-empty `params.prompt` string. For remote app work, include `params.deployTarget` set to `ssh`.',
-            'If `managed-app` reports "Managed app not found" but the transcript still identifies the target app, treat that as recoverable: continue with `managed-app create` to reconcile the catalog entry or use `managed-app inspect`/`list` only when the app reference is genuinely ambiguous.',
-            'If a managed-app inspection shows draft state with no repo clone URL, no SSH URL, or no latest build run, note the gap briefly and continue with `managed-app create` or `managed-app update` instead of stopping for a restatement.',
+            '`managed-app` is disabled. Use `remote-command` for direct remote CLI work, `git-safe` for repository save/push work, and `k3s-deploy` when deployment is the planned next step.',
             'Keep `remote-command` for kubectl, host inspection, package installs, logs, restarts, deployments, DNS, TLS, and other infrastructure operations.',
             'Every `agent-workload` step must use the deferred workload schema only: `{"tool":"agent-workload","reason":"why","params":{"action":"create_from_scenario","request":"the full original user request","timezone":"IANA/Zone"}}`.',
             'Do not parse the schedule, cron, or remote command yourself for `agent-workload`; pass the full original request and let the runtime canonicalize it.',
@@ -9852,11 +9845,6 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('Treat the cluster registry as durable context from earlier verified remote tool runs. Use it to avoid starting from scratch, but still re-verify rollout, ingress, TLS, and public reachability before claiming a deployment is live.');
         }
 
-        if (toolPolicy?.managedAppsSummary) {
-            parts.push(`Managed app catalog:\n${toolPolicy.managedAppsSummary}`);
-            parts.push('Treat the managed app catalog as the authoritative record for agent-owned repos, image repos, namespaces, and public hosts.');
-        }
-
         if (shouldHydrateRemoteOpsGuidance({
             objective,
             instructions: baseInstructions,
@@ -9900,15 +9888,6 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('Treat the local workspace repository as the source of truth for authoring and GitHub pushes unless the user explicitly says the canonical repo lives on the server.');
             parts.push('Treat that local repository rule as a default authoring target, not proof of the repository\'s current health, cleanliness, or contents. Verify those facts with tools before stating them.');
             parts.push('Do not claim generic local shell or sandbox limits for Git work when `git-safe` is available. Continue through the constrained Git tool path instead.');
-        }
-
-        if (allowedToolIds.includes('managed-app')) {
-            parts.push('Use `managed-app` for agent-owned applications that already belong to the managed app catalog, and for explicit managed-app doctor, reconcile, inspect, deploy, or platform repair requests.');
-            parts.push('Do not make `managed-app create` the default authoring lane for generic remote software work. Prefer the remote CLI lane first unless the user clearly asks for a managed app or the active workflow is already tied to a managed app record.');
-            parts.push('For new app requests, let `managed-app create` allocate the repo, image repo, namespace, and host instead of improvising those names in chat.');
-            parts.push('For remote app software changes, use `managed-app update` when the app reference is known; otherwise use `managed-app create` with the app prompt so the control plane can reconcile the app record and remote build pipeline.');
-            parts.push('If a managed-app inspect result shows a draft app with no repo/build metadata, or a managed-app step says the app was not found, treat that as a recoverable catalog issue. Acknowledge it briefly, then continue with the create/reinitialize path unless a real user decision is missing.');
-            parts.push('When the request says SSH, remote server, Gitea, or remote k3s deployment, include `deployTarget: "ssh"` in `managed-app` params so the control plane deploys through the remote host instead of the in-cluster Kubernetes API.');
         }
 
         if (allowedToolIds.includes('web-scrape')) {

@@ -124,7 +124,8 @@ const API = (function() {
         }
 
         try {
-            const url = new URL(normalizedPath, window.location.origin);
+            const backendOrigin = BASE_URL.replace(/\/v1\/?$/i, '') || window.location.origin;
+            const url = new URL(normalizedPath, backendOrigin);
             if (inline) {
                 url.searchParams.set('inline', '1');
             }
@@ -139,10 +140,12 @@ const API = (function() {
             return null;
         }
 
-        const downloadUrl = buildArtifactDisplayUrl(image.downloadPath || image.downloadUrl || '');
+        const artifactId = image.artifactId || image.artifact_id || null;
+        const fallbackDownloadPath = artifactId ? `/api/artifacts/${encodeURIComponent(artifactId)}/download` : '';
+        const downloadUrl = buildArtifactDisplayUrl(image.downloadPath || image.downloadUrl || fallbackDownloadPath || '');
         const inlineUrl = downloadUrl
             ? buildArtifactDisplayUrl(
-                image.inlinePath || image.downloadPath || image.downloadUrl || '',
+                image.inlinePath || image.inlineUrl || image.downloadPath || image.downloadUrl || fallbackDownloadPath || '',
                 { inline: true },
             )
             : '';
@@ -161,7 +164,7 @@ const API = (function() {
             imageUrl,
             inlineUrl: inlineUrl || imageUrl,
             downloadUrl: downloadUrl || buildArtifactDisplayUrl(image.url || '') || image.url || '',
-            artifactId: image.artifactId || null,
+            artifactId,
             filename: image.filename || null,
         };
     }

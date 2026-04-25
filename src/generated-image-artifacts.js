@@ -205,10 +205,13 @@ function normalizeGeneratedImageRecord(image = {}, storedArtifact = null) {
             url: image?.url || null,
             b64_json: image?.b64_json || null,
             revised_prompt: revisedPrompt,
+            revisedPrompt,
             artifactId: null,
             downloadUrl: null,
             inlinePath: null,
+            inlineUrl: null,
             absoluteUrl: null,
+            filename: null,
         };
     }
 
@@ -218,10 +221,13 @@ function normalizeGeneratedImageRecord(image = {}, storedArtifact = null) {
         url: inlinePath,
         b64_json: null,
         revised_prompt: revisedPrompt,
+        revisedPrompt,
         artifactId: storedArtifact.id,
         downloadUrl,
         inlinePath,
+        inlineUrl: inlinePath,
         absoluteUrl: toAbsoluteInternalUrl(inlinePath),
+        filename: storedArtifact.filename || null,
     };
 }
 

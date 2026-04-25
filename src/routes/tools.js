@@ -32,6 +32,8 @@ const {
 } = require('../tool-execution-profiles');
 
 const registry = getUnifiedRegistry();
+const DISABLED_TOOL_IDS = new Set(['managed-app']);
+const DISABLED_TOOL_MESSAGE = 'managed-app is disabled. Use remote-command for direct remote CLI work, git-safe for repository save/push, and k3s-deploy for deployment.';
 
 function getRequestOwnerId(req) {
   return String(req.user?.username || '').trim() || null;
@@ -68,11 +70,6 @@ function buildRuntimeSummary(toolManager, options = {}) {
   const gitea = typeof settingsController.getEffectiveGiteaConfig === 'function'
     ? settingsController.getEffectiveGiteaConfig()
     : {};
-  const managedApps = typeof settingsController.getEffectiveManagedAppsConfig === 'function'
-    ? settingsController.getEffectiveManagedAppsConfig()
-    : {};
-  const managedAppDeployTarget = String(managedApps.deployTarget || config.managedApps.deployTarget || 'ssh').trim() || 'ssh';
-
   return {
     source: 'backend',
     toolManagerInitialized: Boolean(toolManager?.initialized),
@@ -110,23 +107,8 @@ function buildRuntimeSummary(toolManager, options = {}) {
       org: gitea.org || '',
       registryHost: gitea.registryHost || '',
       hasWebhookSecret: Boolean(gitea.webhookSecret),
-      appBaseDomain: managedApps.appBaseDomain || '',
-      namespacePrefix: managedApps.namespacePrefix || '',
-      platformNamespace: managedApps.platformNamespace || '',
-      platformRuntimeSecretName: managedApps.platformRuntimeSecretName || '',
     },
     clusterRegistry: clusterStateRegistry.getRuntimeSummary(),
-    managedApps: {
-      configured: Boolean(gitea.enabled !== false && gitea.baseURL && gitea.token),
-      persistenceAvailable: Boolean(options.managedAppService?.isAvailable?.()),
-      kubernetesConfigured: Boolean(options.managedAppService?.kubernetesClient?.isConfigured?.(managedAppDeployTarget)),
-      deployTarget: managedAppDeployTarget,
-      appBaseDomain: managedApps.appBaseDomain || '',
-      namespacePrefix: managedApps.namespacePrefix || '',
-      platformNamespace: managedApps.platformNamespace || '',
-      platformRuntimeSecretName: managedApps.platformRuntimeSecretName || '',
-      defaultBranch: managedApps.defaultBranch || '',
-    },
     remoteRunner: {
       enabled: config.remoteRunner.enabled !== false,
       configured: Boolean(config.remoteRunner.token),
@@ -202,33 +184,6 @@ function buildToolRuntime(toolId, options = {}) {
     };
   }
 
-  if (toolId === 'managed-app') {
-    const gitea = typeof settingsController.getEffectiveGiteaConfig === 'function'
-      ? settingsController.getEffectiveGiteaConfig()
-      : {};
-    const managedApps = typeof settingsController.getEffectiveManagedAppsConfig === 'function'
-      ? settingsController.getEffectiveManagedAppsConfig()
-      : {};
-    const deployTarget = String(managedApps.deployTarget || config.managedApps.deployTarget || 'ssh').trim() || 'ssh';
-    return {
-      configured: Boolean(gitea.enabled !== false && gitea.baseURL && gitea.token),
-      provider: remoteRunnerService.getHealthyRunner()
-        ? 'external-gitea-plus-remote-runner-k3s'
-        : 'external-gitea-plus-remote-k3s-over-ssh',
-      giteaBaseURL: gitea.baseURL || '',
-      giteaOrg: gitea.org || '',
-      registryHost: gitea.registryHost || '',
-      appBaseDomain: managedApps.appBaseDomain || '',
-      namespacePrefix: managedApps.namespacePrefix || '',
-      platformNamespace: managedApps.platformNamespace || '',
-      platformRuntimeSecretName: managedApps.platformRuntimeSecretName || '',
-      deployTarget,
-      runnerAvailable: Boolean(remoteRunnerService.getHealthyRunner()),
-      kubernetesConfigured: Boolean(options.managedAppService?.kubernetesClient?.isConfigured?.(deployTarget)),
-      persistenceAvailable: Boolean(options.managedAppService?.isAvailable?.()),
-    };
-  }
-
   if (toolId === 'web-search') {
     return {
       configured: Boolean(process.env.PERPLEXITY_API_KEY),
@@ -288,7 +243,6 @@ function buildToolRuntime(toolId, options = {}) {
     'file-mkdir',
     'git-safe',
     'tool-doc-read',
-    'managed-app',
     'security-scan',
     'architecture-design',
     'uml-generate',
@@ -350,7 +304,8 @@ async function buildFrontendToolCatalog({ req, category = null, sessionId = null
 
   const manifestTools = (includeAllTools ? registry.getAllManifests() : registry.getFrontendTools())
     .filter((tool) => !HIDDEN_FRONTEND_TOOL_IDS.includes(tool.id))
-    .filter((tool) => tool.id !== 'ssh-execute');
+    .filter((tool) => tool.id !== 'ssh-execute')
+    .filter((tool) => tool.id !== 'managed-app');
 
   const enrichedTools = await Promise.all(manifestTools.map(async (tool) => {
     const docMetadata = await getToolDocMetadata(tool.id);
@@ -739,6 +694,11 @@ router.get('/docs/:id', async (req, res) => {
   try {
     await ensureToolManagerInitialized();
     const { id } = req.params;
+
+    if (DISABLED_TOOL_IDS.has(id)) {
+      return res.status(404).json({ success: false, error: DISABLED_TOOL_MESSAGE });
+    }
+
     const metadata = await getToolDocMetadata(id);
 
     if (!metadata.docAvailable) {
@@ -768,6 +728,10 @@ router.get('/:id', async (req, res) => {
   try {
     const toolManager = await ensureToolManagerInitialized();
     const { id } = req.params;
+
+    if (DISABLED_TOOL_IDS.has(id)) {
+      return res.status(404).json({ success: false, error: DISABLED_TOOL_MESSAGE });
+    }
     
     const tool = registry.getTool(id);
     const manifest = registry.getManifest(id);
@@ -834,6 +798,10 @@ router.post('/invoke', async (req, res) => {
     if (!toolId) {
       return res.status(400).json({ success: false, error: 'Tool ID is required' });
     }
+
+    if (DISABLED_TOOL_IDS.has(toolId)) {
+      return res.status(400).json({ success: false, error: DISABLED_TOOL_MESSAGE });
+    }
     
     const toolManager = await ensureToolManagerInitialized();
     resolvedSessionId = await resolveToolSessionId(sessionId, ownerId, req.body || {});
@@ -870,6 +838,10 @@ router.post('/invoke/:id', async (req, res) => {
     const { id } = req.params;
     params = req.body;
     const ownerId = getRequestOwnerId(req);
+
+    if (DISABLED_TOOL_IDS.has(id)) {
+      return res.status(400).json({ success: false, error: DISABLED_TOOL_MESSAGE });
+    }
     
     const toolManager = await ensureToolManagerInitialized();
     resolvedSessionId = await resolveToolSessionId(req.body.sessionId, ownerId, req.body || {});
