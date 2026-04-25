@@ -561,7 +561,8 @@ body[data-theme="voxel"] .voxel-icon-btn {
 .voxel-pet {
     --cube: 18px;
     --pet-scale: 1;
-    --pet-tilt: scale(var(--pet-scale)) rotateX(8deg) rotateY(-16deg);
+    --pet-yaw: -16deg;
+    --pet-tilt: scale(var(--pet-scale)) rotateX(8deg) rotateY(var(--pet-yaw));
     position: relative;
     width: 260px;
     height: 230px;
@@ -688,6 +689,10 @@ body[data-theme="voxel"] .voxel-icon-btn {
     animation: voxelScan 900ms ease-in-out;
 }
 
+.voxel-pet.action-roam {
+    animation: voxelStride 1.15s steps(5, end) infinite;
+}
+
 .voxel-pet.action-sleep {
     animation: voxelSleep 1.2s ease-in-out;
 }
@@ -759,6 +764,12 @@ body[data-theme="voxel"] .voxel-icon-btn {
 
 .voxel-cube.shine .voxel-face-front {
     opacity: 0.72;
+}
+
+.voxel-cube.detail .voxel-face-front {
+    box-shadow:
+        inset -1px -1px 0 rgba(0, 0, 0, 0.32),
+        inset 1px 1px 0 rgba(255, 255, 255, 0.36);
 }
 
 .voxel-cube.shade .voxel-face-front {
@@ -1069,6 +1080,14 @@ body[data-theme="voxel"] .autocomplete-item.selected {
     50% { transform: var(--pet-tilt) translateY(8px) rotateZ(-2deg); opacity: 0.72; }
 }
 
+@keyframes voxelStride {
+    0% { transform: var(--pet-tilt) translate3d(0, 0, 0); }
+    25% { transform: var(--pet-tilt) translate3d(4px, -3px, 0); }
+    50% { transform: var(--pet-tilt) translate3d(10px, 0, 0); }
+    75% { transform: var(--pet-tilt) translate3d(14px, -3px, 0); }
+    100% { transform: var(--pet-tilt) translate3d(20px, 0, 0); }
+}
+
 @keyframes voxelBlink {
     0%, 60% { opacity: 1; }
     61%, 100% { opacity: 0.35; }
@@ -1081,6 +1100,7 @@ body[data-theme="voxel"] .autocomplete-item.selected {
     .voxel-pet.action-dance,
     .voxel-pet.action-scout,
     .voxel-pet.action-guard,
+    .voxel-pet.action-roam,
     .voxel-pet.action-sleep,
     .voxel-roamer,
     .voxel-cube.spark,
