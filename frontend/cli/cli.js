@@ -49,7 +49,7 @@ const COMMANDS = [
   '/url', '/config', '/theme', '/export', '/import', '/rename', '/delete',
   '/copy', '/paste', '/undo', '/redo', '/search', '/settings', '/download-image',
   '/models', '/model', '/image', '/img', '/imgmodels', '/providers', '/attach',
-  '/provider-status', '/.help', '/.status', '/.interrupt', '/.detach'
+  '/provider-status', '/remote', '/.help', '/.status', '/.interrupt', '/.detach'
 ];
 
 const MODES = ['chat', 'canvas', 'notation'];
@@ -145,6 +145,7 @@ function printHelp() {
     ['/providers', 'List session-capable backend CLI providers'],
     ['/attach <provider> [cwd]', 'Attach to codex-cli, gemini-cli, or kimi-cli'],
     ['/provider-status', 'Show the active backend CLI session'],
+    ['/remote <cmd>', 'Remote CLI status, tools, plan, run, or verify'],
     ['/theme <name>', 'Set theme (default|minimal|colorful|dark)'],
     ['/export <file>', 'Export current session to file'],
     ['/import <file>', 'Import session from file'],
@@ -1378,6 +1379,183 @@ function completer(line) {
   return [hits.length ? hits : COMMANDS, line];
 }
 
+async function loadRemoteToolCatalog() {
+  const params = new URLSearchParams({
+    category: 'ssh',
+    taskType: 'chat',
+    clientSurface: 'cli',
+  });
+
+  if (currentSessionId && !String(currentSessionId).startsWith('local_')) {
+    params.set('sessionId', currentSessionId);
+  }
+
+  const response = await api.request(`/api/tools/available?${params.toString()}`, {
+    method: 'GET',
+    timeout: 10000,
+  });
+  const tools = response.data || [];
+  const remoteTool = tools.find((tool) => tool.id === 'remote-command')
+    || tools.find((tool) => Array.isArray(tool.runtime?.commandCatalog));
+
+  return {
+    tools,
+    runtime: response.meta?.runtime || null,
+    remoteTool,
+    catalog: remoteTool?.runtime?.commandCatalog || [],
+  };
+}
+
+function printRemotePlan() {
+  console.log(chalk.cyan.bold('\nRemote CLI Plan\n'));
+  console.log(chalk.gray('  1. /remote status - confirm remote runner health and fallback target.'));
+  console.log(chalk.gray('  2. /remote tools - choose a catalog command.'));
+  console.log(chalk.gray('  3. /remote run <command> - execute one purposeful inspect, fix, or verify batch.'));
+  console.log(chalk.gray('  4. Continue normal build/test failures while the next step is still on plan.'));
+  console.log(chalk.gray('  5. Stop for sudo/package installs, secrets, destructive deletes, force push, repeated failures, missing credentials, or unclear recovery.\n'));
+  console.log(chalk.gray('Raw expert access: /remote run hostname && whoami && uname -m\n'));
+}
+
+function printRemoteResult(result = {}) {
+  const exitCode = Number.isFinite(Number(result.exitCode)) ? Number(result.exitCode) : 'unknown';
+  const stdout = String(result.stdout || result.output || '').trim();
+  const stderr = String(result.stderr || '').trim();
+
+  console.log(chalk.cyan.bold('\nRemote CLI Result'));
+  console.log(chalk.gray(`Exit code: ${exitCode}`));
+  if (result.transport || result.source || result.runnerId) {
+    console.log(chalk.gray(`Transport: ${result.transport || result.source || 'remote'}${result.runnerId ? `:${result.runnerId}` : ''}`));
+  }
+  if (result.cwd || result.workspacePath) {
+    console.log(chalk.gray(`Workspace: ${result.cwd || result.workspacePath}`));
+  }
+  if (stdout) {
+    console.log(chalk.green('\nSTDOUT'));
+    console.log(stdout);
+  }
+  if (stderr) {
+    console.log(chalk.yellow('\nSTDERR'));
+    console.log(stderr);
+  }
+  if (!stdout && !stderr) {
+    console.log(JSON.stringify(result, null, 2));
+  }
+  console.log('');
+}
+
+async function invokeRemoteCommand(command, options = {}) {
+  const response = await api.request('/api/tools/invoke', {
+    method: 'POST',
+    timeout: options.timeout || 120000,
+    body: {
+      tool: 'remote-command',
+      params: {
+        command,
+        profile: options.profile || 'build',
+        workflowAction: options.workflowAction || 'remote-cli-manual-run',
+        timeout: options.timeout || 120000,
+      },
+      sessionId: currentSessionId,
+      taskType: 'chat',
+      clientSurface: 'cli',
+      model: currentModel || null,
+    },
+  });
+
+  if (response.sessionId) {
+    currentSessionId = response.sessionId;
+    session.setCurrent(currentSessionId);
+  }
+
+  const envelope = response.data || {};
+  return envelope.data || envelope.result || envelope;
+}
+
+function buildHttpsVerifyCommand(host) {
+  const normalized = String(host || '').trim() || 'demoserver2.buzz';
+  if (!/^[a-z0-9.-]+(?::[0-9]{1,5})?$/i.test(normalized)) {
+    throw new Error('Host must be a domain, IP address, or host:port without shell characters.');
+  }
+
+  return `host=${JSON.stringify(normalized)}
+getent ahosts "$host" || true
+curl -fsSIL --max-time 20 "https://$host"`;
+}
+
+async function handleRemote(argString = '') {
+  const [rawSubcommand, ...restParts] = String(argString || '').trim().split(/\s+/).filter(Boolean);
+  const subcommand = String(rawSubcommand || 'plan').toLowerCase();
+  const rest = restParts.join(' ').trim();
+
+  if (subcommand === 'plan' || subcommand === 'help' || subcommand === '?') {
+    printRemotePlan();
+    return;
+  }
+
+  const spinner = ora(`Remote ${subcommand}...`).start();
+  try {
+    if (subcommand === 'status') {
+      const { runtime, remoteTool } = await loadRemoteToolCatalog();
+      spinner.stop();
+      const runner = runtime?.remoteRunner || {};
+      const ssh = runtime?.sshDefaults || {};
+      const deploy = runtime?.deployDefaults || {};
+      console.log(chalk.cyan.bold('\nRemote CLI Status'));
+      console.log(chalk.gray(`Remote runner: ${runner.healthy ? 'healthy' : 'not healthy'} (enabled=${runner.enabled ? 'yes' : 'no'}, preferred=${runner.preferred ? 'yes' : 'no'})`));
+      console.log(chalk.gray(`Remote-command: ${remoteTool?.runtime?.configured ? 'configured' : 'not configured'} via ${remoteTool?.runtime?.source || 'unknown'}`));
+      console.log(chalk.gray(`Default target: ${remoteTool?.runtime?.defaultTarget || 'none'}`));
+      console.log(chalk.gray(`SSH fallback: ${ssh.configured ? `${ssh.username || 'unknown'}@${ssh.host}:${ssh.port || 22}` : 'not configured'}`));
+      console.log(chalk.gray(`Deploy defaults: namespace=${deploy.namespace || 'unset'}, deployment=${deploy.deployment || 'unset'}, domain=${deploy.publicDomain || 'unset'}\n`));
+      return;
+    }
+
+    if (subcommand === 'tools') {
+      const { catalog } = await loadRemoteToolCatalog();
+      spinner.stop();
+      console.log(chalk.cyan.bold('\nRemote CLI Tools'));
+      if (!catalog.length) {
+        console.log(chalk.gray('No remote CLI command catalog is available.\n'));
+        return;
+      }
+      catalog.forEach((entry) => {
+        console.log(chalk.gray(`  ${chalk.cyan(String(entry.id || '').padEnd(16))} ${(entry.profile || 'inspect').padEnd(8)} ${entry.description || entry.purpose || 'Remote command pattern.'}`));
+      });
+      console.log('');
+      return;
+    }
+
+    if (subcommand === 'run') {
+      if (!rest) {
+        spinner.fail('Usage: /remote run <command>');
+        return;
+      }
+      const result = await invokeRemoteCommand(rest, {
+        profile: 'build',
+        workflowAction: 'remote-cli-manual-run',
+        timeout: 120000,
+      });
+      spinner.stop();
+      printRemoteResult(result);
+      return;
+    }
+
+    if (subcommand === 'verify') {
+      const result = await invokeRemoteCommand(buildHttpsVerifyCommand(rest), {
+        profile: 'inspect',
+        workflowAction: 'remote-cli-https-verify',
+        timeout: 60000,
+      });
+      spinner.stop();
+      printRemoteResult(result);
+      return;
+    }
+
+    spinner.fail('Usage: /remote status | /remote tools | /remote plan | /remote run <command> | /remote verify [host]');
+  } catch (err) {
+    spinner.fail(chalk.red(`Remote ${subcommand} failed: ${err.message}`));
+  }
+}
+
 /**
  * Print version information.
  */
@@ -1454,6 +1632,9 @@ async function processInput(input) {
         return true;
       case 'provider-status':
         printProviderSessionStatus();
+        return true;
+      case 'remote':
+        await handleRemote(args.trim());
         return true;
       case 'export':
         await handleExport(args.trim() || null);
@@ -1657,12 +1838,20 @@ Provider Session Commands:
   /attach <provider> [cwd]      Open a backend CLI session in the chosen cwd
   /.help                        Local escape commands while attached
 
+Remote CLI Commands:
+  /remote status                Show remote runner and fallback target state
+  /remote tools                 Show the remote command catalog
+  /remote plan                  Show the remote CLI build loop
+  /remote run <command>         Execute a curated remote-command call
+  /remote verify [host]         Verify DNS and HTTPS from the remote host
+
 Examples:
   kimibuilt
   kimibuilt --api-url http://localhost:3000
   kimibuilt --model gpt-5.4-mini
   echo "Hello AI" | kimibuilt
   /attach codex-cli
+  /remote status
 `);
 }
 

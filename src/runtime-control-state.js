@@ -72,6 +72,10 @@ function normalizeRuntimeControlState(state = {}) {
         normalized.remoteWorkingState = null;
     }
 
+    if ('remoteCli' in normalized && !isPlainObject(normalized.remoteCli)) {
+        normalized.remoteCli = null;
+    }
+
     if ('workflow' in normalized && !isPlainObject(normalized.workflow)) {
         normalized.workflow = null;
     }
@@ -133,6 +137,10 @@ function buildLegacyControlMetadata(controlState = {}) {
 
     if (normalized.remoteWorkingState) {
         legacyMetadata.remoteWorkingState = normalized.remoteWorkingState;
+    }
+
+    if (normalized.remoteCli) {
+        legacyMetadata.remoteCli = normalized.remoteCli;
     }
 
     if (Object.keys(normalized).length > 0) {

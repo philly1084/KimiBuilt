@@ -153,6 +153,82 @@ describe('ToolManager image tools', () => {
     expect(result.data.audio).toEqual({ artifactId: 'artifact-podcast-1' });
   });
 
+  test('generates batch graph diagrams with native data, SVG, Mermaid, and persisted image artifacts', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+    artifactService.createStoredArtifact.mockImplementation(async (artifact) => ({
+      id: `artifact-${artifact.metadata.graphId}`,
+      sessionId: artifact.sessionId,
+      filename: artifact.filename,
+      extension: artifact.extension,
+      mimeType: artifact.mimeType,
+      sizeBytes: artifact.buffer.length,
+      previewHtml: artifact.previewHtml,
+      metadata: artifact.metadata,
+    }));
+    artifactService.serializeArtifact.mockImplementation((artifact) => ({
+      id: artifact.id,
+      filename: artifact.filename,
+      format: artifact.extension,
+      mimeType: artifact.mimeType,
+      sizeBytes: artifact.sizeBytes,
+      downloadUrl: `/api/artifacts/${artifact.id}/download`,
+      previewUrl: `/api/artifacts/${artifact.id}/preview`,
+      preview: { type: 'html', content: artifact.previewHtml },
+      metadata: artifact.metadata,
+    }));
+
+    const result = await toolManager.executeTool('graph-diagram', {
+      graphs: [
+        {
+          title: 'Agent Tool Flow',
+          type: 'flowchart',
+          nodes: [
+            { id: 'agent', label: 'Agent' },
+            { id: 'graph', label: 'Graph Tool' },
+            { id: 'doc', label: 'Document' },
+          ],
+          edges: [
+            { from: 'agent', to: 'graph', label: 'renders' },
+            { from: 'graph', to: 'doc', label: 'embeds SVG' },
+          ],
+        },
+        {
+          title: 'Evidence Mix',
+          type: 'bar',
+          data: [
+            { label: 'Sources', value: 6 },
+            { label: 'Images', value: 3 },
+          ],
+        },
+      ],
+      outputFormats: ['native', 'mermaid', 'svg', 'html'],
+      renderMode: 'artifact',
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+      model: 'gpt-5.5',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data.graphCount).toBe(2);
+    expect(result.data.svgPreferred).toBe(true);
+    expect(result.data.graphs[0].formats.mermaid).toContain('flowchart');
+    expect(result.data.graphs[0].formats.svg).toContain('<svg');
+    expect(result.data.graphs[1].formats.svg).toContain('Evidence Mix');
+    expect(result.data.images).toHaveLength(2);
+    expect(result.data.markdownImages[0]).toContain('/api/artifacts/artifact-Agent_Tool_Flow/download');
+    expect(artifactService.createStoredArtifact).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-1',
+      extension: 'svg',
+      mimeType: 'image/svg+xml',
+      metadata: expect.objectContaining({
+        toolId: 'graph-diagram',
+        graphType: 'flowchart',
+      }),
+    }));
+  });
+
   test('normalizes markdown-wrapped image URLs before validation', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();

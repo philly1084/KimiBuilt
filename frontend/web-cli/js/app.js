@@ -38,7 +38,7 @@ class CodeCLIApp {
             '/export', '/save', '/load', '/copy', '/image', '/image-models', '/unsplash', '/diagram',
             '/upload', '/session', '/history', '/artifacts', '/stats', '/shortcuts', '/keys', '/health', '/tools', '/tool', '/tool-help',
             '/files', '/ls', '/download', '/open', '/pet', '/spawn', '/agent', '/voxel-agent', '/random-agent', '/creator', '/voxel-creator',
-            '/buddy', '/toolbelt', '/build', '/sandbox', '/sandbox-help',
+            '/buddy', '/toolbelt', '/build', '/remote', '/sandbox', '/sandbox-help',
         ];
         
         this.init();
@@ -1089,6 +1089,9 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
                 this.printBuildDeck();
                 this.recordVoxelToolUse('build');
                 break;
+            case 'remote':
+                await this.handleRemoteCommand(args);
+                break;
             case 'sandbox':
                 await this.invokeSandboxCommand(args);
                 break;
@@ -1469,6 +1472,7 @@ Session Statistics:
   /buddy             Open the voxel coding buddy panel
   /toolbelt          Show sandbox/build/tool shortcuts
   /build             Show the coding-agent build workflow
+  /remote <cmd>      status, tools, plan, run, or verify through remote CLI
   /sandbox <lang>    Run code, or save previewable HTML/Vite-style projects
 
 **AI Controls:**
@@ -1520,7 +1524,8 @@ Your buddy is wired for coding-agent work, not just chat decoration.
 
 - \`/sandbox javascript console.log("hi")\` runs a small isolated code snippet through \`code-sandbox\`.
 - \`/sandbox html <html>...</html>\` saves a previewable frontend artifact.
-- \`/build\` opens a compact build loop for plan -> edit -> test -> verify.
+- \`/build\` opens the remote CLI build loop for plan -> inspect -> build/test -> verify.
+- \`/remote status\`, \`/remote tools\`, and \`/remote run <command>\` use the server-side remote runner lane.
 - \`/tools sandbox\`, \`/tools system\`, \`/tools ssh\`, and \`/tool-help <id>\` inspect the backend tool catalog.
 - \`/files\` and \`/open\` manage generated session files.
 
@@ -1531,13 +1536,13 @@ Buddy stats: bond ${Math.round(personality.bond || 0)}%, sandbox runs ${personal
         this.setActiveVoxelTool('build');
         this.printAI(`## Build Mode
 
-Use this when you want the buddy to act like a coding agent.
+Use this when you want the agent to build through the remote CLI pipeline.
 
 1. Describe the target behavior in the prompt.
-2. Let the agent inspect files, edit narrowly, and run checks.
-3. Use \`/tools\` to see available building tools.
-4. Use \`/sandbox <language> <code>\` for quick experiments, or \`/sandbox html ...\` for previewable UI.
-5. Use \`/files\` for generated artifacts.
+2. The agent uses \`remote-command\` through the remote runner first, with SSH as fallback.
+3. Planned inspect, search, edit, build, test, deploy, rollout, and verify steps continue automatically.
+4. The agent stops for off-plan sudo/package installs, secret mutation, destructive deletes, force pushes, missing credentials, repeated failures, or unclear recovery.
+5. Use \`/remote tools\` for the command catalog, \`/remote status\` for runner health, \`/remote run <command>\` for expert execution, and \`/remote verify [host]\` for HTTPS checks.
 
 Good prompt:
 \`\`\`text
@@ -1667,6 +1672,178 @@ Examples:
         } finally {
             this.setStatus('ready');
         }
+    }
+
+    getRemoteCommandEnvelope(invocation) {
+        const envelope = invocation?.result || {};
+        return envelope?.data || envelope?.result || envelope || {};
+    }
+
+    formatRemoteCommandResult(result = {}) {
+        const exitCode = Number.isFinite(Number(result.exitCode)) ? Number(result.exitCode) : 'unknown';
+        const stdout = String(result.stdout || result.output || '').trim();
+        const stderr = String(result.stderr || '').trim();
+        const lines = ['## Remote CLI Result', '', `Exit code: \`${exitCode}\``];
+
+        if (result.transport || result.source || result.runnerId) {
+            lines.push(`Transport: \`${result.transport || result.source || 'remote'}${result.runnerId ? `:${result.runnerId}` : ''}\``);
+        }
+        if (result.cwd || result.workspacePath) {
+            lines.push(`Workspace: \`${result.cwd || result.workspacePath}\``);
+        }
+        if (stdout) {
+            lines.push('', 'STDOUT:', '', '```text', stdout, '```');
+        }
+        if (stderr) {
+            lines.push('', 'STDERR:', '', '```text', stderr, '```');
+        }
+        if (!stdout && !stderr) {
+            lines.push('', '```json', JSON.stringify(result, null, 2), '```');
+        }
+
+        return lines.join('\n');
+    }
+
+    async loadRemoteToolCatalog() {
+        const response = await api.getAvailableTools('ssh');
+        const tools = response?.tools || [];
+        const remoteTool = tools.find((tool) => tool.id === 'remote-command')
+            || tools.find((tool) => Array.isArray(tool.runtime?.commandCatalog));
+        return {
+            tools,
+            runtime: response?.meta?.runtime || null,
+            remoteTool,
+            catalog: remoteTool?.runtime?.commandCatalog || [],
+        };
+    }
+
+    printRemotePlan() {
+        this.printAI(`## Remote CLI Plan
+
+1. \`/remote status\` - confirm remote runner health and fallback target.
+2. \`/remote tools\` - choose a catalog command: baseline, repo-inspect, file-search, build, test, docker-buildkit, kubectl-inspect, logs, rollout, or https-verify.
+3. \`/remote run <command>\` - execute one purposeful inspect, fix, or verify batch.
+4. Continue normal build/test failures while the next step is still on plan.
+5. Stop and report on privilege boundaries, secrets, destructive deletes, force push, repeated failures, missing credentials, or unclear recovery.
+
+Raw expert access remains available:
+\`\`\`text
+/tool remote-command {"command":"hostname && whoami && uname -m","profile":"inspect"}
+\`\`\``);
+    }
+
+    async handleRemoteCommand(args = []) {
+        const subcommand = String(args[0] || 'plan').toLowerCase();
+        const rest = args.slice(1).join(' ').trim();
+
+        this.setActiveVoxelTool('tools');
+
+        if (subcommand === 'plan' || subcommand === 'help' || subcommand === '?') {
+            this.printRemotePlan();
+            return;
+        }
+
+        if (subcommand === 'status') {
+            this.setStatus('thinking');
+            try {
+                const { runtime, remoteTool } = await this.loadRemoteToolCatalog();
+                const runner = runtime?.remoteRunner || {};
+                const ssh = runtime?.sshDefaults || {};
+                const deploy = runtime?.deployDefaults || {};
+                const lines = ['## Remote CLI Status', ''];
+                lines.push(`Remote runner: \`${runner.healthy ? 'healthy' : 'not healthy'}\` (enabled=${runner.enabled ? 'yes' : 'no'}, preferred=${runner.preferred ? 'yes' : 'no'})`);
+                lines.push(`Remote-command: \`${remoteTool?.runtime?.configured ? 'configured' : 'not configured'}\` via \`${remoteTool?.runtime?.source || 'unknown'}\``);
+                lines.push(`Default target: \`${remoteTool?.runtime?.defaultTarget || 'none'}\``);
+                lines.push(`SSH fallback: \`${ssh.configured ? `${ssh.username || 'unknown'}@${ssh.host}:${ssh.port || 22}` : 'not configured'}\``);
+                lines.push(`Deploy defaults: namespace=\`${deploy.namespace || 'unset'}\`, deployment=\`${deploy.deployment || 'unset'}\`, domain=\`${deploy.publicDomain || 'unset'}\``);
+                if (Array.isArray(runner.runners) && runner.runners.length) {
+                    lines.push('', 'Runners:');
+                    runner.runners.slice(0, 8).forEach((item) => {
+                        lines.push(`- \`${item.runnerId || item.id || 'runner'}\` healthy=${item.healthy ? 'yes' : 'no'} host=${item.hostname || item.host || 'unknown'}`);
+                    });
+                }
+                this.printAI(lines.join('\n'));
+            } catch (error) {
+                this.printError(`Remote status failed: ${error.message}`);
+            } finally {
+                this.setStatus('ready');
+            }
+            return;
+        }
+
+        if (subcommand === 'tools') {
+            this.setStatus('thinking');
+            try {
+                const { catalog } = await this.loadRemoteToolCatalog();
+                if (!catalog.length) {
+                    this.printSystem('No remote CLI command catalog is available.');
+                    return;
+                }
+                const lines = ['## Remote CLI Tools', ''];
+                catalog.forEach((entry) => {
+                    lines.push(`- \`${entry.id}\` (${entry.profile || 'inspect'}): ${entry.description || entry.purpose || 'Remote command pattern.'}`);
+                    if (entry.command) {
+                        lines.push(`  \`${entry.command}\``);
+                    }
+                });
+                this.printAI(lines.join('\n'));
+            } catch (error) {
+                this.printError(`Remote tools failed: ${error.message}`);
+            } finally {
+                this.setStatus('ready');
+            }
+            return;
+        }
+
+        if (subcommand === 'run') {
+            if (!rest) {
+                this.printError('Usage: /remote run <command>');
+                return;
+            }
+            this.setStatus('thinking');
+            this.recordVoxelToolUse('tool');
+            try {
+                const invocation = await api.invokeTool('remote-command', {
+                    command: rest,
+                    profile: 'build',
+                    workflowAction: 'remote-cli-manual-run',
+                    timeout: 120000,
+                });
+                this.printAI(this.formatRemoteCommandResult(this.getRemoteCommandEnvelope(invocation)));
+            } catch (error) {
+                this.printError(`Remote run failed: ${error.message}`);
+            } finally {
+                this.setStatus('ready');
+            }
+            return;
+        }
+
+        if (subcommand === 'verify') {
+            const host = rest || 'demoserver2.buzz';
+            if (!/^[a-z0-9.-]+(?::[0-9]{1,5})?$/i.test(host)) {
+                this.printError('Host must be a domain, IP address, or host:port without shell characters.');
+                return;
+            }
+            const command = `host=${JSON.stringify(host)}\ngetent ahosts "$host" || true\ncurl -fsSIL --max-time 20 "https://$host"`;
+            this.setStatus('thinking');
+            this.recordVoxelToolUse('tool');
+            try {
+                const invocation = await api.invokeTool('remote-command', {
+                    command,
+                    profile: 'inspect',
+                    workflowAction: 'remote-cli-https-verify',
+                    timeout: 60000,
+                });
+                this.printAI(this.formatRemoteCommandResult(this.getRemoteCommandEnvelope(invocation)));
+            } catch (error) {
+                this.printError(`Remote verify failed: ${error.message}`);
+            } finally {
+                this.setStatus('ready');
+            }
+            return;
+        }
+
+        this.printError('Usage: /remote status | /remote tools | /remote plan | /remote run <command> | /remote verify [host]');
     }
 
     async listTools(category = null) {

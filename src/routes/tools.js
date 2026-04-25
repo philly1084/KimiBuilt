@@ -7,7 +7,7 @@ const express = require('express');
 const router = express.Router();
 const { getUnifiedRegistry } = require('../agent-sdk/registry/UnifiedRegistry');
 const { getToolManager } = require('../agent-sdk/tools');
-const { readToolDoc, getToolDocMetadata } = require('../agent-sdk/tool-docs');
+const { readToolDoc, getToolDocMetadata, REMOTE_CLI_COMMAND_CATALOG } = require('../agent-sdk/tool-docs');
 const settingsController = require('./admin/settings.controller');
 const { config } = require('../config');
 const { piperTtsService } = require('../tts/piper-tts-service');
@@ -147,6 +147,7 @@ function buildToolRuntime(toolId, options = {}) {
       defaultTarget: runner ? `runner:${runner.runnerId}` : (ssh.host ? `${ssh.username || 'unknown'}@${ssh.host}:${ssh.port || 22}` : null),
       auth: ssh.privateKeyPath ? 'private-key' : (ssh.password ? 'password' : 'unset'),
       runnerAvailable: Boolean(runner),
+      commandCatalog: REMOTE_CLI_COMMAND_CATALOG,
     };
   }
 
@@ -171,6 +172,7 @@ function buildToolRuntime(toolId, options = {}) {
       defaultIngressClassName: deploy.ingressClassName || '',
       defaultTlsClusterIssuer: deploy.tlsClusterIssuer || '',
       runnerAvailable: Boolean(runner),
+      commandCatalog: REMOTE_CLI_COMMAND_CATALOG.filter((entry) => ['kubectl-inspect', 'rollout', 'https-verify'].includes(entry.id)),
     };
   }
 
@@ -286,6 +288,7 @@ function buildToolRuntime(toolId, options = {}) {
     'architecture-design',
     'uml-generate',
     'api-design',
+    'graph-diagram',
     'schema-generate',
     'migration-create',
   ].includes(toolId)) {
@@ -549,29 +552,76 @@ async function updateSessionToolMetadata(sessionId, toolId, params = {}) {
   const host = String(params.host || '').trim();
   const safeHost = host && !isSuspiciousSshTargetHost(host) ? host : '';
 
-  if (sessionStore.updateControlState) {
-    await sessionStore.updateControlState(sessionId, {
-      lastToolIntent: canonicalizeRemoteToolId(toolId),
-      ...(safeHost ? {
-        lastSshTarget: {
-          host: safeHost,
-          username: params.username || '',
-          port: params.port || 22,
+  const command = String(params.command || '').trim();
+  const workflowAction = String(params.workflowAction || params.workflow_action || '').trim();
+  const remoteCliPatch = {
+    lastCommand: command || null,
+    lastCommandAt: new Date().toISOString(),
+    ...(workflowAction ? { currentPlan: workflowAction } : {}),
+    ...(/\b(verify|rollout|curl|ingress|tls|certificate|kubectl get)\b/i.test(`${workflowAction}\n${command}`)
+      ? {
+        lastVerifiedState: {
+          command,
+          workflowAction: workflowAction || null,
+          verifiedAt: new Date().toISOString(),
         },
-      } : {}),
-    });
+      }
+      : {}),
+  };
+  const controlPatch = {
+    lastToolIntent: canonicalizeRemoteToolId(toolId),
+    remoteCli: remoteCliPatch,
+    ...(safeHost ? {
+      lastSshTarget: {
+        host: safeHost,
+        username: params.username || '',
+        port: params.port || 22,
+      },
+    } : {}),
+  };
+
+  if (sessionStore.updateControlState) {
+    await sessionStore.updateControlState(sessionId, controlPatch);
   }
 
   await sessionStore.update(sessionId, {
     metadata: {
-      lastToolIntent: canonicalizeRemoteToolId(toolId),
-      ...(safeHost ? {
-        lastSshTarget: {
-          host: safeHost,
-          username: params.username || '',
-          port: params.port || 22,
-        },
-      } : {}),
+      ...controlPatch,
+    },
+  });
+}
+
+async function updateSessionToolFailureMetadata(sessionId, toolId, params = {}, error = null) {
+  if (!sessionId || !isRemoteCommandToolId(toolId)) {
+    return;
+  }
+
+  const command = String(params.command || '').trim();
+  const workflowAction = String(params.workflowAction || params.workflow_action || '').trim();
+  const message = String(error?.message || error || 'Tool invocation failed').trim();
+  const remoteCliPatch = {
+    lastCommand: command || null,
+    lastCommandAt: new Date().toISOString(),
+    ...(workflowAction ? { currentPlan: workflowAction } : {}),
+    lastFailure: {
+      command,
+      workflowAction: workflowAction || null,
+      reason: message,
+      failedAt: new Date().toISOString(),
+    },
+  };
+  const controlPatch = {
+    lastToolIntent: canonicalizeRemoteToolId(toolId),
+    remoteCli: remoteCliPatch,
+  };
+
+  if (sessionStore.updateControlState) {
+    await sessionStore.updateControlState(sessionId, controlPatch);
+  }
+
+  await sessionStore.update(sessionId, {
+    metadata: {
+      ...controlPatch,
     },
   });
 }
@@ -768,8 +818,12 @@ router.get('/:id', async (req, res) => {
  * Invoke a tool
  */
 router.post('/invoke', async (req, res) => {
+  let resolvedSessionId = null;
+  let toolId = null;
+  let params = {};
   try {
-    const { tool: toolId, params = {}, sessionId } = req.body;
+    ({ tool: toolId, params = {} } = req.body);
+    const { sessionId } = req.body;
     const ownerId = getRequestOwnerId(req);
     
     if (!toolId) {
@@ -777,7 +831,7 @@ router.post('/invoke', async (req, res) => {
     }
     
     const toolManager = await ensureToolManagerInitialized();
-    const resolvedSessionId = await resolveToolSessionId(sessionId, ownerId, req.body || {});
+    resolvedSessionId = await resolveToolSessionId(sessionId, ownerId, req.body || {});
     const resolvedSession = await persistToolSessionModel(
       resolvedSessionId,
       ownerId,
@@ -794,6 +848,8 @@ router.post('/invoke', async (req, res) => {
     res.json({ success: true, data: result, sessionId: resolvedSessionId });
   } catch (error) {
     console.error('Error invoking tool:', error);
+    await updateSessionToolFailureMetadata(resolvedSessionId || req.body?.sessionId, toolId, params, error)
+      .catch((metadataError) => console.warn('[Tools API] Failed to record tool failure metadata:', metadataError?.message || metadataError));
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -803,13 +859,15 @@ router.post('/invoke', async (req, res) => {
  * Invoke a specific tool
  */
 router.post('/invoke/:id', async (req, res) => {
+  let resolvedSessionId = null;
+  let params = {};
   try {
     const { id } = req.params;
-    const params = req.body;
+    params = req.body;
     const ownerId = getRequestOwnerId(req);
     
     const toolManager = await ensureToolManagerInitialized();
-    const resolvedSessionId = await resolveToolSessionId(req.body.sessionId, ownerId, req.body || {});
+    resolvedSessionId = await resolveToolSessionId(req.body.sessionId, ownerId, req.body || {});
     const resolvedSession = await persistToolSessionModel(
       resolvedSessionId,
       ownerId,
@@ -826,6 +884,8 @@ router.post('/invoke/:id', async (req, res) => {
     res.json({ success: true, data: result, sessionId: resolvedSessionId });
   } catch (error) {
     console.error('Error invoking tool:', error);
+    await updateSessionToolFailureMetadata(resolvedSessionId || req.body?.sessionId, req.params?.id, params, error)
+      .catch((metadataError) => console.warn('[Tools API] Failed to record tool failure metadata:', metadataError?.message || metadataError));
     res.status(500).json({ success: false, error: error.message });
   }
 });

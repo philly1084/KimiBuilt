@@ -121,28 +121,13 @@ function hasDiscoveryPlanningIntent(text = '') {
     ].some((pattern) => pattern.test(normalized));
 }
 
-function hasOpencodeUsageIntent(text = '') {
-    const normalized = normalizeText(text).toLowerCase();
-    if (!normalized || !/\bopencode\b/.test(normalized)) {
-        return false;
-    }
-
-    return [
-        /\b(command|commands|syntax|usage|help|docs?|documentation|example|examples|flags?|arguments?|parameters?)\b[\s\S]{0,32}\bopencode\b/,
-        /\b(how|what)\b[\s\S]{0,20}\b(use|run|invoke|call)\b[\s\S]{0,20}\bopencode\b/,
-        /\bgive\b[\s\S]{0,20}\b(command|commands|example|examples)\b[\s\S]{0,20}\bopencode\b/,
-        /\bopencode\b[\s\S]{0,24}\b(command|commands|syntax|usage|help|docs?|documentation|example|examples)\b/,
-    ].some((pattern) => pattern.test(normalized));
-}
-
 function hasRepoImplementationIntent(text = '') {
     const normalized = normalizeText(text).toLowerCase();
-    if (!normalized || hasDiscoveryPlanningIntent(normalized) || hasOpencodeUsageIntent(normalized)) {
+    if (!normalized || hasDiscoveryPlanningIntent(normalized)) {
         return false;
     }
 
-    const repoContext = /\b(repo|repository|code|codebase|workspace|project|app|application|frontend|backend|service|component)\b/.test(normalized)
-        || /\bopencode\b/.test(normalized);
+    const repoContext = /\b(repo|repository|code|codebase|workspace|project|app|application|frontend|backend|service|component)\b/.test(normalized);
     const changeIntent = /\b(fix|implement|build|create|generate|make|update|change|refactor|add|remove|edit|patch|write|test|compile|ship)\b/.test(normalized);
 
     return repoContext && changeIntent;
@@ -407,7 +392,7 @@ function shouldResumeStoredWorkflow({
         return true;
     }
 
-    if (hasDiscoveryPlanningIntent(normalized) || hasOpencodeUsageIntent(normalized)) {
+    if (hasDiscoveryPlanningIntent(normalized)) {
         return false;
     }
 
@@ -556,8 +541,8 @@ function buildInitialStage(lane = '') {
     return 'planned';
 }
 
-function inferDeliveryMode({ lane = '', opencodeTarget = 'local' } = {}) {
-    if (lane === 'repo-then-deploy' && normalizeText(opencodeTarget) === 'remote-default') {
+function inferDeliveryMode({ lane = '', workspacePath = '', remoteTarget = null } = {}) {
+    if (lane === 'repo-then-deploy' && (normalizeText(workspacePath) || remoteTarget)) {
         return 'remote-workspace';
     }
 
@@ -569,7 +554,8 @@ function isRemoteWorkspaceDeployWorkflow(workflow = null) {
         && workflow.lane === 'repo-then-deploy'
         && inferDeliveryMode({
             lane: workflow.lane,
-            opencodeTarget: workflow.opencodeTarget,
+            workspacePath: workflow.workspacePath,
+            remoteTarget: workflow.remoteTarget,
         }) === 'remote-workspace';
 }
 
@@ -659,7 +645,8 @@ function normalizeWorkflowState(workflow = null, options = {}) {
         ? String(workflow.deliveryMode).trim()
         : inferDeliveryMode({
             lane: workflow.lane,
-            opencodeTarget: workflow.opencodeTarget,
+            workspacePath: workflow.workspacePath,
+            remoteTarget: workflow.remoteTarget,
         });
     const requiresVerification = resolveWorkflowRequiresVerification({
         lane: workflow.lane,
@@ -676,7 +663,6 @@ function normalizeWorkflowState(workflow = null, options = {}) {
         status,
         workspacePath: normalizeText(workflow.workspacePath) || null,
         repositoryPath: normalizeText(workflow.repositoryPath) || null,
-        opencodeTarget: normalizeText(workflow.opencodeTarget) || 'local',
         deliveryMode,
         remoteTarget: workflow.remoteTarget && typeof workflow.remoteTarget === 'object'
             ? {
@@ -714,7 +700,6 @@ function inferEndToEndBuilderWorkflow({
     session = null,
     workspacePath = '',
     repositoryPath = '',
-    opencodeTarget = 'local',
     remoteTarget = null,
     deployDefaults = null,
 } = {}) {
@@ -730,7 +715,6 @@ function inferEndToEndBuilderWorkflow({
             objective: storedWorkflow.objective || normalizeText(objective),
             workspacePath: normalizeText(workspacePath) || storedWorkflow.workspacePath,
             repositoryPath: normalizeText(repositoryPath) || storedWorkflow.repositoryPath,
-            opencodeTarget: normalizeText(opencodeTarget) || storedWorkflow.opencodeTarget,
             remoteTarget: remoteTarget || storedWorkflow.remoteTarget,
             source: 'stored',
         }, {
@@ -752,7 +736,6 @@ function inferEndToEndBuilderWorkflow({
         status: ACTIVE_WORKFLOW_STATUS,
         workspacePath: normalizeText(workspacePath) || null,
         repositoryPath: normalizeText(repositoryPath) || null,
-        opencodeTarget: normalizeText(opencodeTarget) || 'local',
         remoteTarget,
         deploy: buildDeployState({}, deployDefaults, {
             objective,
@@ -761,15 +744,15 @@ function inferEndToEndBuilderWorkflow({
         progress: normalizeProgress(),
         requiresVerification: resolveWorkflowRequiresVerification({
             lane,
-            deliveryMode: inferDeliveryMode({ lane, opencodeTarget }),
+            deliveryMode: inferDeliveryMode({ lane, workspacePath, remoteTarget }),
         }),
         completionCriteria: buildCompletionCriteria({
             lane,
-            deliveryMode: inferDeliveryMode({ lane, opencodeTarget }),
+            deliveryMode: inferDeliveryMode({ lane, workspacePath, remoteTarget }),
         }),
         verificationCriteria: buildVerificationCriteria({
             lane,
-            deliveryMode: inferDeliveryMode({ lane, opencodeTarget }),
+            deliveryMode: inferDeliveryMode({ lane, workspacePath, remoteTarget }),
         }),
         lastMeaningfulProgressAt: null,
         lastError: null,
@@ -814,6 +797,26 @@ function buildImplementationPrompt(workflow = null) {
         'User objective:',
         objective || '(empty)',
     ].join('\n');
+}
+
+function buildRemoteCliImplementationCommand(workflow = null) {
+    const workspacePath = normalizeText(workflow?.workspacePath);
+    const objective = normalizeText(workflow?.objective);
+    return [
+        'set -e',
+        'echo "--- remote baseline ---"',
+        'hostname && whoami && uname -m && (test -f /etc/os-release && sed -n "1,6p" /etc/os-release || true) && uptime',
+        workspacePath ? `cd -- ${quoteShellArg(workspacePath)}` : '',
+        'echo "--- workspace ---"',
+        'pwd && find . -maxdepth 2 -type f | sort | head -n 120',
+        'if [ -d .git ]; then git status --short --branch; fi',
+        'if [ -f package.json ]; then',
+        '  echo "--- package scripts ---"',
+        '  node -e "const p=require(\'./package.json\'); console.log(JSON.stringify(p.scripts || {}, null, 2))" 2>/dev/null || sed -n "1,120p" package.json',
+        'fi',
+        'echo "--- planned objective ---"',
+        `printf "%s\\n" ${quoteShellArg(objective || 'Inspect and prepare the remote workspace for implementation.')}`,
+    ].filter(Boolean).join('\n');
 }
 
 function buildManagedAppAuthoringPlanStep(workflow = null) {
@@ -1096,11 +1099,11 @@ function evaluateEndToEndBuilderWorkflow({
 
     if ((currentWorkflow.lane === 'repo-only' || currentWorkflow.lane === 'repo-then-deploy')
         && !currentWorkflow.progress.implemented
-        && !candidateToolIds.has('opencode-run')
+        && !candidateToolIds.has(remoteTool)
         && !candidateToolIds.has('managed-app')) {
         return buildBlockedWorkflowState(
             currentWorkflow,
-            'Repository implementation is required before this workflow can continue. `opencode-run` is not ready for the selected execution target, and `managed-app` is not available as a fallback.',
+            `Repository implementation is required before this workflow can continue. \`${remoteTool}\` is not ready for the selected remote CLI target, and \`managed-app\` is not available as a fallback.`,
         );
     }
 
@@ -1185,24 +1188,25 @@ function buildEndToEndWorkflowPlan({
 
     if ((currentWorkflow.lane === 'repo-only' || currentWorkflow.lane === 'repo-then-deploy')
         && !currentWorkflow.progress.implemented
-        && candidateToolIds.has('managed-app')) {
-        return [buildManagedAppAuthoringPlanStep(currentWorkflow)];
+        && candidateToolIds.has(remoteTool)) {
+        return [{
+            tool: remoteTool,
+            reason: currentWorkflow.lane === 'repo-then-deploy'
+                ? 'Inspect and prepare the remote workspace before build, deploy, and verification steps.'
+                : 'Inspect and prepare the remote workspace for the requested repository changes.',
+            params: {
+                command: buildRemoteCliImplementationCommand(currentWorkflow),
+                workflowAction: 'implement-remote-workspace',
+                timeout: REMOTE_VERIFICATION_TIMEOUT_MS,
+                ...(currentWorkflow.workspacePath ? { workingDirectory: currentWorkflow.workspacePath } : {}),
+            },
+        }];
     }
 
     if ((currentWorkflow.lane === 'repo-only' || currentWorkflow.lane === 'repo-then-deploy')
         && !currentWorkflow.progress.implemented
-        && candidateToolIds.has('opencode-run')) {
-        return [{
-            tool: 'opencode-run',
-            reason: currentWorkflow.lane === 'repo-then-deploy'
-                ? 'Implement the repository changes before saving, deploying, and verifying.'
-                : 'Implement the requested repository changes before summarizing the result.',
-            params: {
-                prompt: buildImplementationPrompt(currentWorkflow),
-                target: currentWorkflow.opencodeTarget || 'local',
-                ...(currentWorkflow.workspacePath ? { workspacePath: currentWorkflow.workspacePath } : {}),
-            },
-        }];
+        && candidateToolIds.has('managed-app')) {
+        return [buildManagedAppAuthoringPlanStep(currentWorkflow)];
     }
 
     if (currentWorkflow.lane === 'repo-only') {
@@ -1351,14 +1355,16 @@ function advanceEndToEndBuilderWorkflow({
             return currentWorkflow;
         }
 
-        if (toolId === 'opencode-run') {
+        if ((toolId === 'remote-command' || toolId === 'ssh-execute') && workflowAction === 'implement-remote-workspace') {
             currentWorkflow = markMeaningfulProgress({
                 ...currentWorkflow,
                 progress: {
                     ...currentWorkflow.progress,
                     implemented: true,
                 },
-                workspacePath: normalizeText(event?.result?.data?.workspacePath) || currentWorkflow.workspacePath,
+                workspacePath: normalizeText(event?.result?.data?.workspacePath)
+                    || normalizeText(event?.result?.data?.cwd)
+                    || currentWorkflow.workspacePath,
                 stage: currentWorkflow.lane === 'repo-only' ? 'completed' : 'saving',
                 status: currentWorkflow.lane === 'repo-only' ? COMPLETED_WORKFLOW_STATUS : ACTIVE_WORKFLOW_STATUS,
             });

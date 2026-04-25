@@ -6,6 +6,7 @@
 const { ArchitectureTool } = require('./ArchitectureTool');
 const { UMLTool } = require('./UMLTool');
 const { APIDesignTool } = require('./APIDesignTool');
+const { GraphDiagramTool } = require('./GraphDiagramTool');
 const { getUnifiedRegistry } = require('../../../registry/UnifiedRegistry');
 
 function registerDesignTools() {
@@ -14,7 +15,8 @@ function registerDesignTools() {
   const tools = [
     new ArchitectureTool(),
     new UMLTool(),
-    new APIDesignTool()
+    new APIDesignTool(),
+    new GraphDiagramTool()
   ];
   
   tools.forEach(tool => {
@@ -51,7 +53,19 @@ function getTriggerPatterns(toolId) {
   const patterns = {
     'architecture-design': ['design architecture', 'system design', 'create architecture', 'architecture diagram'],
     'uml-generate': ['generate uml', 'class diagram', 'sequence diagram', 'create diagram'],
-    'api-design': ['design api', 'create api', 'api spec', 'openapi', 'rest api design']
+    'api-design': ['design api', 'create api', 'api spec', 'openapi', 'rest api design'],
+    'graph-diagram': [
+      'complex graph',
+      'graph diagram',
+      'diagram image',
+      'render diagram',
+      'generate svg diagram',
+      'multiple graph images',
+      'document diagram',
+      'flowchart image',
+      'network graph',
+      'chart image'
+    ]
   };
   return patterns[toolId] || [toolId];
 }
@@ -60,7 +74,8 @@ function getIcon(toolId) {
   const icons = {
     'architecture-design': 'layout',
     'uml-generate': 'git-branch',
-    'api-design': 'server'
+    'api-design': 'server',
+    'graph-diagram': 'workflow'
   };
   return icons[toolId] || 'pen-tool';
 }
@@ -69,7 +84,8 @@ function getUIComponent(toolId) {
   const components = {
     'architecture-design': 'ArchitectureDesigner',
     'uml-generate': 'UMLGenerator',
-    'api-design': 'APIDesigner'
+    'api-design': 'APIDesigner',
+    'graph-diagram': 'GraphDiagramUtility'
   };
   return components[toolId] || null;
 }

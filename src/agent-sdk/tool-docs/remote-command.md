@@ -2,6 +2,13 @@
 
 Purpose: run non-interactive commands on the configured remote host through the KimiBuilt remote runner when available, falling back to SSH.
 
+Remote CLI agent pipeline:
+- Treat this tool as the default programming lane for remote inspect, edit, build, test, deploy verification, and cluster troubleshooting.
+- Prefer the remote runner whenever a healthy runner exists. Use SSH only when no healthy runner exists or an explicit host override is required.
+- Continue automatically while the action remains on the approved plan: inspect, search, edit planned files, build, test, deploy, rollout, and verify.
+- Stop and report when the work falls off plan: repeated failures, missing credentials, sudo/package install, Kubernetes Secret mutation, destructive delete, force push, unknown host, or recovery that needs a new strategy.
+- Keep batches small and purposeful: baseline -> inspect -> fix -> verify.
+
 Project defaults:
 - The common remote target is Ubuntu Linux on ARM64 (`aarch64`) running k3s.
 - Prefer Bash or POSIX shell syntax.
@@ -13,6 +20,8 @@ Project defaults:
 
 Use `remote-command` when:
 - inspecting host or cluster state
+- inspecting or editing a remote repo workspace
+- running remote build and test commands
 - reading logs or events
 - checking services, ingress, DNS, TLS, or networking
 - installing packages or making one-off host fixes
@@ -51,6 +60,21 @@ kubectl get nodes -o wide || k3s kubectl get nodes -o wide
 ```
 
 ## Command catalog
+
+These catalog entries are exposed through `/api/tools/available` so agents can select known-good remote CLI work patterns instead of inventing shell flows.
+
+| ID | Profile | Purpose |
+|----|---------|---------|
+| `baseline` | `inspect` | Confirm host identity, user, CPU architecture, OS, and uptime. |
+| `repo-inspect` | `inspect` | Inspect current workspace, nearby files, package scripts, and git status. |
+| `file-search` | `inspect` | Search remote files using `find` and `grep -R`; do not assume `rg` exists. |
+| `build` | `build` | Run the project build command discovered from the repo. |
+| `test` | `build` | Run the focused or project test command discovered from the repo. |
+| `docker-buildkit` | `inspect` | Check Docker/BuildKit availability and builder state. |
+| `kubectl-inspect` | `inspect` | Inspect k3s nodes, workloads, services, ingress, and pods. |
+| `logs` | `inspect` | Read Kubernetes logs and recent events for the target workload. |
+| `rollout` | `deploy` | Check rollout and available conditions for a deployment. |
+| `https-verify` | `inspect` | Verify DNS and public HTTPS for the deployed domain. |
 
 ### 1. Cluster survey
 

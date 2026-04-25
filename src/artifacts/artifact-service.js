@@ -1333,6 +1333,16 @@ function isResearchBackedArtifactRequest(prompt = '', format = '') {
     return /\b(research|source|sources|citations?|latest|recent|current|news|headline|headlines|article|articles|coverage|fact-check|verify|look up|search the web|browse|web search|online|current events?)\b/.test(normalizedPrompt);
 }
 
+function isDiagramHeavyArtifactRequest(prompt = '', format = '') {
+    const normalizedPrompt = String(prompt || '').trim().toLowerCase();
+    const normalizedFormat = normalizeFormat(format);
+    if (!normalizedPrompt || !MULTI_PASS_DOCUMENT_FORMATS.has(normalizedFormat)) {
+        return false;
+    }
+
+    return /\b(complex graph|graph image|graph images|diagram image|diagram images|flowchart|network graph|dependency graph|architecture diagram|system diagram|sequence diagram|state diagram|timeline diagram|mindmap|mind map|svg diagram|mermaid diagram|chart image|visualize the flow|visualise the flow)\b/.test(normalizedPrompt);
+}
+
 function shouldEnableArtifactToolOrchestration(prompt = '', format = '') {
     const normalizedPrompt = String(prompt || '').trim().toLowerCase();
     const normalizedFormat = normalizeFormat(format);
@@ -1341,6 +1351,10 @@ function shouldEnableArtifactToolOrchestration(prompt = '', format = '') {
     }
 
     if (isResearchBackedArtifactRequest(normalizedPrompt, normalizedFormat)) {
+        return true;
+    }
+
+    if (isDiagramHeavyArtifactRequest(normalizedPrompt, normalizedFormat)) {
         return true;
     }
 
@@ -1797,6 +1811,7 @@ class ArtifactService {
             ? renderInteractiveArtifactInstructions(requestPrompt, existingContent)
             : '';
         const researchBackedRequest = isResearchBackedArtifactRequest(requestPrompt, normalizedFormat);
+        const diagramHeavyRequest = isDiagramHeavyArtifactRequest(requestPrompt, normalizedFormat);
         const baseContext = [
             'You are the Lilly Business Agent.',
             'Produce business-ready output only, with no surrounding commentary.',
@@ -1805,6 +1820,9 @@ class ArtifactService {
                 : 'Do not use external tools, function calls, or tool invocation syntax.',
             allowToolOrchestration && researchBackedRequest
                 ? 'For research-backed, latest, current-events, and news-style documents, gather grounded online sources with web-search and web-fetch before composing, and prefer verified real image sources from Unsplash or direct image URLs over AI-generated imagery.'
+                : '',
+            allowToolOrchestration && diagramHeavyRequest
+                ? 'For graph-heavy or diagram-heavy documents, use graph-diagram to create native graph JSON plus reusable SVG image artifacts, then embed those SVG artifact URLs or inline SVGs in the final document. If the active model is GPT-5.5 or newer, prefer custom SVG diagrams over plain Mermaid-only output while preserving native graph data when useful.'
                 : '',
             'Do not mention environment limitations, permissions, API keys, or inability to create files.',
             'The platform will render, store, and deliver the file artifact for the user.',
@@ -1963,6 +1981,7 @@ class ArtifactService {
             'Prefer 4-8 sections for substantial documents unless the request clearly needs fewer.',
             'Each section should have a concrete purpose, a visible layout role, and 2-5 key points that must be covered.',
             'If verified images are available, plan where real images support the document, but do not invent illustrations.',
+            'If the request needs graphs, diagrams, charts, process maps, or architecture visuals, plan where graph-diagram SVG artifacts or inline SVGs should be used. For GPT-5.5 or newer models, prefer direct custom SVG diagrams when the visual requires precision or polish.',
             'Do not mirror placeholder headings or sample copy from provided templates.',
             'Treat instruction blocks such as <creative_direction>, <sample_handling>, <continuity>, [Verified image references], and [Research workflow] as guidance only. Never copy them into the document plan.',
             existingContent ? `Existing content to revise:\n${existingContent}` : '',
@@ -2007,6 +2026,7 @@ class ArtifactService {
             'Make the voice feel authored by a thoughtful human, not evenly templated by a machine.',
             'Vary rhythm between sections instead of giving every section the same sentence cadence.',
             'If verified image references are available, mention the real image use naturally in the section content instead of describing fake illustrations.',
+            'For sections that need diagrams, reference the intended graph-diagram output by purpose rather than writing raw diagram source into prose.',
             'Do not echo placeholder copy, sample headings, or tutorial language from the scaffold.',
             'Never quote or reproduce instruction-only metadata such as [Verified image references], [Research workflow], Source: tool, Source: unsplash, or creative-direction labels in the section content.',
             existingContent ? `Existing content to revise:\n${existingContent}` : '',
@@ -2045,6 +2065,7 @@ class ArtifactService {
             'Create a strong opening hero, visible section chrome, and alternating density across sections.',
             'Do not let every section reuse the same card treatment, paragraph width, or transition language.',
             'When verified image URLs are available, make the design image-rich with a hero image, repeated section visuals, image cards, and gallery treatments across the document.',
+            'When graph-diagram produced SVG image artifacts are available, embed them as first-class document visuals with concise captions. If no artifact URL is available and the model is GPT-5.5 or newer, inline clean accessible SVG directly in the HTML.',
             'Do not output a layout plan, source register instructions, build checklist, editorial note, or any meta-document that describes how a future document should be assembled.',
             'The output must be the finished document itself, not instructions for building it.',
             'Do not print workflow labels, source metadata, tool notes, or image search descriptions verbatim in the body or captions.',

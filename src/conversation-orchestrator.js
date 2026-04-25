@@ -975,9 +975,9 @@ function classifyRequestIntent({
         preferredExecutionPath = 'plan-first';
         confidence = 0.72;
         pushReason(reasons, 'The request refers to prior outputs or stored artifacts.');
-    } else if (hasOpencodeRepoWorkIntent(normalized)) {
+    } else if (hasRepositoryImplementationIntent(normalized)) {
         taskFamily = 'repo-work';
-        preferredExecutionPath = 'direct-tool';
+        preferredExecutionPath = executionProfile === REMOTE_BUILD_EXECUTION_PROFILE ? 'workflow' : 'plan-first';
         confidence = 0.82;
         pushReason(reasons, 'The request is about repository implementation work rather than plain chat.');
     }
@@ -992,7 +992,7 @@ function classifyRequestIntent({
         hasExplicitPodcastIntentText(normalized),
         hasDocumentWorkflowIntentText(normalized),
         hasExplicitWebResearchIntentText(normalized) || hasCurrentInfoIntentText(normalized),
-        hasOpencodeRepoWorkIntent(normalized),
+        hasRepositoryImplementationIntent(normalized),
         hasExplicitSubAgentIntentText(normalized),
     ].filter(Boolean).length;
     if (ambiguousSignals >= 2) {
@@ -1054,8 +1054,6 @@ function buildScoredCandidateToolMap({
     hasPodcastIntent = false,
     hasDocumentWorkflowIntent = false,
     hasSubAgentIntent = false,
-    hasOpencodeUsageIntent = false,
-    hasOpencodeIntent = false,
     hasManagedAppIntent = false,
     explicitGitIntent = false,
     explicitK3sDeployIntent = false,
@@ -1064,7 +1062,6 @@ function buildScoredCandidateToolMap({
     shouldPreferRemoteWebsiteSource = false,
     workflowNeedsRepoLane = false,
     workflowNeedsDeployLane = false,
-    opencodeTargetReady = false,
     sessionIsolation = false,
     toolEvents = [],
     hasArchitectureIntent = false,
@@ -1103,14 +1100,13 @@ function buildScoredCandidateToolMap({
         switch (classification.taskFamily) {
         case 'remote-ops':
             adjustCandidateToolScore(scoreMap, remoteToolId, 1.25, 'Remote operations should start with the trusted remote tool.');
-            adjustCandidateToolScore(scoreMap, 'opencode-run', workflowNeedsRepoLane && opencodeTargetReady ? 0.95 : 0, 'The active remote workflow includes repository work.');
-            adjustCandidateToolScore(scoreMap, 'managed-app', workflowNeedsRepoLane || workflowNeedsDeployLane || hasManagedAppIntent ? 1.1 : 0, 'Remote app authoring and deployment should prefer the managed app control plane.');
+            adjustCandidateToolScore(scoreMap, 'managed-app', hasManagedAppIntent ? 1.1 : 0.2, 'Managed app platform and deployment operations use the managed app control plane when explicitly targeted.');
             adjustCandidateToolScore(scoreMap, 'k3s-deploy', workflowNeedsDeployLane || explicitK3sDeployIntent ? 0.95 : 0, 'The active remote workflow includes deployment work.');
             adjustCandidateToolScore(scoreMap, 'git-safe', explicitGitIntent || workflowNeedsDeployLane ? 0.55 : 0, 'Git save/publish flow is relevant to the remote task.');
             break;
         case 'repo-work':
-            adjustCandidateToolScore(scoreMap, 'opencode-run', opencodeTargetReady ? 1.3 : 0.8, 'Repository implementation work should prefer the managed code runtime.');
-            adjustCandidateToolScore(scoreMap, 'managed-app', executionProfile === REMOTE_BUILD_EXECUTION_PROFILE ? 1.2 : 0.35, 'Remote repository-backed app work should prefer the managed app control plane.');
+            adjustCandidateToolScore(scoreMap, remoteToolId, executionProfile === REMOTE_BUILD_EXECUTION_PROFILE ? 1.25 : 0, 'Remote CLI repository work should use the trusted remote command lane.');
+            adjustCandidateToolScore(scoreMap, 'managed-app', hasManagedAppIntent ? 0.9 : 0.2, 'Managed app work is secondary unless the managed app catalog is explicitly targeted.');
             adjustCandidateToolScore(scoreMap, 'git-safe', explicitGitIntent ? 0.75 : 0.3, 'Repository work may end with a save/push step.');
             break;
         case 'research':
@@ -1179,14 +1175,11 @@ function buildScoredCandidateToolMap({
         adjustCandidateToolScore(scoreMap, 'podcast', 1.4, 'Explicit podcast wording should keep the podcast workflow tool in the candidate set.');
         adjustCandidateToolScore(scoreMap, 'web-search', 0.25, 'Podcast production may still need a research fallback when the podcast tool is unavailable.');
     }
-    if (hasOpencodeUsageIntent) {
-        adjustCandidateToolScore(scoreMap, 'tool-doc-read', 1.15, 'Tool usage questions should read docs before execution.');
+    if (workflowNeedsRepoLane && remoteToolId) {
+        adjustCandidateToolScore(scoreMap, remoteToolId, 1.05, 'Repository work in remote-build mode should use the remote CLI lane.');
     }
-    if ((hasOpencodeIntent || workflowNeedsRepoLane) && opencodeTargetReady) {
-        adjustCandidateToolScore(scoreMap, 'opencode-run', 0.95, 'Repository work is relevant and the code runtime is ready.');
-    }
-    if (hasManagedAppIntent || (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE && (workflowNeedsRepoLane || workflowNeedsDeployLane))) {
-        adjustCandidateToolScore(scoreMap, 'managed-app', 1.1, 'Managed app creation, software changes, and deployment should use the dedicated control plane.');
+    if (hasManagedAppIntent || (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE && workflowNeedsDeployLane)) {
+        adjustCandidateToolScore(scoreMap, 'managed-app', hasManagedAppIntent ? 1.1 : 0.4, 'Managed app deployment and platform operations use the dedicated control plane when relevant.');
     }
     if (explicitGitIntent || workflowNeedsDeployLane) {
         adjustCandidateToolScore(scoreMap, 'git-safe', 0.75, 'Git state or save flow is relevant.');
@@ -3682,20 +3675,6 @@ function hasExplicitLocalSandboxIntent(text = '') {
         || /\b(code sandbox|sandbox|locally|local code)\b/.test(normalized);
 }
 
-function hasOpencodeToolUsageIntent(text = '') {
-    const normalized = String(text || '').trim().toLowerCase();
-    if (!normalized || !/\bopencode\b/.test(normalized)) {
-        return false;
-    }
-
-    return [
-        /\b(command|commands|syntax|usage|help|docs?|documentation|example|examples|flags?|arguments?|parameters?)\b[\s\S]{0,32}\bopencode\b/,
-        /\b(how|what)\b[\s\S]{0,20}\b(use|run|invoke|call)\b[\s\S]{0,20}\bopencode\b/,
-        /\bgive\b[\s\S]{0,20}\b(command|commands|example|examples)\b[\s\S]{0,20}\bopencode\b/,
-        /\bopencode\b[\s\S]{0,24}\b(command|commands|syntax|usage|help|docs?|documentation|example|examples)\b/,
-    ].some((pattern) => pattern.test(normalized));
-}
-
 function hasRemoteInfraToolUsageIntent(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -3721,10 +3700,6 @@ function resolveToolDocTargetToolId(text = '') {
         return '';
     }
 
-    if (hasOpencodeToolUsageIntent(normalized)) {
-        return 'opencode-run';
-    }
-
     if (!hasRemoteInfraToolUsageIntent(normalized)) {
         return '';
     }
@@ -3736,61 +3711,19 @@ function resolveToolDocTargetToolId(text = '') {
     return 'remote-command';
 }
 
-function hasExplicitOpencodeImplementationIntent(text = '') {
+function hasRepositoryImplementationIntent(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
-    if (!normalized) {
+    if (!normalized || hasDiscoveryPlanningIntentText(normalized)) {
         return false;
     }
 
-    if (hasOpencodeToolUsageIntent(normalized)) {
-        return false;
-    }
-
-    return /\bopencode\b/.test(normalized)
-        && /\b(implement|implementation|fix|refactor|rewrite|update|modify|edit|patch|add|create|make|build|compile|test|run tests?|debug)\b/.test(normalized);
-}
-
-function hasOpencodeRepoWorkIntent(text = '') {
-    const normalized = String(text || '').trim().toLowerCase();
-    if (!normalized || hasDiscoveryPlanningIntentText(normalized) || hasOpencodeToolUsageIntent(normalized)) {
-        return false;
-    }
-
-    const repoContext = /\b(this repo|the repo|repository|workspace|codebase|project|app|service|package|module)\b/.test(normalized);
+    const repoContext = /\b(this repo|the repo|repository|workspace|codebase|project|app|service|package|module|remote workspace|server workspace|remote repo|server repo)\b/.test(normalized);
     const codeWorkIntent = /\b(implement|implementation|fix|refactor|rewrite|update|modify|edit|patch|add|create|build|compile|test|run tests?|debug)\b/.test(normalized);
+    const remoteWorkspaceCue = /\b(remote|server|ssh|host|\/var\/www\/|\/srv\/|\/opt\/|\/home\/[a-z0-9._-]+\/)\b/.test(normalized);
     const infraOnlyIntent = /\b(kubectl|kubernetes|k8s|deployment|deploy|rollout|restart|systemctl|journalctl|ingress|pod|cluster|node|server health|uptime|hostname|dns|tls|certificate|logs?)\b/.test(normalized)
         && !repoContext;
 
-    return (repoContext && codeWorkIntent && !infraOnlyIntent)
-        || hasExplicitOpencodeImplementationIntent(normalized);
-}
-
-function hasExplicitRemoteRepoWorkspaceIntent(text = '') {
-    const normalized = String(text || '').trim().toLowerCase();
-    if (!normalized || !hasOpencodeRepoWorkIntent(normalized)) {
-        return false;
-    }
-
-    return [
-        /\b(remote|server|ssh|host)\b[\s\S]{0,40}\b(repo|repository|workspace|codebase|project|app|service|package|module)\b/,
-        /\b(repo|repository|workspace|codebase|project|app|service|package|module)\b[\s\S]{0,40}\b(remote|server|ssh|host)\b/,
-        /\b(on|in|inside|within)\b[\s\S]{0,20}\b(the )?(server|remote host|remote machine)\b/,
-        /\b(remote workspace|server workspace|remote repo|server repo)\b/,
-        /\b\/var\/www\/|\b\/srv\/|\b\/opt\/|\b\/home\/[a-z0-9._-]+\//,
-    ].some((pattern) => pattern.test(normalized));
-}
-
-function inferOpencodeTarget(objective = '', session = null) {
-    const normalized = String(objective || '').trim().toLowerCase();
-    const sshContext = resolveSshRequestContext(objective, session);
-    const remoteRepoIntent = hasExplicitRemoteRepoWorkspaceIntent(normalized);
-
-    if (remoteRepoIntent
-        && (hasUsableSshDefaults() || sshContext.target?.host)) {
-        return 'remote-default';
-    }
-
-    return 'local';
+    return repoContext && codeWorkIntent && !infraOnlyIntent && remoteWorkspaceCue;
 }
 
 function hasManagedAppIntentText(text = '') {
@@ -3814,7 +3747,7 @@ function hasManagedAppIntentText(text = '') {
 
 function hasManagedAppAuthoringIntent(text = '', options = {}) {
     const normalized = String(text || '').trim().toLowerCase();
-    if (!normalized || hasDiscoveryPlanningIntentText(normalized) || hasOpencodeToolUsageIntent(normalized)) {
+    if (!normalized || hasDiscoveryPlanningIntentText(normalized)) {
         return false;
     }
 
@@ -4173,45 +4106,16 @@ function buildManagedAppDirectAction(objective = '', options = {}) {
     };
 }
 
-function resolvePreferredOpencodeWorkspacePath({ session = null, toolContext = {}, target = 'local' } = {}) {
-    const opencodeConfig = typeof settingsController.getEffectiveOpencodeConfig === 'function'
-        ? settingsController.getEffectiveOpencodeConfig()
-        : {};
-
-    if (target === 'remote-default') {
-        return String(
-            toolContext?.remoteWorkspacePath
-            || session?.metadata?.lastOpencodeWorkspacePath
-            || opencodeConfig.remoteDefaultWorkspace
-            || '',
-        ).trim();
-    }
-
+function resolvePreferredRemoteCliWorkspacePath({ session = null, toolContext = {} } = {}) {
     return String(
-        toolContext?.workspacePath
-        || toolContext?.repositoryPath
-        || session?.metadata?.lastOpencodeWorkspacePath
+        toolContext?.remoteWorkspacePath
+        || toolContext?.workspacePath
+        || session?.metadata?.remoteWorkingState?.workspacePath
+        || session?.metadata?.lastRemoteWorkspacePath
+        || config.deploy.defaultTargetDirectory
         || config.deploy.defaultRepositoryPath
         || '',
     ).trim();
-}
-
-function isOpencodeTargetReady(toolContext = {}, target = 'local') {
-    const service = toolContext?.opencodeService || null;
-    if (!service || typeof service.getExecutionCapabilities !== 'function') {
-        return true;
-    }
-
-    const capabilities = service.getExecutionCapabilities();
-    if (!capabilities || typeof capabilities !== 'object') {
-        return true;
-    }
-
-    if (target === 'remote-default') {
-        return capabilities.remoteReady !== false;
-    }
-
-    return capabilities.localReady !== false;
 }
 
 function hasArchitectureDesignIntent(text = '') {
@@ -4539,7 +4443,7 @@ function doesToolEventChangeState(event = {}) {
     const command = String(args.command || '').trim().toLowerCase();
     const action = String(args.action || '').trim().toLowerCase();
 
-    if (['file-write', 'git-safe', 'k3s-deploy', 'opencode-run'].includes(toolId)) {
+    if (['file-write', 'git-safe', 'k3s-deploy'].includes(toolId)) {
         return true;
     }
 
@@ -8120,8 +8024,6 @@ class ConversationOrchestrator extends EventEmitter {
         const hasDocumentWorkflowIntent = hasDocumentWorkflowIntentText(prompt);
         const hasAssetCatalogIntent = hasIndexedAssetIntentText(prompt);
         const hasSubAgentIntent = hasExplicitSubAgentIntentText(prompt);
-        const hasOpencodeUsageIntent = hasOpencodeToolUsageIntent(prompt);
-        const hasOpencodeIntent = hasOpencodeRepoWorkIntent(prompt);
         const hasManagedAppIntent = hasManagedAppIntentText(prompt);
         const hasManagedAppAuthoringRequest = hasManagedAppAuthoringIntent(prompt, {
             executionProfile,
@@ -8159,7 +8061,6 @@ class ConversationOrchestrator extends EventEmitter {
         const sshContext = resolveSshRequestContext(objective, session);
         const hasSshDefaults = hasUsableSshDefaults();
         const hasReachableSshTarget = Boolean(hasSshDefaults || sshContext.target?.host);
-        const workflowOpencodeTarget = inferOpencodeTarget(objective, session);
         const deployDefaults = typeof settingsController.getEffectiveDeployConfig === 'function'
             ? settingsController.getEffectiveDeployConfig()
             : {};
@@ -8183,13 +8084,11 @@ class ConversationOrchestrator extends EventEmitter {
             ? inferEndToEndBuilderWorkflow({
                 objective,
                 session,
-                workspacePath: resolvePreferredOpencodeWorkspacePath({
+                workspacePath: resolvePreferredRemoteCliWorkspacePath({
                     session,
                     toolContext,
-                    target: workflowOpencodeTarget,
                 }),
                 repositoryPath,
-                opencodeTarget: workflowOpencodeTarget,
                 remoteTarget: sshContext.target || null,
                 deployDefaults,
             })
@@ -8197,7 +8096,7 @@ class ConversationOrchestrator extends EventEmitter {
         const workflowSeed = inferredWorkflowSeed
             && (
                 !['repo-only', 'repo-then-deploy'].includes(String(inferredWorkflowSeed.lane || '').trim())
-                || allowedToolIds.includes('opencode-run')
+                || allowedToolIds.includes(remoteToolId)
                 || allowedToolIds.includes('managed-app')
             )
             ? inferredWorkflowSeed
@@ -8224,11 +8123,6 @@ class ConversationOrchestrator extends EventEmitter {
             !hasActiveForegroundWorkflow
             && !hasActiveForegroundProjectPlan
         ) || hasExplicitDeferredWorkloadIntent;
-        const shouldConsiderOpencodeTarget = hasOpencodeIntent || workflowNeedsRepoLane;
-        const opencodeTarget = shouldConsiderOpencodeTarget ? workflowOpencodeTarget : 'local';
-        const opencodeTargetReady = shouldConsiderOpencodeTarget
-            ? isOpencodeTargetReady(toolContext, opencodeTarget)
-            : false;
         const scoreMap = isJudgmentV2Enabled()
             ? buildScoredCandidateToolMap({
                 allowedToolIds,
@@ -8250,18 +8144,15 @@ class ConversationOrchestrator extends EventEmitter {
                 hasAssetCatalogIntent,
                 hasPodcastIntent,
                 hasDocumentWorkflowIntent,
-            hasSubAgentIntent,
-            hasOpencodeUsageIntent,
-            hasOpencodeIntent,
-            hasManagedAppIntent: hasManagedAppIntent || hasManagedAppAuthoringRequest,
-            explicitGitIntent,
+                hasSubAgentIntent,
+                hasManagedAppIntent: hasManagedAppIntent || hasManagedAppAuthoringRequest,
+                explicitGitIntent,
                 explicitK3sDeployIntent,
                 hasWorkloadSetupIntent,
                 isDeferredWorkloadRun,
                 shouldPreferRemoteWebsiteSource,
                 workflowNeedsRepoLane,
                 workflowNeedsDeployLane,
-                opencodeTargetReady,
                 sessionIsolation,
                 toolEvents,
                 hasArchitectureIntent,
@@ -8301,9 +8192,6 @@ class ConversationOrchestrator extends EventEmitter {
 
             if (remoteToolId && (sshContext.shouldTreatAsSsh || executionProfile === REMOTE_BUILD_EXECUTION_PROFILE)) {
                 candidates.add(remoteToolId);
-            }
-            if ((hasOpencodeIntent || workflowNeedsRepoLane) && opencodeTargetReady && allowedToolIds.includes('opencode-run')) {
-                candidates.add('opencode-run');
             }
             if ((explicitGitIntent || workflowNeedsDeployLane) && allowedToolIds.includes('git-safe')) {
                 candidates.add('git-safe');
@@ -8355,9 +8243,6 @@ class ConversationOrchestrator extends EventEmitter {
             }
             if (hasAssetCatalogIntent && allowedToolIds.includes('asset-search')) {
                 candidates.add('asset-search');
-            }
-            if (hasOpencodeUsageIntent && allowedToolIds.includes('tool-doc-read')) {
-                candidates.add('tool-doc-read');
             }
             if (!shouldPreferRemoteWebsiteSource
                 && allowedToolIds.includes('file-write')
@@ -8434,9 +8319,6 @@ class ConversationOrchestrator extends EventEmitter {
             if (!sessionIsolation && allowedToolIds.includes('agent-notes-write') && isAgentNotesAutoWriteEnabled()) {
                 candidates.add('agent-notes-write');
             }
-            if ((hasOpencodeIntent || workflowNeedsRepoLane) && opencodeTargetReady && allowedToolIds.includes('opencode-run')) {
-                candidates.add('opencode-run');
-            }
             if ((hasManagedAppIntent || hasManagedAppAuthoringRequest || hasManagedAppContinuationRecovery || (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE && (workflowNeedsRepoLane || workflowNeedsDeployLane))) && allowedToolIds.includes('managed-app')) {
                 candidates.add('managed-app');
             }
@@ -8451,9 +8333,6 @@ class ConversationOrchestrator extends EventEmitter {
             if ((/\btool\b[\s\S]{0,40}\b(help|doc|docs|documentation|how)\b/.test(prompt)
                 || hasRemoteInfraToolUsageIntent(prompt))
                 && allowedToolIds.includes('tool-doc-read')) {
-                candidates.add('tool-doc-read');
-            }
-            if (hasOpencodeUsageIntent && allowedToolIds.includes('tool-doc-read')) {
                 candidates.add('tool-doc-read');
             }
             if (hasArchitectureIntent && allowedToolIds.includes('architecture-design')) {
@@ -8511,10 +8390,6 @@ class ConversationOrchestrator extends EventEmitter {
                 remaining: Math.max(0, Number(userCheckpointPolicy.remaining) || 0),
                 pending: userCheckpointPolicy.pending || null,
                 surveyResponseTurn: isSurveyResponseTurn,
-            },
-            opencode: {
-                target: opencodeTarget,
-                ready: opencodeTargetReady,
             },
             preferredRemoteToolId: remoteToolId,
             sessionIsolation,
@@ -8646,9 +8521,7 @@ class ConversationOrchestrator extends EventEmitter {
             && toolDocTargetToolId) {
             return finalizeAction({
                 tool: 'tool-doc-read',
-                reason: toolDocTargetToolId === 'opencode-run'
-                    ? 'OpenCode usage or command requests should load the tool documentation instead of executing repository work.'
-                    : 'Remote k3s, kubectl, and deployment command requests should load the relevant tool documentation before execution.',
+                reason: 'Remote k3s, kubectl, and deployment command requests should load the relevant tool documentation before execution.',
                 params: {
                     toolId: toolDocTargetToolId,
                 },
@@ -8760,27 +8633,6 @@ class ConversationOrchestrator extends EventEmitter {
                 params: {
                     prompt: buildImagePromptFromArtifactRequest(objective),
                     ...(requestedImageCount > 1 ? { n: requestedImageCount } : {}),
-                },
-            });
-        }
-
-        if (toolPolicy.candidateToolIds.includes('opencode-run') && hasOpencodeRepoWorkIntent(objective)) {
-            const target = inferOpencodeTarget(objective, session);
-            const workspacePath = resolvePreferredOpencodeWorkspacePath({
-                session,
-                toolContext,
-                target,
-            });
-
-            return finalizeAction({
-                tool: 'opencode-run',
-                reason: target === 'remote-default'
-                    ? 'Repo-level code work on the remote workspace should start with the managed OpenCode runtime.'
-                    : 'Repo-level code work should start with the managed OpenCode runtime.',
-                params: {
-                    prompt: objective,
-                    target,
-                    ...(workspacePath ? { workspacePath } : {}),
                 },
             });
         }
@@ -10003,16 +9855,9 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('Do not claim generic local shell or sandbox limits for Git work when `git-safe` is available. Continue through the constrained Git tool path instead.');
         }
 
-        if (allowedToolIds.includes('opencode-run')) {
-            parts.push('Use `opencode-run` for long-form repository work: implementing changes, fixing bugs, refactoring, building, compiling, and testing in a codebase or workspace.');
-            parts.push('Point `opencode-run` at the local workspace by default, or use `target: "remote-default"` when the request is clearly about the remote repository workspace.');
-            parts.push('Do not treat that default local workspace target as evidence about the local workspace state or CLI health unless `opencode-run`, `file-read`, `file-search`, or another verified tool result established it.');
-            parts.push('Keep `remote-command` for infrastructure work such as kubectl, logs, restarts, service inspection, package installs, and deployment operations.');
-        }
-
         if (allowedToolIds.includes('managed-app')) {
-            parts.push('Use `managed-app` for agent-owned applications that should be created or updated in external Gitea and deployed to the configured remote cluster target.');
-            parts.push('Prefer `managed-app` over raw `git-safe`, `remote-command`, or `k3s-deploy` when the request is to create software, change app code, inspect, build, publish, or redeploy an app tracked by the managed app catalog.');
+            parts.push('Use `managed-app` for agent-owned applications that already belong to the managed app catalog, and for explicit managed-app doctor, reconcile, inspect, deploy, or platform repair requests.');
+            parts.push('Do not make `managed-app create` the default authoring lane for generic remote software work. Prefer the remote CLI lane first unless the user clearly asks for a managed app or the active workflow is already tied to a managed app record.');
             parts.push('For new app requests, let `managed-app create` allocate the repo, image repo, namespace, and host instead of improvising those names in chat.');
             parts.push('For remote app software changes, use `managed-app update` when the app reference is known; otherwise use `managed-app create` with the app prompt so the control plane can reconcile the app record and remote build pipeline.');
             parts.push('If a managed-app inspect result shows a draft app with no repo/build metadata, or a managed-app step says the app was not found, treat that as a recoverable catalog issue. Acknowledge it briefly, then continue with the create/reinitialize path unless a real user decision is missing.');

@@ -4430,7 +4430,7 @@ describe('ConversationOrchestrator', () => {
             },
             toolManager: {
                 getTool: jest.fn((toolId) => (
-                    ['managed-app', 'opencode-run', 'git-safe', 'k3s-deploy', 'remote-command']
+                    ['managed-app', 'git-safe', 'k3s-deploy', 'remote-command']
                         .includes(toolId)
                         ? { id: toolId, description: toolId }
                         : null
@@ -5616,10 +5616,10 @@ describe('ConversationOrchestrator', () => {
         const instructions = orchestrator.buildRuntimeInstructions({
             baseInstructions: 'Base continuity',
             executionProfile: 'default',
-            allowedToolIds: ['git-safe', 'opencode-run', 'file-read', 'file-search'],
+            allowedToolIds: ['git-safe', 'file-read', 'file-search'],
             toolEvents: [],
             toolPolicy: {
-                allowedToolIds: ['git-safe', 'opencode-run', 'file-read', 'file-search'],
+                allowedToolIds: ['git-safe', 'file-read', 'file-search'],
                 hasReachableSshTarget: false,
             },
         });
@@ -5627,7 +5627,6 @@ describe('ConversationOrchestrator', () => {
         expect(instructions).toContain('Treat the local CLI environment, workspace state, filesystem contents, and shell behavior as unknown');
         expect(instructions).toContain('Do not comment on local environment health, startup state, writable paths, repository cleanliness, or command availability');
         expect(instructions).toContain('default authoring target, not proof of the repository\'s current health, cleanliness, or contents');
-        expect(instructions).toContain('Do not treat that default local workspace target as evidence about the local workspace state or CLI health');
     });
 
     test('notes tool policy is restricted to web research tools for page-edit requests', () => {
@@ -6308,7 +6307,7 @@ describe('ConversationOrchestrator', () => {
             },
             toolManager: {
                 getTool: jest.fn((toolId) => (
-                    ['agent-workload', 'remote-command', 'opencode-run', 'git-safe', 'k3s-deploy']
+                    ['agent-workload', 'remote-command', 'git-safe', 'k3s-deploy']
                         .includes(toolId)
                         ? { id: toolId, description: toolId }
                         : null
@@ -6329,7 +6328,6 @@ describe('ConversationOrchestrator', () => {
                         status: 'active',
                         workspacePath: 'C:/Users/phill/KimiBuilt',
                         repositoryPath: 'C:/Users/phill/KimiBuilt',
-                        opencodeTarget: 'local',
                         progress: {
                             implemented: true,
                         },
@@ -6369,17 +6367,17 @@ describe('ConversationOrchestrator', () => {
                     status: 'completed',
                 }),
                 expect.objectContaining({
-                    id: 'save-and-push-repository',
+                    id: 'build-and-deploy-remote-workspace',
                     status: 'in_progress',
                 }),
             ]),
         }));
         expect(toolPolicy.candidateToolIds).not.toContain('agent-workload');
         expect(directAction).toEqual(expect.objectContaining({
-            tool: 'git-safe',
+            tool: 'remote-command',
             params: expect.objectContaining({
-                action: 'remote-info',
-                repositoryPath: 'C:/Users/phill/KimiBuilt',
+                workflowAction: 'build-and-deploy-remote-workspace',
+                workingDirectory: 'C:/Users/phill/KimiBuilt',
             }),
         }));
     });
@@ -6411,7 +6409,7 @@ describe('ConversationOrchestrator', () => {
             },
             toolManager: {
                 getTool: jest.fn((toolId) => (
-                    ['agent-workload', 'remote-command', 'opencode-run', 'git-safe', 'k3s-deploy']
+                    ['agent-workload', 'remote-command', 'git-safe', 'k3s-deploy']
                         .includes(toolId)
                         ? { id: toolId, description: toolId }
                         : null
@@ -6435,7 +6433,6 @@ describe('ConversationOrchestrator', () => {
                         status: 'active',
                         workspacePath: 'C:/Users/phill/KimiBuilt',
                         repositoryPath: 'C:/Users/phill/KimiBuilt',
-                        opencodeTarget: 'local',
                         progress: {
                             implemented: true,
                         },
@@ -6561,7 +6558,7 @@ describe('ConversationOrchestrator', () => {
         expect(toolPolicy.candidateToolIds).toContain('web-fetch');
     });
 
-    test('prefers opencode-run for repo-level remote build work', () => {
+    test('prefers remote-command for repo-level remote build work', () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
             host: '10.0.0.5',
@@ -6588,7 +6585,7 @@ describe('ConversationOrchestrator', () => {
             },
             toolManager: {
                 getTool: jest.fn((toolId) => (
-                    ['remote-command', 'opencode-run', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read']
+                    ['remote-command', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read']
                         .includes(toolId)
                         ? { id: toolId, description: toolId }
                         : null
@@ -6611,19 +6608,19 @@ describe('ConversationOrchestrator', () => {
             toolContext: {},
         });
 
-        expect(toolPolicy.candidateToolIds).toContain('opencode-run');
+        expect(toolPolicy.candidateToolIds).toContain('remote-command');
+        expect(toolPolicy.candidateToolIds).not.toContain('opencode-run');
         expect(directAction).toEqual(expect.objectContaining({
-            tool: 'opencode-run',
+            tool: 'remote-command',
             params: expect.objectContaining({
-                target: 'remote-default',
-                workspacePath: '/srv/apps/kimibuilt',
+                workflowAction: 'implement-remote-workspace',
+                command: expect.stringContaining('planned objective'),
             }),
         }));
-        expect(directAction.params.prompt).toContain('Implement the requested repository changes in the workspace.');
-        expect(directAction.params.prompt).toContain(objective);
+        expect(directAction.params.command).toContain(objective);
     });
 
-    test('keeps opencode local when the repo is local and only deployment is remote', () => {
+    test('keeps local repo work on the remote CLI lane when deployment is remote', () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
             host: '10.0.0.5',
@@ -6650,7 +6647,7 @@ describe('ConversationOrchestrator', () => {
             },
             toolManager: {
                 getTool: jest.fn((toolId) => (
-                    ['remote-command', 'opencode-run', 'git-safe', 'k3s-deploy', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read']
+                    ['remote-command', 'git-safe', 'k3s-deploy', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read']
                         .includes(toolId)
                         ? { id: toolId, description: toolId }
                         : null
@@ -6680,21 +6677,18 @@ describe('ConversationOrchestrator', () => {
             },
         });
 
-        expect(toolPolicy.candidateToolIds).toContain('opencode-run');
-        expect(toolPolicy.opencode).toEqual({
-            target: 'local',
-            ready: true,
-        });
+        expect(toolPolicy.candidateToolIds).toContain('remote-command');
+        expect(toolPolicy.candidateToolIds).not.toContain('opencode-run');
         expect(directAction).toEqual(expect.objectContaining({
-            tool: 'opencode-run',
+            tool: 'remote-command',
             params: expect.objectContaining({
-                target: 'local',
-                workspacePath: 'C:/Users/phill/KimiBuilt',
+                workflowAction: 'implement-remote-workspace',
+                workingDirectory: 'C:/Users/phill/KimiBuilt',
             }),
         }));
     });
 
-    test('offers local opencode-run in the default profile for repo implementation plus github push requests', () => {
+    test('does not offer opencode-run in the default profile for repo implementation plus github push requests', () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
             host: '10.0.0.5',
@@ -6721,7 +6715,7 @@ describe('ConversationOrchestrator', () => {
             },
             toolManager: {
                 getTool: jest.fn((toolId) => (
-                    ['opencode-run', 'git-safe', 'tool-doc-read', 'web-search', 'web-fetch', 'file-read', 'file-search']
+                    ['git-safe', 'tool-doc-read', 'web-search', 'web-fetch', 'file-read', 'file-search']
                         .includes(toolId)
                         ? { id: toolId, description: toolId }
                         : null
@@ -6729,7 +6723,7 @@ describe('ConversationOrchestrator', () => {
             },
         });
 
-        const objective = 'Fix the auth module in this repo, build it locally with opencode, and push it to GitHub.';
+        const objective = 'Fix the auth module in this repo, build it locally, and push it to GitHub.';
         const toolPolicy = orchestrator.buildToolPolicy({
             objective,
             executionProfile: 'default',
@@ -6752,21 +6746,11 @@ describe('ConversationOrchestrator', () => {
         });
 
         expect(toolPolicy.executionProfile).toBe('default');
-        expect(toolPolicy.candidateToolIds).toContain('opencode-run');
-        expect(toolPolicy.opencode).toEqual({
-            target: 'local',
-            ready: true,
-        });
-        expect(directAction).toEqual(expect.objectContaining({
-            tool: 'opencode-run',
-            params: expect.objectContaining({
-                target: 'local',
-                workspacePath: 'C:/Users/phill/KimiBuilt',
-            }),
-        }));
+        expect(toolPolicy.candidateToolIds).not.toContain('opencode-run');
+        expect(directAction).toBeNull();
     });
 
-    test('keeps opencode local for kimibuilt tls-plus-github requests instead of treating the .help domain like docs help', () => {
+    test('keeps remote CLI for kimibuilt tls-plus-github requests instead of treating the .help domain like docs help', () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
             host: '10.0.0.5',
@@ -6793,7 +6777,7 @@ describe('ConversationOrchestrator', () => {
             },
             toolManager: {
                 getTool: jest.fn((toolId) => (
-                    ['remote-command', 'opencode-run', 'git-safe', 'k3s-deploy', 'web-search', 'tool-doc-read']
+                    ['remote-command', 'git-safe', 'k3s-deploy', 'web-search', 'tool-doc-read']
                         .includes(toolId)
                         ? { id: toolId, description: toolId }
                         : null
@@ -6801,7 +6785,7 @@ describe('ConversationOrchestrator', () => {
             },
         });
 
-        const objective = 'next.js, I have kimibuilt.secdevsolutions.help and you need to do the tls with traefik, acme, and lets encrypt. We should be able to use opencode to make the code and push to github.';
+        const objective = 'next.js, I have kimibuilt.secdevsolutions.help and you need to do the tls with traefik, acme, and lets encrypt. We should be able to use remote CLI to make the code and push to github.';
         const toolPolicy = orchestrator.buildToolPolicy({
             objective,
             executionProfile: 'remote-build',
@@ -6824,24 +6808,20 @@ describe('ConversationOrchestrator', () => {
         });
 
         expect(toolPolicy.candidateToolIds).toEqual(expect.arrayContaining([
-            'opencode-run',
+            'remote-command',
             'git-safe',
             'k3s-deploy',
         ]));
-        expect(toolPolicy.opencode).toEqual({
-            target: 'local',
-            ready: true,
-        });
         expect(directAction).toEqual(expect.objectContaining({
-            tool: 'opencode-run',
+            tool: 'remote-command',
             params: expect.objectContaining({
-                target: 'local',
-                workspacePath: 'C:/Users/phill/KimiBuilt',
+                workflowAction: 'implement-remote-workspace',
+                workingDirectory: 'C:/Users/phill/KimiBuilt',
             }),
         }));
     });
 
-    test('treats explicit opencode create-and-deploy requests as repo work', () => {
+    test('treats explicit remote CLI create-and-deploy requests as repo work', () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
             host: '10.0.0.5',
@@ -6868,7 +6848,7 @@ describe('ConversationOrchestrator', () => {
             },
             toolManager: {
                 getTool: jest.fn((toolId) => (
-                    ['remote-command', 'opencode-run', 'k3s-deploy', 'git-safe', 'web-search', 'tool-doc-read']
+                    ['remote-command', 'k3s-deploy', 'git-safe', 'web-search', 'tool-doc-read']
                         .includes(toolId)
                         ? { id: toolId, description: toolId }
                         : null
@@ -6876,7 +6856,7 @@ describe('ConversationOrchestrator', () => {
             },
         });
 
-        const objective = 'Use opencode to create something small and add it to the k3s cluster as a smoke test.';
+        const objective = 'Use remote CLI to create a small app in this repo and add it to the k3s cluster as a smoke test.';
         const toolPolicy = orchestrator.buildToolPolicy({
             objective,
             executionProfile: 'remote-build',
@@ -6898,17 +6878,17 @@ describe('ConversationOrchestrator', () => {
             },
         });
 
-        expect(toolPolicy.candidateToolIds).toContain('opencode-run');
+        expect(toolPolicy.candidateToolIds).toContain('remote-command');
+        expect(toolPolicy.candidateToolIds).not.toContain('opencode-run');
         expect(toolPolicy.candidateToolIds).toContain('k3s-deploy');
         expect(directAction).toEqual(expect.objectContaining({
-            tool: 'opencode-run',
+            tool: 'remote-command',
             params: expect.objectContaining({
-                target: 'local',
-                workspacePath: 'C:/Users/phill/KimiBuilt',
+                workflowAction: 'implement-remote-workspace',
+                workingDirectory: 'C:/Users/phill/KimiBuilt',
             }),
         }));
-        expect(directAction.params.prompt).toContain('Implement the requested repository changes in the workspace.');
-        expect(directAction.params.prompt).toContain(objective);
+        expect(directAction.params.command).toContain(objective);
     });
 
     test('keeps discovery-first server build prompts out of the repo implementation lane', () => {
@@ -6938,7 +6918,7 @@ describe('ConversationOrchestrator', () => {
             },
             toolManager: {
                 getTool: jest.fn((toolId) => (
-                    ['remote-command', 'opencode-run', 'web-search', 'tool-doc-read', 'user-checkpoint']
+                    ['remote-command', 'web-search', 'tool-doc-read', 'user-checkpoint']
                         .includes(toolId)
                         ? { id: toolId, description: toolId }
                         : null
@@ -6978,7 +6958,7 @@ describe('ConversationOrchestrator', () => {
         expect(directAction).toBeNull();
     });
 
-    test('treats opencode command-help prompts as documentation instead of repo implementation', () => {
+    test('treats remote command-help prompts as documentation instead of repo implementation', () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
             host: '10.0.0.5',
@@ -7005,7 +6985,7 @@ describe('ConversationOrchestrator', () => {
             },
             toolManager: {
                 getTool: jest.fn((toolId) => (
-                    ['remote-command', 'opencode-run', 'tool-doc-read', 'web-search']
+                    ['remote-command', 'tool-doc-read', 'web-search']
                         .includes(toolId)
                         ? { id: toolId, description: toolId }
                         : null
@@ -7013,7 +6993,7 @@ describe('ConversationOrchestrator', () => {
             },
         });
 
-        const objective = 'Use remote build to give a command to opencode.';
+        const objective = 'Use remote build to give a remote command catalog summary.';
         const toolPolicy = orchestrator.buildToolPolicy({
             objective,
             executionProfile: 'remote-build',
@@ -7031,13 +7011,7 @@ describe('ConversationOrchestrator', () => {
         expect(toolPolicy.workflow).toBeNull();
         expect(toolPolicy.candidateToolIds).toContain('tool-doc-read');
         expect(toolPolicy.candidateToolIds).not.toContain('opencode-run');
-        expect(directAction).toEqual({
-            tool: 'tool-doc-read',
-            reason: 'OpenCode usage or command requests should load the tool documentation instead of executing repository work.',
-            params: {
-                toolId: 'opencode-run',
-            },
-        });
+        expect(directAction).toBeNull();
     });
 
     test('loads the remote-command docs for kubectl and k3s command catalog requests', () => {
@@ -7117,7 +7091,7 @@ describe('ConversationOrchestrator', () => {
             },
             toolManager: {
                 getTool: jest.fn((toolId) => (
-                    ['remote-command', 'opencode-run', 'git-safe', 'k3s-deploy', 'web-search', 'tool-doc-read']
+                    ['remote-command', 'git-safe', 'k3s-deploy', 'web-search', 'tool-doc-read']
                         .includes(toolId)
                         ? { id: toolId, description: toolId }
                         : null
@@ -7134,7 +7108,6 @@ describe('ConversationOrchestrator', () => {
 
         expect(toolPolicy.candidateToolIds).toEqual(expect.arrayContaining([
             'remote-command',
-            'opencode-run',
             'git-safe',
             'k3s-deploy',
         ]));
@@ -7172,7 +7145,7 @@ describe('ConversationOrchestrator', () => {
             },
             toolManager: {
                 getTool: jest.fn((toolId) => (
-                    ['managed-app', 'remote-command', 'opencode-run', 'git-safe', 'k3s-deploy', 'web-search', 'tool-doc-read']
+                    ['managed-app', 'remote-command', 'git-safe', 'k3s-deploy', 'web-search', 'tool-doc-read']
                         .includes(toolId)
                         ? { id: toolId, description: toolId }
                         : null
@@ -7235,7 +7208,7 @@ describe('ConversationOrchestrator', () => {
         }));
     });
 
-    test('runs the repo-to-deploy workflow through opencode and git-safe, leaving deployment for follow-up', async () => {
+    test('runs the repo-to-deploy workflow through remote-command and verifies the remote result', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
             host: '10.0.0.5',
@@ -7261,7 +7234,7 @@ describe('ConversationOrchestrator', () => {
         };
         const toolManager = {
             getTool: jest.fn((toolId) => (
-                ['remote-command', 'opencode-run', 'git-safe', 'k3s-deploy', 'web-search', 'tool-doc-read']
+                ['remote-command', 'git-safe', 'k3s-deploy', 'web-search', 'tool-doc-read']
                     .includes(toolId)
                     ? { id: toolId, description: toolId }
                     : null
@@ -7269,7 +7242,7 @@ describe('ConversationOrchestrator', () => {
             executeTool: jest.fn()
                 .mockResolvedValueOnce({
                     success: true,
-                    toolId: 'opencode-run',
+                    toolId: 'remote-command',
                     data: {
                         workspacePath: '/srv/apps/kimibuilt',
                         summary: 'Landing page updated.',
@@ -7277,20 +7250,17 @@ describe('ConversationOrchestrator', () => {
                 })
                 .mockResolvedValueOnce({
                     success: true,
-                    toolId: 'git-safe',
+                    toolId: 'remote-command',
                     data: {
-                        action: 'remote-info',
-                        branch: 'main',
-                        stdout: 'branch: main\nupstream: origin/main',
+                        stdout: 'deployment applied',
+                        workspacePath: '/srv/apps/kimibuilt',
                     },
                 })
                 .mockResolvedValueOnce({
                     success: true,
-                    toolId: 'git-safe',
+                    toolId: 'remote-command',
                     data: {
-                        action: 'save-and-push',
-                        branch: 'main',
-                        stdout: 'pushed to origin/main',
+                        stdout: 'deployment "backend" successfully rolled out',
                     },
                 }),
         };
@@ -7324,19 +7294,18 @@ describe('ConversationOrchestrator', () => {
         });
 
         expect(toolManager.executeTool.mock.calls.map((call) => call[0])).toEqual([
-            'opencode-run',
-            'git-safe',
-            'git-safe',
+            'remote-command',
+            'remote-command',
+            'remote-command',
         ]);
         expect(toolManager.executeTool.mock.calls[0][1]).toEqual(expect.objectContaining({
-            target: 'local',
+            workflowAction: 'implement-remote-workspace',
         }));
-        expect(toolManager.executeTool.mock.calls[0][1].prompt).toContain('Implement the requested repository changes in the workspace.');
         expect(toolManager.executeTool.mock.calls[1][1]).toEqual(expect.objectContaining({
-            action: 'remote-info',
+            workflowAction: 'build-and-deploy-remote-workspace',
         }));
         expect(toolManager.executeTool.mock.calls[2][1]).toEqual(expect.objectContaining({
-            action: 'save-and-push',
+            workflowAction: 'verify-deployment',
         }));
         expect(result.trace.executionTrace.map((entry) => entry.name)).toEqual(expect.arrayContaining([
             'End-to-end builder workflow',
@@ -7351,7 +7320,8 @@ describe('ConversationOrchestrator', () => {
                         status: 'completed',
                         progress: expect.objectContaining({
                             implemented: true,
-                            saved: true,
+                            deployed: true,
+                            verified: true,
                         }),
                     }),
                 }),
@@ -7360,7 +7330,7 @@ describe('ConversationOrchestrator', () => {
         expect(result.output).toBe('Implemented the requested change and pushed it to GitHub. Deploy it in a follow-up when ready.');
     });
 
-    test('runs the repo-only workflow through opencode-run and stops after implementation', async () => {
+    test('runs the repo-only workflow through remote-command and stops after implementation', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
             host: '10.0.0.5',
@@ -7386,14 +7356,14 @@ describe('ConversationOrchestrator', () => {
         };
         const toolManager = {
             getTool: jest.fn((toolId) => (
-                ['remote-command', 'opencode-run', 'git-safe', 'k3s-deploy', 'web-search', 'tool-doc-read']
+                ['remote-command', 'git-safe', 'k3s-deploy', 'web-search', 'tool-doc-read']
                     .includes(toolId)
                     ? { id: toolId, description: toolId }
                     : null
             )),
             executeTool: jest.fn().mockResolvedValue({
                 success: true,
-                toolId: 'opencode-run',
+                toolId: 'remote-command',
                 data: {
                     workspacePath: 'C:/Users/phill/KimiBuilt',
                     summary: 'Auth module fixed.',
@@ -7430,9 +7400,9 @@ describe('ConversationOrchestrator', () => {
         });
 
         expect(toolManager.executeTool).toHaveBeenCalledTimes(1);
-        expect(toolManager.executeTool).toHaveBeenCalledWith('opencode-run', expect.objectContaining({
-            target: 'local',
-            prompt: expect.stringContaining('Implement the requested repository changes in the workspace.'),
+        expect(toolManager.executeTool).toHaveBeenCalledWith('remote-command', expect.objectContaining({
+            workflowAction: 'implement-remote-workspace',
+            command: expect.stringContaining('planned objective'),
         }), expect.any(Object));
         expect(result.trace.executionTrace.map((entry) => entry.name)).toEqual(expect.arrayContaining([
             'End-to-end builder workflow',
@@ -7471,7 +7441,7 @@ describe('ConversationOrchestrator', () => {
         };
         const toolManager = {
             getTool: jest.fn((toolId) => (
-                ['remote-command', 'opencode-run', 'git-safe', 'k3s-deploy', 'web-search', 'tool-doc-read']
+                ['remote-command', 'git-safe', 'k3s-deploy', 'web-search', 'tool-doc-read']
                     .includes(toolId)
                     ? { id: toolId, description: toolId }
                     : null
@@ -7617,7 +7587,7 @@ describe('ConversationOrchestrator', () => {
         }));
     });
 
-    test('blocks a mixed repo-and-deploy workflow when opencode is unavailable for the required repo lane', async () => {
+    test('falls back to the model when remote CLI is unavailable for a repo-and-deploy request', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
             host: '10.0.0.5',
@@ -7638,12 +7608,12 @@ describe('ConversationOrchestrator', () => {
         });
 
         const llmClient = {
-            createResponse: jest.fn(),
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Remote CLI is unavailable, so I need a healthy runner or SSH target before continuing.', 'resp_remote_unavailable')),
             complete: jest.fn(),
         };
         const toolManager = {
             getTool: jest.fn((toolId) => (
-                ['remote-command', 'opencode-run', 'git-safe', 'k3s-deploy', 'web-search', 'tool-doc-read']
+                ['git-safe', 'k3s-deploy', 'web-search', 'tool-doc-read']
                     .includes(toolId)
                     ? { id: toolId, description: toolId }
                     : null
@@ -7676,40 +7646,15 @@ describe('ConversationOrchestrator', () => {
             metadata: {
                 remoteBuildAutonomyApproved: true,
             },
-            toolContext: {
-                opencodeService: {
-                    getExecutionCapabilities: () => ({
-                        localReady: true,
-                        remoteReady: false,
-                    }),
-                },
-            },
             stream: false,
         });
 
         expect(toolManager.executeTool).not.toHaveBeenCalled();
-        expect(llmClient.createResponse).not.toHaveBeenCalled();
-        expect(result.trace.executionTrace.map((entry) => entry.name)).toEqual(expect.arrayContaining([
-            'End-to-end builder workflow',
-            'End-to-end builder workflow blocked',
-        ]));
-        expect(result.output).toContain('End-to-end builder blocked for:');
-        expect(result.output).toContain('`opencode-run` is not ready');
-        expect(sessionStore.update).toHaveBeenCalledWith('session-blocked-workflow', expect.objectContaining({
-            metadata: expect.objectContaining({
-                controlState: expect.objectContaining({
-                    workflow: expect.objectContaining({
-                        lane: 'repo-then-deploy',
-                        stage: 'blocked',
-                        status: 'blocked',
-                        lastError: expect.stringContaining('`opencode-run` is not ready'),
-                    }),
-                }),
-            }),
-        }));
+        expect(llmClient.createResponse).toHaveBeenCalled();
+        expect(result.output).toBe('Remote CLI is unavailable, so I need a healthy runner or SSH target before continuing.');
     });
 
-    test('does not offer opencode-run for remote repo work when the remote target is unavailable', () => {
+    test('does not offer opencode-run for remote repo work', () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
             host: '10.0.0.5',
@@ -7736,7 +7681,7 @@ describe('ConversationOrchestrator', () => {
             },
             toolManager: {
                 getTool: jest.fn((toolId) => (
-                    ['remote-command', 'opencode-run', 'web-search', 'tool-doc-read']
+                    ['remote-command', 'web-search', 'tool-doc-read']
                         .includes(toolId)
                         ? { id: toolId, description: toolId }
                         : null
@@ -7748,22 +7693,10 @@ describe('ConversationOrchestrator', () => {
             objective: 'Fix the failing tests in this repo on the server and refactor the auth module.',
             executionProfile: 'remote-build',
             toolManager: orchestrator.toolManager,
-            toolContext: {
-                opencodeService: {
-                    getExecutionCapabilities: () => ({
-                        localReady: true,
-                        remoteReady: false,
-                    }),
-                },
-            },
         });
 
         expect(toolPolicy.candidateToolIds).toContain('remote-command');
         expect(toolPolicy.candidateToolIds).not.toContain('opencode-run');
-        expect(toolPolicy.opencode).toEqual({
-            target: 'remote-default',
-            ready: false,
-        });
     });
 
     test('keeps infrastructure-only remote build work on remote-command', () => {
@@ -7783,7 +7716,7 @@ describe('ConversationOrchestrator', () => {
             },
             toolManager: {
                 getTool: jest.fn((toolId) => (
-                    ['remote-command', 'opencode-run', 'web-search'].includes(toolId)
+                    ['remote-command', 'web-search'].includes(toolId)
                         ? { id: toolId, description: toolId }
                         : null
                 )),

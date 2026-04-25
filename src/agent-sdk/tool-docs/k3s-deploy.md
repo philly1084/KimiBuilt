@@ -2,6 +2,8 @@
 
 Purpose: run restricted k3s deployment actions through the remote runner when available, falling back to SSH against the configured server.
 
+Lane boundary: `k3s-deploy` is the deploy-only lane. Use `remote-command` for remote CLI authoring, repo inspection, build/test loops, `kubectl describe`, logs, and HTTPS verification. Use `git-safe`, `k3s-deploy`, or `managed-app deploy` only when deployment is the next planned step.
+
 Allowed actions:
 - `sync-repo`
 - `apply-manifests`
@@ -50,7 +52,7 @@ Use `remote-command` instead when you need:
 
 Preferred GitOps-style sequence:
 
-1. Author or update code locally or in OpenCode.
+1. Author or update code locally or through the remote CLI lane.
 2. Create or update Dockerfile and manifests in the repo if the app is not deployable yet.
 3. Push code or image changes through the normal repo flow.
 4. Run `k3s-deploy sync-and-apply`.

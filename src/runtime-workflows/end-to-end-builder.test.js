@@ -29,7 +29,6 @@ describe('end-to-end builder workflow', () => {
             objective: 'Fix the landing page in the repo, push it to GitHub, deploy it to k3s, and verify the rollout.',
             workspacePath: '/workspace/app',
             repositoryPath: '/workspace/app',
-            opencodeTarget: 'local',
             remoteTarget: {
                 host: '10.0.0.5',
                 username: 'ubuntu',
@@ -42,15 +41,19 @@ describe('end-to-end builder workflow', () => {
             lane: 'repo-then-deploy',
             stage: 'implementing',
             status: 'active',
-            requiresVerification: false,
+            requiresVerification: true,
             completionCriteria: [
                 'Repository implementation completed',
-                'Changes pushed',
+                'Remote workspace built and deployed',
+                'Deployment verified',
             ],
-            verificationCriteria: [],
+            verificationCriteria: [
+                'Remote workspace build completed',
+                'Kubernetes apply completed',
+                'Post-deploy remote verification captured',
+            ],
             workspacePath: '/workspace/app',
             repositoryPath: '/workspace/app',
-            opencodeTarget: 'local',
             remoteTarget: {
                 host: '10.0.0.5',
                 username: 'ubuntu',
@@ -59,12 +62,11 @@ describe('end-to-end builder workflow', () => {
         }));
     });
 
-    test('classifies explicit opencode create-and-deploy requests into a repo-then-deploy lane', () => {
+    test('classifies explicit remote CLI create-and-deploy requests into a repo-then-deploy lane', () => {
         const workflow = inferEndToEndBuilderWorkflow({
-            objective: 'Use opencode to create a tiny smoke-test app and add it to the k3s cluster.',
+            objective: 'Use the remote CLI to create a tiny smoke-test app and add it to the k3s cluster.',
             workspacePath: '/workspace/app',
             repositoryPath: '/workspace/app',
-            opencodeTarget: 'local',
             remoteTarget: {
                 host: '10.0.0.5',
                 username: 'ubuntu',
@@ -82,10 +84,9 @@ describe('end-to-end builder workflow', () => {
 
     test('classifies make-code-and-deploy requests into a repo-then-deploy lane', () => {
         const workflow = inferEndToEndBuilderWorkflow({
-            objective: 'next.js, I have kimibuilt.secdevsolutions.help and you need to do the tls with traefik, acme, and lets encrypt. We should be able to use opencode to make the code and push to github.',
+            objective: 'next.js, I have kimibuilt.secdevsolutions.help and you need to do the tls with traefik, acme, and lets encrypt. We should be able to use remote CLI to make the code and push to github.',
             workspacePath: '/workspace/app',
             repositoryPath: '/workspace/app',
-            opencodeTarget: 'local',
             remoteTarget: {
                 host: '10.0.0.5',
                 username: 'ubuntu',
@@ -106,7 +107,6 @@ describe('end-to-end builder workflow', () => {
             objective: 'Fix the build in the repo, push it to GitHub, deploy it to k3s, and verify the rollout.',
             workspacePath: '/workspace/app',
             repositoryPath: '/workspace/app',
-            opencodeTarget: 'local',
             remoteTarget: {
                 host: '10.0.0.5',
                 username: 'ubuntu',
@@ -114,7 +114,7 @@ describe('end-to-end builder workflow', () => {
             },
         });
         const toolPolicy = {
-            candidateToolIds: ['opencode-run', 'git-safe', 'k3s-deploy', 'remote-command'],
+            candidateToolIds: ['remote-command', 'git-safe', 'k3s-deploy'],
         };
 
         const implementationPlan = buildEndToEndWorkflowPlan({
@@ -124,10 +124,11 @@ describe('end-to-end builder workflow', () => {
         });
         expect(implementationPlan).toEqual([
             expect.objectContaining({
-                tool: 'opencode-run',
+                tool: 'remote-command',
                 params: expect.objectContaining({
-                    target: 'local',
-                    workspacePath: '/workspace/app',
+                    workflowAction: 'implement-remote-workspace',
+                    workingDirectory: '/workspace/app',
+                    command: expect.stringContaining('planned objective'),
                 }),
             }),
         ]);
@@ -135,7 +136,7 @@ describe('end-to-end builder workflow', () => {
         const afterImplementation = advanceEndToEndBuilderWorkflow({
             workflow,
             toolEvents: [
-                buildToolEvent('opencode-run', {}, {
+                buildToolEvent('remote-command', { workflowAction: 'implement-remote-workspace' }, {
                     data: {
                         workspacePath: '/workspace/app',
                         summary: 'Build fixed.',
@@ -150,82 +151,76 @@ describe('end-to-end builder workflow', () => {
             }),
         }));
 
-        const remoteInfoPlan = buildEndToEndWorkflowPlan({
+        const deployPlan = buildEndToEndWorkflowPlan({
             workflow: afterImplementation,
             toolPolicy,
             remoteToolId: 'remote-command',
         });
-        expect(remoteInfoPlan).toEqual([
+        expect(deployPlan).toEqual([
             expect.objectContaining({
-                tool: 'git-safe',
+                tool: 'remote-command',
                 params: expect.objectContaining({
-                    action: 'remote-info',
-                    repositoryPath: '/workspace/app',
+                    workflowAction: 'build-and-deploy-remote-workspace',
+                    workingDirectory: '/workspace/app',
                 }),
             }),
         ]);
 
-        const afterRemoteInfo = advanceEndToEndBuilderWorkflow({
+        const afterDeploy = advanceEndToEndBuilderWorkflow({
             workflow: afterImplementation,
             toolEvents: [
-                buildToolEvent('git-safe', { action: 'remote-info' }, {
+                buildToolEvent('remote-command', { workflowAction: 'build-and-deploy-remote-workspace' }, {
                     data: {
-                        action: 'remote-info',
-                        stdout: 'branch: main',
+                        stdout: 'deployment applied',
                     },
                 }),
             ],
         });
-        const saveAndPushPlan = buildEndToEndWorkflowPlan({
-            workflow: afterRemoteInfo,
+        const verifyPlan = buildEndToEndWorkflowPlan({
+            workflow: afterDeploy,
             toolPolicy,
             remoteToolId: 'remote-command',
         });
-        expect(saveAndPushPlan).toEqual([
+        expect(verifyPlan).toEqual([
             expect.objectContaining({
-                tool: 'git-safe',
+                tool: 'remote-command',
                 params: expect.objectContaining({
-                    action: 'save-and-push',
-                    repositoryPath: '/workspace/app',
+                    workflowAction: 'verify-deployment',
                 }),
             }),
         ]);
 
-        const afterSaveAndPush = advanceEndToEndBuilderWorkflow({
-            workflow: afterRemoteInfo,
+        const afterVerify = advanceEndToEndBuilderWorkflow({
+            workflow: afterDeploy,
             toolEvents: [
-                buildToolEvent('git-safe', { action: 'save-and-push' }, {
+                buildToolEvent('remote-command', { workflowAction: 'verify-deployment' }, {
                     data: {
-                        action: 'save-and-push',
-                        branch: 'main',
+                        stdout: 'deployment "backend" successfully rolled out',
                     },
                 }),
             ],
         });
-        expect(afterSaveAndPush).toEqual(expect.objectContaining({
+        expect(afterVerify).toEqual(expect.objectContaining({
             stage: 'completed',
             status: 'completed',
             progress: expect.objectContaining({
                 implemented: true,
-                repoStatusChecked: true,
-                saved: true,
-                deployed: false,
-                verified: false,
+                deployed: true,
+                verified: true,
             }),
         }));
         expect(buildEndToEndWorkflowPlan({
-            workflow: afterSaveAndPush,
+            workflow: afterVerify,
             toolPolicy,
             remoteToolId: 'remote-command',
         })).toEqual([]);
     });
 
-    test('uses managed-app for repo implementation when the managed control plane is available', () => {
+    test('uses remote-command before managed-app when both remote CLI and managed control plane are available', () => {
         const workflow = inferEndToEndBuilderWorkflow({
             objective: 'Fix the hello-stack app and deploy it to k3s on the remote server using Gitea.',
             workspacePath: '/workspace/app',
             repositoryPath: '/workspace/app',
-            opencodeTarget: 'remote-default',
             remoteTarget: {
                 host: '10.0.0.5',
                 username: 'ubuntu',
@@ -243,25 +238,22 @@ describe('end-to-end builder workflow', () => {
             remoteToolId: 'remote-command',
         });
 
-        expect(implementationPlan).toEqual([{
-            tool: 'managed-app',
-            reason: 'Implement the requested app changes through the managed app control plane.',
-            params: {
-                action: 'create',
-                prompt: 'Fix the hello-stack app and deploy it to k3s on the remote server using Gitea.',
-                sourcePrompt: 'Fix the hello-stack app and deploy it to k3s on the remote server using Gitea.',
-                requestedAction: 'build',
-                deployTarget: 'ssh',
-            },
-        }]);
+        expect(implementationPlan).toEqual([
+            expect.objectContaining({
+                tool: 'remote-command',
+                params: expect.objectContaining({
+                    workflowAction: 'implement-remote-workspace',
+                    workingDirectory: '/workspace/app',
+                }),
+            }),
+        ]);
     });
 
-    test('uses remote-command to build and deploy a remote workspace after OpenCode implementation', () => {
+    test('uses remote-command to implement, build, and deploy a remote workspace', () => {
         const workflow = inferEndToEndBuilderWorkflow({
             objective: 'Fix the app in the remote repo, deploy it to k3s on the same server, and verify the rollout.',
             workspacePath: '/var/www/test.demoserver2.buzz',
             repositoryPath: '/workspace/local-clone',
-            opencodeTarget: 'remote-default',
             remoteTarget: {
                 host: '10.0.0.5',
                 username: 'ubuntu',
@@ -269,7 +261,7 @@ describe('end-to-end builder workflow', () => {
             },
         });
         const toolPolicy = {
-            candidateToolIds: ['opencode-run', 'remote-command'],
+            candidateToolIds: ['remote-command'],
             preferredRemoteToolId: 'remote-command',
         };
 
@@ -288,10 +280,11 @@ describe('end-to-end builder workflow', () => {
         });
         expect(implementationPlan).toEqual([
             expect.objectContaining({
-                tool: 'opencode-run',
+                tool: 'remote-command',
                 params: expect.objectContaining({
-                    target: 'remote-default',
-                    workspacePath: '/var/www/test.demoserver2.buzz',
+                    workflowAction: 'implement-remote-workspace',
+                    workingDirectory: '/var/www/test.demoserver2.buzz',
+                    command: expect.stringContaining('planned objective'),
                 }),
             }),
         ]);
@@ -299,7 +292,7 @@ describe('end-to-end builder workflow', () => {
         const afterImplementation = advanceEndToEndBuilderWorkflow({
             workflow,
             toolEvents: [
-                buildToolEvent('opencode-run', {}, {
+                buildToolEvent('remote-command', { workflowAction: 'implement-remote-workspace' }, {
                     data: {
                         workspacePath: '/var/www/test.demoserver2.buzz',
                         summary: 'Remote repo updated.',
@@ -664,7 +657,6 @@ describe('end-to-end builder workflow', () => {
                             status: 'active',
                             workspacePath: '/workspace/app',
                             repositoryPath: '/workspace/app',
-                            opencodeTarget: 'local',
                             progress: {
                                 implemented: true,
                             },
@@ -701,7 +693,6 @@ describe('end-to-end builder workflow', () => {
                             status: 'active',
                             workspacePath: '/workspace/app',
                             repositoryPath: '/workspace/app',
-                            opencodeTarget: 'local',
                             progress: {
                                 implemented: true,
                             },
@@ -723,7 +714,7 @@ describe('end-to-end builder workflow', () => {
                     status: 'completed',
                 }),
                 expect.objectContaining({
-                    id: 'save-and-push-repository',
+                    id: 'build-and-deploy-remote-workspace',
                     status: 'in_progress',
                 }),
             ]),
@@ -735,7 +726,6 @@ describe('end-to-end builder workflow', () => {
             objective: 'I want to build on the server, let\'s start with a couple questionnaires to figure out what we should work on. Some kind of web app we can run on our VPS server with demoserver2.buzz DNS. Can you do some research on the server and then provide those questions.',
             workspacePath: '/workspace/app',
             repositoryPath: '/workspace/app',
-            opencodeTarget: 'remote-default',
             remoteTarget: {
                 host: '10.0.0.5',
                 username: 'ubuntu',
@@ -746,12 +736,11 @@ describe('end-to-end builder workflow', () => {
         expect(workflow).toBeNull();
     });
 
-    test('does not classify opencode command-help prompts as implementation workflows', () => {
+    test('does not classify remote CLI command-help prompts as implementation workflows', () => {
         const workflow = inferEndToEndBuilderWorkflow({
-            objective: 'Use remote build to give a command to opencode.',
+            objective: 'Use remote build to give a command catalog summary.',
             workspacePath: '/workspace/app',
             repositoryPath: '/workspace/app',
-            opencodeTarget: 'remote-default',
             remoteTarget: {
                 host: '10.0.0.5',
                 username: 'ubuntu',
@@ -762,12 +751,11 @@ describe('end-to-end builder workflow', () => {
         expect(workflow).toBeNull();
     });
 
-    test('blocks a repo-then-deploy workflow when repository implementation is required but opencode is unavailable', () => {
+    test('blocks a repo-then-deploy workflow when repository implementation is required but remote CLI is unavailable', () => {
         const workflow = inferEndToEndBuilderWorkflow({
             objective: 'Fix the auth service in the repo, push it to GitHub, deploy it to k3s, and verify the rollout.',
             workspacePath: '/workspace/app',
             repositoryPath: '/workspace/app',
-            opencodeTarget: 'remote-default',
             remoteTarget: {
                 host: '10.0.0.5',
                 username: 'ubuntu',
@@ -778,7 +766,7 @@ describe('end-to-end builder workflow', () => {
         const blockedWorkflow = evaluateEndToEndBuilderWorkflow({
             workflow,
             toolPolicy: {
-                candidateToolIds: ['remote-command', 'git-safe', 'k3s-deploy'],
+                candidateToolIds: ['git-safe', 'k3s-deploy'],
                 preferredRemoteToolId: 'remote-command',
             },
         });
@@ -787,7 +775,7 @@ describe('end-to-end builder workflow', () => {
             lane: 'repo-then-deploy',
             stage: 'blocked',
             status: 'blocked',
-            lastError: expect.stringContaining('`opencode-run` is not ready'),
+            lastError: expect.stringContaining('`remote-command` is not ready'),
         }));
     });
 
@@ -796,7 +784,6 @@ describe('end-to-end builder workflow', () => {
             objective: 'Fix the app in the remote repo, deploy it to k3s on the same server, and verify the rollout.',
             workspacePath: '/var/www/test.demoserver2.buzz',
             repositoryPath: '/workspace/local-clone',
-            opencodeTarget: 'remote-default',
             remoteTarget: {
                 host: '10.0.0.5',
                 username: 'ubuntu',
@@ -807,7 +794,7 @@ describe('end-to-end builder workflow', () => {
         const afterImplementation = advanceEndToEndBuilderWorkflow({
             workflow,
             toolEvents: [
-                buildToolEvent('opencode-run', {}, {
+                buildToolEvent('remote-command', { workflowAction: 'implement-remote-workspace' }, {
                     data: {
                         workspacePath: '/var/www/test.demoserver2.buzz',
                     },

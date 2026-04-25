@@ -4,7 +4,9 @@ Creates, updates, and deploys agent-owned applications through the external Gite
 
 Managed-app deployment should use the configured remote runner when it is online, with SSH retained as a break-glass fallback. It should deploy through the configured remote host and remote k3s cluster, not through the backend pod's local Kubernetes service account.
 
-Use this tool as the single control-plane entry point when the remote Gitea instance, BuildKit runner, and deploy cluster all live on the same remote server or k3s environment.
+Use this tool as the control-plane entry point when the remote Gitea instance, BuildKit runner, and deploy cluster all live on the same remote server or k3s environment.
+
+Lane boundary: managed apps are secondary to the remote CLI authoring lane. Use `managed-app doctor`, `managed-app reconcile`, and `managed-app deploy` for explicit managed-app platform health and deployment work. Do not use managed-app creation as the default path for every remote software task; remote CLI work can update a repo first, then use `git-safe`, `k3s-deploy`, or `managed-app deploy` when deployment is the planned next step.
 
 ## Actions
 
@@ -41,4 +43,4 @@ Use this tool as the single control-plane entry point when the remote Gitea inst
 - `deploy` creates the app namespace image pull secret from the remote `agent-platform-runtime` Secret when Gitea and k3s live on the same remote platform. Admin Settings registry credentials are only a fallback, which avoids stale local passwords causing image-pull `401 Unauthorized` errors.
 - The `doctor` action is the preferred first check when Gitea Actions are queued or waiting. It inspects the same remote cluster the managed-app deploy lane uses.
 - The `reconcile` action is the preferred repair path when the platform exists but Gitea runners are missing, tokened incorrectly, or stuck waiting. It is designed for the case where the Gitea instance and deploy cluster live on the same remote server or k3s environment.
-- For remote app authoring requests, prefer `managed-app create` or `managed-app update` over ad hoc repo-runner tools. This control plane is the intended path for code changes, Gitea builds, and remote k3s deployment on the same server.
+- For explicit managed app authoring requests, prefer `managed-app create` or `managed-app update` over ad hoc repo-runner tools. For general remote programming requests, prefer `remote-command` first and use managed-app actions only when the user asked for that control plane or deployment is the next planned step.
