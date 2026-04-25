@@ -187,6 +187,11 @@ const AUTO_TOOL_ALLOWLIST = new Set([
     'image-search-unsplash',
     'image-from-url',
     'asset-search',
+    'research-bucket-list',
+    'research-bucket-search',
+    'research-bucket-read',
+    'research-bucket-write',
+    'research-bucket-mkdir',
     'file-read',
     'file-write',
     'file-search',
@@ -1237,6 +1242,24 @@ function hasIndexedAssetIntent(prompt = '') {
         /\b(image|images|photo|photos|picture|pictures|document|documents|doc|docs|pdf|deck|slide deck|pptx|file|files|artifact|artifacts|attachment|attachments)\b[\s\S]{0,70}\b(from earlier|from before|from last time|we worked on|we were working with|you generated|you made|you created|uploaded|attached|saved)\b/i,
         /\b(find|search|locate|list|show|open|use|reuse|reference|pull up|look for)\b[\s\S]{0,40}\b(previous|earlier|uploaded|attached|generated|saved|artifact|image|document|pdf|file|attachment)\b/i,
         /\b(asset|assets)\b[\s\S]{0,20}\b(search|index|indexed|catalog|catalogue|manager)\b/i,
+    ].some((pattern) => pattern.test(source));
+}
+
+function hasResearchBucketIntent(prompt = '') {
+    const source = String(prompt || '').trim();
+    if (!source) {
+        return false;
+    }
+
+    return [
+        /\bresearch bucket\b/i,
+        /\breference bucket\b/i,
+        /\bsource library\b/i,
+        /\bsaved research\b/i,
+        /\bproject references?\b/i,
+        /\blong[- ]term bucket\b/i,
+        /\bbucket\b[\s\S]{0,60}\b(images?|data|graphs?|code|audio|wave|wav|docs?|references?|assets?)\b/i,
+        /\b(images?|data|graphs?|code|audio|wave|wav|docs?|references?|assets?)\b[\s\S]{0,60}\bbucket\b/i,
     ].some((pattern) => pattern.test(source));
 }
 
@@ -2348,6 +2371,7 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
         || canonicalWorkload?.trigger?.type === 'cron'
         || canonicalWorkload?.trigger?.type === 'once';
     const hasAssetCatalogIntent = hasIndexedAssetIntent(prompt);
+    const hasResearchBucketCatalogIntent = hasResearchBucketIntent(prompt);
     const remoteToolId = availableToolIds.has('remote-command')
         ? 'remote-command'
         : (availableToolIds.has('ssh-execute') ? 'ssh-execute' : null);
@@ -2438,6 +2462,26 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
 
     if (hasAssetCatalogIntent && availableToolIds.has('asset-search')) {
         selectedIds.add('asset-search');
+    }
+
+    if (hasResearchBucketCatalogIntent) {
+        if (availableToolIds.has('research-bucket-list')) {
+            selectedIds.add('research-bucket-list');
+        }
+        if (availableToolIds.has('research-bucket-search')) {
+            selectedIds.add('research-bucket-search');
+        }
+        if (availableToolIds.has('research-bucket-read')) {
+            selectedIds.add('research-bucket-read');
+        }
+        if (/\b(write|save|add|store|capture|create|update|append)\b/i.test(normalizedPrompt)
+            && availableToolIds.has('research-bucket-write')) {
+            selectedIds.add('research-bucket-write');
+        }
+        if (/\b(mkdir|folder|directory)\b/i.test(normalizedPrompt)
+            && availableToolIds.has('research-bucket-mkdir')) {
+            selectedIds.add('research-bucket-mkdir');
+        }
     }
 
     if (!shouldPreferRemoteWorkspaceSource && extractRequestedDirectoryPath(prompt)) {
@@ -2742,6 +2786,13 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
             : '- Use `asset-search` to find earlier images, PDFs, documents, uploaded artifacts, and workspace files before asking the user to resend them.');
         guidance.push('- Prefer `asset-search kind:"image"` for prior visuals and `asset-search kind:"document"` for PDFs, docs, HTML, markdown, and similar files.');
         guidance.push('- Set `includeContent: true` when you need the stored text preview from a document match, and use `refresh: true` when a very recent local file is missing from the index.');
+    }
+
+    if (automaticTools.some((entry) => String(entry.id || '').startsWith('research-bucket-'))) {
+        guidance.push('- Use the `research-bucket-*` tools for the shared durable research bucket when the user mentions a research bucket, reference bucket, source library, saved research, project references, or reusable web-project assets.');
+        guidance.push('- Treat the research bucket as callable storage, not memory. List or search first, then read only the specific files needed for the current turn.');
+        guidance.push('- Use `research-bucket-list` for metadata, `research-bucket-search` for grep-style lookup, `research-bucket-read` for selected files, and `research-bucket-write` or `research-bucket-mkdir` only when the user wants bucket contents created or updated.');
+        guidance.push('- Prefer bucket paths and metadata over copying large bucket contents into the conversation. Normal compaction still applies.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'file-read')) {

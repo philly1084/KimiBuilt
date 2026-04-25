@@ -118,6 +118,48 @@ describe('AssetManager', () => {
         expect(removedResults.count).toBe(0);
     });
 
+    test('indexes research bucket files with research-bucket source type', async () => {
+        const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-assets-bucket-'));
+        const stateDir = path.join(tempDir, '.state');
+        const bucketRoot = path.join(stateDir, 'research-buckets', 'shared');
+        await fs.mkdir(path.join(bucketRoot, 'docs'), { recursive: true });
+        await fs.writeFile(
+            path.join(bucketRoot, 'docs', 'web-project-brief.md'),
+            '# Web Project Brief\n\nUse the reference bucket for reusable dashboard research.',
+            'utf8',
+        );
+
+        const manager = new AssetManager({
+            projectRoot: tempDir,
+            stateDir,
+            indexFilePath: path.join(tempDir, 'asset-index.json'),
+            workspaceRoots: [tempDir],
+            researchBucketRoot: bucketRoot,
+            artifactStore: {
+                listAllWithSessions: jest.fn(async () => []),
+            },
+            postgres: {
+                enabled: false,
+            },
+        });
+
+        const results = await manager.searchAssets({
+            query: 'dashboard research',
+            kind: 'document',
+            sourceType: 'research-bucket',
+            includeContent: true,
+            refresh: true,
+        });
+
+        expect(results.count).toBe(1);
+        expect(results.results[0]).toEqual(expect.objectContaining({
+            sourceType: 'research-bucket',
+            filename: 'web-project-brief.md',
+            relativePath: expect.stringContaining('docs'),
+            contentPreview: expect.stringContaining('reference bucket'),
+        }));
+    });
+
     test('restricts artifact search results to the active session when isolation is enabled', async () => {
         const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-assets-isolated-'));
         const manager = new AssetManager({

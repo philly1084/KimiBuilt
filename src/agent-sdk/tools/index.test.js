@@ -14,6 +14,16 @@ jest.mock('../../asset-manager', () => ({
   },
 }));
 
+jest.mock('../../research-buckets', () => ({
+  researchBucketService: {
+    list: jest.fn(),
+    search: jest.fn(),
+    read: jest.fn(),
+    write: jest.fn(),
+    mkdir: jest.fn(),
+  },
+}));
+
 jest.mock('../../tts/piper-tts-service', () => ({
   piperTtsService: {
     synthesize: jest.fn(),
@@ -38,6 +48,7 @@ jest.mock('../../generated-audio-artifacts', () => ({
 const { ToolManager } = require('./index');
 const { artifactService } = require('../../artifacts/artifact-service');
 const { assetManager } = require('../../asset-manager');
+const { researchBucketService } = require('../../research-buckets');
 const config = require('../../config');
 const { piperTtsService } = require('../../tts/piper-tts-service');
 const { persistGeneratedAudio } = require('../../generated-audio-artifacts');
@@ -56,6 +67,11 @@ describe('ToolManager image tools', () => {
     artifactService.serializeArtifact.mockReset();
     assetManager.searchAssets.mockReset();
     assetManager.upsertWorkspacePath.mockClear();
+    researchBucketService.list.mockReset();
+    researchBucketService.search.mockReset();
+    researchBucketService.read.mockReset();
+    researchBucketService.write.mockReset();
+    researchBucketService.mkdir.mockReset();
     piperTtsService.synthesize.mockReset();
     persistGeneratedAudio.mockReset();
     artifactService.createStoredArtifact.mockResolvedValue({
@@ -403,6 +419,100 @@ describe('ToolManager image tools', () => {
       }),
     );
     expect(result.data.results[0].filename).toBe('pricing-report.pdf');
+  });
+
+  test('registers and executes research bucket tools', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    researchBucketService.list.mockResolvedValue({
+      rootPath: '/tmp/research-buckets/shared',
+      count: 1,
+      results: [{ path: 'docs/brief.md', category: 'docs' }],
+    });
+    researchBucketService.search.mockResolvedValue({
+      query: 'pricing',
+      count: 1,
+      results: [{ path: 'docs/brief.md', snippet: 'pricing table' }],
+    });
+    researchBucketService.read.mockResolvedValue({
+      path: 'docs/brief.md',
+      category: 'docs',
+      content: '# Brief',
+    });
+    researchBucketService.mkdir.mockResolvedValue({
+      path: 'docs/vendor',
+      created: true,
+    });
+    researchBucketService.write.mockResolvedValue({
+      path: 'docs/brief.md',
+      absolutePath: '/tmp/research-buckets/shared/docs/brief.md',
+      bytesWritten: 7,
+      entry: { path: 'docs/brief.md', category: 'docs' },
+    });
+    assetManager.upsertWorkspacePath.mockResolvedValue({
+      id: 'research-bucket:/tmp/research-buckets/shared/docs/brief.md',
+      sourceType: 'research-bucket',
+    });
+
+    expect(toolManager.getTool('research-bucket-list')).toBeTruthy();
+    expect(toolManager.getTool('research-bucket-search')).toBeTruthy();
+    expect(toolManager.getTool('research-bucket-read')).toBeTruthy();
+    expect(toolManager.getTool('research-bucket-write')).toBeTruthy();
+    expect(toolManager.getTool('research-bucket-mkdir')).toBeTruthy();
+
+    await expect(toolManager.executeTool('research-bucket-list', { category: 'docs' })).resolves.toEqual(expect.objectContaining({
+      success: true,
+      data: expect.objectContaining({ count: 1 }),
+    }));
+    await expect(toolManager.executeTool('research-bucket-search', { query: 'pricing' })).resolves.toEqual(expect.objectContaining({
+      success: true,
+      data: expect.objectContaining({ query: 'pricing' }),
+    }));
+    await expect(toolManager.executeTool('research-bucket-read', { path: 'docs/brief.md' })).resolves.toEqual(expect.objectContaining({
+      success: true,
+      data: expect.objectContaining({ content: '# Brief' }),
+    }));
+    await expect(toolManager.executeTool('research-bucket-mkdir', { path: 'docs/vendor' })).resolves.toEqual(expect.objectContaining({
+      success: true,
+      data: expect.objectContaining({ created: true }),
+    }));
+
+    const writeResult = await toolManager.executeTool('research-bucket-write', {
+      path: 'brief.md',
+      category: 'docs',
+      content: '# Brief',
+      tags: ['pricing'],
+    }, {
+      ownerId: 'phill',
+      sessionId: 'session-1',
+    });
+
+    expect(writeResult.success).toBe(true);
+    expect(writeResult.data.assetIndexed).toBe(true);
+    expect(assetManager.upsertWorkspacePath).toHaveBeenCalledWith(
+      '/tmp/research-buckets/shared/docs/brief.md',
+      expect.objectContaining({
+        sourceType: 'research-bucket',
+        ownerId: 'phill',
+        sessionId: 'session-1',
+      }),
+    );
+  });
+
+  test('returns research bucket validation errors through tool execution', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    researchBucketService.read.mockRejectedValue(new Error('research-bucket-read mode must be "preview", "content", or "base64".'));
+
+    const result = await toolManager.executeTool('research-bucket-read', {
+      path: 'docs/brief.md',
+      mode: 'raw',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('mode must be');
   });
 
   test('synthesizes speech with Piper and persists the audio into the active session', async () => {

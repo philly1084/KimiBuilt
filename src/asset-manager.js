@@ -8,6 +8,7 @@ const {
     getStateDirectory,
     resolvePreferredWritableFile,
 } = require('./runtime-state-paths');
+const { resolveResearchBucketRoot } = require('./research-buckets');
 
 const ASSET_INDEX_VERSION = 1;
 const DEFAULT_SEARCH_LIMIT = 10;
@@ -23,6 +24,8 @@ const WORKSPACE_IGNORE_PATTERNS = Object.freeze([
     '**/build/**',
     '**/.next/**',
     '**/.cache/**',
+    '**/research-buckets/**/bucket.json',
+    '**/research-buckets/**/bucket.json.tmp',
 ]);
 const IMAGE_EXTENSIONS = new Set([
     'png',
@@ -222,7 +225,12 @@ function tokenizeQuery(query = '') {
         .filter((token) => token.length >= 2);
 }
 
-function normalizeWorkspaceRoots(configuredRoots = [], projectRoot = PROJECT_ROOT, stateDir = getStateDirectory()) {
+function normalizeWorkspaceRoots(
+    configuredRoots = [],
+    projectRoot = PROJECT_ROOT,
+    stateDir = getStateDirectory(),
+    researchBucketRoot = resolveResearchBucketRoot(),
+) {
     const configured = (Array.isArray(configuredRoots) ? configuredRoots : [])
         .map((entry) => String(entry || '').trim())
         .filter(Boolean);
@@ -231,7 +239,7 @@ function normalizeWorkspaceRoots(configuredRoots = [], projectRoot = PROJECT_ROO
         : [projectRoot, stateDir];
 
     return Array.from(new Set(
-        roots
+        [...roots, researchBucketRoot]
             .map((entry) => path.resolve(entry))
             .filter(Boolean),
     ));
@@ -322,6 +330,12 @@ class AssetManager {
         this.indexFilePath = path.resolve(options.indexFilePath || getAssetIndexFilePath());
         this.artifactStore = options.artifactStore || artifactStore;
         this.postgres = options.postgres || postgres;
+        this.researchBucketRoot = path.resolve(
+            options.researchBucketRoot
+            || (process.env.KIMIBUILT_RESEARCH_BUCKET_ROOT
+                ? resolveResearchBucketRoot()
+                : path.join(this.stateDir, 'research-buckets', 'shared')),
+        );
         this.workspaceRoots = normalizeWorkspaceRoots(
             options.workspaceRoots
             || String(process.env.KIMIBUILT_ASSET_ROOTS || '')
@@ -330,6 +344,7 @@ class AssetManager {
                 .filter(Boolean),
             this.projectRoot,
             this.stateDir,
+            this.researchBucketRoot,
         );
     }
 
@@ -377,6 +392,11 @@ class AssetManager {
         return payload;
     }
 
+    isResearchBucketPath(absolutePath = '') {
+        const relative = path.relative(this.researchBucketRoot, path.resolve(absolutePath));
+        return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
+    }
+
     async buildWorkspaceEntry(absolutePath, workspaceRoot, options = {}) {
         if (normalizePathKey(absolutePath) === normalizePathKey(this.indexFilePath)
             || normalizePathKey(absolutePath) === normalizePathKey(`${this.indexFilePath}.tmp`)) {
@@ -415,9 +435,12 @@ class AssetManager {
             ? relativeToProject
             : path.relative(workspaceRoot, absolutePath);
 
+        const sourceType = options.sourceType
+            || (this.isResearchBucketPath(absolutePath) ? 'research-bucket' : 'workspace');
+
         return normalizeEntry({
-            id: `workspace:${normalizePathKey(absolutePath)}`,
-            sourceType: 'workspace',
+            id: `${sourceType}:${normalizePathKey(absolutePath)}`,
+            sourceType,
             kind,
             title: deriveTitle(filename),
             filename,
@@ -552,9 +575,13 @@ class AssetManager {
             const relative = path.relative(root, absolutePath);
             return relative && !relative.startsWith('..') && !path.isAbsolute(relative);
         }) || this.projectRoot;
-        const entry = await this.buildWorkspaceEntry(absolutePath, workspaceRoot, options);
+        const entry = await this.buildWorkspaceEntry(absolutePath, workspaceRoot, {
+            ...options,
+            sourceType: options.sourceType || (this.isResearchBucketPath(absolutePath) ? 'research-bucket' : 'workspace'),
+        });
         const index = await this.readIndex();
-        const entryId = `workspace:${normalizePathKey(absolutePath)}`;
+        const sourceType = entry?.sourceType || (this.isResearchBucketPath(absolutePath) ? 'research-bucket' : 'workspace');
+        const entryId = `${sourceType}:${normalizePathKey(absolutePath)}`;
         const nextEntries = index.entries.filter((candidate) => candidate.id !== entryId);
 
         if (entry) {
@@ -586,7 +613,9 @@ class AssetManager {
             });
 
             for (const absolutePath of matches) {
-                const entry = await this.buildWorkspaceEntry(absolutePath, workspaceRoot);
+                const entry = await this.buildWorkspaceEntry(absolutePath, workspaceRoot, {
+                    sourceType: this.isResearchBucketPath(absolutePath) ? 'research-bucket' : 'workspace',
+                });
                 if (entry) {
                     workspaceEntries.set(entry.id, entry);
                 }
@@ -596,7 +625,7 @@ class AssetManager {
         const nextIndex = {
             ...index,
             entries: [
-                ...index.entries.filter((entry) => entry.sourceType !== 'workspace'),
+                ...index.entries.filter((entry) => !['workspace', 'research-bucket'].includes(entry.sourceType)),
                 ...workspaceEntries.values(),
             ],
             workspaceIndexedAt: new Date().toISOString(),
@@ -726,7 +755,7 @@ class AssetManager {
         const kind = ['image', 'document'].includes(String(params.kind || '').trim().toLowerCase())
             ? String(params.kind).trim().toLowerCase()
             : 'any';
-        const sourceType = ['artifact', 'workspace'].includes(String(params.sourceType || '').trim().toLowerCase())
+        const sourceType = ['artifact', 'workspace', 'research-bucket'].includes(String(params.sourceType || '').trim().toLowerCase())
             ? String(params.sourceType).trim().toLowerCase()
             : 'any';
         const sessionId = String(params.sessionId || context.sessionId || '').trim() || null;

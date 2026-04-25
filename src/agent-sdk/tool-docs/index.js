@@ -44,8 +44,15 @@ const REMOTE_CLI_COMMAND_CATALOG = Object.freeze([
     id: 'docker-buildkit',
     label: 'Docker and BuildKit checks',
     profile: 'inspect',
-    description: 'Check Docker and BuildKit availability before remote image build work.',
-    command: 'docker info 2>/dev/null | sed -n "1,80p" || true; docker buildx ls 2>/dev/null || true',
+    description: 'Check Docker, buildctl, and BuildKit availability before remote image build work.',
+    command: 'command -v buildctl || true; test -n "$BUILDKIT_HOST" && buildctl --addr "$BUILDKIT_HOST" debug workers || true; docker info 2>/dev/null | sed -n "1,80p" || true; docker buildx ls 2>/dev/null || true',
+  },
+  {
+    id: 'direct-image-build',
+    label: 'Direct image build',
+    profile: 'build',
+    description: 'Build and push an image from the remote workspace through the direct BuildKit runner.',
+    command: 'image="${DIRECT_CLI_IMAGE_PREFIX:-ghcr.io/philly1084}/app:$(date +%Y%m%d%H%M%S)"; buildctl --addr "$BUILDKIT_HOST" build --frontend dockerfile.v0 --local context=. --local dockerfile=. --output type=image,name="$image",push=true && printf "IMAGE=%s\\n" "$image"',
   },
   {
     id: 'kubectl-inspect',
@@ -96,6 +103,11 @@ const TOOL_SUPPORT = {
   'code-sandbox': { status: 'requires_setup', notes: ['Execute mode requires Docker image pull/run capability in the backend runtime.', 'Project mode can persist previewable frontend bundles without Docker.'] },
   'git-safe': { status: 'requires_setup', notes: ['Requires a git repository in the backend-accessible filesystem and working git credentials for push.'] },
   'tool-doc-read': { status: 'stable', notes: ['Reads detailed tool documentation from the backend docs directory on demand.'] },
+  'research-bucket-list': { status: 'stable', notes: ['Lists metadata from the shared durable research bucket without loading full file contents.'] },
+  'research-bucket-search': { status: 'stable', notes: ['Searches bucket metadata and supported text files with grep-style matching.'] },
+  'research-bucket-read': { status: 'stable', notes: ['Reads selected bucket files with byte limits; binary files require explicit base64 mode.'] },
+  'research-bucket-write': { status: 'stable', notes: ['Creates or updates guarded files inside the shared research bucket and indexes supported assets.'] },
+  'research-bucket-mkdir': { status: 'stable', notes: ['Creates guarded subfolders inside the shared research bucket.'] },
   'podcast': {
     status: 'stable',
     notes: [
@@ -108,7 +120,11 @@ const TOOL_SUPPORT = {
 };
 
 function getToolDocPath(toolId) {
-  return path.join(TOOL_DOCS_DIR, `${toolId}.md`);
+  const normalizedToolId = String(toolId || '').trim();
+  if (normalizedToolId.startsWith('research-bucket-')) {
+    return path.join(TOOL_DOCS_DIR, 'research-bucket.md');
+  }
+  return path.join(TOOL_DOCS_DIR, `${normalizedToolId}.md`);
 }
 
 async function hasToolDoc(toolId) {

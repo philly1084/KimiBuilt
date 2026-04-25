@@ -71,6 +71,7 @@ These catalog entries are exposed through `/api/tools/available` so agents can s
 | `build` | `build` | Run the project build command discovered from the repo. |
 | `test` | `build` | Run the focused or project test command discovered from the repo. |
 | `docker-buildkit` | `inspect` | Check Docker/BuildKit availability and builder state. |
+| `direct-image-build` | `build` | Build and push an image from the remote workspace through the direct BuildKit runner. |
 | `kubectl-inspect` | `inspect` | Inspect k3s nodes, workloads, services, ingress, and pods. |
 | `logs` | `inspect` | Read Kubernetes logs and recent events for the target workload. |
 | `rollout` | `deploy` | Check rollout and available conditions for a deployment. |
@@ -169,7 +170,51 @@ kubectl rollout status deployment/"$app" -n "$ns" --timeout=180s
 kubectl get svc,ingress -n "$ns"
 ```
 
-### 7. TLS, cert-manager, and DNS checks
+### 7. Direct CLI image build with BuildKit
+
+This is the preferred path when Gitea/ACT is not part of the build lane. The remote runner executes the commands in `/workspace`, talks to the private BuildKit service through `BUILDKIT_HOST`, pushes with the mounted Docker config, then deploys with in-cluster `kubectl`.
+
+Check the runner has the required tools:
+
+```bash
+command -v buildctl
+command -v kubectl
+test -n "$BUILDKIT_HOST" && buildctl --addr "$BUILDKIT_HOST" debug workers
+```
+
+Build and push from a repo workspace:
+
+```bash
+set -e
+cd /workspace/app
+image="${DIRECT_CLI_IMAGE_PREFIX:-ghcr.io/philly1084}/app:$(date +%Y%m%d%H%M%S)"
+buildctl --addr "$BUILDKIT_HOST" build \
+  --frontend dockerfile.v0 \
+  --local context=. \
+  --local dockerfile=. \
+  --output type=image,name="$image",push=true
+printf 'IMAGE=%s\n' "$image"
+```
+
+Deploy the pushed image:
+
+```bash
+set -e
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+ns=app
+app=app
+image="ghcr.io/philly1084/app:replace-with-built-tag"
+kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
+kubectl create deployment "$app" --image="$image" -n "$ns" --dry-run=client -o yaml | kubectl apply -f -
+kubectl set image deployment/"$app" "$app=$image" -n "$ns"
+kubectl rollout status deployment/"$app" -n "$ns" --timeout=180s
+```
+
+Notes:
+- Do not mutate Kubernetes Secrets from the runner. Ask the user to create registry pull secrets or app secrets explicitly when needed.
+- Keep image names explicit in the final verification output so the next agent can continue from the last verified state.
+
+### 8. TLS, cert-manager, and DNS checks
 
 Ingress and TLS objects:
 
@@ -191,7 +236,7 @@ curl -fsSIL --max-time 20 "https://$host"
 curl -fsS --max-time 20 "https://$host" | sed -n '1,20p'
 ```
 
-### 8. k3s service health
+### 9. k3s service health
 
 Server nodes usually use `k3s`; agent-only nodes use `k3s-agent`.
 
@@ -202,7 +247,7 @@ sudo systemctl status k3s-agent --no-pager
 sudo journalctl -u k3s-agent --no-pager -n 200
 ```
 
-### 9. Packaged manifests and add-ons
+### 10. Packaged manifests and add-ons
 
 K3s automatically applies manifests from `/var/lib/rancher/k3s/server/manifests`.
 
@@ -213,7 +258,7 @@ kubectl get addon -n kube-system
 kubectl describe addon <addon-name> -n kube-system
 ```
 
-### 10. Host files, repo, and search
+### 11. Host files, repo, and search
 
 Do not assume `rg` is installed on Ubuntu servers.
 
@@ -223,7 +268,7 @@ find /path/to/check -maxdepth 2 -type f | sort | head -n 200
 grep -R --line-number "needle" /path/to/check
 ```
 
-### 11. Networking and ports
+### 12. Networking and ports
 
 Prefer modern Ubuntu tooling.
 
@@ -234,7 +279,7 @@ ss -tulpn
 curl -I https://example.com
 ```
 
-### 12. Package install on Ubuntu
+### 13. Package install on Ubuntu
 
 Avoid interactive prompts:
 

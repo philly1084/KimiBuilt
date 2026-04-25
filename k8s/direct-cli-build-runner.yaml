@@ -1,0 +1,313 @@
+# Direct CLI build runner for the remote k3s cluster.
+#
+# This manifest bypasses Gitea and ACT entirely:
+# - KimiBuilt agents send remote-command jobs to this runner.
+# - The runner executes planned CLI work in /workspace.
+# - BuildKit builds and pushes images.
+# - kubectl applies/updates workloads in the same k3s cluster.
+#
+# Before applying:
+# 1. Replace KIMIBUILT_BACKEND_URL and KIMIBUILT_REMOTE_RUNNER_TOKEN.
+# 2. Replace the registry auth JSON with credentials for GHCR, Docker Hub,
+#    a private registry, or your Rancher-managed registry.
+# 3. Build/push the KimiBuilt image after the Dockerfile buildctl change.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agent-platform
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kimibuilt-direct-runner
+  namespace: agent-platform
+type: Opaque
+stringData:
+  KIMIBUILT_BACKEND_URL: "https://kimibuilt.demoserver2.buzz"
+  KIMIBUILT_REMOTE_RUNNER_TOKEN: "REPLACE_WITH_THE_BACKEND_RUNNER_TOKEN"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kimibuilt-direct-registry-auth
+  namespace: agent-platform
+type: kubernetes.io/dockerconfigjson
+stringData:
+  .dockerconfigjson: |
+    {
+      "auths": {
+        "ghcr.io": {
+          "username": "REPLACE_WITH_REGISTRY_USERNAME",
+          "password": "REPLACE_WITH_REGISTRY_TOKEN_OR_PASSWORD"
+        }
+      }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kimibuilt-direct-runner
+  namespace: agent-platform
+data:
+  KIMIBUILT_RUNNER_ID: "agent-platform-direct-cli"
+  KIMIBUILT_RUNNER_NAME: "Agent Platform Direct CLI Builder"
+  KIMIBUILT_RUNNER_CAPABILITIES: "inspect,build,deploy"
+  KIMIBUILT_RUNNER_ALLOWED_ROOTS: "/app,/workspace,/tmp"
+  KIMIBUILT_RUNNER_HEARTBEAT_MS: "15000"
+  KIMIBUILT_RUNNER_MAX_OUTPUT_CHARS: "120000"
+  BUILDKIT_HOST: "tcp://kimibuilt-buildkitd.agent-platform.svc.cluster.local:1234"
+  DOCKER_CONFIG: "/home/kimibuilt/.docker"
+  DIRECT_CLI_WORKSPACE: "/workspace"
+  DIRECT_CLI_IMAGE_PREFIX: "ghcr.io/philly1084"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kimibuilt-direct-runner-kubeconfig
+  namespace: agent-platform
+data:
+  k3s.yaml: |
+    apiVersion: v1
+    kind: Config
+    clusters:
+      - name: in-cluster
+        cluster:
+          certificate-authority: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          server: https://kubernetes.default.svc
+    users:
+      - name: runner
+        user:
+          tokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+    contexts:
+      - name: in-cluster
+        context:
+          cluster: in-cluster
+          user: runner
+    current-context: in-cluster
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kimibuilt-direct-runner-workspace
+  namespace: agent-platform
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kimibuilt-buildkit-cache
+  namespace: agent-platform
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 30Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kimibuilt-direct-runner
+  namespace: agent-platform
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kimibuilt-direct-runner
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "nodes", "pods", "pods/log", "services", "endpoints", "events", "configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates", "challenges", "orders", "clusterissuers", "issuers"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["namespaces", "services", "configmaps"]
+    verbs: ["create", "update", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["create", "update", "patch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["create", "update", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kimibuilt-direct-runner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kimibuilt-direct-runner
+subjects:
+  - kind: ServiceAccount
+    name: kimibuilt-direct-runner
+    namespace: agent-platform
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kimibuilt-buildkitd
+  namespace: agent-platform
+  labels:
+    app: kimibuilt-buildkitd
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kimibuilt-buildkitd
+  template:
+    metadata:
+      labels:
+        app: kimibuilt-buildkitd
+    spec:
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      containers:
+        - name: buildkitd
+          image: moby/buildkit:v0.17.2
+          imagePullPolicy: IfNotPresent
+          args:
+            - --addr=tcp://0.0.0.0:1234
+          ports:
+            - name: buildkit
+              containerPort: 1234
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: cache
+              mountPath: /var/lib/buildkit
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+      volumes:
+        - name: cache
+          persistentVolumeClaim:
+            claimName: kimibuilt-buildkit-cache
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kimibuilt-buildkitd
+  namespace: agent-platform
+spec:
+  selector:
+    app: kimibuilt-buildkitd
+  ports:
+    - name: buildkit
+      port: 1234
+      targetPort: buildkit
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kimibuilt-direct-runner
+  namespace: agent-platform
+  labels:
+    app: kimibuilt-direct-runner
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kimibuilt-direct-runner
+  template:
+    metadata:
+      labels:
+        app: kimibuilt-direct-runner
+    spec:
+      serviceAccountName: kimibuilt-direct-runner
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+        - name: install-kubectl
+          image: rancher/kubectl:v1.30.4
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - cp "$(command -v kubectl)" /tools/kubectl && chmod 0755 /tools/kubectl
+          volumeMounts:
+            - name: tools
+              mountPath: /tools
+      containers:
+        - name: runner
+          image: ghcr.io/philly1084/kimibuilt:latest
+          imagePullPolicy: Always
+          command:
+            - node
+            - /app/bin/kimibuilt-runner.js
+          envFrom:
+            - configMapRef:
+                name: kimibuilt-direct-runner
+            - secretRef:
+                name: kimibuilt-direct-runner
+          env:
+            - name: KUBECONFIG
+              value: /etc/rancher/k3s/k3s.yaml
+            - name: PATH
+              value: /tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          volumeMounts:
+            - name: tools
+              mountPath: /tools
+              readOnly: true
+            - name: kubeconfig
+              mountPath: /etc/rancher/k3s
+              readOnly: true
+            - name: workspace
+              mountPath: /workspace
+            - name: registry-auth
+              mountPath: /home/kimibuilt/.docker/config.json
+              subPath: .dockerconfigjson
+              readOnly: true
+          resources:
+            requests:
+              cpu: 150m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: tools
+          emptyDir: {}
+        - name: kubeconfig
+          configMap:
+            name: kimibuilt-direct-runner-kubeconfig
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: kimibuilt-direct-runner-workspace
+        - name: registry-auth
+          secret:
+            secretName: kimibuilt-direct-registry-auth

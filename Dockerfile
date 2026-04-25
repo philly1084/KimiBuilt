@@ -9,7 +9,12 @@ COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 # ================================
-# Stage 2: Production image
+# Stage 2: BuildKit client
+# ================================
+FROM moby/buildkit:v0.17.2 AS buildkit
+
+# ================================
+# Stage 3: Production image
 # ================================
 FROM node:20-bookworm-slim
 
@@ -24,6 +29,8 @@ RUN apt-get update && \
   python3 -m pip install --break-system-packages --no-cache-dir "piper-tts==${PIPER_TTS_VERSION}" && \
   command -v piper >/dev/null && \
   rm -rf /var/lib/apt/lists/*
+
+COPY --from=buildkit /usr/bin/buildctl /usr/local/bin/buildctl
 
 # Security: run as non-root
 RUN groupadd --gid 1001 kimibuilt && \

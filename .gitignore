@@ -5,6 +5,7 @@ node_modules/
 .env
 agent-notes.md
 asset-index.json
+research-buckets/
 
 # Test & Build
 coverage/

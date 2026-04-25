@@ -801,6 +801,24 @@ function hasIndexedAssetIntentText(text = '') {
     ].some((pattern) => pattern.test(normalized));
 }
 
+function hasResearchBucketIntentText(text = '') {
+    const normalized = String(text || '').trim();
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        /\bresearch bucket\b/i,
+        /\breference bucket\b/i,
+        /\bsource library\b/i,
+        /\bsaved research\b/i,
+        /\bproject references?\b/i,
+        /\blong[- ]term bucket\b/i,
+        /\bbucket\b[\s\S]{0,60}\b(images?|data|graphs?|code|audio|wave|wav|docs?|references?|assets?)\b/i,
+        /\b(images?|data|graphs?|code|audio|wave|wav|docs?|references?|assets?)\b[\s\S]{0,60}\bbucket\b/i,
+    ].some((pattern) => pattern.test(normalized));
+}
+
 function hasExplicitCheckpointRequestText(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -1051,6 +1069,7 @@ function buildScoredCandidateToolMap({
     hasImageUrlIntent = false,
     hasDirectImageUrl = false,
     hasAssetCatalogIntent = false,
+    hasResearchBucketIntent = false,
     hasPodcastIntent = false,
     hasDocumentWorkflowIntent = false,
     hasSubAgentIntent = false,
@@ -1170,6 +1189,13 @@ function buildScoredCandidateToolMap({
     }
     if (hasAssetCatalogIntent) {
         adjustCandidateToolScore(scoreMap, 'asset-search', 0.95, 'The request refers to a prior or indexed asset.');
+    }
+    if (hasResearchBucketIntent) {
+        adjustCandidateToolScore(scoreMap, 'research-bucket-list', 0.9, 'The request refers to the shared research bucket.');
+        adjustCandidateToolScore(scoreMap, 'research-bucket-search', 0.95, 'The request may need lookup in the shared research bucket.');
+        adjustCandidateToolScore(scoreMap, 'research-bucket-read', 0.7, 'The request may need selected bucket file contents.');
+        adjustCandidateToolScore(scoreMap, 'research-bucket-write', /\b(write|save|add|store|capture|create|update|append)\b/.test(normalizedPrompt) ? 0.85 : 0, 'The request may add material to the shared research bucket.');
+        adjustCandidateToolScore(scoreMap, 'research-bucket-mkdir', /\b(mkdir|folder|directory)\b/.test(normalizedPrompt) ? 0.65 : 0, 'The request may create a bucket folder.');
     }
     if (hasPodcastIntent) {
         adjustCandidateToolScore(scoreMap, 'podcast', 1.4, 'Explicit podcast wording should keep the podcast workflow tool in the candidate set.');
@@ -8023,6 +8049,7 @@ class ConversationOrchestrator extends EventEmitter {
         const hasSecurityIntent = hasSecurityScanIntent(prompt);
         const hasDocumentWorkflowIntent = hasDocumentWorkflowIntentText(prompt);
         const hasAssetCatalogIntent = hasIndexedAssetIntentText(prompt);
+        const hasResearchBucketIntent = hasResearchBucketIntentText(prompt);
         const hasSubAgentIntent = hasExplicitSubAgentIntentText(prompt);
         const hasManagedAppIntent = hasManagedAppIntentText(prompt);
         const hasManagedAppAuthoringRequest = hasManagedAppAuthoringIntent(prompt, {
@@ -8142,6 +8169,7 @@ class ConversationOrchestrator extends EventEmitter {
                 hasImageUrlIntent,
                 hasDirectImageUrl,
                 hasAssetCatalogIntent,
+                hasResearchBucketIntent,
                 hasPodcastIntent,
                 hasDocumentWorkflowIntent,
                 hasSubAgentIntent,
@@ -8244,6 +8272,15 @@ class ConversationOrchestrator extends EventEmitter {
             if (hasAssetCatalogIntent && allowedToolIds.includes('asset-search')) {
                 candidates.add('asset-search');
             }
+            if (hasResearchBucketIntent) {
+                ['research-bucket-list', 'research-bucket-search', 'research-bucket-read'].forEach((toolId) => allowedToolIds.includes(toolId) && candidates.add(toolId));
+                if (/\b(write|save|add|store|capture|create|update|append)\b/.test(prompt) && allowedToolIds.includes('research-bucket-write')) {
+                    candidates.add('research-bucket-write');
+                }
+                if (/\b(mkdir|folder|directory)\b/.test(prompt) && allowedToolIds.includes('research-bucket-mkdir')) {
+                    candidates.add('research-bucket-mkdir');
+                }
+            }
             if (!shouldPreferRemoteWebsiteSource
                 && allowedToolIds.includes('file-write')
                 && /\b(write|create|update|edit|save|patch|fix)\b/.test(prompt)) {
@@ -8303,6 +8340,15 @@ class ConversationOrchestrator extends EventEmitter {
             }
             if (hasAssetCatalogIntent && allowedToolIds.includes('asset-search')) {
                 candidates.add('asset-search');
+            }
+            if (hasResearchBucketIntent) {
+                ['research-bucket-list', 'research-bucket-search', 'research-bucket-read'].forEach((toolId) => allowedToolIds.includes(toolId) && candidates.add(toolId));
+                if (/\b(write|save|add|store|capture|create|update|append)\b/.test(prompt) && allowedToolIds.includes('research-bucket-write')) {
+                    candidates.add('research-bucket-write');
+                }
+                if (/\b(mkdir|folder|directory)\b/.test(prompt) && allowedToolIds.includes('research-bucket-mkdir')) {
+                    candidates.add('research-bucket-mkdir');
+                }
             }
             if (/\b(read|open|show|print|cat)\b[\s\S]{0,40}\bfile\b/.test(prompt) && allowedToolIds.includes('file-read')) {
                 candidates.add('file-read');
@@ -9113,6 +9159,8 @@ class ConversationOrchestrator extends EventEmitter {
                 ]),
             'Use `asset-search.params.kind = "image"` for visuals and `asset-search.params.kind = "document"` for PDFs, docs, HTML, markdown, and similar files.',
             'Set `asset-search.params.includeContent = true` when the stored text preview would help choose the right document.',
+            'Use `research-bucket-*` tools when the user mentions a research bucket, reference bucket, source library, saved research, project references, or reusable web-project assets.',
+            'For research bucket work, list or search first, then read only the specific files required. Use `research-bucket-write` or `research-bucket-mkdir` only when the user wants bucket contents created or updated.',
             ...(toolPolicy.sessionIsolation
                 ? ['Do not use `agent-notes-write` in this isolated session.']
                 : [
@@ -9894,6 +9942,10 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('Use `asset-search` to find earlier images, documents, uploaded artifacts, and workspace files before asking the user to resend them.');
             parts.push('Use `asset-search kind:"image"` for prior visuals and `asset-search kind:"document"` for PDFs, docs, HTML, markdown, and similar files.');
             parts.push('Set `asset-search includeContent:true` when you need the stored text preview from a document match, and use `refresh:true` if a very recent local file is missing from the index.');
+        }
+        if (allowedToolIds.some((toolId) => String(toolId || '').startsWith('research-bucket-'))) {
+            parts.push('Use `research-bucket-*` tools for shared durable bucket references. Treat bucket contents as callable storage, not memory: list/search first, then read only selected files.');
+            parts.push('Use `research-bucket-write` or `research-bucket-mkdir` only when the user wants to add or organize bucket material.');
         }
 
         if (toolEvents.length > 0) {

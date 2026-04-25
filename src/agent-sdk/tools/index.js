@@ -12,6 +12,7 @@ const { persistGeneratedImages } = require('../../generated-image-artifacts');
 const { persistGeneratedAudio } = require('../../generated-audio-artifacts');
 const { artifactService } = require('../../artifacts/artifact-service');
 const { assetManager } = require('../../asset-manager');
+const { researchBucketService } = require('../../research-buckets');
 const { piperTtsService } = require('../../tts/piper-tts-service');
 const { audioProcessingService } = require('../../audio/audio-processing-service');
 const { podcastService } = require('../../podcast/podcast-service');
@@ -1390,7 +1391,7 @@ class ToolManager {
             },
             sourceType: {
               type: 'string',
-              enum: ['any', 'artifact', 'workspace'],
+              enum: ['any', 'artifact', 'workspace', 'research-bucket'],
               default: 'any'
             },
             sessionId: {
@@ -1428,6 +1429,216 @@ class ToolManager {
         frontend: {
           exposeToFrontend: true,
           icon: 'folder-search'
+        }
+      },
+      {
+        id: 'research-bucket-list',
+        name: 'Research Bucket List',
+        category: 'system',
+        description: 'List files in the shared durable research bucket by category, tag, or query without loading full contents.',
+        backend: {
+          handler: async (params = {}, context = {}) => {
+            const service = context.researchBucketService || researchBucketService;
+            return service.list(params);
+          },
+          sideEffects: ['read'],
+          timeout: 30000
+        },
+        inputSchema: {
+          type: 'object',
+          properties: {
+            category: { type: 'string', enum: ['images', 'data', 'graphs', 'code', 'audio', 'docs', 'notes', 'refs'] },
+            query: { type: 'string' },
+            tags: {
+              type: 'array',
+              items: { type: 'string' }
+            },
+            limit: { type: 'integer', minimum: 1, maximum: 200, default: 50 }
+          },
+          additionalProperties: false
+        },
+        skill: {
+          triggerPatterns: [
+            'research bucket',
+            'reference bucket',
+            'source library',
+            'saved research',
+            'project references'
+          ],
+          requiresConfirmation: false
+        },
+        frontend: {
+          exposeToFrontend: true,
+          icon: 'library'
+        }
+      },
+      {
+        id: 'research-bucket-search',
+        name: 'Research Bucket Search',
+        category: 'system',
+        description: 'Search the shared durable research bucket with grep-style text matching over supported text files and manifest metadata.',
+        backend: {
+          handler: async (params = {}, context = {}) => {
+            const service = context.researchBucketService || researchBucketService;
+            return service.search(params);
+          },
+          sideEffects: ['read'],
+          timeout: 30000
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['query'],
+          properties: {
+            query: { type: 'string' },
+            category: { type: 'string', enum: ['images', 'data', 'graphs', 'code', 'audio', 'docs', 'notes', 'refs'] },
+            glob: { type: 'string' },
+            limit: { type: 'integer', minimum: 1, maximum: 200, default: 50 },
+            includeSnippets: { type: 'boolean', default: true }
+          },
+          additionalProperties: false
+        },
+        skill: {
+          triggerPatterns: [
+            'search research bucket',
+            'grep research bucket',
+            'search saved research',
+            'find in source library'
+          ],
+          requiresConfirmation: false
+        },
+        frontend: {
+          exposeToFrontend: true,
+          icon: 'search'
+        }
+      },
+      {
+        id: 'research-bucket-read',
+        name: 'Research Bucket Read',
+        category: 'system',
+        description: 'Read selected content or metadata from a file in the shared durable research bucket.',
+        backend: {
+          handler: async (params = {}, context = {}) => {
+            const service = context.researchBucketService || researchBucketService;
+            return service.read(params);
+          },
+          sideEffects: ['read'],
+          timeout: 30000
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['path'],
+          properties: {
+            path: { type: 'string' },
+            mode: { type: 'string', enum: ['preview', 'content', 'base64'], default: 'preview' },
+            maxBytes: { type: 'integer', minimum: 1, maximum: 1048576, default: 65536 }
+          },
+          additionalProperties: false
+        },
+        skill: {
+          triggerPatterns: [
+            'read research bucket',
+            'open research bucket',
+            'read reference bucket',
+            'use bucket file'
+          ],
+          requiresConfirmation: false
+        },
+        frontend: {
+          exposeToFrontend: true,
+          icon: 'file-text'
+        }
+      },
+      {
+        id: 'research-bucket-write',
+        name: 'Research Bucket Write',
+        category: 'system',
+        description: 'Create or update a text or base64 binary file in the shared durable research bucket.',
+        backend: {
+          handler: async (params = {}, context = {}) => {
+            const service = context.researchBucketService || researchBucketService;
+            const result = await service.write(params);
+            let indexedAsset = null;
+            try {
+              indexedAsset = await assetManager.upsertWorkspacePath(result.absolutePath, {
+                sourceType: 'research-bucket',
+                sessionId: context.sessionId || null,
+                ownerId: context.ownerId || context.userId || null,
+              });
+            } catch (error) {
+              console.warn('[ToolManager] Failed to index research bucket file:', error.message);
+            }
+            return {
+              ...result,
+              assetIndexed: Boolean(indexedAsset),
+              indexedAsset,
+            };
+          },
+          sideEffects: ['write'],
+          timeout: 30000
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['path', 'content'],
+          properties: {
+            path: { type: 'string' },
+            content: { type: 'string' },
+            encoding: { type: 'string', enum: ['utf8', 'base64'], default: 'utf8' },
+            category: { type: 'string', enum: ['images', 'data', 'graphs', 'code', 'audio', 'docs', 'notes', 'refs'] },
+            mimeType: { type: 'string' },
+            tags: {
+              type: 'array',
+              items: { type: 'string' }
+            },
+            description: { type: 'string' }
+          },
+          additionalProperties: false
+        },
+        skill: {
+          triggerPatterns: [
+            'write research bucket',
+            'save to research bucket',
+            'add to research bucket',
+            'store in reference bucket'
+          ],
+          requiresConfirmation: false
+        },
+        frontend: {
+          exposeToFrontend: true,
+          icon: 'archive'
+        }
+      },
+      {
+        id: 'research-bucket-mkdir',
+        name: 'Research Bucket Directory Creator',
+        category: 'system',
+        description: 'Create a safe subfolder inside the shared durable research bucket.',
+        backend: {
+          handler: async (params = {}, context = {}) => {
+            const service = context.researchBucketService || researchBucketService;
+            return service.mkdir(params);
+          },
+          sideEffects: ['write'],
+          timeout: 10000
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['path'],
+          properties: {
+            path: { type: 'string' }
+          },
+          additionalProperties: false
+        },
+        skill: {
+          triggerPatterns: [
+            'create research bucket folder',
+            'make research bucket directory',
+            'research bucket mkdir'
+          ],
+          requiresConfirmation: false
+        },
+        frontend: {
+          exposeToFrontend: true,
+          icon: 'folder-plus'
         }
       },
       {

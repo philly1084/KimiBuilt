@@ -275,6 +275,11 @@ function buildToolRuntime(toolId, options = {}) {
 
   if ([
     'asset-search',
+    'research-bucket-list',
+    'research-bucket-search',
+    'research-bucket-read',
+    'research-bucket-write',
+    'research-bucket-mkdir',
     'web-fetch',
     'web-scrape',
     'file-read',

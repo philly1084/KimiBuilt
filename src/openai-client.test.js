@@ -116,6 +116,76 @@ function createToolManager() {
                 },
             },
         }],
+        ['research-bucket-list', {
+            id: 'research-bucket-list',
+            name: 'Research Bucket List',
+            description: 'List files in the shared durable research bucket',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    category: { type: 'string' },
+                    query: { type: 'string' },
+                    tags: { type: 'array', items: { type: 'string' } },
+                    limit: { type: 'integer' },
+                },
+            },
+        }],
+        ['research-bucket-search', {
+            id: 'research-bucket-search',
+            name: 'Research Bucket Search',
+            description: 'Search files in the shared durable research bucket',
+            inputSchema: {
+                type: 'object',
+                required: ['query'],
+                properties: {
+                    query: { type: 'string' },
+                    category: { type: 'string' },
+                    glob: { type: 'string' },
+                    limit: { type: 'integer' },
+                },
+            },
+        }],
+        ['research-bucket-read', {
+            id: 'research-bucket-read',
+            name: 'Research Bucket Read',
+            description: 'Read a selected research bucket file',
+            inputSchema: {
+                type: 'object',
+                required: ['path'],
+                properties: {
+                    path: { type: 'string' },
+                    mode: { type: 'string' },
+                    maxBytes: { type: 'integer' },
+                },
+            },
+        }],
+        ['research-bucket-write', {
+            id: 'research-bucket-write',
+            name: 'Research Bucket Write',
+            description: 'Write a file into the shared durable research bucket',
+            inputSchema: {
+                type: 'object',
+                required: ['path', 'content'],
+                properties: {
+                    path: { type: 'string' },
+                    content: { type: 'string' },
+                    category: { type: 'string' },
+                    tags: { type: 'array', items: { type: 'string' } },
+                },
+            },
+        }],
+        ['research-bucket-mkdir', {
+            id: 'research-bucket-mkdir',
+            name: 'Research Bucket Directory Creator',
+            description: 'Create a folder in the shared durable research bucket',
+            inputSchema: {
+                type: 'object',
+                required: ['path'],
+                properties: {
+                    path: { type: 'string' },
+                },
+            },
+        }],
         ['file-read', {
             id: 'file-read',
             name: 'File Reader',
@@ -378,6 +448,11 @@ function createToolManager() {
         ['image-from-url', { enabled: true, triggerPatterns: ['image url', 'embed image'], requiresConfirmation: false }],
         ['podcast', { enabled: true, triggerPatterns: ['podcast', 'podcast episode', 'two host podcast'], requiresConfirmation: false }],
         ['asset-search', { enabled: true, triggerPatterns: ['search assets', 'find earlier document'], requiresConfirmation: false }],
+        ['research-bucket-list', { enabled: true, triggerPatterns: ['research bucket', 'reference bucket'], requiresConfirmation: false }],
+        ['research-bucket-search', { enabled: true, triggerPatterns: ['search research bucket', 'source library'], requiresConfirmation: false }],
+        ['research-bucket-read', { enabled: true, triggerPatterns: ['read research bucket', 'use bucket file'], requiresConfirmation: false }],
+        ['research-bucket-write', { enabled: true, triggerPatterns: ['write research bucket', 'save to research bucket'], requiresConfirmation: false }],
+        ['research-bucket-mkdir', { enabled: true, triggerPatterns: ['create research bucket folder'], requiresConfirmation: false }],
         ['file-read', { enabled: true, triggerPatterns: ['read file', 'open file'], requiresConfirmation: false }],
         ['file-write', { enabled: true, triggerPatterns: ['write file', 'save file'], requiresConfirmation: true }],
         ['file-search', { enabled: true, triggerPatterns: ['find file', 'search files'], requiresConfirmation: false }],
@@ -816,6 +891,20 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(guidance).toContain('includeContent: true');
     });
 
+    test('research bucket guidance explains callable durable storage', () => {
+        const guidance = __testUtils.buildAutomaticToolGuidance([
+            { id: 'research-bucket-list' },
+            { id: 'research-bucket-search' },
+            { id: 'research-bucket-read' },
+            { id: 'research-bucket-write' },
+        ]);
+
+        expect(guidance).toContain('shared durable research bucket');
+        expect(guidance).toContain('callable storage, not memory');
+        expect(guidance).toContain('List or search first');
+        expect(guidance).toContain('Normal compaction still applies');
+    });
+
     test('checkpoint guidance forbids request_user_input when user-checkpoint is attached', () => {
         const guidance = __testUtils.buildAutomaticToolGuidance([
             { id: 'user-checkpoint' },
@@ -891,6 +980,34 @@ describe('openai-client automatic tool orchestration helpers', () => {
         ], 'Use the PDF we worked on earlier and the same image from before.');
 
         expect(selectedTools.map((tool) => tool.id)).toContain('asset-search');
+    });
+
+    test('selects research bucket tools when the prompt refers to saved project references', () => {
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions([
+            { id: 'asset-search' },
+            { id: 'research-bucket-list' },
+            { id: 'research-bucket-search' },
+            { id: 'research-bucket-read' },
+            { id: 'research-bucket-write' },
+            { id: 'research-bucket-mkdir' },
+        ], 'Use the research bucket source library and save the pricing notes there for this web project.');
+
+        const ids = selectedTools.map((tool) => tool.id);
+        expect(ids).toContain('research-bucket-list');
+        expect(ids).toContain('research-bucket-search');
+        expect(ids).toContain('research-bucket-read');
+        expect(ids).toContain('research-bucket-write');
+    });
+
+    test('keeps normal file search selection separate from research bucket prompts', () => {
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions([
+            { id: 'file-search' },
+            { id: 'research-bucket-search' },
+        ], 'Search files for config.js');
+
+        const ids = selectedTools.map((tool) => tool.id);
+        expect(ids).toContain('file-search');
+        expect(ids).not.toContain('research-bucket-search');
     });
 
     test('extracts requested folder names for deterministic preflight', () => {
