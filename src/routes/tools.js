@@ -70,6 +70,7 @@ function buildRuntimeSummary(toolManager, options = {}) {
   const gitea = typeof settingsController.getEffectiveGiteaConfig === 'function'
     ? settingsController.getEffectiveGiteaConfig()
     : {};
+  const healthyRunner = remoteRunnerService.getHealthyRunner();
   return {
     source: 'backend',
     toolManagerInitialized: Boolean(toolManager?.initialized),
@@ -114,8 +115,33 @@ function buildRuntimeSummary(toolManager, options = {}) {
       configured: Boolean(config.remoteRunner.token),
       preferred: config.remoteRunner.preferred !== false,
       runners: remoteRunnerService.listRunners(),
-      healthy: Boolean(remoteRunnerService.getHealthyRunner()),
+      healthy: Boolean(healthyRunner),
+      defaultRunnerId: healthyRunner?.runnerId || '',
+      defaultWorkspace: healthyRunner?.metadata?.defaultCwd || healthyRunner?.metadata?.workspace || '',
+      shell: healthyRunner?.metadata?.shell || '',
+      capabilities: healthyRunner?.capabilities || [],
+      allowedRoots: healthyRunner?.allowedRoots || [],
     },
+  };
+}
+
+function buildRunnerRuntimeDetails(runner = null) {
+  if (!runner) {
+    return null;
+  }
+
+  return {
+    runnerId: runner.runnerId,
+    displayName: runner.displayName || runner.runnerId,
+    capabilities: runner.capabilities || [],
+    allowedRoots: runner.allowedRoots || [],
+    defaultWorkspace: runner.metadata?.defaultCwd || runner.metadata?.workspace || '',
+    workspace: runner.metadata?.workspace || '',
+    shell: runner.metadata?.shell || '',
+    buildkitHostConfigured: Boolean(runner.metadata?.buildkitHostConfigured),
+    kubernetesConfigured: Boolean(runner.metadata?.kubernetesConfigured),
+    imagePrefix: runner.metadata?.imagePrefix || '',
+    hostIdentity: runner.hostIdentity || {},
   };
 }
 
@@ -123,12 +149,17 @@ function buildToolRuntime(toolId, options = {}) {
   if (isRemoteCommandToolId(toolId)) {
     const ssh = settingsController.getEffectiveSshConfig();
     const runner = remoteRunnerService.getHealthyRunner();
+    const runnerDetails = buildRunnerRuntimeDetails(runner);
     return {
       configured: Boolean(runner || (ssh.enabled && ssh.host && ssh.username && (ssh.password || ssh.privateKeyPath))),
       source: runner ? 'remote-runner' : (ssh.source || 'dashboard'),
       defaultTarget: runner ? `runner:${runner.runnerId}` : (ssh.host ? `${ssh.username || 'unknown'}@${ssh.host}:${ssh.port || 22}` : null),
       auth: ssh.privateKeyPath ? 'private-key' : (ssh.password ? 'password' : 'unset'),
       runnerAvailable: Boolean(runner),
+      runner: runnerDetails,
+      defaultWorkspace: runnerDetails?.defaultWorkspace || '',
+      shell: runnerDetails?.shell || '',
+      transportPreference: runner ? 'runner-first' : 'ssh',
       commandCatalog: REMOTE_CLI_COMMAND_CATALOG,
     };
   }
@@ -138,7 +169,8 @@ function buildToolRuntime(toolId, options = {}) {
     const deploy = typeof settingsController.getEffectiveDeployConfig === 'function'
       ? settingsController.getEffectiveDeployConfig()
       : {};
-    const runner = remoteRunnerService.getHealthyRunner();
+    const runner = remoteRunnerService.getHealthyRunner('', { requiredProfile: 'deploy' });
+    const runnerDetails = buildRunnerRuntimeDetails(runner);
     return {
       configured: Boolean(runner || (ssh.enabled && ssh.host && ssh.username && (ssh.password || ssh.privateKeyPath))),
       source: runner ? 'remote-runner' : (ssh.source || 'dashboard'),
@@ -154,6 +186,10 @@ function buildToolRuntime(toolId, options = {}) {
       defaultIngressClassName: deploy.ingressClassName || '',
       defaultTlsClusterIssuer: deploy.tlsClusterIssuer || '',
       runnerAvailable: Boolean(runner),
+      runner: runnerDetails,
+      defaultWorkspace: runnerDetails?.defaultWorkspace || '',
+      shell: runnerDetails?.shell || '',
+      transportPreference: runner ? 'runner-first' : 'ssh',
       commandCatalog: REMOTE_CLI_COMMAND_CATALOG.filter((entry) => ['kubectl-inspect', 'rollout', 'https-verify'].includes(entry.id)),
     };
   }

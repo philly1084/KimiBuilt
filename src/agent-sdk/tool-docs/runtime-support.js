@@ -181,32 +181,40 @@ async function getRuntimeSupport(toolId) {
 
     if (toolId === 'ssh-execute' || toolId === 'remote-command') {
         const runner = remoteRunnerService.getHealthyRunner();
+        const runnerWorkspace = runner?.metadata?.defaultCwd || runner?.metadata?.workspace || '';
         return {
             status: (runner || snapshot.ssh.ready) ? 'stable' : 'requires_setup',
             notes: runner
-                ? [`Remote runner ${runner.runnerId} is online.`, ...snapshot.ssh.notes]
+                ? [`Remote runner ${runner.runnerId} is online${runnerWorkspace ? ` with workspace ${runnerWorkspace}` : ''}.`, ...snapshot.ssh.notes]
                 : snapshot.ssh.notes,
             runtime: {
                 ...snapshot.ssh,
                 ready: Boolean(runner || snapshot.ssh.ready),
                 runnerReady: Boolean(runner),
                 runnerId: runner?.runnerId || '',
+                runnerWorkspace,
+                runnerShell: runner?.metadata?.shell || '',
+                runnerCapabilities: runner?.capabilities || [],
             },
         };
     }
 
     if (toolId === 'k3s-deploy') {
-        const runner = remoteRunnerService.getHealthyRunner();
+        const runner = remoteRunnerService.getHealthyRunner('', { requiredProfile: 'deploy' });
+        const runnerWorkspace = runner?.metadata?.defaultCwd || runner?.metadata?.workspace || '';
         return {
             status: (runner || snapshot.ssh.ready) ? 'stable' : 'requires_setup',
             notes: runner
-                ? [`Remote runner ${runner.runnerId} is online for deploy operations.`, ...snapshot.ssh.notes]
+                ? [`Remote runner ${runner.runnerId} is online for deploy operations${runnerWorkspace ? ` with workspace ${runnerWorkspace}` : ''}.`, ...snapshot.ssh.notes]
                 : snapshot.ssh.notes,
             runtime: {
                 ...snapshot.ssh,
                 ready: Boolean(runner || snapshot.ssh.ready),
                 runnerReady: Boolean(runner),
                 runnerId: runner?.runnerId || '',
+                runnerWorkspace,
+                runnerShell: runner?.metadata?.shell || '',
+                runnerCapabilities: runner?.capabilities || [],
             },
         };
     }

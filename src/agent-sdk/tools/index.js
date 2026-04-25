@@ -1106,7 +1106,7 @@ class ToolManager {
         new SSHExecuteTool({
           id: 'remote-command',
           name: 'Remote Command',
-          description: 'Execute remote server commands over SSH',
+          description: 'Execute remote server commands through the remote CLI runner when available, falling back to SSH',
         }),
         new DockerExecTool(),
         new K3sDeployTool(),

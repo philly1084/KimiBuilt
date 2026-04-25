@@ -29,7 +29,9 @@ KIMIBUILT_REMOTE_RUNNER_TOKEN=<same-long-random-token>
 KIMIBUILT_RUNNER_ID=demoserver2-builder
 KIMIBUILT_RUNNER_NAME=Demoserver2 Builder
 KIMIBUILT_RUNNER_CAPABILITIES=inspect,deploy,build
-KIMIBUILT_RUNNER_ALLOWED_ROOTS=/opt,/srv,/var/www,/tmp
+KIMIBUILT_RUNNER_ALLOWED_ROOTS=/workspace,/opt,/srv,/var/www,/tmp
+KIMIBUILT_RUNNER_DEFAULT_CWD=/workspace
+KIMIBUILT_RUNNER_SHELL=/bin/bash
 EOF
 sudo chmod 0640 /etc/kimibuilt/runner.env
 ```
@@ -39,6 +41,7 @@ Create a dedicated user:
 ```bash
 sudo useradd --system --create-home --shell /usr/sbin/nologin kimibuilt-runner || true
 sudo usermod -aG docker kimibuilt-runner || true
+sudo install -d -o kimibuilt-runner -g kimibuilt-runner -m 0750 /workspace
 ```
 
 Install a systemd unit. Adjust `WorkingDirectory` to the repo or package location:
@@ -88,8 +91,10 @@ To run a direct command job:
 ```bash
 curl -X POST https://kimibuilt.demoserver2.buzz/api/runners/demoserver2-builder/jobs \
   -H 'Content-Type: application/json' \
-  -d '{"command":"hostname && whoami && uname -m","profile":"inspect","timeout":30000}'
+  -d '{"command":"pwd && hostname && whoami && uname -m","profile":"inspect","timeout":30000}'
 ```
+
+Expected: `pwd` reports `/workspace` unless the job supplies a narrower `cwd`.
 
 ## Policy Notes
 

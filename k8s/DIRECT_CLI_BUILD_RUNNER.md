@@ -10,6 +10,13 @@ This path bypasses Gitea and ACT. KimiBuilt agents use `remote-command` to talk 
 - `kimibuilt-direct-registry-auth`: Docker config used by `buildctl` when pushing images.
 - `kimibuilt-direct-runner` service account/RBAC: can inspect the cluster and create/update/patch workloads, services, configmaps, jobs, and ingresses. It cannot create/update/delete Kubernetes Secrets.
 
+The runner is configured as the default remote CLI workbench:
+
+- commands without an explicit working directory start in `/workspace`
+- `/workspace` is backed by a PVC so generated projects survive pod restarts
+- commands run through Bash when it is available
+- runner metadata reports the default workspace, shell, BuildKit, Kubernetes, and image prefix back to the backend tool catalog
+
 ## Backend Settings
 
 On the KimiBuilt backend side, enable runner-first remote commands:
@@ -45,7 +52,7 @@ kubectl logs -n agent-platform deployment/kimibuilt-buildkitd --tail=100
 From KimiBuilt, use `/remote status`, then:
 
 ```bash
-/remote run command -v buildctl && command -v kubectl && buildctl --addr "$BUILDKIT_HOST" debug workers
+/remote run pwd && command -v bash && command -v buildctl && command -v kubectl && buildctl --addr "$BUILDKIT_HOST" debug workers
 /remote run export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; kubectl get nodes -o wide
 ```
 

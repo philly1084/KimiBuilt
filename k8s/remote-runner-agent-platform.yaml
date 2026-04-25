@@ -24,6 +24,8 @@ data:
   KIMIBUILT_RUNNER_NAME: "Agent Platform Remote CLI"
   KIMIBUILT_RUNNER_CAPABILITIES: "inspect,build,deploy"
   KIMIBUILT_RUNNER_ALLOWED_ROOTS: "/app,/workspace,/opt,/srv,/var/www,/tmp"
+  KIMIBUILT_RUNNER_DEFAULT_CWD: "/workspace"
+  KIMIBUILT_RUNNER_SHELL: "/bin/bash"
   KIMIBUILT_RUNNER_HEARTBEAT_MS: "15000"
   KIMIBUILT_RUNNER_MAX_OUTPUT_CHARS: "120000"
   # Temporary workaround for self-signed backend ingress certificates.

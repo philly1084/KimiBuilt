@@ -3,6 +3,7 @@
 
 const os = require('os');
 const path = require('path');
+const fs = require('fs');
 const { spawn } = require('child_process');
 const { WebSocket } = require('ws');
 
@@ -29,6 +30,9 @@ const capabilities = String(process.env.KIMIBUILT_RUNNER_CAPABILITIES || 'inspec
   .filter(Boolean);
 const heartbeatMs = Math.max(5000, Number(process.env.KIMIBUILT_RUNNER_HEARTBEAT_MS) || 15000);
 const maxOutputChars = Math.max(1000, Number(process.env.KIMIBUILT_RUNNER_MAX_OUTPUT_CHARS) || 120000);
+const defaultCwd = normalizeText(process.env.KIMIBUILT_RUNNER_DEFAULT_CWD || process.env.DIRECT_CLI_WORKSPACE || '');
+const workspaceRoot = normalizeText(process.env.DIRECT_CLI_WORKSPACE || defaultCwd);
+const configuredShell = normalizeText(process.env.KIMIBUILT_RUNNER_SHELL || '');
 
 if (!token) {
   console.error('[Runner] KIMIBUILT_REMOTE_RUNNER_TOKEN is required');
@@ -54,6 +58,39 @@ function isPathAllowed(candidate = '') {
   });
 }
 
+function resolveRunnerShell() {
+  if (process.platform === 'win32') {
+    return configuredShell || 'powershell.exe';
+  }
+
+  const candidates = [
+    configuredShell,
+    '/bin/bash',
+    '/usr/bin/bash',
+    '/bin/sh',
+  ].filter(Boolean);
+
+  return candidates.find((candidate) => {
+    if (candidate.includes('/')) {
+      return fs.existsSync(candidate);
+    }
+    return true;
+  }) || '/bin/sh';
+}
+
+const runnerShell = resolveRunnerShell();
+
+function resolveJobCwd(requestedCwd = '') {
+  const candidate = normalizeText(requestedCwd || defaultCwd);
+  if (!candidate) {
+    return process.cwd();
+  }
+  if (!isPathAllowed(candidate)) {
+    return null;
+  }
+  return path.resolve(candidate);
+}
+
 function buildHostIdentity() {
   return {
     hostname: os.hostname(),
@@ -65,6 +102,19 @@ function buildHostIdentity() {
   };
 }
 
+function buildRunnerMetadata() {
+  return {
+    defaultCwd: defaultCwd || '',
+    workspace: workspaceRoot || '',
+    shell: runnerShell,
+    buildkitHostConfigured: Boolean(normalizeText(process.env.BUILDKIT_HOST || '')),
+    dockerConfigConfigured: Boolean(normalizeText(process.env.DOCKER_CONFIG || '')),
+    kubernetesConfigured: Boolean(normalizeText(process.env.KUBECONFIG || process.env.KUBERNETES_SERVICE_HOST || '')),
+    imagePrefix: normalizeText(process.env.DIRECT_CLI_IMAGE_PREFIX || ''),
+    nodeVersion: process.version,
+  };
+}
+
 function send(ws, payload) {
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(payload));
@@ -73,11 +123,12 @@ function send(ws, payload) {
 
 function runCommand(job = {}) {
   const normalized = normalizeCommandJob(job);
-  if (!isPathAllowed(normalized.cwd)) {
+  const resolvedCwd = resolveJobCwd(normalized.cwd);
+  if (!resolvedCwd) {
     return Promise.resolve({
       jobId: normalized.id,
       stdout: '',
-      stderr: `Working directory is outside allowed roots: ${normalized.cwd}`,
+      stderr: `Working directory is outside allowed roots: ${normalized.cwd || defaultCwd}`,
       exitCode: 126,
       duration: 0,
       host: os.hostname(),
@@ -101,12 +152,12 @@ function runCommand(job = {}) {
     const startedAt = new Date().toISOString();
     const started = Date.now();
     const child = spawn(normalized.command, [], {
-      cwd: normalized.cwd || process.cwd(),
+      cwd: resolvedCwd,
       env: {
         ...process.env,
         ...normalized.environment,
       },
-      shell: process.platform === 'win32' ? 'powershell.exe' : '/bin/sh',
+      shell: runnerShell,
       windowsHide: true,
     });
 
@@ -190,6 +241,7 @@ function connect() {
         hostIdentity: buildHostIdentity(),
         capabilities,
         allowedRoots,
+        metadata: buildRunnerMetadata(),
       },
     });
     heartbeatTimer = setInterval(() => {
@@ -199,6 +251,7 @@ function connect() {
         payload: {
           hostIdentity: buildHostIdentity(),
           metadata: {
+            ...buildRunnerMetadata(),
             uptimeSeconds: Math.floor(process.uptime()),
           },
         },

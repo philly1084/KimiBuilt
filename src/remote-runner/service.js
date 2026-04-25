@@ -133,18 +133,46 @@ class RemoteRunnerService extends EventEmitter {
     }
     const lastHeartbeatMs = Date.parse(runner.lastHeartbeat || runner.connectedAt || '');
     if (!Number.isFinite(lastHeartbeatMs)) {
-      return true;
+      return this.runnerSupportsProfile(runner);
     }
-    return Date.now() - lastHeartbeatMs <= Math.max(5000, Number(this.config.staleAfterMs) || 45000);
+    return Date.now() - lastHeartbeatMs <= Math.max(5000, Number(this.config.staleAfterMs) || 45000)
+      && this.runnerSupportsProfile(runner);
   }
 
-  getHealthyRunner(preferredRunnerId = '') {
+  runnerSupportsProfile(runner = null, requiredProfile = '') {
+    const normalizedProfile = normalizeText(requiredProfile);
+    if (!normalizedProfile) {
+      return true;
+    }
+    const capabilities = Array.isArray(runner?.capabilities)
+      ? runner.capabilities.map((capability) => normalizeText(capability)).filter(Boolean)
+      : [];
+    return capabilities.includes(normalizedProfile) || capabilities.includes('admin');
+  }
+
+  isRunnerReadyForProfile(runner = null, requiredProfile = '') {
+    if (!runner?.online || !runner.ws || runner.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    const lastHeartbeatMs = Date.parse(runner.lastHeartbeat || runner.connectedAt || '');
+    const fresh = !Number.isFinite(lastHeartbeatMs)
+      || Date.now() - lastHeartbeatMs <= Math.max(5000, Number(this.config.staleAfterMs) || 45000);
+    return fresh && this.runnerSupportsProfile(runner, requiredProfile);
+  }
+
+  getHealthyRunner(preferredRunnerId = '', options = {}) {
+    const requiredProfile = typeof options === 'string'
+      ? normalizeText(options)
+      : normalizeText(options.requiredProfile || options.profile);
+
     if (preferredRunnerId) {
       const runner = this.runners.get(preferredRunnerId);
-      return this.isRunnerHealthy(runner) ? runner : null;
+      return this.isRunnerReadyForProfile(runner, requiredProfile) ? runner : null;
     }
 
-    return Array.from(this.runners.values()).find((runner) => this.isRunnerHealthy(runner)) || null;
+    return Array.from(this.runners.values()).find((runner) => (
+      this.isRunnerReadyForProfile(runner, requiredProfile)
+    )) || null;
   }
 
   listRunners() {
@@ -206,15 +234,21 @@ class RemoteRunnerService extends EventEmitter {
   }
 
   async dispatchCommand(runnerId = '', input = {}, context = {}) {
-    const runner = this.getHealthyRunner(runnerId);
+    const normalizedJob = normalizeCommandJob(input);
+    const runner = this.getHealthyRunner(runnerId, {
+      requiredProfile: normalizedJob.profile,
+    });
     if (!runner) {
-      const error = new Error(runnerId ? `Remote runner ${runnerId} is not online` : 'No healthy remote runner is online');
+      const profileHint = normalizedJob.profile ? ` ${normalizedJob.profile} jobs` : ' the requested job';
+      const error = new Error(runnerId
+        ? `Remote runner ${runnerId} is not online or does not support${profileHint}`
+        : `No healthy remote runner is online or supports${profileHint}`);
       error.statusCode = 503;
       throw error;
     }
 
     const job = {
-      ...normalizeCommandJob(input),
+      ...normalizedJob,
       runnerId: runner.runnerId,
       status: 'queued',
       createdAt: new Date().toISOString(),
@@ -227,8 +261,8 @@ class RemoteRunnerService extends EventEmitter {
   }
 
   sendJob(runner = {}, job = {}) {
-    if (!this.isRunnerHealthy(runner)) {
-      const error = new Error(`Remote runner ${runner.runnerId || 'unknown'} is not online`);
+    if (!this.isRunnerReadyForProfile(runner, job.profile)) {
+      const error = new Error(`Remote runner ${runner.runnerId || 'unknown'} is not online or does not support ${job.profile || 'the requested'} jobs`);
       error.statusCode = 503;
       throw error;
     }

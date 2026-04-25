@@ -84,4 +84,74 @@ describe('RemoteRunnerService', () => {
       sessionId: 'session-1',
     }));
   });
+
+  test('selects only runners that support the requested capability profile', async () => {
+    const service = new RemoteRunnerService({
+      config: {
+        enabled: true,
+        token: 'secret',
+        staleAfterMs: 45000,
+        jobTimeoutMs: 30000,
+      },
+    });
+    const inspectSocket = new FakeSocket();
+    const buildSocket = new FakeSocket();
+    service.registerRunner({
+      runnerId: 'inspect-only',
+      capabilities: ['inspect'],
+      allowedRoots: ['/workspace'],
+    }, inspectSocket);
+    service.registerRunner({
+      runnerId: 'builder',
+      capabilities: ['inspect', 'build'],
+      allowedRoots: ['/workspace'],
+    }, buildSocket);
+
+    const pending = service.dispatchCommand('', {
+      command: 'npm test',
+      profile: 'build',
+      timeout: 30000,
+    });
+
+    expect(inspectSocket.sent).toHaveLength(0);
+    expect(buildSocket.sent[0]).toEqual(expect.objectContaining({
+      type: 'job',
+      job: expect.objectContaining({
+        command: 'npm test',
+        profile: 'build',
+      }),
+    }));
+
+    service.handleJobResult({
+      jobId: buildSocket.sent[0].job.id,
+      stdout: 'ok\n',
+      exitCode: 0,
+      duration: 12,
+      host: 'builder-host',
+    });
+
+    await expect(pending).resolves.toEqual(expect.objectContaining({
+      stdout: 'ok\n',
+    }));
+  });
+
+  test('rejects a named runner that lacks the requested capability profile', async () => {
+    const service = new RemoteRunnerService({
+      config: {
+        enabled: true,
+        token: 'secret',
+        staleAfterMs: 45000,
+        jobTimeoutMs: 30000,
+      },
+    });
+    service.registerRunner({
+      runnerId: 'inspect-only',
+      capabilities: ['inspect'],
+    }, new FakeSocket());
+
+    await expect(service.dispatchCommand('inspect-only', {
+      command: 'npm test',
+      profile: 'build',
+    })).rejects.toThrow('does not support');
+  });
 });

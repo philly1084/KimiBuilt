@@ -5,6 +5,8 @@ Purpose: run non-interactive commands on the configured remote host through the 
 Remote CLI agent pipeline:
 - Treat this tool as the default programming lane for remote inspect, edit, build, test, deploy verification, and cluster troubleshooting.
 - Prefer the remote runner whenever a healthy runner exists. Use SSH only when no healthy runner exists or an explicit host override is required.
+- When the runner reports a default workspace, treat that path as the remote desktop/workbench. The direct CLI runner defaults to `/workspace`.
+- Build and creation work should happen inside the persistent workspace unless the user names another target.
 - Continue automatically while the action remains on the approved plan: inspect, search, edit planned files, build, test, deploy, rollout, and verify.
 - Stop and report when the work falls off plan: repeated failures, missing credentials, sudo/package install, Kubernetes Secret mutation, destructive delete, force push, unknown host, or recovery that needs a new strategy.
 - Keep batches small and purposeful: baseline -> inspect -> fix -> verify.

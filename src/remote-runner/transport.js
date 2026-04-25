@@ -38,8 +38,10 @@ class RunnerCommandTransport {
     this.runnerService = options.runnerService || remoteRunnerService;
   }
 
-  isAvailable(runnerId = '') {
-    return Boolean(this.runnerService.getHealthyRunner(runnerId));
+  isAvailable(runnerId = '', profile = '') {
+    return Boolean(this.runnerService.getHealthyRunner(runnerId, {
+      requiredProfile: normalizeText(profile),
+    }));
   }
 
   async execute(params = {}, context = {}, tracker = createNoopTracker()) {
@@ -49,6 +51,7 @@ class RunnerCommandTransport {
     }
 
     const runnerId = normalizeText(params.runnerId || params.remoteRunnerId || context.runnerId);
+    const profile = normalizeText(params.profile || params.capabilityProfile || context.profile || 'deploy');
     tracker.recordExecution(`runner ${runnerId || 'default'}`, { command });
 
     const result = await this.runnerService.dispatchCommand(runnerId, {
@@ -56,7 +59,7 @@ class RunnerCommandTransport {
       cwd: params.workingDirectory || params.cwd,
       environment: params.environment || {},
       timeout: params.timeout,
-      profile: params.profile || params.capabilityProfile || 'deploy',
+      profile,
       approval: params.approval || {},
       metadata: {
         toolId: context.toolId || '',
@@ -99,7 +102,8 @@ async function executeWithRunnerPreference({
   fallback,
 } = {}) {
   const transport = new RunnerCommandTransport();
-  if (shouldPreferRunner(params) && transport.isAvailable(params.runnerId || params.remoteRunnerId || context.runnerId)) {
+  const profile = normalizeText(params.profile || params.capabilityProfile || context.profile || 'deploy');
+  if (shouldPreferRunner(params) && transport.isAvailable(params.runnerId || params.remoteRunnerId || context.runnerId, profile)) {
     try {
       return await transport.execute(params, context, tracker);
     } catch (error) {
