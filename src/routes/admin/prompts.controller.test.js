@@ -205,4 +205,10 @@ describe('admin prompts controller', () => {
     expect(agentNotesHelpers.writeAgentNotesFile).not.toHaveBeenCalled();
     expect(settingsController.saveSettings).not.toHaveBeenCalled();
   });
+
+  test('planner prompt maps remote CLI language to remote-command', () => {
+    const prompt = promptsController.getSurfaceById('conversation-planner');
+
+    expect(prompt.content).toContain('Treat "remote CLI", "direct CLI", and "remote command" as aliases for the `remote-command` tool.');
+  });
 });

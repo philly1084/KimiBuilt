@@ -694,6 +694,23 @@ describe('ai-route-utils', () => {
         });
     });
 
+    test('resolveSshRequestContext treats remote CLI into user@host as an explicit remote target', () => {
+        const sshContext = resolveSshRequestContext('Use remote CLI into root@162.55.163.199 and check server health');
+
+        expect(sshContext.shouldTreatAsSsh).toBe(true);
+        expect(sshContext.target).toEqual({
+            host: '162.55.163.199',
+            username: 'root',
+            port: null,
+        });
+        expect(sshContext.command).toBe('hostname && uptime && (df -h / || true) && (free -m || true)');
+        expect(sshContext.directParams).toEqual({
+            host: '162.55.163.199',
+            username: 'root',
+            command: 'hostname && uptime && (df -h / || true) && (free -m || true)',
+        });
+    });
+
     test('resolveSshRequestContext reuses the previous remote command for retry-style continuation prompts', () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,

@@ -125,6 +125,9 @@ describe('ToolManager image tools', () => {
     const deploySkill = toolManager.registry.getSkill('k3s-deploy');
 
     expect(remoteSkill.triggerPatterns).toEqual(expect.arrayContaining([
+      'remote cli',
+      'remote cli runner',
+      'direct cli',
       'kubectl',
       'k3s',
       'rancher',

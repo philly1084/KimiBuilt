@@ -9184,6 +9184,7 @@ class ConversationOrchestrator extends EventEmitter {
             'Only use tools listed above.',
             'Do not invent SSH hosts, usernames, file paths, or credentials.',
             'Every `remote-command` step must include a non-empty `params.command` string.',
+            'Treat "remote CLI", "direct CLI", and "remote command" as aliases for `remote-command`; do not route those phrases to a local shell or code sandbox.',
             '`managed-app` is disabled. Use `remote-command` for direct remote CLI work, `git-safe` for repository save/push work, and `k3s-deploy` when deployment is the planned next step.',
             'Keep `remote-command` for kubectl, host inspection, package installs, logs, restarts, deployments, DNS, TLS, and other infrastructure operations.',
             'Every `agent-workload` step must use the deferred workload schema only: `{"tool":"agent-workload","reason":"why","params":{"action":"create_from_scenario","request":"the full original user request","timezone":"IANA/Zone"}}`.',

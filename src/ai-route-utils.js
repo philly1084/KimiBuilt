@@ -700,7 +700,8 @@ function promptHasExplicitSshIntent(text = '') {
 
     return /\bssh\b/.test(normalized)
         || /\b(remote host|remote server|remote machine)\b/.test(normalized)
-        || /\b(remote command|run remotely|execute remotely)\b/.test(normalized)
+        || /\b(remote cli|remote command|run remotely|execute remotely)\b/.test(normalized)
+        || /\bremote cli into\b/.test(normalized)
         || /\bremote into\b/.test(normalized)
         || /\b(login to|log into|ssh into|ssh to|connect to)\b/.test(normalized);
 }
@@ -738,7 +739,7 @@ function hasImmediateSshTargetContext(text = '', matchIndex = 0) {
         return false;
     }
 
-    return /\b(?:ssh(?:\s+into|\s+to)?|connect(?:\s+to)?|login(?:\s+to)?|log\s+into|remote command(?:\s+into|\s+on)?|execute(?:\s+on|\s+against)?|run(?:\s+on|\s+against)?|targeting|target|host|server|machine|node)\b[\s\S]{0,24}$/.test(prefix);
+    return /\b(?:ssh(?:\s+into|\s+to)?|connect(?:\s+to)?|login(?:\s+to)?|log\s+into|remote cli(?:\s+into|\s+on)?|remote command(?:\s+into|\s+on)?|execute(?:\s+on|\s+against)?|run(?:\s+on|\s+against)?|targeting|target|host|server|machine|node)\b[\s\S]{0,24}$/.test(prefix);
 }
 
 function extractExplicitSshTarget(text = '') {

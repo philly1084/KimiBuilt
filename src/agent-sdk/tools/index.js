@@ -3584,6 +3584,11 @@ class ToolManager {
         'run bash remotely',
       ],
       'remote-command': [
+        'remote cli',
+        'remote cli runner',
+        'remote cli workbench',
+        'direct cli',
+        'direct remote cli',
         'remote command',
         'run remotely',
         'execute remotely',

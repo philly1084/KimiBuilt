@@ -234,6 +234,7 @@ describe('runtime-execution', () => {
         expect(inferExecutionProfile({ executionProfile: 'remote-builder' })).toBe('remote-build');
         expect(inferExecutionProfile({ input: 'Use kubectl to inspect the cluster and restart the deployment.' })).toBe('remote-build');
         expect(inferExecutionProfile({ input: 'Run a remote command on root@77.42.44.98 to check its health.' })).toBe('remote-build');
+        expect(inferExecutionProfile({ input: 'Use remote CLI into root@77.42.44.98 to check its health.' })).toBe('remote-build');
         expect(inferExecutionProfile({ input: 'Use this server as the sandbox and build environment to create and develop the web app through Gitea.' })).toBe('remote-build');
         expect(inferExecutionProfile({ input: 'Answer directly.' })).toBe('default');
     });

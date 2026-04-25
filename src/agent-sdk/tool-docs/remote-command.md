@@ -2,6 +2,8 @@
 
 Purpose: run non-interactive commands on the configured remote host through the KimiBuilt remote runner when available, falling back to SSH.
 
+Aliases: `remote CLI`, `direct CLI`, `remote command`, and `remote runner` all refer to this `remote-command` tool. These phrases should not be routed to the local execution sandbox.
+
 Remote CLI agent pipeline:
 - Treat this tool as the default programming lane for remote inspect, edit, build, test, deploy verification, and cluster troubleshooting.
 - Prefer the remote runner whenever a healthy runner exists. Use SSH only when no healthy runner exists or an explicit host override is required.

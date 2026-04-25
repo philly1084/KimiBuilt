@@ -69,6 +69,7 @@ function buildPlannerPromptSurface() {
     'Every file-write step must include both params.path and the full file body as params.content.',
     'Use file-write only for local runtime files. For remote hosts or deployed servers, use remote-command or k3s-deploy instead. Do not plan docker-exec for the host unless the user explicitly says Docker is available there.',
     'Do not plan a file-write step that only points at an earlier artifact or previous file when the full content is not already available in the prompt or recent transcript.',
+    'Treat "remote CLI", "direct CLI", and "remote command" as aliases for the `remote-command` tool. Do not use the local execution sandbox for those requests.',
     'When an SSH runtime target is already available, prefer trying remote-command before asking the user for host details again.',
     'Only ask for SSH connection details after an actual tool failure shows the target is missing or incorrect.',
     'For remote reconnect or baseline checks, assume Ubuntu/Linux and prefer a concrete command such as: hostname && uname -m && (test -f /etc/os-release && sed -n \'1,3p\' /etc/os-release || true) && uptime',

@@ -19,7 +19,7 @@ function isRemotePermissionGrantText(text = '') {
 
     const grantsPermission = [
         /\b(i give you permission|you have permission|permission granted|i approve|approved)\b/,
-        /\b(go ahead and use|you can use|allowed to use|can use)\b[\s\S]{0,20}\b(remote command|ssh|server access|remote access)\b/,
+        /\b(go ahead and use|you can use|allowed to use|can use)\b[\s\S]{0,20}\b(remote cli|remote command|ssh|server access|remote access)\b/,
     ].some((pattern) => pattern.test(normalized));
 
     if (!grantsPermission) {
@@ -245,8 +245,9 @@ function inferExecutionProfile(payload = {}) {
         /\bremote-build\b/,
         /\bremote build\b/,
         /\b(remote host|remote server|remote machine)\b/,
-        /\b(remote command|run remotely|execute remotely)\b/,
+        /\b(remote cli|remote command|run remotely|execute remotely)\b/,
         /\bremote into\b/,
+        /\bremote cli into\b/,
         /\b(reach|check|access|inspect)\b[\s\S]{0,30}\bremote build\b/,
         /\b(log ?in to|ssh into|ssh to|connect to)\b/,
         /\b(deploy|release|rollout|restart)\b[\s\S]{0,40}\b(server|host|container|cluster|pod|deployment)\b/,
@@ -260,7 +261,7 @@ function inferExecutionProfile(payload = {}) {
         /^(continue|proceed|next|go ahead|do it|do that|finish|retry|try again|rerun|re-run|resume|keep going|keep working)\b/,
         /\b(replace|update|deploy|publish|push|upload|install|restart|reload|rollout|fix|repair|override|swap|remove|copy)\b[\s\S]{0,50}\b(site|website|app|application|game|frontend|ingress|deployment|service|pod|html|index\.html|homepage|landing)\b/,
         /\b(put|get|bring|take)\b[\s\S]{0,30}\b(live|online|running|deployed|serving)\b/,
-        /\b(remote command into|ssh into|connect to)\b[\s\S]{0,30}\b(server|host|machine)\b/,
+        /\b(remote cli into|remote command into|ssh into|connect to)\b[\s\S]{0,30}\b(server|host|machine)\b/,
         /\b(on|to|for)\b[\s\S]{0,20}\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b/,
         /\b(current html|index\.html|site html|website html)\b/,
         /\b(game|website|site|app)\b[\s\S]{0,30}\b(live|online|deployment|ingress|domain|dns|tls)\b/,
