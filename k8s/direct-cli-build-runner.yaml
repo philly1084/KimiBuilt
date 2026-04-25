@@ -258,13 +258,13 @@ spec:
             - /bin/sh
             - -ec
             - |
-              export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-              mkdir -p /tmp/tools
+              /bin/mkdir -p /tmp/tools
               if [ ! -x /tmp/tools/kubectl ]; then
-                curl -fsSL -o /tmp/tools/kubectl https://dl.k8s.io/release/v1.30.4/bin/linux/arm64/kubectl
-                chmod 0755 /tmp/tools/kubectl
+                /usr/bin/curl -fsSL -o /tmp/tools/kubectl https://dl.k8s.io/release/v1.30.4/bin/linux/arm64/kubectl
+                /bin/chmod 0755 /tmp/tools/kubectl
               fi
-              exec node /app/bin/kimibuilt-runner.js
+              export PATH=/tmp/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+              exec /usr/local/bin/node /app/bin/kimibuilt-runner.js
           envFrom:
             - configMapRef:
                 name: kimibuilt-direct-runner
