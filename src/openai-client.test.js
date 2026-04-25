@@ -2416,6 +2416,38 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(selectedTools.map((tool) => tool.id)).not.toContain('code-sandbox');
     });
 
+    test('does not select managed-app for generic direct remote CLI website builds', () => {
+        jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
+            enabled: true,
+            host: '162.55.163.199',
+            port: 22,
+            username: 'root',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const toolManager = createToolManager();
+        const prompt = 'Use the direct remote SSH/CLI path against root@162.55.163.199, create the test site files there, start a small web server, then verify it with a public fetch.';
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            prompt,
+            { executionProfile: 'remote-build' },
+        );
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            prompt,
+            { toolContext: { executionProfile: 'remote-build' } },
+        );
+
+        expect(selectedTools.map((tool) => tool.id)).toContain('remote-command');
+        expect(selectedTools.map((tool) => tool.id)).not.toContain('managed-app');
+        expect(__testUtils.inferRequiredAutomaticToolId(
+            prompt,
+            automaticTools.map((tool) => tool.id),
+            { executionProfile: 'remote-build' },
+        )).not.toBe('managed-app');
+    });
+
     test('does not misclassify research html documents about public or live events as remote website work', () => {
         jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
             enabled: true,

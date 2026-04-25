@@ -397,7 +397,7 @@ function resolveSessionWorkloadService(context = {}) {
 function resolveManagedAppService(context = {}) {
   const service = context?.managedAppService || null;
   if (!service?.isAvailable?.()) {
-    throw new Error('Managed apps are unavailable. This feature requires an active Postgres-backed session store.');
+    throw new Error('Managed apps are unavailable. This feature requires an active Postgres-backed session store. For generic remote website/app builds, use the remote-command direct CLI runner path instead of managed-app.');
   }
 
   const ownerId = String(context?.ownerId || context?.userId || '').trim();

@@ -1204,8 +1204,8 @@ function buildScoredCandidateToolMap({
     if (workflowNeedsRepoLane && remoteToolId) {
         adjustCandidateToolScore(scoreMap, remoteToolId, 1.05, 'Repository work in remote-build mode should use the remote CLI lane.');
     }
-    if (hasManagedAppIntent || (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE && workflowNeedsDeployLane)) {
-        adjustCandidateToolScore(scoreMap, 'managed-app', hasManagedAppIntent ? 1.1 : 0.4, 'Managed app deployment and platform operations use the dedicated control plane when relevant.');
+    if (hasManagedAppIntent) {
+        adjustCandidateToolScore(scoreMap, 'managed-app', 1.1, 'Managed app deployment and platform operations use the dedicated control plane only when explicitly relevant.');
     }
     if (explicitGitIntent || workflowNeedsDeployLane) {
         adjustCandidateToolScore(scoreMap, 'git-safe', 0.75, 'Git state or save flow is relevant.');
@@ -3760,14 +3760,11 @@ function hasManagedAppIntentText(text = '') {
 
     return [
         /\bmanaged app\b/i,
-        /\b(create|build|deploy|publish|launch|ship|update|redeploy|inspect|check|verify|diagnose|debug|troubleshoot|status|show|list)\b[\s\S]{0,40}\b(app|website|site|frontend|service|game)\b/i,
-        /\b(app|website|site|frontend|service|game)\b[\s\S]{0,40}\b(create|build|deploy|publish|launch|ship|update|redeploy|inspect|check|verify|diagnose|debug|troubleshoot|status|show|list)\b/i,
-        /\b(develop|software changes?|code changes?|fix|edit|modify|rewrite|refactor|patch)\b[\s\S]{0,40}\b(app|website|site|frontend|service|game)\b/i,
-        /\b(app|website|site|frontend|service|game)\b[\s\S]{0,40}\b(develop|software changes?|code changes?|fix|edit|modify|rewrite|refactor|patch)\b/i,
-        /\b(gitea|container registry|image repo|namespace|ingress host)\b/i,
-        /\b(gitea|remote server|server|ssh)\b[\s\S]{0,60}\b(app|website|site|frontend|service|game)\b/i,
-        /\b(app|website|site|frontend|service|game)\b[\s\S]{0,60}\b(gitea|remote server|server|ssh)\b/i,
-        /\b(dns|domain|tls|certificate|cert-manager|traefik|ingress)\b[\s\S]{0,60}\b(app|website|site|frontend|service)\b/i,
+        /\bmanaged[- ]app\b/i,
+        /\bmanaged\b[\s\S]{0,20}\b(app|apps|catalog|control plane|platform)\b/i,
+        /\b(app|apps)\b[\s\S]{0,20}\b(managed catalog|managed-app|control plane)\b/i,
+        /\b(gitea|act[-_ ]runner|gitea actions?|managed app catalog|managed-app catalog|build events webhook)\b/i,
+        /\b(managed-app|managed app)\b[\s\S]{0,40}\b(create|build|deploy|publish|launch|ship|update|redeploy|inspect|check|verify|diagnose|debug|troubleshoot|status|show|list|doctor|reconcile|repair)\b/i,
     ].some((pattern) => pattern.test(normalized));
 }
 
@@ -3778,14 +3775,15 @@ function hasManagedAppAuthoringIntent(text = '', options = {}) {
     }
 
     const executionProfile = String(options.executionProfile || '').trim();
-    const appContext = /\b(app|website|site|frontend|service|game|landing page|web app|web site)\b/.test(normalized)
-        || hasManagedAppIntentText(normalized);
+    const explicitManagedAppContext = hasManagedAppIntentText(normalized);
+    const appContext = explicitManagedAppContext
+        || /\b(app|website|site|frontend|service|game|landing page|web app|web site)\b/.test(normalized);
     const changeIntent = /\b(create|build|deploy|publish|launch|ship|update|fix|edit|modify|rewrite|refactor|patch|develop|make)\b/.test(normalized);
     const remoteContext = executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
         || hasRemoteManagedAppTargetIntent(normalized)
         || /\b(gitea|k3s|k8s|kubernetes|cluster|dns|domain|tls|traefik|cert-manager)\b/.test(normalized);
 
-    return appContext && changeIntent && remoteContext;
+    return explicitManagedAppContext && appContext && changeIntent && remoteContext;
 }
 
 function normalizeManagedAppDeployTarget(value = '') {
@@ -8224,7 +8222,7 @@ class ConversationOrchestrator extends EventEmitter {
             if ((explicitGitIntent || workflowNeedsDeployLane) && allowedToolIds.includes('git-safe')) {
                 candidates.add('git-safe');
             }
-            if ((hasManagedAppIntent || hasManagedAppAuthoringRequest || hasManagedAppContinuationRecovery || workflowNeedsRepoLane || workflowNeedsDeployLane) && allowedToolIds.includes('managed-app')) {
+            if ((hasManagedAppIntent || hasManagedAppAuthoringRequest || hasManagedAppContinuationRecovery) && allowedToolIds.includes('managed-app')) {
                 candidates.add('managed-app');
             }
             if ((explicitK3sDeployIntent || workflowNeedsDeployLane) && allowedToolIds.includes('k3s-deploy')) {
@@ -8365,7 +8363,7 @@ class ConversationOrchestrator extends EventEmitter {
             if (!sessionIsolation && allowedToolIds.includes('agent-notes-write') && isAgentNotesAutoWriteEnabled()) {
                 candidates.add('agent-notes-write');
             }
-            if ((hasManagedAppIntent || hasManagedAppAuthoringRequest || hasManagedAppContinuationRecovery || (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE && (workflowNeedsRepoLane || workflowNeedsDeployLane))) && allowedToolIds.includes('managed-app')) {
+            if ((hasManagedAppIntent || hasManagedAppAuthoringRequest || hasManagedAppContinuationRecovery) && allowedToolIds.includes('managed-app')) {
                 candidates.add('managed-app');
             }
             if (/\b(git|github)\b[\s\S]{0,80}\b(status|diff|branch|stage|add|commit|push|save and push|save-and-push)\b/.test(prompt)
@@ -9088,7 +9086,8 @@ class ConversationOrchestrator extends EventEmitter {
             'Only use tools listed above.',
             'Do not invent SSH hosts, usernames, file paths, or credentials.',
             'Every `remote-command` step must include a non-empty `params.command` string.',
-            'Use `managed-app` for agent-owned app implementation, software changes, Gitea builds, and remote k3s deployments when the request is about creating or updating an app on the remote server.',
+            'Use `managed-app` only for explicit managed-app catalog/control-plane work, Gitea/ACT runner platform work, or apps already tied to a managed-app record.',
+            'For generic remote website/app builds, prefer `remote-command` through the remote CLI runner; do not route those through managed-app just because the target is remote.',
             'Every `managed-app` step must include a valid `params.action`. For `create` or `update`, include a non-empty `params.prompt` string. For remote app work, include `params.deployTarget` set to `ssh`.',
             'If `managed-app` reports "Managed app not found" but the transcript still identifies the target app, treat that as recoverable: continue with `managed-app create` to reconcile the catalog entry or use `managed-app inspect`/`list` only when the app reference is genuinely ambiguous.',
             'If a managed-app inspection shows draft state with no repo clone URL, no SSH URL, or no latest build run, note the gap briefly and continue with `managed-app create` or `managed-app update` instead of stopping for a restatement.',

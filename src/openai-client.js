@@ -1370,9 +1370,11 @@ function hasManagedAppIntent(prompt = '') {
 
     return [
         /\bmanaged app\b/i,
-        /\b(create|build|deploy|publish|launch|ship|update|redeploy|inspect|list)\b[\s\S]{0,40}\b(app|website|site|frontend|service|game)\b/i,
-        /\b(app|website|site|frontend|service|game)\b[\s\S]{0,40}\b(create|build|deploy|publish|launch|ship|update|redeploy|inspect|list)\b/i,
-        /\b(gitea|container registry|image repo|ingress host|namespace)\b/i,
+        /\bmanaged[- ]app\b/i,
+        /\bmanaged\b[\s\S]{0,20}\b(app|apps|catalog|control plane|platform)\b/i,
+        /\b(app|apps)\b[\s\S]{0,20}\b(managed catalog|managed-app|control plane)\b/i,
+        /\b(gitea|act[-_ ]runner|gitea actions?|managed app catalog|managed-app catalog|build events webhook)\b/i,
+        /\b(managed-app|managed app)\b[\s\S]{0,40}\b(create|build|deploy|publish|launch|ship|update|redeploy|inspect|list|doctor|reconcile|repair)\b/i,
     ].some((pattern) => pattern.test(text));
 }
 
@@ -2908,12 +2910,12 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
     }
 
     if (automaticTools.some((entry) => entry.id === 'managed-app')) {
-        guidance.push('- Use `managed-app` for agent-created applications that should live in the external Gitea control plane and deploy to the configured cluster target.');
-        guidance.push('- Prefer `managed-app` over ad hoc `git-safe` plus `k3s-deploy` when the request is to create, build, publish, inspect, or redeploy an app that the agent owns.');
+        guidance.push('- Use `managed-app` only for explicit managed-app catalog/control-plane work, Gitea/ACT runner platform work, or apps already tied to a managed-app record.');
+        guidance.push('- For generic remote website/app builds, prefer `remote-command` through the remote CLI runner; do not route those through managed-app just because the target is remote.');
         guidance.push('- `managed-app create` should allocate the repo, image repo, namespace, and ingress host instead of improvising those names in chat.');
         guidance.push('- `managed-app deploy` should use the authoritative managed app record, the latest successful image tag, and the app\'s configured deployment target instead of guessing the cluster target from scratch.');
         if (executionProfile === 'remote-build') {
-            guidance.push('- In `remote-build` sessions, treat the configured remote Gitea plus SSH/k3s lane as the active app sandbox and build environment for managed apps.');
+            guidance.push('- In `remote-build` sessions, treat the remote CLI runner as the default app sandbox and build environment unless the user explicitly asks for the managed-app/Gitea control plane.');
         }
     }
 

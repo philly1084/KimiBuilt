@@ -4732,7 +4732,7 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
-    test('routes diagnose demo app prompts to managed-app inspect', () => {
+    test('routes explicit managed app diagnose prompts to managed-app inspect', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {
                 createResponse: jest.fn(),
@@ -4748,7 +4748,7 @@ describe('ConversationOrchestrator', () => {
             },
         });
 
-        const objective = 'Diagnose demo app and show its status.';
+        const objective = 'Diagnose the managed app called demo and show its status.';
         const toolPolicy = orchestrator.buildToolPolicy({
             objective,
             executionProfile: 'remote-build',
@@ -6889,6 +6889,58 @@ describe('ConversationOrchestrator', () => {
             }),
         }));
         expect(directAction.params.command).toContain(objective);
+    });
+
+    test('keeps generic remote website builds on direct CLI even when managed-app is available', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '162.55.163.199',
+            port: 22,
+            username: 'root',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['managed-app', 'remote-command', 'k3s-deploy', 'git-safe', 'tool-doc-read']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Use the direct remote SSH/CLI path against root@162.55.163.199, create a test website there, route a small web server, and verify it publicly.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+            toolContext: {
+                workspacePath: '/workspace/test-site',
+                repositoryPath: '/workspace/test-site',
+            },
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            session: {
+                metadata: {},
+            },
+            toolPolicy,
+            toolContext: {
+                workspacePath: '/workspace/test-site',
+                repositoryPath: '/workspace/test-site',
+            },
+        });
+
+        expect(toolPolicy.candidateToolIds).toContain('remote-command');
+        expect(toolPolicy.candidateToolIds).not.toContain('managed-app');
+        expect(directAction?.tool || null).not.toBe('managed-app');
     });
 
     test('keeps discovery-first server build prompts out of the repo implementation lane', () => {
