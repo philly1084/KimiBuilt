@@ -58,11 +58,18 @@ Preferred fix: issue a publicly trusted certificate for the backend host with ce
 Temporary workaround for a private/self-signed backend certificate:
 
 ```bash
-kubectl -n agent-platform set env deployment/kimibuilt-direct-runner NODE_TLS_REJECT_UNAUTHORIZED=0
+kubectl -n agent-platform set env deployment/kimibuilt-direct-runner KIMIBUILT_RUNNER_TLS_INSECURE=true NODE_TLS_REJECT_UNAUTHORIZED=0
 kubectl -n agent-platform rollout restart deployment/kimibuilt-direct-runner
 ```
 
-For rebuilt runner images, `KIMIBUILT_RUNNER_TLS_INSECURE=true` can be used instead of the Node-wide setting.
+For rebuilt runner images, `KIMIBUILT_RUNNER_TLS_INSECURE=true` is the scoped runner option. `NODE_TLS_REJECT_UNAUTHORIZED=0` is included for compatibility with already-deployed runner images that do not yet include the scoped option.
+
+After a trusted backend certificate is installed:
+
+```bash
+kubectl -n agent-platform set env deployment/kimibuilt-direct-runner KIMIBUILT_RUNNER_TLS_INSECURE=false NODE_TLS_REJECT_UNAUTHORIZED-
+kubectl -n agent-platform rollout restart deployment/kimibuilt-direct-runner
+```
 
 ## Build and Deploy Flow
 
