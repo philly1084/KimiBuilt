@@ -5,7 +5,7 @@ FROM node:20-bookworm-slim AS deps
 
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
+COPY package.json package-lock.json* .npmrc ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 # ================================
@@ -43,6 +43,7 @@ COPY frontend/ ./frontend/
 COPY data/piper/voices/manifest.json ./data/piper/voices/manifest.json
 COPY package.json ./
 COPY package-lock.json* ./
+COPY .npmrc ./
 
 RUN mkdir -p /app/data/piper/voices && \
   curl --fail --show-error --silent --location --retry 3 \
