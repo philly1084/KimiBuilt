@@ -3683,6 +3683,18 @@ body.layout-minimal #current-session-info {
     display: none !important;
 }
 
+body.layout-minimal #minimalist-toggle-btn {
+    display: inline-flex !important;
+    width: 2.5rem;
+    height: 2.5rem;
+    padding: 0;
+    justify-content: center;
+}
+
+body.layout-minimal .minimalist-toggle-label {
+    display: none !important;
+}
+
 body.layout-minimal #mobile-chat-menu-btn.mobile-only {
     display: inline-flex;
 }
