@@ -1,0 +1,203 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kimibuilt-runner
+  labels:
+    app.kubernetes.io/name: kimibuilt-runner
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kimibuilt-runner-secret
+  namespace: kimibuilt-runner
+type: Opaque
+stringData:
+  KIMIBUILT_BACKEND_URL: "https://kimibuilt.demoserver2.buzz"
+  KIMIBUILT_REMOTE_RUNNER_TOKEN: "REPLACE_WITH_THE_BACKEND_RUNNER_TOKEN"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kimibuilt-runner-config
+  namespace: kimibuilt-runner
+data:
+  KIMIBUILT_RUNNER_ID: "demoserver2-builder"
+  KIMIBUILT_RUNNER_NAME: "Demoserver2 Builder"
+  KIMIBUILT_RUNNER_CAPABILITIES: "inspect,build,deploy"
+  KIMIBUILT_RUNNER_ALLOWED_ROOTS: "/app,/workspace,/opt,/srv,/var/www,/tmp"
+  KIMIBUILT_RUNNER_HEARTBEAT_MS: "15000"
+  KIMIBUILT_RUNNER_MAX_OUTPUT_CHARS: "120000"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kimibuilt-runner-kubeconfig
+  namespace: kimibuilt-runner
+data:
+  k3s.yaml: |
+    apiVersion: v1
+    kind: Config
+    clusters:
+      - name: in-cluster
+        cluster:
+          certificate-authority: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          server: https://kubernetes.default.svc
+    users:
+      - name: runner
+        user:
+          tokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+    contexts:
+      - name: in-cluster
+        context:
+          cluster: in-cluster
+          user: runner
+    current-context: in-cluster
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kimibuilt-runner
+  namespace: kimibuilt-runner
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kimibuilt-runner
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "nodes", "pods", "pods/log", "services", "endpoints", "events", "configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates", "challenges", "orders", "clusterissuers", "issuers"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["namespaces", "services", "configmaps"]
+    verbs: ["create", "update", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["create", "update", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kimibuilt-runner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kimibuilt-runner
+subjects:
+  - kind: ServiceAccount
+    name: kimibuilt-runner
+    namespace: kimibuilt-runner
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kimibuilt-runner
+  namespace: kimibuilt-runner
+  labels:
+    app: kimibuilt-runner
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kimibuilt-runner
+  template:
+    metadata:
+      labels:
+        app: kimibuilt-runner
+    spec:
+      serviceAccountName: kimibuilt-runner
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+        - name: install-kubectl
+          image: rancher/kubectl:v1.30.4
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - cp "$(command -v kubectl)" /tools/kubectl && chmod 0755 /tools/kubectl
+          volumeMounts:
+            - name: tools
+              mountPath: /tools
+      containers:
+        - name: runner
+          image: ghcr.io/philly1084/kimibuilt:latest
+          imagePullPolicy: Always
+          command:
+            - node
+            - /app/bin/kimibuilt-runner.js
+          envFrom:
+            - configMapRef:
+                name: kimibuilt-runner-config
+            - secretRef:
+                name: kimibuilt-runner-secret
+          env:
+            - name: KUBECONFIG
+              value: /etc/rancher/k3s/k3s.yaml
+            - name: PATH
+              value: /tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          volumeMounts:
+            - name: tools
+              mountPath: /tools
+              readOnly: true
+            - name: kubeconfig
+              mountPath: /etc/rancher/k3s
+              readOnly: true
+            - name: workspace
+              mountPath: /workspace
+            - name: host-opt
+              mountPath: /opt
+            - name: host-srv
+              mountPath: /srv
+            - name: host-var-www
+              mountPath: /var/www
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: tools
+          emptyDir: {}
+        - name: kubeconfig
+          configMap:
+            name: kimibuilt-runner-kubeconfig
+        - name: workspace
+          emptyDir: {}
+        - name: host-opt
+          hostPath:
+            path: /opt
+            type: DirectoryOrCreate
+        - name: host-srv
+          hostPath:
+            path: /srv
+            type: DirectoryOrCreate
+        - name: host-var-www
+          hostPath:
+            path: /var/www
+            type: DirectoryOrCreate

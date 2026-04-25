@@ -30,6 +30,7 @@ RUN groupadd --gid 1001 kimibuilt && \
   useradd --uid 1001 --gid 1001 --create-home --shell /usr/sbin/nologin kimibuilt
 
 COPY --from=deps /app/node_modules ./node_modules
+COPY bin/ ./bin/
 COPY src/ ./src/
 COPY frontend/ ./frontend/
 COPY data/piper/voices/manifest.json ./data/piper/voices/manifest.json
