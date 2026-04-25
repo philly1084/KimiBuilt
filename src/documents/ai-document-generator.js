@@ -349,6 +349,15 @@ function renderDocumentFormatPromptContext(formatProfile = null, options = {}) {
   return lines.join('\n');
 }
 
+function normalizePageTarget(value = null) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return null;
+  }
+
+  return Math.min(Math.floor(numeric), 20);
+}
+
 class AIDocumentGenerator {
   constructor(openaiClient) {
     this.openai = openaiClient;
@@ -619,6 +628,7 @@ Return JSON:
     const tone = options.tone || 'professional';
     const length = options.length || 'medium';
     const language = options.language || 'en';
+    const pageTarget = normalizePageTarget(options.pageTarget || options.maxPages || options.pages);
     const blueprint = resolveDocumentBlueprint(documentType);
     const formatProfile = selectDocumentFormat({
       prompt: options.prompt || '',
@@ -649,6 +659,7 @@ Return JSON:
       '<writing_style>',
       `- Tone: ${toneGuidance[tone] || toneGuidance.professional}`,
       `- Length: ${lengthGuidance[length] || lengthGuidance.medium}`,
+      pageTarget ? `- Target depth: up to ${pageTarget} pages. Expand coverage only when the source material supports it, and keep every page aligned to the researched facts.` : null,
       language !== 'en' ? `- Language: Write in ${language}` : null,
       '</writing_style>',
       options.templateContext || null,
@@ -708,6 +719,7 @@ Return JSON:
       '- Only include bullets, stats, tables, charts, or callouts when they strengthen the document.',
       '- Convert abstract coverage beats into natural, request-specific headings and prose.',
       '- Do not let the output read like a template, rubric, or plan for a future document.',
+      pageTarget ? `- Keep metadata.estimatedPages at or below ${pageTarget}.` : null,
       '- Do not output markdown fences, commentary, or any text outside the JSON object.',
       '</rules>',
     ].filter(Boolean).join('\n');
@@ -989,6 +1001,7 @@ Return JSON:
     const theme = options.theme || options.style || 'editorial';
     const includeImages = options.includeImages !== false;
     const includeCharts = options.includeCharts !== false;
+    const pageTarget = normalizePageTarget(options.pageTarget || options.maxPages || options.pages);
     const blueprint = resolveDocumentBlueprint(options.documentType || 'presentation');
     const designPlan = options.designPlan || null;
 
@@ -999,6 +1012,7 @@ Return JSON:
       `- Tone: ${tone}.`,
       `- Audience: ${audience}.`,
       `- Theme/style: ${theme}.`,
+      pageTarget ? `- Target depth: up to ${pageTarget} pages/slides of research-aligned material; do not pad beyond the useful story.` : null,
       '- Include a compelling title slide.',
       '- Maintain visible narrative progression from slide to slide.',
       '- Keep each slide focused on one dominant idea.',

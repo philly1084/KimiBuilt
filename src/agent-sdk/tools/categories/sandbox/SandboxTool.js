@@ -57,6 +57,8 @@ class SandboxTool extends ToolBase {
               properties: {
                 path: { type: 'string' },
                 content: { type: 'string' },
+                contentBase64: { type: 'string' },
+                dataBase64: { type: 'string' },
                 purpose: { type: 'string' },
                 language: { type: 'string' }
               }
@@ -245,14 +247,18 @@ class SandboxTool extends ToolBase {
       const content = typeof file.content === 'string'
         ? file.content
         : (typeof file.contents === 'string' ? file.contents : '');
+      const contentBase64 = String(file.contentBase64 || file.dataBase64 || '').trim();
+      const contentBuffer = contentBase64 ? Buffer.from(contentBase64, 'base64') : null;
 
-      if (!filePath || !content) {
+      if (!filePath || (!content && !contentBuffer)) {
         return;
       }
 
       normalizedFiles.push({
         path: filePath,
         content,
+        ...(contentBuffer ? { contentBuffer } : {}),
+        ...(contentBase64 ? { contentBase64 } : {}),
         language: String(file.language || '').trim() || null,
         purpose: String(file.purpose || '').trim() || null
       });
@@ -290,14 +296,17 @@ class SandboxTool extends ToolBase {
       }
 
       await fs.mkdir(path.dirname(targetPath), { recursive: true });
-      await fs.writeFile(targetPath, file.content, 'utf8');
+      const payload = file.contentBuffer || file.content;
+      await fs.writeFile(targetPath, payload, file.contentBuffer ? undefined : 'utf8');
       written.push({
         path: file.path,
-        sizeBytes: Buffer.byteLength(file.content, 'utf8'),
+        sizeBytes: file.contentBuffer ? file.contentBuffer.length : Buffer.byteLength(file.content, 'utf8'),
         language: file.language || null,
         purpose: file.purpose || null
       });
-      tracker.recordWrite(targetPath, { sizeBytes: Buffer.byteLength(file.content, 'utf8') });
+      tracker.recordWrite(targetPath, {
+        sizeBytes: file.contentBuffer ? file.contentBuffer.length : Buffer.byteLength(file.content, 'utf8')
+      });
     }
 
     return written;

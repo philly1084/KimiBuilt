@@ -27,7 +27,9 @@ const {
     extractResponseText,
     resolveCompletedResponseText,
     getMissingCompletionDelta,
+    artifactService,
 } = require('../artifacts/artifact-service');
+const { extractSaveableDocumentArtifact } = require('../artifacts/saveable-document-extractor');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 const { resolveTranscriptObjectiveFromSession } = require('../conversation-continuity');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
@@ -232,6 +234,42 @@ async function updateSessionProjectMemory(sessionId, updates = {}, ownerId = nul
 function isResponseToolOutputItem(item = {}) {
     const type = String(item?.type || '').trim();
     return type === 'function_call' || type === 'custom_tool_call';
+}
+
+async function maybePersistSaveableDocumentResponse({
+    sessionId,
+    mode,
+    requestText = '',
+    assistantText = '',
+    responseId = '',
+} = {}) {
+    const extracted = extractSaveableDocumentArtifact({
+        requestText,
+        assistantText,
+    });
+    if (!extracted) {
+        return [];
+    }
+
+    try {
+        const artifact = await artifactService.storeGeneratedArtifactFromContent({
+            sessionId,
+            mode,
+            format: extracted.format,
+            content: extracted.content,
+            title: extracted.title,
+            metadata: {
+                sourceResponseId: responseId,
+                source: 'assistant-saveable-document-response',
+                requestedFilename: extracted.filename || null,
+                ...(extracted.metadata || {}),
+            },
+        });
+        return [artifact];
+    } catch (error) {
+        console.warn('[ChatRoute] Failed to persist saveable document response:', error.message);
+        return [];
+    }
 }
 
 const chatSchema = {
@@ -880,9 +918,19 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                             recentMessages: await sessionStore.getRecentMessages(sessionId, WORKLOAD_PREFLIGHT_RECENT_LIMIT),
                         })
                         : [];
+                    const saveableDocumentArtifacts = generatedArtifacts.length === 0
+                        ? await maybePersistSaveableDocumentResponse({
+                            sessionId,
+                            mode: taskType,
+                            requestText: message,
+                            assistantText: fullText,
+                            responseId: event.response.id,
+                        })
+                        : [];
                     const artifacts = mergeRuntimeArtifacts(
                         extractArtifactsFromToolEvents(toolEvents),
                         generatedArtifacts,
+                        saveableDocumentArtifacts,
                     );
                     if (artifacts.length > 0) {
                         await Promise.all(artifacts.map((artifact) => memoryService.rememberArtifactResult(sessionId, {
@@ -1042,9 +1090,19 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 recentMessages: await sessionStore.getRecentMessages(sessionId, WORKLOAD_PREFLIGHT_RECENT_LIMIT),
             })
             : [];
+        const saveableDocumentArtifacts = generatedArtifacts.length === 0
+            ? await maybePersistSaveableDocumentResponse({
+                sessionId,
+                mode: taskType,
+                requestText: message,
+                assistantText: outputText,
+                responseId: response.id,
+            })
+            : [];
         const artifacts = mergeRuntimeArtifacts(
             extractArtifactsFromToolEvents(response?.metadata?.toolEvents || []),
             generatedArtifacts,
+            saveableDocumentArtifacts,
         );
         if (artifacts.length > 0) {
             await Promise.all(artifacts.map((artifact) => memoryService.rememberArtifactResult(sessionId, {

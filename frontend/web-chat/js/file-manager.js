@@ -591,8 +591,8 @@ class FileManager {
   getFileCategory(filename) {
     const ext = filename.split('.').pop()?.toLowerCase();
     const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'];
-    const docExts = ['doc', 'docx', 'pdf', 'ppt', 'pptx', 'txt', 'md', 'rtf', 'odt'];
-    const codeExts = ['js', 'ts', 'html', 'css', 'py', 'java', 'cpp', 'c', 'go', 'rs', 'php', 'rb', 'json', 'xml', 'yaml', 'sql'];
+    const docExts = ['doc', 'docx', 'pdf', 'ppt', 'pptx', 'txt', 'md', 'rtf', 'odt', 'html', 'htm'];
+    const codeExts = ['js', 'ts', 'css', 'py', 'java', 'cpp', 'c', 'go', 'rs', 'php', 'rb', 'json', 'xml', 'yaml', 'sql'];
     const dataExts = ['xls', 'xlsx', 'csv', 'json', 'xml', 'parquet'];
     const archiveExts = ['zip', 'rar', '7z', 'tar', 'gz'];
     

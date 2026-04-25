@@ -43,7 +43,8 @@ const MAX_VERIFIED_REFERENCE_IMAGES = 20;
 const IMAGE_REFERENCE_VERIFY_TIMEOUT_MS = 15000;
 const DOCUMENT_WORKFLOW_TOOL_ID = 'document-workflow';
 const DEEP_RESEARCH_PRESENTATION_TOOL_ID = 'deep-research-presentation';
-const MAX_DOCUMENT_SOURCES = 8;
+const MAX_DOCUMENT_SOURCES = 20;
+const MAX_DOCUMENT_SUITE_FORMATS = 8;
 const MAX_DOCUMENT_SOURCE_CHARS = 4000;
 const DEFAULT_DEEP_RESEARCH_PASSES = 3;
 const MAX_DEEP_RESEARCH_PASSES = 6;
@@ -518,6 +519,46 @@ function normalizeDocumentWorkflowAction(value = '') {
   return String(value || '').trim().toLowerCase() || 'recommend';
 }
 
+function normalizeDocumentWorkflowFormat(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized || normalized === 'doc' || normalized === 'docx' || normalized === 'word') {
+    return 'html';
+  }
+  if (normalized === 'markdown') {
+    return 'md';
+  }
+  if (normalized === 'excel' || normalized === 'spreadsheet' || normalized === 'workbook') {
+    return 'xlsx';
+  }
+  if (normalized === 'powerpoint' || normalized === 'slides' || normalized === 'deck') {
+    return 'pptx';
+  }
+  if (normalized === 'website' || normalized === 'webpage' || normalized === 'web-page') {
+    return 'html';
+  }
+  return normalized;
+}
+
+function normalizeDocumentWorkflowFormats(values = [], fallback = 'html') {
+  const rawValues = Array.isArray(values)
+    ? values
+    : String(values || '').split(',');
+  const formats = dedupeStringList(rawValues.map(normalizeDocumentWorkflowFormat))
+    .filter(Boolean)
+    .slice(0, MAX_DOCUMENT_SUITE_FORMATS);
+
+  return formats.length > 0 ? formats : [normalizeDocumentWorkflowFormat(fallback)];
+}
+
+function normalizeDocumentPageTarget(value, fallback = null) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return fallback;
+  }
+
+  return Math.min(Math.floor(numeric), 20);
+}
+
 function truncateDocumentSourceText(value = '', limit = MAX_DOCUMENT_SOURCE_CHARS) {
   const text = String(value || '').trim();
   if (!text || text.length <= limit) {
@@ -581,6 +622,7 @@ function buildGroundedDocumentPrompt(prompt = '', sources = [], preferences = {}
     preferences.theme ? `Theme: ${String(preferences.theme).trim()}` : '',
     preferences.format ? `Target format: ${String(preferences.format).trim()}` : '',
     preferences.documentType ? `Document type: ${String(preferences.documentType).trim()}` : '',
+    preferences.pageTarget ? `Target depth: up to ${String(preferences.pageTarget).trim()} pages of research-aligned content.` : '',
   ].filter(Boolean);
 
   if (preferenceLines.length > 0) {
@@ -672,6 +714,153 @@ function buildArtifactWorkflowResult(result = null, { includeContent = false } =
       }
       : {}),
   };
+}
+
+function buildSafeDocumentBundlePath(filename = '', fallback = 'document.html') {
+  const normalized = String(filename || fallback)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 96);
+
+  return normalized || fallback;
+}
+
+function normalizeSandboxImageAssets(images = []) {
+  return (Array.isArray(images) ? images : [])
+    .map((image, index) => {
+      if (!image || typeof image !== 'object') {
+        return null;
+      }
+
+      const url = String(image.url || image.imageUrl || '').trim();
+      const alt = String(image.alt || image.imageAlt || image.title || `Image ${index + 1}`).trim();
+      const rawBase64 = String(image.contentBase64 || image.dataBase64 || '').trim();
+      const dataUrl = String(image.dataUrl || image.src || '').trim();
+      const dataUrlMatch = dataUrl.match(/^data:([^;,]+);base64,(.+)$/i);
+      const mimeType = String(image.mimeType || image.contentType || dataUrlMatch?.[1] || '').trim();
+      const extension = mimeType.includes('png')
+        ? 'png'
+        : (mimeType.includes('webp') ? 'webp' : (mimeType.includes('gif') ? 'gif' : (mimeType.includes('svg') ? 'svg' : 'jpg')));
+      const base64 = rawBase64 || dataUrlMatch?.[2] || '';
+      const imageFilename = buildSafeDocumentBundlePath(
+        String(image.path || image.filename || `image-${index + 1}.${extension}`).split(/[\\/]/).pop(),
+        `image-${index + 1}.${extension}`,
+      );
+      const path = `assets/${imageFilename}`;
+
+      if (!url && !base64) {
+        return null;
+      }
+
+      return {
+        path,
+        url,
+        alt,
+        title: String(image.title || alt).trim(),
+        attribution: String(image.attribution || image.imageSource || image.source || '').trim(),
+        mimeType,
+        base64,
+      };
+    })
+    .filter(Boolean)
+    .slice(0, MAX_VERIFIED_REFERENCE_IMAGES);
+}
+
+function buildDocumentSuiteSandboxFiles(documents = [], title = 'Document Suite', images = []) {
+  const htmlDocuments = (Array.isArray(documents) ? documents : [])
+    .map((entry, index) => ({
+      index,
+      format: entry?.format || '',
+      documentType: entry?.documentType || '',
+      document: entry?.document || null,
+    }))
+    .filter((entry) => (
+      entry.document
+      && isTextualDocumentMimeType(entry.document.mimeType, entry.document.filename)
+      && String(entry.document.content || entry.document.contentPreview || '').trim()
+    ));
+
+  const files = htmlDocuments.map((entry) => ({
+    path: buildSafeDocumentBundlePath(entry.document.filename, `document-${entry.index + 1}.html`),
+    content: String(entry.document.content || entry.document.contentPreview || ''),
+    language: 'html',
+    purpose: `${entry.format || 'document'} output`,
+  }));
+
+  const imageAssets = normalizeSandboxImageAssets(images);
+  const imageFiles = imageAssets
+    .filter((image) => image.base64)
+    .map((image) => ({
+      path: image.path,
+      contentBase64: image.base64,
+      language: null,
+      purpose: image.attribution ? `Attached image: ${image.attribution}` : 'Attached image asset',
+    }));
+  const imageGallery = imageAssets.map((image) => {
+    const src = image.base64 ? `./${escapeHtml(image.path)}` : escapeHtml(image.url);
+    const caption = [image.title, image.attribution].filter(Boolean).join(' - ');
+    return `<figure><img src="${src}" alt="${escapeHtml(image.alt)}"><figcaption>${escapeHtml(caption || image.alt)}</figcaption></figure>`;
+  }).join('\n');
+  const links = files.map((file, index) => {
+    const source = htmlDocuments[index] || {};
+    const label = source.document?.filename || file.path;
+    return `<li><a href="./${escapeHtml(file.path)}">${escapeHtml(label)}</a><span>${escapeHtml(source.documentType || source.format || 'document')}</span></li>`;
+  }).join('\n');
+
+  const indexHtml = [
+    '<!DOCTYPE html>',
+    '<html lang="en">',
+    '<head>',
+    '<meta charset="utf-8">',
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    `<title>${escapeHtml(title || 'Document Suite')}</title>`,
+    '<style>',
+    'body{font-family:Aptos,Segoe UI,sans-serif;margin:0;background:#f7f8fb;color:#111827;}',
+    'main{max-width:980px;margin:0 auto;padding:40px 24px;}',
+    'h1{font-size:clamp(2rem,5vw,4rem);line-height:1;margin:0 0 12px;}',
+    'p{color:#4b5563;line-height:1.65;}',
+    'ul{display:grid;gap:12px;list-style:none;padding:0;margin:28px 0;}',
+    'li{display:flex;justify-content:space-between;gap:16px;border:1px solid #dde3ee;border-radius:10px;background:white;padding:14px 16px;}',
+    'a{color:#0f4c81;font-weight:700;text-decoration:none;}',
+    'span{color:#6b7280;font-size:.9rem;}',
+    '.gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-top:28px;}',
+    'figure{margin:0;border:1px solid #dde3ee;border-radius:10px;background:white;padding:10px;}',
+    'img{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:8px;display:block;}',
+    'figcaption{color:#6b7280;font-size:.82rem;line-height:1.35;margin-top:8px;}',
+    '</style>',
+    '</head>',
+    '<body>',
+    '<main>',
+    `<h1>${escapeHtml(title || 'Document Suite')}</h1>`,
+    '<p>Sandbox build bundle assembled from the generated document outputs. Use this index to inspect the HTML and dashboard surfaces together after the document build process.</p>',
+    `<ul>${links || '<li><span>No previewable HTML outputs were available.</span></li>'}</ul>`,
+    imageGallery ? `<section><h2>Attached Images</h2><div class="gallery">${imageGallery}</div></section>` : '',
+    '</main>',
+    '</body>',
+    '</html>',
+  ].join('\n');
+
+  return [
+    {
+      path: 'index.html',
+      content: indexHtml,
+      language: 'html',
+      purpose: 'Suite index',
+    },
+    ...files,
+    ...imageFiles,
+    {
+      path: 'assets/images.json',
+      content: JSON.stringify(imageAssets.map(({ base64, ...image }) => ({
+        ...image,
+        attached: Boolean(base64),
+      })), null, 2),
+      language: 'json',
+      purpose: 'Image attachment manifest',
+    },
+  ];
 }
 
 function delay(ms = 0) {
@@ -969,6 +1158,7 @@ function buildPresentationResearchPrompt({
     theme: params.theme || plan?.themeSuggestion || '',
     format,
     documentType: params.documentType || recommendation?.inferredType || 'presentation',
+    pageTarget: normalizeDocumentPageTarget(params.pageTarget || params.maxPages || params.pages, null),
   });
 }
 
@@ -1773,7 +1963,14 @@ class ToolManager {
             const documentType = String(params.documentType || params.document_type || '').trim();
             const tone = String(params.tone || 'professional').trim() || 'professional';
             const length = String(params.length || 'medium').trim() || 'medium';
-            const formatPreference = String(params.format || '').trim().toLowerCase();
+            const formatPreference = normalizeDocumentWorkflowFormat(params.format || '');
+            const requestedFormats = normalizeDocumentWorkflowFormats(
+              params.formats || params.outputFormats || [],
+              formatPreference || 'html',
+            );
+            const buildMode = String(params.buildMode || '').trim().toLowerCase();
+            const useSandboxBuild = params.useSandbox === true || ['sandbox', 'scripted', 'code'].includes(buildMode);
+            const pageTarget = normalizeDocumentPageTarget(params.pageTarget || params.maxPages || params.pages, null);
             const sources = normalizeDocumentSources(params.sources || []);
             const limit = Number.isFinite(Number(params.limit))
               ? Math.max(1, Math.min(Number(params.limit), 8))
@@ -1807,6 +2004,7 @@ class ToolManager {
                     theme: params.theme,
                     format: resolvedFormat,
                     documentType: resolvedDocumentType,
+                    pageTarget,
                   }),
                   documentType: resolvedDocumentType,
                   format: resolvedFormat,
@@ -1859,6 +2057,7 @@ class ToolManager {
                 theme: params.theme,
                 format: resolvedFormat,
                 documentType: resolvedDocumentType,
+                pageTarget,
               });
               if (!groundedPrompt && !structuredPresentation) {
                 throw new Error('document-workflow generate requires a prompt or grounded source material.');
@@ -1928,6 +2127,8 @@ class ToolManager {
                 audience: params.audience,
                 style: params.style,
                 theme: params.theme,
+                pageTarget,
+                maxPages: pageTarget,
                 slideCount: params.slideCount,
                 generateImages: params.generateImages,
               });
@@ -1942,6 +2143,123 @@ class ToolManager {
               };
             }
 
+            if (action === 'generate-suite') {
+              const groundedPrompt = buildGroundedDocumentPrompt(prompt, sources, {
+                title: params.title,
+                subtitle: params.subtitle,
+                audience: params.audience,
+                style: params.style,
+                theme: params.theme,
+                format: requestedFormats.join(', '),
+                documentType: resolvedDocumentType,
+                pageTarget,
+              });
+              if (!groundedPrompt) {
+                throw new Error('document-workflow generate-suite requires a prompt or grounded source material.');
+              }
+
+              const documents = [];
+              for (const suiteFormat of requestedFormats) {
+                const suiteRecommendation = suiteFormat === resolvedFormat
+                  ? recommendation
+                  : documentService.recommendDocumentWorkflow({
+                    prompt,
+                    documentType: resolvedDocumentType,
+                    format: suiteFormat,
+                    limit,
+                  });
+                const suiteDocumentType = suiteRecommendation.inferredType || resolvedDocumentType;
+
+                if (suiteFormat === 'html'
+                  && isDashboardRequest(groundedPrompt)
+                  && context?.sessionId) {
+                  try {
+                    const generatedArtifact = await artifactService.generateArtifact({
+                      session: context.session || null,
+                      sessionId: context.sessionId,
+                      mode: context.clientSurface || 'chat',
+                      prompt: groundedPrompt,
+                      format: 'html',
+                      artifactIds: [],
+                      existingContent: '',
+                      model: params.model || context.model || undefined,
+                      reasoningEffort: params.reasoningEffort || context.reasoningEffort || undefined,
+                    });
+                    documents.push({
+                      format: suiteFormat,
+                      documentType: suiteDocumentType,
+                      document: buildArtifactWorkflowResult(generatedArtifact, {
+                        includeContent: params.includeContent === true || useSandboxBuild,
+                      }),
+                    });
+                    continue;
+                  } catch (error) {
+                    console.warn(`[document-workflow] Dashboard HTML artifact generation failed, falling back to document service: ${error.message}`);
+                  }
+                }
+
+                const document = await documentService.aiGenerate(groundedPrompt, {
+                  documentType: suiteDocumentType,
+                  tone,
+                  length,
+                  format: suiteFormat,
+                  model: params.model || context.model || undefined,
+                  title: params.title,
+                  subtitle: params.subtitle,
+                  audience: params.audience,
+                  style: params.style,
+                  theme: params.theme,
+                  pageTarget,
+                  maxPages: pageTarget,
+                  slideCount: params.slideCount,
+                  generateImages: params.generateImages,
+                });
+
+                documents.push({
+                  format: suiteFormat,
+                  documentType: suiteDocumentType,
+                  document: buildDocumentWorkflowResult(document, {
+                    includeContent: params.includeContent === true || useSandboxBuild,
+                  }),
+                });
+              }
+
+              let sandboxBuild = null;
+              if (useSandboxBuild) {
+                const files = buildDocumentSuiteSandboxFiles(
+                  documents,
+                  String(params.title || recommendation.blueprint?.label || 'Document Suite').trim() || 'Document Suite',
+                  params.images || params.imageAssets || params.assets || [],
+                );
+                const hasPreviewableOutput = files.length > 1;
+                if (hasPreviewableOutput) {
+                  sandboxBuild = await executeNestedTool(context, 'code-sandbox', {
+                    mode: 'project',
+                    language: 'html',
+                    projectName: buildSafeDocumentBundlePath(params.title || prompt || 'document-suite', 'document-suite')
+                      .replace(/\.html$/i, ''),
+                    entry: 'index.html',
+                    files,
+                  });
+                } else {
+                  sandboxBuild = {
+                    skipped: true,
+                    reason: 'No previewable HTML outputs were available for sandbox project mode.',
+                  };
+                }
+              }
+
+              return {
+                action,
+                recommendation,
+                sourceCount: sources.length,
+                formats: requestedFormats,
+                pageTarget,
+                documents,
+                sandboxBuild,
+              };
+            }
+
             throw new Error(`Unsupported document-workflow action: ${action}`);
           },
           sideEffects: ['write'],
@@ -1953,15 +2271,59 @@ class ToolManager {
           properties: {
             action: {
               type: 'string',
-              enum: ['recommend', 'plan', 'generate', 'assemble']
+              enum: ['recommend', 'plan', 'generate', 'assemble', 'generate-suite']
             },
             prompt: { type: 'string' },
             request: { type: 'string' },
             topic: { type: 'string' },
             documentType: { type: 'string' },
             format: { type: 'string' },
+            formats: {
+              type: 'array',
+              maxItems: MAX_DOCUMENT_SUITE_FORMATS,
+              items: { type: 'string' },
+            },
+            outputFormats: {
+              type: 'array',
+              maxItems: MAX_DOCUMENT_SUITE_FORMATS,
+              items: { type: 'string' },
+            },
             tone: { type: 'string' },
             length: { type: 'string' },
+            pageTarget: { type: 'integer', minimum: 1, maximum: 20 },
+            maxPages: { type: 'integer', minimum: 1, maximum: 20 },
+            buildMode: { type: 'string', enum: ['sandbox', 'scripted', 'code', 'direct'] },
+            useSandbox: { type: 'boolean' },
+            images: {
+              type: 'array',
+              maxItems: MAX_VERIFIED_REFERENCE_IMAGES,
+              items: {
+                type: 'object',
+                properties: {
+                  url: { type: 'string' },
+                  imageUrl: { type: 'string' },
+                  dataUrl: { type: 'string' },
+                  contentBase64: { type: 'string' },
+                  dataBase64: { type: 'string' },
+                  filename: { type: 'string' },
+                  path: { type: 'string' },
+                  alt: { type: 'string' },
+                  title: { type: 'string' },
+                  attribution: { type: 'string' },
+                  mimeType: { type: 'string' },
+                },
+              },
+            },
+            imageAssets: {
+              type: 'array',
+              maxItems: MAX_VERIFIED_REFERENCE_IMAGES,
+              items: { type: 'object' },
+            },
+            assets: {
+              type: 'array',
+              maxItems: MAX_VERIFIED_REFERENCE_IMAGES,
+              items: { type: 'object' },
+            },
             title: { type: 'string' },
             subtitle: { type: 'string' },
             audience: { type: 'string' },
@@ -2405,6 +2767,8 @@ class ToolManager {
             format: { type: 'string' },
             tone: { type: 'string' },
             length: { type: 'string' },
+            pageTarget: { type: 'integer', minimum: 1, maximum: 20 },
+            maxPages: { type: 'integer', minimum: 1, maximum: 20 },
             title: { type: 'string' },
             subtitle: { type: 'string' },
             audience: { type: 'string' },

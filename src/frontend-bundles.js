@@ -198,8 +198,12 @@ function normalizeFrontendBundle(bundle = null, content = '') {
             const fileContent = typeof entry.content === 'string'
                 ? entry.content
                 : (typeof entry.contents === 'string' ? entry.contents : '');
+            const fileBuffer = Buffer.isBuffer(entry.contentBuffer)
+                ? entry.contentBuffer
+                : (Buffer.isBuffer(entry.buffer) ? entry.buffer : null);
+            const base64Content = String(entry.contentBase64 || entry.dataBase64 || '').trim();
             const filePath = normalizeBundlePath(entry.path || entry.name || '');
-            if (!filePath || !fileContent.trim()) {
+            if (!filePath || (!fileContent.trim() && !fileBuffer && !base64Content)) {
                 return;
             }
 
@@ -208,6 +212,8 @@ function normalizeFrontendBundle(bundle = null, content = '') {
                 language: String(entry.language || '').trim() || inferBundleLanguage(filePath),
                 purpose: String(entry.purpose || '').trim() || null,
                 content: fileContent,
+                ...(fileBuffer ? { contentBuffer: fileBuffer } : {}),
+                ...(base64Content ? { contentBuffer: Buffer.from(base64Content, 'base64') } : {}),
             });
         });
     } else if (source && typeof source === 'object') {
@@ -497,7 +503,7 @@ function createFrontendBundleArchive(bundle = null) {
     const normalizedBundle = normalizeFrontendBundle(bundle);
     return createZip(normalizedBundle.files.map((file) => ({
         name: file.path,
-        data: file.content,
+        data: file.contentBuffer || file.buffer || file.content,
     })));
 }
 

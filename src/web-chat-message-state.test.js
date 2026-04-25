@@ -113,6 +113,30 @@ describe('buildWebChatSessionMessages', () => {
         expect(messages[1].content).not.toContain('<!DOCTYPE html>');
     });
 
+    test('replaces save-as HTML prose with the artifact summary when an HTML file was created', () => {
+        const messages = buildWebChatSessionMessages({
+            userText: 'Make the skydiving research project.',
+            assistantText: [
+                'I can make it, but one verification step failed. Save this as `skydiving-research.html`.',
+                '```html',
+                '<!DOCTYPE html><html><head><title>Skydiving</title></head><body><main>Research</main></body></html>',
+                '```',
+            ].join('\n'),
+            artifacts: [{
+                id: 'artifact-html-skydiving',
+                filename: 'skydiving-research.html',
+                format: 'html',
+                downloadUrl: '/api/artifacts/artifact-html-skydiving/download',
+                previewUrl: '/api/artifacts/artifact-html-skydiving/preview',
+            }],
+            timestamp: '2026-04-13T12:15:00.000Z',
+        });
+
+        expect(messages).toHaveLength(2);
+        expect(messages[1].content).toBe('Created skydiving-research.html. Preview and Download below.');
+        expect(messages[1].content).not.toContain('```html');
+    });
+
     test('stores checkpoint fallback display content as a bare survey fence without duplicated prose', () => {
         const messages = buildWebChatSessionMessages({
             userText: 'Please redesign the page.',

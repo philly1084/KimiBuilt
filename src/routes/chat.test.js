@@ -87,6 +87,7 @@ const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { ensureRuntimeToolManager } = require('../runtime-tool-manager');
 const { executeConversationRuntime } = require('../runtime-execution');
+const { artifactService } = require('../artifacts/artifact-service');
 const {
     buildInstructionsWithArtifacts,
     generateOutputArtifactFromPrompt,
@@ -492,6 +493,82 @@ describe('/api/chat route', () => {
                 downloadUrl: '/api/artifacts/html-artifact-1/download',
             }),
         ]);
+    });
+
+    test('persists save-as HTML responses as session artifacts when normal chat returns them', async () => {
+        const storeSpy = jest.spyOn(artifactService, 'storeGeneratedArtifactFromContent').mockResolvedValue({
+            id: 'artifact-skydiving-html',
+            filename: 'skydiving-research.html',
+            format: 'html',
+            downloadUrl: '/api/artifacts/artifact-skydiving-html/download',
+            previewUrl: '/api/artifacts/artifact-skydiving-html/preview',
+        });
+        ensureRuntimeToolManager.mockResolvedValue({
+            getTool: jest.fn(),
+        });
+        resolveSshRequestContext.mockReturnValue({
+            effectivePrompt: 'make a skydiving research project',
+        });
+        executeConversationRuntime.mockResolvedValue({
+            handledPersistence: false,
+            response: {
+                id: 'resp-saveable-html-1',
+                model: 'gpt-test',
+                output: [{
+                    type: 'message',
+                    content: [{
+                        text: [
+                            'I can make it, but one verification step failed. Save this as `skydiving-research.html`.',
+                            '```html',
+                            '<!DOCTYPE html><html><head><title>Skydiving Research</title></head><body><main>Ready</main></body></html>',
+                            '```',
+                        ].join('\n'),
+                    }],
+                }],
+                metadata: {
+                    toolEvents: [],
+                },
+            },
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use('/api/chat', chatRouter);
+
+        const response = await request(app)
+            .post('/api/chat')
+            .send({
+                sessionId: 'session-1',
+                message: 'make a skydiving research project',
+                stream: false,
+                metadata: { clientSurface: 'web-chat' },
+            });
+
+        expect(response.status).toBe(200);
+        expect(storeSpy).toHaveBeenCalledWith(expect.objectContaining({
+            sessionId: 'session-1',
+            mode: 'web-chat',
+            format: 'html',
+            title: 'skydiving-research',
+            content: expect.stringContaining('<!DOCTYPE html>'),
+        }));
+        expect(response.body.artifacts).toEqual([
+            expect.objectContaining({
+                id: 'artifact-skydiving-html',
+                filename: 'skydiving-research.html',
+            }),
+        ]);
+        expect(sessionStore.appendMessages).toHaveBeenCalledWith(
+            'session-1',
+            expect.arrayContaining([
+                expect.objectContaining({
+                    role: 'assistant',
+                    content: 'Created skydiving-research.html. Preview and Download below.',
+                }),
+            ]),
+        );
+
+        storeSpy.mockRestore();
     });
 
     test('expands referential artifact follow-ups before memory recall', async () => {

@@ -5725,7 +5725,9 @@ class UIHelpers {
             return false;
         }
 
-        if (/^\s*(?:```(?:html)?\s*)?(?:html\s+)?(?:<!doctype\s+html\b|<html\b)/i.test(content)) {
+        if (/^\s*(?:```(?:html)?\s*)?(?:html\s+)?(?:<!doctype\s+html\b|<html\b)/i.test(content)
+            || /```html\b[\s\S]*?(?:<!doctype\s+html\b|<html\b)[\s\S]*?```/i.test(content)
+            || /\b(?:save|saved|saving|download|open)\b[\s\S]{0,80}?\b[a-z0-9][a-z0-9._ -]{1,100}\.html?\b/i.test(content)) {
             return false;
         }
 

@@ -761,7 +761,10 @@
     }
 
     function looksLikeRawGeneratedArtifactText(value = '') {
-        return /^\s*(?:```(?:html)?\s*)?(?:html\s+)?(?:<!doctype\s+html\b|<html\b)/i.test(String(value || '').trim());
+        const source = String(value || '').trim();
+        return /^\s*(?:```(?:html)?\s*)?(?:html\s+)?(?:<!doctype\s+html\b|<html\b)/i.test(source)
+            || /```html\b[\s\S]*?(?:<!doctype\s+html\b|<html\b)[\s\S]*?```/i.test(source)
+            || /\b(?:save|saved|saving|download|open)\b[\s\S]{0,80}?\b[a-z0-9][a-z0-9._ -]{1,100}\.html?\b/i.test(source);
     }
 
     function renderGeneratedArtifacts(artifacts) {
