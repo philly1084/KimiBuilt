@@ -98,6 +98,10 @@ const MAX_PLAN_STEPS = 4;
 const MAX_TOOL_RESULT_CHARS = config.memory.toolResultCharLimit;
 const RECENT_TRANSCRIPT_LIMIT = config.memory.recentTranscriptLimit;
 const MAX_STEP_SIGNATURE_REPEATS = 3;
+const HARNESS_VERSION = 'planner-recovery-v2';
+const HARNESS_REVIEW_ACTIONS = new Set(['continue', 'replan', 'synthesize', 'checkpoint', 'blocked']);
+const NORMAL_PROFILE_MAX_REPLANS = 1;
+const REMOTE_BUILD_MAX_REPLANS = 3;
 const DOCUMENT_WORKFLOW_TOOL_ID = 'document-workflow';
 const DEEP_RESEARCH_PRESENTATION_TOOL_ID = 'deep-research-presentation';
 const AUTONOMY_CONTINUATION_CHECKPOINT_ID_PREFIX = 'checkpoint-autonomy-continue';
@@ -3376,6 +3380,114 @@ function buildRemoteFollowupPlanFromToolEvents({ objective = '', instructions = 
     return [];
 }
 
+function getLastFailedToolEvent(toolEvents = []) {
+    return [...(Array.isArray(toolEvents) ? toolEvents : [])]
+        .reverse()
+        .find((event) => event?.result?.success === false) || null;
+}
+
+function buildDeterministicRecoveryPlanFromFailure({
+    objective = '',
+    executionProfile = DEFAULT_EXECUTION_PROFILE,
+    toolPolicy = {},
+    toolEvents = [],
+    recentMessages = [],
+    session = null,
+} = {}) {
+    const failedEvent = getLastFailedToolEvent(toolEvents);
+    if (!failedEvent) {
+        return [];
+    }
+
+    const toolId = canonicalizeRemoteToolId(failedEvent?.toolCall?.function?.name || failedEvent?.result?.toolId || '');
+    const errorText = [
+        failedEvent?.result?.error || '',
+        failedEvent?.result?.data?.stdout || '',
+        failedEvent?.result?.data?.stderr || '',
+    ].join('\n');
+
+    if (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
+        && toolId === 'managed-app'
+        && toolPolicy?.candidateToolIds?.includes('managed-app')
+        && MANAGED_APP_RECOVERABLE_ERROR_PATTERNS.some((pattern) => pattern.test(errorText))) {
+        const reference = extractManagedAppReference(objective)
+            || extractManagedAppReferenceFromRecentMessages(recentMessages);
+        const recoveryMessages = [
+            ...(Array.isArray(recentMessages) ? recentMessages : []),
+            { role: 'assistant', content: errorText },
+        ];
+        const recoveryAction = buildManagedAppDirectAction(
+            reference
+                ? `continue with managed app ${reference}`
+                : 'continue with the managed app',
+            {
+                executionProfile,
+                recentMessages: recoveryMessages,
+                workflow: toolPolicy.workflow,
+            },
+        );
+
+        if (recoveryAction?.tool === 'managed-app') {
+            return [{
+                ...recoveryAction,
+                reason: 'Recover the missing managed app catalog entry by creating or reconciling the identified app instead of pausing.',
+                params: {
+                    ...recoveryAction.params,
+                    prompt: objective || recoveryAction.params?.prompt,
+                    sourcePrompt: objective || recoveryAction.params?.sourcePrompt,
+                    requestedAction: inferManagedAppRequestedAction(objective),
+                    ...(reference ? { name: titleizeManagedAppReference(reference) } : {}),
+                },
+            }];
+        }
+    }
+
+    const remoteToolId = getPreferredRemoteToolId(toolPolicy);
+    if (executionProfile !== REMOTE_BUILD_EXECUTION_PROFILE || !remoteToolId || !isRemoteCommandToolId(toolId)) {
+        return [];
+    }
+
+    const args = parseToolCallArguments(failedEvent?.toolCall?.function?.arguments || '{}');
+    const command = String(args.command || '').trim();
+    const combined = [objective, command, errorText].join('\n');
+    const initFailure = parseKubernetesInitContainerFailure(combined);
+    if (initFailure) {
+        return [{
+            tool: remoteToolId,
+            reason: `Fetch failing init container logs for ${initFailure.namespace}/${initFailure.podName} before asking for help.`,
+            params: {
+                command: `kubectl logs -n ${shellQuote(initFailure.namespace)} ${shellQuote(initFailure.podName)} -c ${shellQuote(initFailure.containerName)} --previous || kubectl logs -n ${shellQuote(initFailure.namespace)} ${shellQuote(initFailure.podName)} -c ${shellQuote(initFailure.containerName)}`,
+            },
+        }];
+    }
+
+    if (/\bkubectl\b/i.test(command) && /\b(crashloopbackoff|init:|exit code|imagepullbackoff|errimagepull|containercreating|pending)\b/i.test(combined)) {
+        return [{
+            tool: remoteToolId,
+            reason: 'Follow the failed Kubernetes command with a broader pod diagnostic pass before pausing.',
+            params: {
+                command: 'kubectl get pods -A -o wide && kubectl get events -A --sort-by=.lastTimestamp | tail -n 80',
+            },
+        }];
+    }
+
+    if (isTransientToolFailure(failedEvent?.result || {})) {
+        const retryParams = {
+            ...args,
+            ...(Number(args.timeoutMs || 0) > 0
+                ? { timeoutMs: Math.max(Number(args.timeoutMs), 60000) }
+                : { timeoutMs: 60000 }),
+        };
+        return [{
+            tool: remoteToolId,
+            reason: 'Retry the transient remote failure once with a longer timeout before replanning.',
+            params: retryParams,
+        }];
+    }
+
+    return [];
+}
+
 function buildResearchFollowupPlanFromToolEvents({ objective = '', toolPolicy = {}, toolEvents = [] } = {}) {
     if (!hasExplicitWebResearchIntentText(objective) && !hasCurrentInfoIntentText(objective)) {
         return [];
@@ -3839,6 +3951,15 @@ function extractManagedAppReference(text = '') {
     return '';
 }
 
+function titleizeManagedAppReference(reference = '') {
+    return String(reference || '')
+        .trim()
+        .split(/[-_\s]+/)
+        .filter(Boolean)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+        .join(' ');
+}
+
 function extractManagedAppReferenceFromRecentMessages(recentMessages = []) {
     const messages = Array.isArray(recentMessages) ? recentMessages : [];
     const patterns = [
@@ -4287,6 +4408,32 @@ function filterRepeatedPlanSteps(steps = [], signatureHistory = [], signatureCou
     return accepted;
 }
 
+function filterRepeatedPlanStepsWithReport(steps = [], signatureHistory = [], signatureCounts = new Map()) {
+    const accepted = [];
+    const rejected = [];
+    const plannedHistory = [...signatureHistory];
+    const plannedCounts = new Map(signatureCounts);
+
+    for (const step of Array.isArray(steps) ? steps : []) {
+        const signature = normalizeStepSignature(step);
+        if (shouldSkipStepSignature(signature, plannedHistory, plannedCounts)) {
+            rejected.push({
+                step,
+                signature,
+                count: plannedCounts.get(signature) || 0,
+                repeatedImmediately: plannedHistory[plannedHistory.length - 1] === signature,
+            });
+            continue;
+        }
+
+        accepted.push(step);
+        plannedHistory.push(signature);
+        plannedCounts.set(signature, (plannedCounts.get(signature) || 0) + 1);
+    }
+
+    return { accepted, rejected };
+}
+
 function recordExecutedStepSignatures(toolEvents = [], signatureHistory = [], signatureCounts = new Map()) {
     for (const event of Array.isArray(toolEvents) ? toolEvents : []) {
         const signature = extractExecutedStepSignature(event);
@@ -4349,6 +4496,39 @@ function classifyToolFailure(event = {}, executionProfile = DEFAULT_EXECUTION_PR
     };
 }
 
+function isTransientToolFailure(result = {}) {
+    const text = `${result?.error || ''}\n${result?.data?.stderr || ''}\n${result?.data?.stdout || ''}`;
+    return /\b(timeout|timed out|temporar(?:y|ily)|try again|rate limit|429|502|503|504|econnreset|etimedout|socket hang up)\b/i.test(text);
+}
+
+function classifyToolExecutionResult(event = {}, {
+    executionProfile = DEFAULT_EXECUTION_PROFILE,
+    budgetExceeded = false,
+} = {}) {
+    if (budgetExceeded) {
+        return 'blocked_failure';
+    }
+
+    if (isTerminalWorkloadCreationEvent(event)) {
+        return 'terminal_success';
+    }
+
+    if (event?.result?.success !== false) {
+        return 'success';
+    }
+
+    const failure = classifyToolFailure(event, executionProfile);
+    if (failure && !failure.blocking) {
+        return 'retryable_failure';
+    }
+
+    if (isTransientToolFailure(event?.result || {})) {
+        return 'retryable_failure';
+    }
+
+    return 'blocked_failure';
+}
+
 function summarizeRoundFailures(toolEvents = [], executionProfile = DEFAULT_EXECUTION_PROFILE) {
     const failures = (Array.isArray(toolEvents) ? toolEvents : [])
         .map((event) => classifyToolFailure(event, executionProfile))
@@ -4407,6 +4587,260 @@ function createExecutionTraceEntry({
         duration: Math.max(0, new Date(endTime).getTime() - new Date(startTime).getTime()),
         details,
     };
+}
+
+function normalizeHarnessReviewAction(action = '') {
+    const normalized = String(action || '').trim().toLowerCase();
+    if (normalized === 'stop') {
+        return 'synthesize';
+    }
+    return HARNESS_REVIEW_ACTIONS.has(normalized) ? normalized : 'synthesize';
+}
+
+function buildHarnessRunId() {
+    return `harness_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function summarizeHarnessToolEvent(event = {}, classification = '') {
+    return {
+        tool: event?.toolCall?.function?.name || event?.result?.toolId || '',
+        success: event?.result?.success !== false,
+        error: event?.result?.error || null,
+        classification: classification || null,
+        reason: event?.reason || '',
+    };
+}
+
+class HarnessRunState {
+    constructor({
+        runId = '',
+        objective = '',
+        executionProfile = DEFAULT_EXECUTION_PROFILE,
+        autonomyApproved = false,
+        autonomyLevel = '',
+        maxToolCalls = MAX_PLAN_STEPS,
+        maxRounds = 1,
+        maxReplans = null,
+        completionCriteria = [],
+    } = {}) {
+        this.version = HARNESS_VERSION;
+        this.runId = runId || buildHarnessRunId();
+        this.executionProfile = executionProfile || DEFAULT_EXECUTION_PROFILE;
+        this.autonomyLevel = autonomyLevel || (autonomyApproved ? 'guarded-remote' : 'guarded');
+        this.autonomyApproved = Boolean(autonomyApproved);
+        this.rounds = [];
+        this.currentObjective = String(objective || '').trim();
+        this.completionCriteria = Array.isArray(completionCriteria) ? completionCriteria.filter(Boolean) : [];
+        this.blockers = [];
+        this.recoveryAttempts = [];
+        this.decision = 'continue';
+        this.maxRounds = Math.max(1, Number(maxRounds) || 1);
+        this.maxToolCalls = Math.max(1, Number(maxToolCalls) || MAX_PLAN_STEPS);
+        this.toolCalls = 0;
+        this.replans = 0;
+        this.maxReplans = Math.max(0, Number.isFinite(Number(maxReplans))
+            ? Number(maxReplans)
+            : (this.executionProfile === REMOTE_BUILD_EXECUTION_PROFILE && this.autonomyApproved
+                ? REMOTE_BUILD_MAX_REPLANS
+                : NORMAL_PROFILE_MAX_REPLANS));
+    }
+
+    setBudget({ maxRounds = this.maxRounds, maxToolCalls = this.maxToolCalls } = {}) {
+        this.maxRounds = Math.max(1, Number(maxRounds) || this.maxRounds);
+        this.maxToolCalls = Math.max(1, Number(maxToolCalls) || this.maxToolCalls);
+    }
+
+    setDecision(decision = 'synthesize', reason = '') {
+        this.decision = normalizeHarnessReviewAction(decision);
+        if (reason) {
+            this.decisionReason = reason;
+        }
+        return this.decision;
+    }
+
+    get remainingToolCalls() {
+        return Math.max(0, this.maxToolCalls - this.toolCalls);
+    }
+
+    get remainingReplans() {
+        return Math.max(0, this.maxReplans - this.replans);
+    }
+
+    recordPlan({ round = 0, steps = [], source = 'none' } = {}) {
+        const existing = this.rounds.find((entry) => entry.round === round);
+        const roundState = existing || {
+            round,
+            planSource: source,
+            plannedSteps: [],
+            executedSteps: [],
+            decision: null,
+            productive: null,
+        };
+        roundState.planSource = source;
+        roundState.plannedSteps = (Array.isArray(steps) ? steps : []).map((step) => ({
+            tool: step?.tool || '',
+            reason: step?.reason || '',
+            paramKeys: Object.keys(step?.params || {}).sort(),
+        }));
+        if (!existing) {
+            this.rounds.push(roundState);
+        }
+    }
+
+    recordToolEvent(event = {}, { round = 0, classification = '' } = {}) {
+        this.toolCalls += 1;
+        const existing = this.rounds.find((entry) => entry.round === round);
+        const roundState = existing || {
+            round,
+            planSource: 'unknown',
+            plannedSteps: [],
+            executedSteps: [],
+            decision: null,
+            productive: null,
+        };
+        roundState.executedSteps.push(summarizeHarnessToolEvent(event, classification));
+        if (!existing) {
+            this.rounds.push(roundState);
+        }
+    }
+
+    recordBlocker(blocker = {}) {
+        const normalized = {
+            type: String(blocker.type || 'unknown').trim() || 'unknown',
+            reason: String(blocker.reason || blocker.error || '').trim(),
+            round: Number.isFinite(Number(blocker.round)) ? Number(blocker.round) : null,
+            tool: blocker.tool || null,
+            signature: blocker.signature || null,
+        };
+        this.blockers.push(normalized);
+        return normalized;
+    }
+
+    recordRecoveryAttempt(attempt = {}) {
+        const normalized = {
+            type: String(attempt.type || 'replan').trim() || 'replan',
+            round: Number.isFinite(Number(attempt.round)) ? Number(attempt.round) : null,
+            tool: attempt.tool || null,
+            reason: String(attempt.reason || '').trim(),
+            signature: attempt.signature || null,
+            outcome: attempt.outcome || 'planned',
+        };
+        this.recoveryAttempts.push(normalized);
+        return normalized;
+    }
+
+    reviewRound({
+        round = 0,
+        roundToolEvents = [],
+        roundFailureSummary = null,
+        budgetExceeded = false,
+        suggestedDecision = null,
+        suggestedReason = '',
+        productive = null,
+        terminalSuccess = false,
+        hasDeterministicRecovery = false,
+    } = {}) {
+        let decision = normalizeHarnessReviewAction(suggestedDecision);
+        let reason = suggestedReason || 'The planner review selected the next guarded action.';
+
+        if (budgetExceeded) {
+            decision = 'checkpoint';
+            reason = 'The guarded autonomy budget is exhausted.';
+            this.recordBlocker({ type: 'autonomy_budget_exhausted', reason, round });
+        } else if (roundFailureSummary?.blockingFailures?.length > 0) {
+            decision = 'blocked';
+            reason = 'A blocking tool failure requires external input or a different capability.';
+            const failure = roundFailureSummary.blockingFailures[0];
+            this.recordBlocker({
+                type: failure.category || 'blocking_failure',
+                reason: failure.error || reason,
+                round,
+                tool: failure.toolId,
+            });
+        } else if (terminalSuccess) {
+            decision = 'synthesize';
+            reason = 'A terminal tool result completed the requested work.';
+        } else if (roundFailureSummary?.recoverableFailures?.length > 0) {
+            if (hasDeterministicRecovery) {
+                decision = 'continue';
+                reason = 'A deterministic recovery step is ready, so no model replan is needed yet.';
+            } else if (this.remainingReplans > 0) {
+                decision = 'replan';
+                reason = 'A recoverable tool failure needs a changed next step.';
+                this.replans += 1;
+                this.recordRecoveryAttempt({
+                    type: 'model-replan',
+                    round,
+                    reason,
+                    outcome: 'requested',
+                });
+            } else {
+                decision = 'blocked';
+                reason = 'Recoverable failures repeated after the replan budget was exhausted.';
+                this.recordBlocker({ type: 'replan_budget_exhausted', reason, round });
+            }
+        } else if (!Array.isArray(roundToolEvents) || roundToolEvents.length === 0) {
+            decision = 'synthesize';
+            reason = 'No additional tool progress was available.';
+        }
+
+        const roundState = this.rounds.find((entry) => entry.round === round);
+        if (roundState) {
+            roundState.decision = decision;
+            roundState.decisionReason = reason;
+            roundState.productive = productive;
+        }
+        this.setDecision(decision, reason);
+        return { decision, reason };
+    }
+
+    toPlannerContext() {
+        return {
+            version: this.version,
+            runId: this.runId,
+            executionProfile: this.executionProfile,
+            autonomyLevel: this.autonomyLevel,
+            currentObjective: this.currentObjective,
+            completionCriteria: this.completionCriteria,
+            remainingAutonomyBudget: {
+                rounds: Math.max(0, this.maxRounds - this.rounds.length),
+                toolCalls: this.remainingToolCalls,
+                replans: this.remainingReplans,
+            },
+            priorFailedSignatures: this.blockers
+                .filter((blocker) => blocker.signature)
+                .map((blocker) => blocker.signature)
+                .slice(-6),
+            blockers: this.blockers.slice(-6),
+            recoveryAttempts: this.recoveryAttempts.slice(-6),
+            decision: this.decision,
+        };
+    }
+
+    toJSON() {
+        return {
+            version: this.version,
+            runId: this.runId,
+            executionProfile: this.executionProfile,
+            autonomyLevel: this.autonomyLevel,
+            rounds: this.rounds,
+            currentObjective: this.currentObjective,
+            completionCriteria: this.completionCriteria,
+            blockers: this.blockers,
+            recoveryAttempts: this.recoveryAttempts,
+            decision: this.decision,
+            ...(this.decisionReason ? { decisionReason: this.decisionReason } : {}),
+            budget: {
+                maxRounds: this.maxRounds,
+                maxToolCalls: this.maxToolCalls,
+                maxReplans: this.maxReplans,
+                toolCalls: this.toolCalls,
+                replans: this.replans,
+                remainingToolCalls: this.remainingToolCalls,
+                remainingReplans: this.remainingReplans,
+            },
+        };
+    }
 }
 
 function appendModelResponseTrace(executionTrace = [], response = null, {
@@ -5526,6 +5960,34 @@ class ConversationOrchestrator extends EventEmitter {
             ),
             extensionsUsed: 0,
         };
+        const harnessRun = new HarnessRunState({
+            objective,
+            executionProfile: resolvedProfile,
+            autonomyApproved,
+            maxRounds: budgetState.maxRounds,
+            maxToolCalls: budgetState.maxToolCalls,
+            maxReplans: resolvedProfile === REMOTE_BUILD_EXECUTION_PROFILE && autonomyApproved
+                ? REMOTE_BUILD_MAX_REPLANS
+                : NORMAL_PROFILE_MAX_REPLANS,
+            completionCriteria: Array.isArray(activeProjectPlan?.milestones)
+                ? activeProjectPlan.milestones
+                    .filter((milestone) => milestone?.status !== 'completed')
+                    .map((milestone) => milestone.title || milestone.objective || '')
+                    .filter(Boolean)
+                : [],
+        });
+        const refreshHarnessMetadata = (decision = null, reason = '') => {
+            harnessRun.setBudget({
+                maxRounds: budgetState.maxRounds,
+                maxToolCalls: budgetState.maxToolCalls,
+            });
+            if (decision) {
+                harnessRun.setDecision(decision, reason);
+            }
+            toolPolicy.harness = harnessRun.toJSON();
+            return toolPolicy.harness;
+        };
+        refreshHarnessMetadata();
         publishProgress({
             phase: 'planning',
             detail: 'Estimating the work and lining up the steps.',
@@ -5542,6 +6004,7 @@ class ConversationOrchestrator extends EventEmitter {
                     contextMessages: resolvedContextMessages.length,
                     recentMessages: resolvedRecentMessages.length,
                     toolCandidates: toolPolicy.candidateToolIds.length,
+                    harness: toolPolicy.harness,
                 },
             }));
 
@@ -5603,6 +6066,7 @@ class ConversationOrchestrator extends EventEmitter {
 
             if (endToEndWorkflow?.status === 'blocked') {
                 runtimeMode = 'workflow-blocked';
+                refreshHarnessMetadata('blocked', endToEndWorkflow.lastError || 'The active workflow is blocked.');
                 executionTrace.push(createExecutionTraceEntry({
                     type: 'workflow',
                     name: 'End-to-end builder workflow blocked',
@@ -5688,6 +6152,8 @@ class ConversationOrchestrator extends EventEmitter {
                 });
 
                 const deterministicExecutionStartedAt = new Date().toISOString();
+                harnessRun.recordPlan({ round: 1, steps: deterministicWorkflow.steps, source: 'deterministic-workflow' });
+                refreshHarnessMetadata();
                 const {
                     toolEvents: deterministicToolEvents,
                 } = await this.executePlan({
@@ -5701,6 +6167,7 @@ class ConversationOrchestrator extends EventEmitter {
                     recentMessages: resolvedRecentMessages,
                     executionTrace,
                     round: 1,
+                    harnessRun,
                     onProgress: (progress) => publishProgress({
                         ...progress,
                         planOverride: progress.plan,
@@ -5710,6 +6177,12 @@ class ConversationOrchestrator extends EventEmitter {
                 });
 
                 toolEvents = deterministicToolEvents;
+                refreshHarnessMetadata(
+                    deterministicToolEvents.some((event) => event?.result?.success === false) ? 'blocked' : 'synthesize',
+                    deterministicToolEvents.some((event) => event?.result?.success === false)
+                        ? 'Deterministic workflow stopped on a tool failure.'
+                        : 'Deterministic workflow finished and can be synthesized.',
+                );
                 executionTrace.push(createExecutionTraceEntry({
                     type: 'execution',
                     name: 'Deterministic workflow execution',
@@ -5791,6 +6264,7 @@ class ConversationOrchestrator extends EventEmitter {
             const executedStepSignatureCounts = new Map();
             let round = 0;
             let lastAutonomyProgress = null;
+            let forcedRecoveryPlan = [];
 
             while (true) {
                 if (round >= budgetState.maxRounds) {
@@ -5930,7 +6404,14 @@ class ConversationOrchestrator extends EventEmitter {
                     }
                 }
 
-                if (round === 1) {
+                if (forcedRecoveryPlan.length > 0) {
+                    nextPlan = forcedRecoveryPlan;
+                    forcedRecoveryPlan = [];
+                    runtimeMode = 'recovered-tools';
+                    planSource = 'deterministic-recovery';
+                }
+
+                if (nextPlan.length === 0 && round === 1) {
                     const directAction = this.buildDirectAction({
                         objective,
                         session,
@@ -5986,7 +6467,32 @@ class ConversationOrchestrator extends EventEmitter {
                     }
                 }
 
-                nextPlan = filterRepeatedPlanSteps(nextPlan, executedStepSignatures, executedStepSignatureCounts);
+                const repeatedPlanReport = filterRepeatedPlanStepsWithReport(nextPlan, executedStepSignatures, executedStepSignatureCounts);
+                nextPlan = repeatedPlanReport.accepted;
+                for (const rejectedStep of repeatedPlanReport.rejected) {
+                    harnessRun.recordBlocker({
+                        type: 'repeated_tool_signature',
+                        reason: 'A planned tool call repeated a prior signature without intervening state change.',
+                        round,
+                        tool: rejectedStep.step?.tool || null,
+                        signature: rejectedStep.signature,
+                    });
+                }
+                if (repeatedPlanReport.rejected.length > 0) {
+                    executionTrace.push(createExecutionTraceEntry({
+                        type: 'harness',
+                        name: `Repeated plan steps blocked in round ${round}`,
+                        status: 'error',
+                        details: {
+                            round,
+                            blocked: repeatedPlanReport.rejected.map((entry) => ({
+                                tool: entry.step?.tool || '',
+                                reason: entry.step?.reason || '',
+                                signature: entry.signature,
+                            })),
+                        },
+                    }));
+                }
 
                 if (autonomyApproved) {
                     const guidedRemotePlan = filterRepeatedPlanSteps(
@@ -6084,6 +6590,8 @@ class ConversationOrchestrator extends EventEmitter {
                         })),
                     },
                 }));
+                harnessRun.recordPlan({ round, steps: nextPlan, source: planSource });
+                refreshHarnessMetadata();
 
                 if (nextPlan.length === 0) {
                     break;
@@ -6155,6 +6663,7 @@ class ConversationOrchestrator extends EventEmitter {
                     autonomyDeadline: (autonomyApproved || hasCustomToolBudget) ? budgetState.autonomyDeadline : null,
                     executionTrace,
                     round,
+                    harnessRun,
                     onProgress: (progress) => publishProgress({
                         ...progress,
                         planOverride: progress.plan,
@@ -6299,10 +6808,46 @@ class ConversationOrchestrator extends EventEmitter {
                             })),
                         },
                     }));
+                    const deterministicRecoveryPlan = filterRepeatedPlanSteps(
+                        buildDeterministicRecoveryPlanFromFailure({
+                            objective,
+                            executionProfile: resolvedProfile,
+                            toolPolicy,
+                            toolEvents,
+                            recentMessages: resolvedRecentMessages,
+                            session,
+                        }),
+                        executedStepSignatures,
+                        executedStepSignatureCounts,
+                    );
+                    if (deterministicRecoveryPlan.length > 0) {
+                        forcedRecoveryPlan = deterministicRecoveryPlan;
+                        harnessRun.recordRecoveryAttempt({
+                            type: 'deterministic-recovery',
+                            round,
+                            tool: deterministicRecoveryPlan[0]?.tool || null,
+                            reason: deterministicRecoveryPlan[0]?.reason || 'Deterministic recovery plan selected.',
+                            signature: normalizeStepSignature(deterministicRecoveryPlan[0]),
+                            outcome: 'planned',
+                        });
+                        executionTrace.push(createExecutionTraceEntry({
+                            type: 'harness',
+                            name: `Deterministic recovery selected after round ${round}`,
+                            details: {
+                                round,
+                                stepCount: deterministicRecoveryPlan.length,
+                                steps: deterministicRecoveryPlan.map((step) => ({
+                                    tool: step.tool,
+                                    reason: step.reason,
+                                })),
+                            },
+                        }));
+                    }
                 }
 
                 if (roundToolEvents.some((event) => isTerminalWorkloadCreationEvent(event))) {
                     runtimeMode = runtimeMode || 'direct-tool';
+                    refreshHarnessMetadata('synthesize', 'A terminal tool result completed the requested work.');
                     const terminalOutput = buildTerminalWorkloadCreationOutput(roundToolEvents);
                     finalResponse = this.withResponseMetadata(buildSyntheticResponse({
                         output: terminalOutput,
@@ -6349,7 +6894,7 @@ class ConversationOrchestrator extends EventEmitter {
                     });
                 }
 
-                const roundReview = reviewExecutionRound({
+                const legacyRoundReview = reviewExecutionRound({
                     round,
                     nextPlan,
                     roundToolEvents,
@@ -6359,6 +6904,36 @@ class ConversationOrchestrator extends EventEmitter {
                     toolPolicy,
                     endToEndWorkflow,
                 });
+                const suggestedRoundDecision = forcedRecoveryPlan.length > 0
+                    ? 'continue'
+                    : (legacyRoundReview?.decision
+                        || (planSource === 'deterministic-recovery' && !roundFailed
+                            ? 'synthesize'
+                            : null)
+                        || (autonomyApproved && !blockingRoundFailure && roundToolEvents.length > 0
+                            ? 'continue'
+                            : 'synthesize'));
+                const suggestedRoundReason = forcedRecoveryPlan.length > 0
+                    ? 'A deterministic recovery step is ready for the next pass.'
+                    : (legacyRoundReview?.reason
+                        || (planSource === 'deterministic-recovery' && !roundFailed
+                            ? 'Deterministic recovery succeeded; synthesize the result.'
+                            : null)
+                        || (autonomyApproved && !blockingRoundFailure && roundToolEvents.length > 0
+                            ? 'Continue guarded autonomous work while tool progress is available.'
+                            : 'Synthesize after the completed round.'));
+                const roundReview = harnessRun.reviewRound({
+                    round,
+                    roundToolEvents,
+                    roundFailureSummary,
+                    budgetExceeded,
+                    suggestedDecision: suggestedRoundDecision,
+                    suggestedReason: suggestedRoundReason,
+                    productive: lastAutonomyProgress?.productive === true,
+                    terminalSuccess: roundToolEvents.some((event) => isTerminalWorkloadCreationEvent(event)),
+                    hasDeterministicRecovery: forcedRecoveryPlan.length > 0,
+                });
+                refreshHarnessMetadata(roundReview.decision, roundReview.reason);
                 if (roundReview) {
                     executionTrace.push(createExecutionTraceEntry({
                         type: 'review',
@@ -6373,12 +6948,25 @@ class ConversationOrchestrator extends EventEmitter {
                         },
                     }));
 
-                    if (roundReview.decision === 'replan') {
-                        continue;
-                    }
+                    const harnessControlsRound = isJudgmentV2Enabled()
+                        || forcedRecoveryPlan.length > 0
+                        || roundFailed
+                        || budgetExceeded
+                        || roundToolEvents.length === 0
+                        || planSource === 'deterministic-recovery';
 
-                    if (['synthesize', 'stop'].includes(roundReview.decision)) {
-                        break;
+                    if (harnessControlsRound) {
+                        if (roundReview.decision === 'replan') {
+                            continue;
+                        }
+
+                        if (roundReview.decision === 'continue') {
+                            continue;
+                        }
+
+                        if (['synthesize', 'checkpoint', 'blocked'].includes(roundReview.decision)) {
+                            break;
+                        }
                     }
                 }
 
@@ -6437,8 +7025,22 @@ class ConversationOrchestrator extends EventEmitter {
                 }
             }
 
+            const latestBudgetTrace = [...executionTrace].reverse()
+                .find((entry) => entry?.type === 'budget' && /budget reached/i.test(String(entry?.name || '')));
+            if (latestBudgetTrace && !['blocked', 'checkpoint', 'synthesize'].includes(toolPolicy?.harness?.decision)) {
+                refreshHarnessMetadata('checkpoint', latestBudgetTrace.name || 'Guarded autonomy budget reached.');
+            } else {
+                refreshHarnessMetadata(
+                    toolPolicy?.harness?.decision === 'blocked' || toolPolicy?.harness?.decision === 'checkpoint'
+                        ? toolPolicy.harness.decision
+                        : 'synthesize',
+                    toolPolicy?.harness?.decisionReason || 'Final response synthesis is the next harness action.',
+                );
+            }
+
             if (endToEndWorkflow?.status === 'blocked') {
                 runtimeMode = 'workflow-blocked';
+                refreshHarnessMetadata('blocked', endToEndWorkflow.lastError || 'The active workflow is blocked.');
                 const blockedOutput = [
                     buildEndToEndWorkflowBlockedOutput(endToEndWorkflow),
                     toolEvents.length > 0
@@ -6702,6 +7304,7 @@ class ConversationOrchestrator extends EventEmitter {
                         session,
                         recentMessages: resolvedRecentMessages,
                         executionTrace,
+                        harnessRun,
                         onProgress: (progress) => publishProgress({
                             ...progress,
                             planOverride: progress.plan,
@@ -7957,8 +8560,15 @@ class ConversationOrchestrator extends EventEmitter {
                 ? JSON.stringify(summarizeToolEventsForPlanner(toolEvents), null, 2)
                 : '(none)',
             '',
+            'Harness run state for this planning pass:',
+            toolPolicy?.harness
+                ? JSON.stringify(toolPolicy.harness, null, 2)
+                : '(none)',
+            '',
             'Evidence-first planning rules:',
             'Reject steps that repeat a no-op command from this run, mismatch the active surface, skip required grounding, or omit required parameters.',
+            'Use the harness state to avoid prior failed signatures, respect current blockers, and stay inside the remaining autonomy and replan budget.',
+            'If a step is missing required parameters, return a changed plan with those parameters filled instead of executing a malformed call.',
             'If the active surface is notes page editing, stay inside notes-safe research tools rather than switching to file, deploy, or document workflows.',
             'If grounding is required, do not jump straight to `document-workflow generate` unless verified web evidence already exists in this run.',
             '',
@@ -8158,6 +8768,7 @@ class ConversationOrchestrator extends EventEmitter {
         autonomyDeadline = null,
         executionTrace = [],
         round = null,
+        harnessRun = null,
         onProgress = null,
     }) {
         const toolEvents = [];
@@ -8220,12 +8831,17 @@ class ConversationOrchestrator extends EventEmitter {
                     startedAt: toolStartedAt,
                     endedAt: toolEndedAt,
                 });
-
-                toolEvents.push({
+                const toolEvent = {
                     toolCall,
                     result: normalizedResult,
                     reason: step.reason,
+                };
+                const classification = classifyToolExecutionResult(toolEvent, {
+                    executionProfile,
+                    budgetExceeded: false,
                 });
+                toolEvents.push(toolEvent);
+                harnessRun?.recordToolEvent?.(toolEvent, { round, classification });
                 executionTrace.push(createExecutionTraceEntry({
                     type: 'tool_call',
                     name: `Tool call (${step.tool})`,
@@ -8237,6 +8853,7 @@ class ConversationOrchestrator extends EventEmitter {
                         reason: step.reason,
                         paramKeys: Object.keys(step.params || {}).sort(),
                         error: normalizedResult.error || null,
+                        classification,
                     },
                 }));
                 emitConversationProgress(onProgress, {
@@ -8263,11 +8880,17 @@ class ConversationOrchestrator extends EventEmitter {
                     startedAt: toolStartedAt,
                     endedAt: toolEndedAt,
                 }, step.tool);
-                toolEvents.push({
+                const toolEvent = {
                     toolCall,
                     result: normalizedResult,
                     reason: step.reason,
+                };
+                const classification = classifyToolExecutionResult(toolEvent, {
+                    executionProfile,
+                    budgetExceeded: false,
                 });
+                toolEvents.push(toolEvent);
+                harnessRun?.recordToolEvent?.(toolEvent, { round, classification });
                 executionTrace.push(createExecutionTraceEntry({
                     type: 'tool_call',
                     name: `Tool call (${step.tool})`,
@@ -8279,6 +8902,7 @@ class ConversationOrchestrator extends EventEmitter {
                         reason: step.reason,
                         paramKeys: Object.keys(step.params || {}).sort(),
                         error: normalizedResult.error || null,
+                        classification,
                     },
                 }));
                 emitConversationProgress(onProgress, {
@@ -8921,6 +9545,9 @@ class ConversationOrchestrator extends EventEmitter {
             clientSurface,
             executionProfile,
         });
+        const harnessSummary = toolPolicy?.harness && typeof toolPolicy.harness === 'object'
+            ? toolPolicy.harness
+            : (metadata?.harness && typeof metadata.harness === 'object' ? metadata.harness : null);
         const memoryWriteTargets = {
             conversation: buildScopedMemoryMetadata({
                 ...(ownerId ? { ownerId } : {}),
@@ -8943,6 +9570,7 @@ class ConversationOrchestrator extends EventEmitter {
             initiativeReview: intelligenceSummary.initiativeReview,
             activeTaskFrame,
             surfaceFinisher,
+            ...(harnessSummary ? { harness: harnessSummary } : {}),
             perceivedIntelligenceScores: intelligenceSummary.perceivedIntelligenceScores,
             failureTags: intelligenceSummary.failureTags,
             ...(aggregatedUsage ? { usage: aggregatedUsage, tokenUsage: aggregatedUsage } : {}),
@@ -8993,6 +9621,7 @@ class ConversationOrchestrator extends EventEmitter {
                 assistantMetadata: tracedResponse?.metadata || null,
             }),
             activeTaskFrame,
+            harness: harnessSummary,
             memoryNamespace: tracedResponse?.metadata?.memoryNamespace || null,
             memoryReadSetSummary: intelligenceSummary.memoryReadSetSummary,
             memoryWriteTargets,
@@ -9285,6 +9914,9 @@ class ConversationOrchestrator extends EventEmitter {
 
 module.exports = {
     ConversationOrchestrator,
+    HarnessRunState,
+    classifyToolExecutionResult,
+    filterRepeatedPlanStepsWithReport,
     normalizeExecutionProfile,
     DEFAULT_EXECUTION_PROFILE,
     REMOTE_BUILD_EXECUTION_PROFILE,

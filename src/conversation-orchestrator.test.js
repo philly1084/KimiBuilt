@@ -8,6 +8,9 @@ const settingsController = require('./routes/admin/settings.controller');
 const config = require('./config');
 const {
     ConversationOrchestrator,
+    HarnessRunState,
+    classifyToolExecutionResult,
+    filterRepeatedPlanStepsWithReport,
 } = require('./conversation-orchestrator');
 
 function buildResponse(text, id = 'resp_test') {
@@ -38,6 +41,98 @@ function buildResponseWithPromptState(text, id = 'resp_test_prompt_state', promp
         },
     };
 }
+
+describe('HarnessRunState', () => {
+    test('records canonical metadata and review transitions', () => {
+        const harness = new HarnessRunState({
+            objective: 'Deploy the app',
+            executionProfile: 'remote-build',
+            autonomyApproved: true,
+            maxRounds: 5,
+            maxToolCalls: 10,
+            maxReplans: 1,
+            completionCriteria: ['app deployed'],
+        });
+
+        harness.recordPlan({
+            round: 1,
+            source: 'planned',
+            steps: [{ tool: 'remote-command', reason: 'inspect', params: { command: 'kubectl get pods -A' } }],
+        });
+        const review = harness.reviewRound({
+            round: 1,
+            roundToolEvents: [{
+                toolCall: { function: { name: 'remote-command' } },
+                result: { success: true },
+                reason: 'inspect',
+            }],
+            roundFailureSummary: { recoverableFailures: [], blockingFailures: [] },
+            suggestedDecision: 'continue',
+            productive: true,
+        });
+        const metadata = harness.toJSON();
+
+        expect(review.decision).toBe('continue');
+        expect(metadata.version).toBe('planner-recovery-v2');
+        expect(metadata.runId).toMatch(/^harness_/);
+        expect(metadata.executionProfile).toBe('remote-build');
+        expect(metadata.autonomyLevel).toBe('guarded-remote');
+        expect(metadata.currentObjective).toBe('Deploy the app');
+        expect(metadata.completionCriteria).toEqual(['app deployed']);
+        expect(metadata.rounds[0].decision).toBe('continue');
+        expect(metadata.decision).toBe('continue');
+    });
+
+    test('chooses replan once for recoverable failures, then blocks when replan budget is exhausted', () => {
+        const harness = new HarnessRunState({ maxReplans: 1 });
+        const failureSummary = {
+            recoverableFailures: [{ toolId: 'remote-command', error: 'temporary timeout', blocking: false }],
+            blockingFailures: [],
+        };
+
+        expect(harness.reviewRound({
+            round: 1,
+            roundToolEvents: [{ result: { success: false } }],
+            roundFailureSummary: failureSummary,
+        }).decision).toBe('replan');
+        expect(harness.reviewRound({
+            round: 2,
+            roundToolEvents: [{ result: { success: false } }],
+            roundFailureSummary: failureSummary,
+        }).decision).toBe('blocked');
+        expect(harness.toJSON().blockers).toEqual(expect.arrayContaining([
+            expect.objectContaining({ type: 'replan_budget_exhausted' }),
+        ]));
+    });
+
+    test('classifies tool execution results and blocks repeated signatures', () => {
+        const successEvent = {
+            toolCall: { function: { name: 'remote-command', arguments: '{"command":"hostname"}' } },
+            result: { success: true },
+        };
+        const retryEvent = {
+            toolCall: { function: { name: 'remote-command', arguments: '{"command":"hostname"}' } },
+            result: { success: false, error: 'operation timed out' },
+        };
+        const blockingEvent = {
+            toolCall: { function: { name: 'managed-app', arguments: '{"action":"inspect"}' } },
+            result: { success: false, error: 'bad request' },
+        };
+        const repeated = filterRepeatedPlanStepsWithReport(
+            [{ tool: 'remote-command', params: { command: 'hostname' } }],
+            ['{"tool":"remote-command","params":{"command":"hostname"}}'],
+            new Map([['{"tool":"remote-command","params":{"command":"hostname"}}', 1]]),
+        );
+
+        expect(classifyToolExecutionResult(successEvent)).toBe('success');
+        expect(classifyToolExecutionResult(retryEvent)).toBe('retryable_failure');
+        expect(classifyToolExecutionResult(blockingEvent)).toBe('blocked_failure');
+        expect(repeated.accepted).toHaveLength(0);
+        expect(repeated.rejected[0]).toEqual(expect.objectContaining({
+            signature: '{"tool":"remote-command","params":{"command":"hostname"}}',
+        }));
+    });
+});
 
 describe('ConversationOrchestrator', () => {
     beforeEach(() => {
@@ -115,6 +210,16 @@ describe('ConversationOrchestrator', () => {
         });
 
         expect(result.output).toBe('Plain answer');
+        expect(result.response.metadata.harness).toEqual(expect.objectContaining({
+            version: 'planner-recovery-v2',
+            executionProfile: 'default',
+            autonomyLevel: 'guarded',
+            decision: 'synthesize',
+        }));
+        expect(result.trace.harness).toEqual(expect.objectContaining({
+            runId: result.response.metadata.harness.runId,
+            rounds: expect.any(Array),
+        }));
         expect(llmClient.complete).not.toHaveBeenCalled();
         expect(llmClient.createResponse).toHaveBeenCalledWith(expect.objectContaining({
             input: 'Answer directly.',

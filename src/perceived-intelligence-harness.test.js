@@ -97,4 +97,69 @@ describe('perceived intelligence harness', () => {
         expect(sharedSummary.failureTags).not.toContain('cross_surface_recall');
         expect(sharedSummary.crossScopeReuse.foreignSurfaceCount).toBe(0);
     });
+
+    test('scores planner recovery and repeated-command guardrails', () => {
+        const summary = scorePerceivedIntelligence({
+            executionTrace: [
+                {
+                    type: 'harness',
+                    name: 'Repeated plan steps blocked in round 1',
+                    details: {},
+                },
+                {
+                    type: 'harness',
+                    name: 'Deterministic recovery selected after round 1',
+                    details: {},
+                },
+                {
+                    type: 'review',
+                    name: 'Round review 1',
+                    details: {
+                        decision: 'continue',
+                        productive: true,
+                    },
+                },
+                {
+                    type: 'review',
+                    name: 'Round review 2',
+                    details: {
+                        decision: 'synthesize',
+                        productive: true,
+                    },
+                },
+            ],
+            toolEvents: [
+                { result: { success: false, error: 'temporary timeout' } },
+                { result: { success: true } },
+            ],
+        });
+
+        expect(summary.initiativeReview.repeatedCommandBlocks).toBe(1);
+        expect(summary.initiativeReview.successfulRecovery).toBe(true);
+        expect(summary.failureTags).toContain('repeated_command_blocked');
+        expect(summary.failureTags).not.toContain('premature_stop_after_failure');
+        expect(summary.perceivedIntelligenceScores.recovery).toBeGreaterThan(0.8);
+        expect(summary.perceivedIntelligenceScores.plannerDiscipline).toBeLessThan(0.92);
+    });
+
+    test('flags premature synthesis after failure without recovery', () => {
+        const summary = scorePerceivedIntelligence({
+            executionTrace: [
+                {
+                    type: 'review',
+                    name: 'Round review 1',
+                    details: {
+                        decision: 'synthesize',
+                        productive: true,
+                    },
+                },
+            ],
+            toolEvents: [
+                { result: { success: false, error: 'failed' } },
+            ],
+        });
+
+        expect(summary.failureTags).toContain('premature_stop_after_failure');
+        expect(summary.perceivedIntelligenceScores.plannerDiscipline).toBeLessThan(0.7);
+    });
 });

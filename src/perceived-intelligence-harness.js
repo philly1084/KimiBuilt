@@ -85,12 +85,22 @@ function summarizeMemoryReadSet(memoryTrace = null, { projectKey = '', clientSur
 }
 
 function buildInitiativeReview({ executionTrace = [], toolEvents = [] } = {}) {
-    const roundReviews = (Array.isArray(executionTrace) ? executionTrace : [])
+    const traceEntries = Array.isArray(executionTrace) ? executionTrace : [];
+    const roundReviews = traceEntries
         .filter((entry) => /^Round review \d+$/i.test(String(entry?.name || '')));
     const decisions = roundReviews.map((entry) => String(entry?.details?.decision || '').trim()).filter(Boolean);
     const productiveRounds = roundReviews.filter((entry) => entry?.details?.productive !== false).length;
     const toolFailures = (Array.isArray(toolEvents) ? toolEvents : [])
         .filter((event) => event?.result?.success === false).length;
+    const repeatedCommandBlocks = traceEntries.filter((entry) => entry?.type === 'harness'
+        && /repeated plan steps blocked/i.test(String(entry?.name || ''))).length;
+    const deterministicRecoveries = traceEntries.filter((entry) => entry?.type === 'harness'
+        && /deterministic recovery selected/i.test(String(entry?.name || ''))).length;
+    const successfulRecovery = deterministicRecoveries > 0
+        && traceEntries.some((entry) => entry?.type === 'review'
+            && ['continue', 'synthesize'].includes(String(entry?.details?.decision || '').trim()));
+    const checkpointDecisions = decisions.filter((decision) => decision === 'checkpoint').length;
+    const finalDecision = decisions[decisions.length - 1] || null;
     const failureTags = [];
 
     if (roundReviews.some((entry) => entry?.details?.productive === false)) {
@@ -102,12 +112,25 @@ function buildInitiativeReview({ executionTrace = [], toolEvents = [] } = {}) {
     if (toolFailures > 0 && productiveRounds === 0) {
         failureTags.push('stalled_after_failure');
     }
+    if (repeatedCommandBlocks > 0) {
+        failureTags.push('repeated_command_blocked');
+    }
+    if (toolFailures > 0 && finalDecision === 'synthesize' && !successfulRecovery) {
+        failureTags.push('premature_stop_after_failure');
+    }
+    if (checkpointDecisions > 1) {
+        failureTags.push('checkpoint_overuse');
+    }
 
     return {
         totalRounds: roundReviews.length,
         productiveRounds,
-        lastDecision: decisions[decisions.length - 1] || null,
+        lastDecision: finalDecision,
         toolFailures,
+        repeatedCommandBlocks,
+        deterministicRecoveries,
+        successfulRecovery,
+        checkpointDecisions,
         failureTags,
     };
 }
@@ -133,6 +156,13 @@ function scorePerceivedIntelligence({
     const perceivedIntelligenceScores = {
         continuity: clampScore(1 - (initiativeReview.totalRounds > 0 && initiativeReview.productiveRounds === 0 ? 0.35 : 0)),
         initiative: clampScore(1 - (initiativeReview.failureTags.includes('unproductive_round') ? 0.35 : 0) - (initiativeReview.failureTags.includes('repeated_replan') ? 0.2 : 0)),
+        plannerDiscipline: clampScore(0.92
+            - (initiativeReview.failureTags.includes('repeated_command_blocked') ? 0.18 : 0)
+            - (initiativeReview.failureTags.includes('premature_stop_after_failure') ? 0.28 : 0)
+            - (initiativeReview.failureTags.includes('checkpoint_overuse') ? 0.12 : 0)),
+        recovery: clampScore(initiativeReview.toolFailures > 0
+            ? (initiativeReview.successfulRecovery ? 0.92 : 0.62)
+            : 0.9),
         groundedness: clampScore(Array.isArray(toolEvents) && toolEvents.length > 0 && toolEvents.some((event) => event?.result?.success === false) ? 0.78 : 0.92),
         isolation: clampScore(1 - (memoryReadSetSummary.foreignProjectEntries.length > 0 ? 0.9 : 0) - (memoryReadSetSummary.foreignSurfaceEntries.length > 0 ? 0.45 : 0)),
         surfaceDiscipline: clampScore(memoryReadSetSummary.foreignSurfaceEntries.length > 0 ? 0.55 : 0.92),
