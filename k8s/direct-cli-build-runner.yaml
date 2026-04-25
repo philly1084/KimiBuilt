@@ -56,6 +56,9 @@ data:
   KIMIBUILT_RUNNER_ALLOWED_ROOTS: "/app,/workspace,/tmp"
   KIMIBUILT_RUNNER_HEARTBEAT_MS: "15000"
   KIMIBUILT_RUNNER_MAX_OUTPUT_CHARS: "120000"
+  # Temporary workaround for self-signed backend ingress certificates.
+  # Prefer fixing TLS and setting this back to "false".
+  KIMIBUILT_RUNNER_TLS_INSECURE: "false"
   BUILDKIT_HOST: "tcp://kimibuilt-buildkitd.agent-platform.svc.cluster.local:1234"
   DOCKER_CONFIG: "/home/kimibuilt/.docker"
   DIRECT_CLI_WORKSPACE: "/workspace"

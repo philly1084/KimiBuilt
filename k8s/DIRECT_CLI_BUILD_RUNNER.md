@@ -49,6 +49,21 @@ From KimiBuilt, use `/remote status`, then:
 /remote run export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; kubectl get nodes -o wide
 ```
 
+## TLS
+
+The runner connects outbound to `KIMIBUILT_BACKEND_URL` over WebSocket. If the backend ingress uses a self-signed certificate, the runner logs `WebSocket error: self-signed certificate` and will not register.
+
+Preferred fix: issue a publicly trusted certificate for the backend host with cert-manager/Let's Encrypt, then keep `KIMIBUILT_RUNNER_TLS_INSECURE=false`.
+
+Temporary workaround for a private/self-signed backend certificate:
+
+```bash
+kubectl -n agent-platform set env deployment/kimibuilt-direct-runner NODE_TLS_REJECT_UNAUTHORIZED=0
+kubectl -n agent-platform rollout restart deployment/kimibuilt-direct-runner
+```
+
+For rebuilt runner images, `KIMIBUILT_RUNNER_TLS_INSECURE=true` can be used instead of the Node-wide setting.
+
 ## Build and Deploy Flow
 
 Agents should work in `/workspace`:

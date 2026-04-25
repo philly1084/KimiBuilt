@@ -16,6 +16,7 @@ const {
 
 const backendUrl = normalizeText(process.env.KIMIBUILT_BACKEND_URL || process.env.API_BASE_URL || 'http://localhost:3000');
 const token = normalizeText(process.env.KIMIBUILT_REMOTE_RUNNER_TOKEN || '');
+const tlsInsecure = /^(?:1|true|yes)$/i.test(normalizeText(process.env.KIMIBUILT_RUNNER_TLS_INSECURE || ''));
 const runnerId = normalizeText(process.env.KIMIBUILT_RUNNER_ID || `${os.hostname()}-${process.platform}-${process.arch}`);
 const displayName = normalizeText(process.env.KIMIBUILT_RUNNER_NAME || `KimiBuilt Runner ${os.hostname()}`);
 const allowedRoots = String(process.env.KIMIBUILT_RUNNER_ALLOWED_ROOTS || '/opt,/srv,/var/www,/tmp')
@@ -176,7 +177,7 @@ function runCommand(job = {}) {
 }
 
 function connect() {
-  const ws = new WebSocket(buildRunnerWsUrl());
+  const ws = new WebSocket(buildRunnerWsUrl(), tlsInsecure ? { rejectUnauthorized: false } : undefined);
   let heartbeatTimer = null;
 
   ws.on('open', () => {
