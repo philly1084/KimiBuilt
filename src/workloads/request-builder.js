@@ -253,7 +253,7 @@ function inferDeferredArtifactOutputFormat(prompt = '') {
     }
 
     if (/\b(docx|word document)\b/.test(normalized)) {
-        return 'docx';
+        return 'html';
     }
 
     if (/\bhtml\b/.test(normalized)
@@ -275,7 +275,7 @@ function buildDeferredArtifactContentPrompt(prompt = '', outputFormat = '') {
 
     const formatLabel = {
         pdf: 'PDF',
-        docx: 'DOCX',
+        docx: 'HTML',
         html: 'HTML',
     }[outputFormat] || outputFormat.toUpperCase();
     const formatToken = outputFormat.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -316,11 +316,11 @@ function buildDeferredArtifactStages(outputFormat = '') {
 
 function resolveDocxFallbackFormat(prompt = '') {
     const normalized = sanitizeText(prompt).toLowerCase();
-    if (/\b(html|website|web page|webpage|landing page|homepage|site)\b/.test(normalized)) {
+    if (/\b(html|website|web page|webpage|landing page|homepage|site|document|docx|word document)\b/.test(normalized)) {
         return 'html';
     }
 
-    return 'pdf';
+    return 'html';
 }
 
 function resolveBrutalBuilderArtifactPlan(prompt = '', requestedOutputFormat = '') {

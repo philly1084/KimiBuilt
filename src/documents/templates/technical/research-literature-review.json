@@ -9,8 +9,8 @@
   "packId": "research-suite",
   "intent": "research",
   "useCases": ["research", "literature review", "evidence map"],
-  "recommendedFormats": ["html", "pdf", "docx"],
-  "formats": ["html", "pdf", "docx"],
+  "recommendedFormats": ["html", "pdf"],
+  "formats": ["html", "pdf"],
   "requiredVariables": ["title", "scope", "theme_map", "recommendations"],
   "variables": {
     "title": { "type": "text", "label": "Title", "required": true },

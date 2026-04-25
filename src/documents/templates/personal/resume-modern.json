@@ -101,7 +101,7 @@
     }
   ],
   
-  "formats": ["docx", "pdf", "html"],
+  "formats": ["pdf", "html"],
   
   "aiEnhancement": {
     "enabled": true,

@@ -9,8 +9,8 @@
   "packId": "research-suite",
   "intent": "research",
   "useCases": ["research", "methodology", "study design"],
-  "recommendedFormats": ["html", "pdf", "docx"],
-  "formats": ["html", "pdf", "docx"],
+  "recommendedFormats": ["html", "pdf"],
+  "formats": ["html", "pdf"],
   "requiredVariables": ["title", "objective", "method", "analysis_plan"],
   "variables": {
     "title": { "type": "text", "label": "Title", "required": true },

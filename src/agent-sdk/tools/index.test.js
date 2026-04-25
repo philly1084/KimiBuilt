@@ -1471,7 +1471,7 @@ describe('ToolManager image tools', () => {
     }), 'user-1');
   });
 
-  test('includes a warning when brutal builder downgrades docx output', async () => {
+  test('maps brutal builder docx requests to html output', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();
 
@@ -1497,13 +1497,12 @@ describe('ToolManager image tools', () => {
     expect(result.success).toBe(true);
     expect(createWorkload).toHaveBeenCalledWith(expect.objectContaining({
       metadata: expect.objectContaining({
-        requestedOutputFormat: 'docx',
-        resolvedOutputFormat: 'pdf',
-        defaultOutputFormat: 'pdf',
-        outputFormatWarnings: [expect.stringContaining('downgraded it to PDF')],
+        requestedOutputFormat: 'html',
+        resolvedOutputFormat: 'html',
+        defaultOutputFormat: 'html',
       }),
     }), 'user-1');
-    expect(result.data.message).toContain('Warning: DOCX output was requested');
+    expect(result.data.message).not.toContain('DOCX output was requested');
   });
 
   test('reconstructs a fragmented scheduled workload request from recent transcript context', async () => {

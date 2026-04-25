@@ -52,6 +52,17 @@ class DocumentCreator {
     ];
   }
 
+  normalizeCreationFormat(format = 'html') {
+    const normalized = String(format || 'html').trim().toLowerCase();
+    if (!normalized || normalized === 'docx' || normalized === 'doc' || normalized === 'word') {
+      return 'html';
+    }
+    if (normalized === 'markdown') {
+      return 'md';
+    }
+    return normalized;
+  }
+
   /**
    * Handle /templates command
    */
@@ -97,12 +108,12 @@ class DocumentCreator {
     const parts = templateIdOrArgs.split(' ');
     const templateId = parts[0];
     
-    let format = 'docx';
+    let format = 'html';
     let outputPath = null;
 
     for (let i = 1; i < parts.length; i++) {
       if (parts[i] === '--format' || parts[i] === '-f') {
-        format = parts[++i];
+        format = this.normalizeCreationFormat(parts[++i]);
       } else if (parts[i] === '--output' || parts[i] === '-o') {
         outputPath = parts[++i];
       }
@@ -172,9 +183,8 @@ class DocumentCreator {
       name: 'format',
       message: 'Select output format:',
       choices: [
-        { name: 'Word Document (DOCX)', value: 'docx' },
-        { name: 'PDF Document', value: 'pdf' },
         { name: 'HTML Document', value: 'html' },
+        { name: 'PDF Document', value: 'pdf' },
         { name: 'Markdown', value: 'md' }
       ]
     }]);
@@ -362,14 +372,14 @@ class DocumentCreator {
 
     // Parse arguments
     let prompt = args;
-    let format = 'docx';
+    let format = 'html';
     let documentType = '';
     let tone = 'professional';
     let length = 'medium';
 
     const formatMatch = args.match(/--format\s+(\w+)/);
     if (formatMatch) {
-      format = formatMatch[1];
+      format = this.normalizeCreationFormat(formatMatch[1]);
       prompt = prompt.replace(formatMatch[0], '');
     }
 
@@ -396,7 +406,7 @@ class DocumentCreator {
           documentType,
           tone,
           length,
-          format
+          format: this.normalizeCreationFormat(format)
         })
       });
 
@@ -451,14 +461,15 @@ class DocumentCreator {
         body: JSON.stringify({
           data,
           templateId,
-          format: options.format || 'docx'
+          format: this.normalizeCreationFormat(options.format || 'html')
         })
       }, true);
 
       const defaultDir = this.config.get('documentOutputDir', './documents');
       await fs.mkdir(defaultDir, { recursive: true });
       
-      const filename = path.join(defaultDir, `generated-${Date.now()}.${options.format || 'docx'}`);
+      const outputFormat = this.normalizeCreationFormat(options.format || 'html');
+      const filename = path.join(defaultDir, `generated-${Date.now()}.${outputFormat}`);
       await fs.writeFile(filename, Buffer.from(response));
 
       spinner.succeed(chalk.green(`Document created: ${filename}`));

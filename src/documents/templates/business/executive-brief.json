@@ -6,7 +6,7 @@
   "icon": "📌",
   "tags": ["brief", "executive", "board", "summary", "decision"],
   "blueprint": "executive-brief",
-  "recommendedFormats": ["pdf", "docx", "html", "md"],
+  "recommendedFormats": ["pdf", "html", "md"],
   "useCases": ["board update", "executive summary", "decision brief"],
   "variables": [
     {
@@ -80,7 +80,7 @@
       "placeholder": "Approve budget by Friday\nAssign launch owner\nReview progress in 30 days"
     }
   ],
-  "formats": ["docx", "pdf", "html", "md"],
+  "formats": ["pdf", "html", "md"],
   "aiEnhancement": {
     "enabled": true,
     "features": [

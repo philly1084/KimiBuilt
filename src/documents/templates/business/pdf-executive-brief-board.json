@@ -9,8 +9,8 @@
   "packId": "pdf-publication",
   "intent": "pdf",
   "useCases": ["pdf", "executive brief", "board brief"],
-  "recommendedFormats": ["pdf", "docx"],
-  "formats": ["pdf", "docx"],
+  "recommendedFormats": ["pdf"],
+  "formats": ["pdf"],
   "requiredVariables": ["title", "decision", "signals", "recommendation"],
   "variables": {
     "title": { "type": "text", "label": "Title", "required": true },

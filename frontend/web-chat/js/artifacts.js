@@ -403,7 +403,7 @@
 
         if (isInteractiveDocumentRequest(text)) return 'html';
         if (/\bpdf\b/.test(text) && hasArtifactIntent) return 'pdf';
-        if (/\b(docx|word document)\b/.test(text) && hasArtifactIntent) return 'docx';
+        if (/\b(docx|word document)\b/.test(text) && hasArtifactIntent) return 'html';
         if (/\bxml\b/.test(text) && hasArtifactIntent) return 'xml';
         if (hasExplicitMermaidIntent(text)) return 'mermaid';
         if (hasExplicitHtmlArtifactIntent(text)) return 'html';

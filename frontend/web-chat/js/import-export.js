@@ -1,6 +1,6 @@
 /**
  * Import/Export Module for LillyBuilt AI Chat
- * Handles DOCX, PDF, HTML, Markdown, JSON, and TXT formats
+ * Handles PDF, HTML, Markdown, JSON, TXT export and DOCX import
  */
 
 class ImportExportManager {
@@ -85,6 +85,11 @@ class ImportExportManager {
      * Export conversation in specified format
      */
     async exportConversation(format, messages, session) {
+        format = String(format || '').trim().toLowerCase();
+        if (format === 'docx' || format === 'doc' || format === 'word') {
+            format = 'html';
+        }
+
         if (!messages || messages.length === 0) {
             throw new Error('No messages to export');
         }
@@ -100,8 +105,6 @@ class ImportExportManager {
                 return this.exportAsText(messages, session, sessionTitle);
             case 'html':
                 return this.exportAsHTML(messages, session, sessionTitle);
-            case 'docx':
-                return await this.exportAsDOCX(messages, session, sessionTitle);
             case 'pdf':
                 return await this.exportAsPDF(messages, session, sessionTitle);
             default:
@@ -438,249 +441,6 @@ class ImportExportManager {
             filename: this.createUniqueFilename(sessionTitle, 'html'),
             mimeType: 'text/html'
         };
-    }
-
-    async exportAsDOCX(messages, session, sessionTitle) {
-        // Check if docx library is loaded
-        if (typeof docx === 'undefined') {
-            await this.loadScript('https://unpkg.com/docx@8.5.0/build/index.js');
-        }
-
-        const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, BorderStyle } = docx;
-
-        const docChildren = [
-            new Paragraph({
-                text: session?.title || 'Conversation',
-                heading: HeadingLevel.TITLE,
-                alignment: AlignmentType.CENTER,
-                spacing: { after: 200 }
-            }),
-            new Paragraph({
-                children: [
-                    new TextRun({ text: 'Exported: ', bold: true }),
-                    new TextRun(new Date().toLocaleString())
-                ],
-                alignment: AlignmentType.CENTER,
-                spacing: { after: 100 }
-            }),
-            new Paragraph({
-                children: [
-                    new TextRun({ text: 'Messages: ', bold: true }),
-                    new TextRun(String(messages.length))
-                ],
-                alignment: AlignmentType.CENTER,
-                spacing: { after: 400 }
-            })
-        ];
-
-        messages.forEach((msg, index) => {
-            const time = new Date(msg.timestamp).toLocaleString();
-            let roleLabel, roleColor;
-            
-            switch (msg.role) {
-                case 'user':
-                    roleLabel = 'You';
-                    roleColor = '3B82F6';
-                    break;
-                case 'assistant':
-                    roleLabel = msg.type === 'image' ? 'AI Image Generator' : 'Assistant';
-                    roleColor = '8B5CF6';
-                    break;
-                case 'system':
-                    roleLabel = 'System';
-                    roleColor = 'F59E0B';
-                    break;
-                default:
-                    roleLabel = 'Unknown';
-                    roleColor = '6B7280';
-            }
-
-            // Message header
-            docChildren.push(new Paragraph({
-                children: [
-                    new TextRun({ text: roleLabel, bold: true, color: roleColor }),
-                    new TextRun({ text: `  (${time})`, color: '888888', size: 18 })
-                ],
-                spacing: { before: 300, after: 100 },
-                border: {
-                    top: index > 0 ? {
-                        color: 'CCCCCC',
-                        space: 1,
-                        style: BorderStyle.SINGLE,
-                        size: 6
-                    } : undefined
-                }
-            }));
-
-            // Message content
-            if (msg.type === 'image') {
-                docChildren.push(new Paragraph({
-                    children: [new TextRun({ text: `Prompt: "${msg.prompt || ''}"`, italics: true })],
-                    spacing: { after: 100 }
-                }));
-                if (msg.imageUrl) {
-                    docChildren.push(new Paragraph({
-                        children: [new TextRun({ text: `Image URL: ${msg.imageUrl}`, color: '666666' })],
-                        spacing: { after: 200 }
-                    }));
-                }
-            } else {
-                const paragraphs = this.parseContentForDocx(msg.content);
-                paragraphs.forEach(p => docChildren.push(p));
-            }
-        });
-
-        const doc = new Document({
-            sections: [{
-                properties: {
-                    page: {
-                        margin: {
-                            top: 1440, // 1 inch
-                            right: 1440,
-                            bottom: 1440,
-                            left: 1440
-                        }
-                    }
-                },
-                children: docChildren
-            }]
-        });
-
-        const blob = await Packer.toBlob(doc);
-        return {
-            blob: blob,
-            filename: this.createUniqueFilename(sessionTitle, 'docx'),
-            mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-        };
-    }
-
-    parseContentForDocx(content) {
-        if (!content) return [new Paragraph({ text: '' })];
-
-        const paragraphs = [];
-        const lines = content.split('\n');
-
-        lines.forEach(line => {
-            const trimmed = line.trim();
-            
-            // Headers
-            if (trimmed.startsWith('### ')) {
-                paragraphs.push(new Paragraph({
-                    text: trimmed.substring(4),
-                    heading: 3,
-                    spacing: { before: 200, after: 100 }
-                }));
-            } else if (trimmed.startsWith('## ')) {
-                paragraphs.push(new Paragraph({
-                    text: trimmed.substring(3),
-                    heading: 2,
-                    spacing: { before: 200, after: 100 }
-                }));
-            } else if (trimmed.startsWith('# ')) {
-                paragraphs.push(new Paragraph({
-                    text: trimmed.substring(2),
-                    heading: 1,
-                    spacing: { before: 200, after: 100 }
-                }));
-            } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
-                // Bullet list
-                paragraphs.push(new Paragraph({
-                    text: trimmed.substring(2),
-                    bullet: { level: 0 },
-                    spacing: { after: 50 }
-                }));
-            } else if (/^\d+\.\s/.test(trimmed)) {
-                // Numbered list
-                paragraphs.push(new Paragraph({
-                    text: trimmed.replace(/^\d+\.\s/, ''),
-                    numbering: { level: 0 },
-                    spacing: { after: 50 }
-                }));
-            } else if (trimmed.startsWith('> ')) {
-                // Blockquote
-                paragraphs.push(new Paragraph({
-                    children: [new TextRun({ text: trimmed.substring(2), italics: true })],
-                    indent: { left: 720 },
-                    spacing: { after: 100 }
-                }));
-            } else if (trimmed.startsWith('```')) {
-                // Code block indicator - skip
-            } else if (trimmed === '---' || trimmed === '***') {
-                // Horizontal rule
-                paragraphs.push(new Paragraph({
-                    text: '',
-                    border: {
-                        bottom: {
-                            color: 'CCCCCC',
-                            space: 1,
-                            style: BorderStyle.SINGLE,
-                            size: 6
-                        }
-                    },
-                    spacing: { before: 100, after: 100 }
-                }));
-            } else if (trimmed) {
-                // Regular paragraph with inline formatting
-                const children = this.parseInlineFormatting(trimmed);
-                paragraphs.push(new Paragraph({
-                    children: children,
-                    spacing: { after: 120 }
-                }));
-            } else {
-                // Empty line
-                paragraphs.push(new Paragraph({ text: '', spacing: { after: 100 } }));
-            }
-        });
-
-        return paragraphs.length > 0 ? paragraphs : [new Paragraph({ text: '' })];
-    }
-
-    parseInlineFormatting(text) {
-        const children = [];
-        let remaining = text;
-
-        // Pattern for inline formatting
-        const patterns = [
-            { regex: /\*\*\*(.+?)\*\*\*/g, format: { bold: true, italics: true } }, // ***bold italic***
-            { regex: /\*\*(.+?)\*\*/g, format: { bold: true } },                     // **bold**
-            { regex: /\*(.+?)\*/g, format: { italics: true } },                      // *italic*
-            { regex: /`(.+?)`/g, format: { font: { name: 'Courier New' } } },        // `code`
-            { regex: /__(.+?)__/g, format: { underline: {} } },                     // __underline__
-            { regex: /~~(.+?)~~/g, format: { strike: true } }                        // ~~strikethrough~~
-        ];
-
-        while (remaining.length > 0) {
-            let earliestMatch = null;
-            let earliestPattern = null;
-
-            patterns.forEach(pattern => {
-                pattern.regex.lastIndex = 0;
-                const match = pattern.regex.exec(remaining);
-                if (match && (!earliestMatch || match.index < earliestMatch.index)) {
-                    earliestMatch = match;
-                    earliestPattern = pattern;
-                }
-            });
-
-            if (earliestMatch) {
-                // Add text before the match
-                if (earliestMatch.index > 0) {
-                    children.push(new docx.TextRun(remaining.substring(0, earliestMatch.index)));
-                }
-                // Add formatted text
-                children.push(new docx.TextRun({
-                    text: earliestMatch[1],
-                    ...earliestPattern.format
-                }));
-                remaining = remaining.substring(earliestMatch.index + earliestMatch[0].length);
-            } else {
-                // No more matches, add remaining text
-                children.push(new docx.TextRun(remaining));
-                break;
-            }
-        }
-
-        return children.length > 0 ? children : [new docx.TextRun(text)];
     }
 
     async exportAsPDF(messages, session, sessionTitle) {

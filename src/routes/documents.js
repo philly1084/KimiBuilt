@@ -109,6 +109,32 @@ function normalizeRequestedSessionId(value = '') {
   return normalized || null;
 }
 
+function normalizeDocumentCreationFormat(format = 'html') {
+  const normalized = String(format || 'html').trim().toLowerCase();
+  if (!normalized || normalized === 'docx' || normalized === 'doc' || normalized === 'word') {
+    return 'html';
+  }
+  if (normalized === 'markdown') {
+    return 'md';
+  }
+  return normalized;
+}
+
+function setPersistedArtifactHeaders(res, artifact = null) {
+  if (!artifact) {
+    return;
+  }
+
+  res.setHeader('X-Artifact-Id', artifact.id || '');
+  res.setHeader('X-Artifact-Filename', artifact.filename || '');
+  res.setHeader('X-Artifact-Format', artifact.format || artifact.metadata?.format || '');
+  res.setHeader('X-Artifact-Mime-Type', artifact.mimeType || '');
+  res.setHeader('X-Artifact-Download-Url', artifact.downloadUrl || '');
+  res.setHeader('X-Artifact-Preview-Url', artifact.previewUrl || '');
+  res.setHeader('X-Artifact-Session-Id', artifact.sessionId || '');
+  res.setHeader('X-Artifact-Size-Bytes', String(artifact.sizeBytes || artifact.size || 0));
+}
+
 function normalizeDocumentContentBuffer(document = null) {
   if (Buffer.isBuffer(document?.contentBuffer)) {
     return document.contentBuffer;
@@ -180,14 +206,19 @@ function serializeArtifactAsDocument(artifact = null) {
     filename: artifact?.filename || 'document.html',
     mimeType: artifact?.mimeType || 'text/html',
     size: Number(artifact?.sizeBytes || 0),
+    sizeBytes: Number(artifact?.sizeBytes || 0),
+    format: artifact?.format || metadata.format || 'html',
+    sessionId: artifact?.sessionId || '',
     metadata: {
       generatedAt: new Date().toISOString(),
       aiGenerated: true,
-      format: artifact?.format || 'html',
+      format: artifact?.format || metadata.format || 'html',
       ...metadata,
     },
     preview: artifact?.preview || null,
     downloadUrl: artifact?.downloadUrl || null,
+    previewUrl: artifact?.previewUrl || null,
+    sandboxUrl: artifact?.sandboxUrl || null,
   };
 }
 
@@ -301,13 +332,14 @@ router.get('/templates', async (req, res, next) => {
       limit,
     } = req.query;
     const documentService = req.app.locals.documentService;
+    const requestedFormat = format ? normalizeDocumentCreationFormat(format) : '';
 
     const templates = await documentService.getTemplates({
       category,
       packId,
       useCase,
       intent,
-      format,
+      format: requestedFormat,
       limit,
     });
 
@@ -422,7 +454,11 @@ router.get('/formats', (req, res) => {
 router.post('/recommend', validate(recommendSchema), async (req, res, next) => {
   try {
     const documentService = req.app.locals.documentService;
-    const recommendation = documentService.recommendDocumentWorkflow(req.body || {});
+    const body = req.body || {};
+    const recommendation = documentService.recommendDocumentWorkflow({
+      ...body,
+      format: body.format ? normalizeDocumentCreationFormat(body.format) : '',
+    });
 
     res.json({
       success: true,
@@ -443,6 +479,7 @@ router.post('/plan', validate(planSchema), async (req, res, next) => {
     const body = req.body || {};
     const plan = documentService.buildDocumentPlan({
       ...body,
+      format: body.format ? normalizeDocumentCreationFormat(body.format) : '',
       theme: body.style || body.theme || '',
       designOptionId: body.designOptionId || '',
     });
@@ -464,11 +501,12 @@ router.post('/generate', validate(generateSchema), async (req, res, next) => {
   try {
     const { sessionId = null, templateId, variables, format, options = {} } = req.body;
     const documentService = req.app.locals.documentService;
+    const requestedFormat = normalizeDocumentCreationFormat(format);
     
     let document = await documentService.generateFromTemplate(
       templateId, 
       variables, 
-      format, 
+      requestedFormat, 
       options
     );
     const persistedArtifact = await maybePersistDocumentArtifact(req, document, sessionId, 'document-template');
@@ -487,6 +525,7 @@ router.post('/generate', validate(generateSchema), async (req, res, next) => {
     res.setHeader('Content-Disposition', `attachment; filename="${document.filename}"`);
     res.setHeader('X-Document-Id', document.id);
     res.setHeader('X-Document-Metadata', JSON.stringify(document.metadata));
+    setPersistedArtifactHeaders(res, persistedArtifact);
     
     res.send(document.content);
   } catch (err) {
@@ -510,7 +549,7 @@ router.post('/ai-generate', validate(aiGenerateSchema), async (req, res, next) =
       tone = 'professional',
       length = 'medium',
       style = '',
-      format = 'docx',
+      format = 'html',
       options = {},
       model,
       designOptionId = '',
@@ -520,6 +559,7 @@ router.post('/ai-generate', validate(aiGenerateSchema), async (req, res, next) =
     } = req.body;
 
     const documentService = req.app.locals.documentService;
+    const requestedFormat = normalizeDocumentCreationFormat(format);
     const templateSelection = await buildDocumentTemplateSelection(req.app.locals.templateStore, {
       prompt,
       documentType,
@@ -533,7 +573,7 @@ router.post('/ai-generate', validate(aiGenerateSchema), async (req, res, next) =
       intent,
       useCase,
       packId,
-      format,
+      format: requestedFormat,
       tone,
       length,
       theme: style || options.theme || options.style || '',
@@ -547,7 +587,7 @@ router.post('/ai-generate', validate(aiGenerateSchema), async (req, res, next) =
       packId,
       tone,
       length,
-      format,
+      format: requestedFormat,
       style,
       model,
       designOptionId: designOptionId || options.designOptionId || '',
@@ -570,9 +610,16 @@ router.post('/ai-generate', validate(aiGenerateSchema), async (req, res, next) =
         filename: document.filename,
         mimeType: document.mimeType,
         size: document.size,
+        sizeBytes: document.sizeBytes || document.size || 0,
+        format: document.format || document.metadata?.format || requestedFormat,
+        sessionId: document.sessionId || sessionId || '',
         metadata: document.metadata,
         preview: document.preview,
+        downloadUrl,
+        previewUrl: document.previewUrl || null,
+        sandboxUrl: document.sandboxUrl || null,
       },
+      artifact: persistedArtifact || null,
       productionPlan,
       templateMatches: templateSelection.matches,
       downloadUrl,
@@ -594,18 +641,19 @@ router.post('/expand-outline', validate(expandOutlineSchema), async (req, res, n
       title,
       tone = 'professional',
       length = 'medium',
-      format = 'docx',
+      format = 'html',
       options = {},
       model
     } = req.body;
     
     const documentService = req.app.locals.documentService;
+    const requestedFormat = normalizeDocumentCreationFormat(format);
     
     let document = await documentService.expandOutline(outline, {
       title,
       tone,
       length,
-      format,
+      format: requestedFormat,
       model,
       ...options
     });
@@ -624,8 +672,12 @@ router.post('/expand-outline', validate(expandOutlineSchema), async (req, res, n
         filename: document.filename,
         mimeType: document.mimeType,
         size: document.size,
+        sizeBytes: document.sizeBytes || document.size || 0,
+        format: document.format || document.metadata?.format || requestedFormat,
+        sessionId: document.sessionId || sessionId || '',
         metadata: document.metadata
       },
+      artifact: persistedArtifact || null,
       downloadUrl
     });
   } catch (err) {
@@ -639,13 +691,14 @@ router.post('/expand-outline', validate(expandOutlineSchema), async (req, res, n
  */
 router.post('/generate-from-data', validate(dataGenerateSchema), async (req, res, next) => {
   try {
-    const { sessionId = null, data, templateId, format = 'docx', options = {} } = req.body;
+    const { sessionId = null, data, templateId, format = 'html', options = {} } = req.body;
     const documentService = req.app.locals.documentService;
+    const requestedFormat = normalizeDocumentCreationFormat(format);
     
     let document = await documentService.generateFromData(
       data,
       templateId,
-      format
+      requestedFormat
     );
     const persistedArtifact = await maybePersistDocumentArtifact(req, document, sessionId, 'document-data');
     if (persistedArtifact) {
@@ -661,6 +714,7 @@ router.post('/generate-from-data', validate(dataGenerateSchema), async (req, res
     res.setHeader('Content-Type', document.mimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${document.filename}"`);
     res.setHeader('X-Document-Id', document.id);
+    setPersistedArtifactHeaders(res, persistedArtifact);
     
     res.send(document.content);
   } catch (err) {
@@ -676,9 +730,10 @@ router.post('/assemble', validate(assembleSchema), async (req, res, next) => {
   try {
     const { sessionId = null, sources, format, options = {} } = req.body;
     const documentService = req.app.locals.documentService;
+    const requestedFormat = normalizeDocumentCreationFormat(format);
     
     let document = await documentService.assemble(sources, {
-      format,
+      format: requestedFormat,
       ...options
     });
     const persistedArtifact = await maybePersistDocumentArtifact(req, document, sessionId, 'document-assemble');
@@ -695,6 +750,7 @@ router.post('/assemble', validate(assembleSchema), async (req, res, next) => {
     res.setHeader('Content-Type', document.mimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${document.filename}"`);
     res.setHeader('X-Document-Id', document.id);
+    setPersistedArtifactHeaders(res, persistedArtifact);
     
     res.send(document.content);
   } catch (err) {

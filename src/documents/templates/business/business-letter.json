@@ -6,7 +6,7 @@
   "icon": "📄",
   "tags": ["formal", "correspondence", "professional"],
   "blueprint": "letter",
-  "recommendedFormats": ["docx", "pdf", "html"],
+  "recommendedFormats": ["pdf", "html"],
   "useCases": ["formal outreach", "partner communication", "customer correspondence"],
   
   "variables": [
@@ -113,7 +113,7 @@
     }
   ],
   
-  "formats": ["docx", "pdf", "html"],
+  "formats": ["pdf", "html"],
   
   "aiEnhancement": {
     "enabled": true,

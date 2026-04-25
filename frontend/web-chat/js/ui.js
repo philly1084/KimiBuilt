@@ -7413,7 +7413,6 @@ class UIHelpers {
                 { category: 'Export', icon: 'download', title: 'Export as JSON', description: 'Download conversation as .json file', action: 'export-json' },
                 { category: 'Export', icon: 'download', title: 'Export as Text', description: 'Download conversation as .txt file', action: 'export-txt' },
                 { category: 'Export', icon: 'globe', title: 'Export as HTML', description: 'Download conversation as .html file', action: 'export-html' },
-                { category: 'Export', icon: 'file-type', title: 'Export as Word (DOCX)', description: 'Download conversation as .docx file', action: 'export-docx' },
                 { category: 'Export', icon: 'file-box', title: 'Export as PDF', description: 'Download conversation as .pdf file', action: 'export-pdf' },
             ] : []),
             { category: 'Data', icon: 'upload', title: 'Import Conversation', description: 'Import from DOCX, PDF, HTML, MD, TXT, or JSON', action: 'import-conversations' },
@@ -7485,9 +7484,6 @@ class UIHelpers {
             case 'export-html':
                 window.chatApp?.exportConversation('html');
                 break;
-            case 'export-docx':
-                window.chatApp?.exportConversation('docx');
-                break;
             case 'export-pdf':
                 window.chatApp?.exportConversation('pdf');
                 break;
@@ -7553,7 +7549,7 @@ class UIHelpers {
             { key: '', description: '/model [name] - Change AI model' },
             { key: '', description: '/clear - Clear conversation' },
             { key: '', description: '' },
-            { key: 'Import/Export', description: 'Supports DOCX, PDF, HTML, Markdown, TXT, and JSON formats' },
+            { key: 'Import/Export', description: 'Exports PDF, HTML, Markdown, TXT, and JSON; imports also support DOCX' },
         ];
         
         modal.innerHTML = `

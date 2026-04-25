@@ -6845,6 +6845,19 @@ curl -fsSIL --max-time 20 "https://$host"`;
             }
         }
 
+        if (Array.isArray(chunk.artifacts) && chunk.artifacts.length > 0) {
+            try {
+                chunk.artifacts
+                    .filter((artifact) => artifact?.id && artifact?.downloadUrl)
+                    .forEach((artifact) => {
+                        window.fileManager?.addFile?.(artifact, { sessionId });
+                    });
+                window.artifactManager?.refresh?.();
+            } catch (error) {
+                console.warn('[ChatApp] Failed to add generated artifacts to file manager:', error);
+            }
+        }
+
         const readyDetail = uiHelpers.isTtsAutoPlayEnabled() && uiHelpers.isTtsAvailable()
             ? 'Ready to speak'
             : 'Reply complete';
@@ -7485,10 +7498,15 @@ curl -fsSIL --max-time 20 "https://$host"`;
     }
 
     // ============================================
-    // Export - Enhanced with DOCX and PDF support
+    // Export - Enhanced with PDF support
     // ============================================
 
     async exportConversation(format) {
+        format = String(format || '').trim().toLowerCase();
+        if (format === 'docx' || format === 'doc' || format === 'word') {
+            format = 'html';
+        }
+
         const sessionId = sessionManager.currentSessionId;
         if (!sessionId) {
             uiHelpers.showToast('No conversation to export', 'warning');
@@ -7504,14 +7522,14 @@ curl -fsSIL --max-time 20 "https://$host"`;
         }
         
         // Show progress for formats that need processing
-        const showProgress = format === 'docx' || format === 'pdf';
+        const showProgress = format === 'pdf';
         
         try {
             const result = await window.importExportManager.exportConversation(format, messages, session);
             
             // Download the file
             if (result.blob) {
-                // For blob-based exports (DOCX, PDF)
+                // For blob-based exports (PDF)
                 this.downloadBlob(result.blob, result.filename, result.mimeType);
             } else {
                 // For text-based exports

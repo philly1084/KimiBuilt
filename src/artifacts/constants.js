@@ -14,7 +14,6 @@ const SUPPORTED_UPLOAD_FORMATS = new Set([
 const SUPPORTED_GENERATION_FORMATS = new Set([
     'xlsx',
     'pdf',
-    'docx',
     'pptx',
     'html',
     'xml',

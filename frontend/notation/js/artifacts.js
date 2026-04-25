@@ -111,7 +111,6 @@
                     <option value="">No file output</option>
                     <option value="html">HTML</option>
                     <option value="pdf">PDF</option>
-                    <option value="docx">DOCX</option>
                     <option value="xml">XML</option>
                     <option value="mermaid">Mermaid</option>
                     <option value="xlsx">XLSX</option>

@@ -133,7 +133,7 @@ function buildArtifactCompletionMessage(outputFormat, artifact) {
         );
     const formatLabel = {
         pdf: 'PDF',
-        docx: 'Word document',
+        docx: 'HTML document',
         html: isSiteBundle ? 'HTML site bundle' : 'HTML document',
         xml: 'XML file',
         mermaid: 'Mermaid diagram',
@@ -406,7 +406,7 @@ function inferRequestedOutputFormat(text = '') {
     }
 
     if (/\b(docx|word document)\b/.test(normalized) && hasArtifactIntent) {
-        return 'docx';
+        return 'html';
     }
 
     if (/\bxml\b/.test(normalized) && hasArtifactIntent) {
@@ -575,7 +575,7 @@ function shouldPreGenerateImagesForArtifactRequest({
     outputFormat = null,
 } = {}) {
     const normalizedFormat = normalizeFormat(outputFormat);
-    if (!['pdf', 'docx', 'html'].includes(normalizedFormat)) {
+    if (!['pdf', 'html'].includes(normalizedFormat)) {
         return false;
     }
 

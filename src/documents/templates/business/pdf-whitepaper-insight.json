@@ -9,8 +9,8 @@
   "packId": "pdf-publication",
   "intent": "pdf",
   "useCases": ["pdf", "whitepaper", "industry report"],
-  "recommendedFormats": ["pdf", "docx"],
-  "formats": ["pdf", "docx"],
+  "recommendedFormats": ["pdf"],
+  "formats": ["pdf"],
   "requiredVariables": ["title", "executive_summary", "analysis", "recommendations"],
   "variables": {
     "title": { "type": "text", "label": "Title", "required": true },

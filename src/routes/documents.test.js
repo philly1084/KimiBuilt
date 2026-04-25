@@ -88,6 +88,14 @@ describe('/api/documents route', () => {
         },
       ]),
       getTemplateAvailableFormats: jest.fn().mockReturnValue(['pptx', 'html']),
+      buildTemplateMetadata: jest.fn((template) => ({
+        id: template.id,
+        name: template.name,
+        category: template.category,
+        description: template.description,
+        formats: ['pptx', 'html'],
+      })),
+      summarizePackSuggestions: jest.fn().mockReturnValue([]),
       templateEngine: {
         getCategories: jest.fn().mockReturnValue(['creative']),
       },
@@ -163,10 +171,10 @@ describe('/api/documents route', () => {
       }),
       aiGenerate: jest.fn().mockResolvedValue({
         id: 'doc-1',
-        filename: 'brief.docx',
-        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        filename: 'brief.html',
+        mimeType: 'text/html',
         size: 1234,
-        metadata: {},
+        metadata: { format: 'html' },
         preview: [],
       }),
     };
@@ -189,6 +197,7 @@ describe('/api/documents route', () => {
     expect(documentService.aiGenerate).toHaveBeenCalledWith(
       'Write an executive brief for Q2 priorities',
       expect.objectContaining({
+        format: 'html',
         templateContext: expect.stringContaining('[Reference pattern library]'),
       }),
     );

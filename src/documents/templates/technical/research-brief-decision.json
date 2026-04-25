@@ -9,8 +9,8 @@
   "packId": "research-suite",
   "intent": "research",
   "useCases": ["research", "decision brief", "research summary"],
-  "recommendedFormats": ["html", "pdf", "docx", "md"],
-  "formats": ["html", "pdf", "docx", "md"],
+  "recommendedFormats": ["html", "pdf", "md"],
+  "formats": ["html", "pdf", "md"],
   "requiredVariables": ["title", "audience", "top_findings", "recommendation"],
   "variables": {
     "title": { "type": "text", "label": "Title", "required": true },

@@ -6,7 +6,7 @@
   "icon": "📋",
   "tags": ["meeting", "notes", "minutes", "documentation"],
   "blueprint": "memo",
-  "recommendedFormats": ["docx", "pdf", "html", "md"],
+  "recommendedFormats": ["pdf", "html", "md"],
   "useCases": ["meeting minutes", "decision logs", "action-item capture"],
   
   "variables": [
@@ -98,7 +98,7 @@
     }
   ],
   
-  "formats": ["docx", "pdf", "html", "md"],
+  "formats": ["pdf", "html", "md"],
   
   "aiEnhancement": {
     "enabled": true,

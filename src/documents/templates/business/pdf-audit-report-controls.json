@@ -9,8 +9,8 @@
   "packId": "pdf-publication",
   "intent": "pdf",
   "useCases": ["pdf", "audit report", "controls review"],
-  "recommendedFormats": ["pdf", "docx"],
-  "formats": ["pdf", "docx"],
+  "recommendedFormats": ["pdf"],
+  "formats": ["pdf"],
   "requiredVariables": ["title", "scope", "findings", "remediation"],
   "variables": {
     "title": { "type": "text", "label": "Title", "required": true },

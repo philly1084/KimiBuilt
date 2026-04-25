@@ -253,7 +253,7 @@ describe('workload request builder', () => {
         expect(canonical.stages).toHaveLength(7);
     });
 
-    test('downgrades brutal builder docx requests to pdf with a warning', () => {
+    test('maps brutal builder docx requests to html output', () => {
         const canonical = buildCanonicalWorkloadAction({
             request: 'Use brutal builder to make a DOCX executive brief for the launch plan and take a couple passes quickly.',
         }, {
@@ -265,14 +265,13 @@ describe('workload request builder', () => {
             action: 'create',
             metadata: expect.objectContaining({
                 brutalBuilderEnabled: true,
-                requestedOutputFormat: 'docx',
-                resolvedOutputFormat: 'pdf',
-                defaultOutputFormat: 'pdf',
-                outputFormatWarnings: [expect.stringContaining('downgraded it to PDF')],
+                requestedOutputFormat: 'html',
+                resolvedOutputFormat: 'html',
+                defaultOutputFormat: 'html',
             }),
         }));
         expect(canonical.stages[0]).toEqual(expect.objectContaining({
-            outputFormat: 'pdf',
+            outputFormat: 'html',
         }));
     });
 });

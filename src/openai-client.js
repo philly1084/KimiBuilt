@@ -1619,7 +1619,7 @@ function inferRequestedOutputFormatForPreflight(text = '') {
     }
 
     if (/\b(docx|word document)\b/.test(normalized) && hasArtifactIntent) {
-        return 'docx';
+        return 'html';
     }
 
     if (/\bxml\b/.test(normalized) && hasArtifactIntent) {
@@ -1680,7 +1680,7 @@ function shouldPreGenerateImagesForArtifactRequestForPreflight({
     text = '',
     outputFormat = null,
 } = {}) {
-    if (!['pdf', 'docx', 'html'].includes(String(outputFormat || '').trim().toLowerCase())) {
+    if (!['pdf', 'html'].includes(String(outputFormat || '').trim().toLowerCase())) {
         return false;
     }
 
@@ -2760,7 +2760,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
 
     if (automaticTools.some((entry) => ['image-generate', 'image-search-unsplash', 'image-from-url'].includes(entry.id))) {
         guidance.push('- When verified image URLs are available from tools, embed those directly with markdown image syntax instead of fabricating SVG placeholders, overlays, or HTML mockups.');
-        guidance.push('- For HTML, PDF, and DOCX document requests that call for real images, prefer `image-search-unsplash` and `image-from-url` over `image-generate`, save the verified references, and reuse them throughout the document when the user asks for visuals.');
+        guidance.push('- For HTML and PDF document requests that call for real images, prefer `image-search-unsplash` and `image-from-url` over `image-generate`, save the verified references, and reuse them throughout the document when the user asks for visuals.');
         guidance.push('- For research-backed reports, news pages, and current-events documents, gather grounded sources with `web-search` and `web-fetch`, then source real visuals with `image-search-unsplash` or `image-from-url` before composing the document.');
     }
 

@@ -95,6 +95,64 @@ class DocumentCreator {
     }
   }
 
+  normalizeCreationFormat(format = 'html') {
+    const normalized = String(format || 'html').trim().toLowerCase();
+    if (!normalized || normalized === 'docx' || normalized === 'doc' || normalized === 'word') {
+      return 'html';
+    }
+    if (normalized === 'markdown') {
+      return 'md';
+    }
+    return normalized;
+  }
+
+  addCreatedArtifactToFileManager(artifact = null, sessionId = '') {
+    if (!artifact?.id || !artifact?.downloadUrl) {
+      return;
+    }
+
+    try {
+      window.fileManager?.addFile?.({
+        ...artifact,
+        sessionId: artifact.sessionId || sessionId || '',
+        format: this.normalizeCreationFormat(artifact.format || artifact.metadata?.format || ''),
+      }, { sessionId: sessionId || artifact.sessionId || '' });
+    } catch (error) {
+      console.warn('[DocumentCreator] Failed to add document artifact to file manager:', error);
+    }
+  }
+
+  buildArtifactFromDocumentResponse(response, fallback = {}) {
+    const id = response.headers.get('X-Artifact-Id') || '';
+    if (!id) {
+      return null;
+    }
+
+    const format = this.normalizeCreationFormat(
+      response.headers.get('X-Artifact-Format')
+      || fallback.format
+      || '',
+    );
+    const filename = response.headers.get('X-Artifact-Filename')
+      || fallback.filename
+      || `document.${format}`;
+
+    return {
+      id,
+      filename,
+      format,
+      mimeType: response.headers.get('X-Artifact-Mime-Type') || fallback.mimeType || response.headers.get('Content-Type') || 'text/html',
+      downloadUrl: response.headers.get('X-Artifact-Download-Url') || fallback.downloadUrl || '',
+      previewUrl: response.headers.get('X-Artifact-Preview-Url') || fallback.previewUrl || '',
+      sessionId: response.headers.get('X-Artifact-Session-Id') || fallback.sessionId || '',
+      sizeBytes: Number(response.headers.get('X-Artifact-Size-Bytes') || fallback.sizeBytes || 0),
+      metadata: {
+        ...(fallback.metadata || {}),
+        format,
+      },
+    };
+  }
+
   async init() {
     // Load templates on init
     await this.loadTemplates();
@@ -138,10 +196,10 @@ class DocumentCreator {
    */
   getDefaultTemplates() {
     return [
-      { id: 'business-letter', name: 'Business Letter', category: 'business', icon: '📄', formats: ['docx', 'pdf'] },
-      { id: 'resume-modern', name: 'Resume', category: 'personal', icon: '👤', formats: ['docx', 'pdf'] },
-      { id: 'meeting-notes', name: 'Meeting Notes', category: 'business', icon: '📋', formats: ['docx', 'pdf', 'md'] },
-      { id: 'project-proposal', name: 'Project Proposal', category: 'business', icon: '📊', formats: ['docx', 'pdf'] }
+      { id: 'business-letter', name: 'Business Letter', category: 'business', icon: '📄', formats: ['html', 'pdf'] },
+      { id: 'resume-modern', name: 'Resume', category: 'personal', icon: '👤', formats: ['html', 'pdf'] },
+      { id: 'meeting-notes', name: 'Meeting Notes', category: 'business', icon: '📋', formats: ['html', 'pdf', 'md'] },
+      { id: 'project-proposal', name: 'Project Proposal', category: 'business', icon: '📊', formats: ['html', 'pdf'] }
     ];
   }
 
@@ -204,7 +262,6 @@ class DocumentCreator {
                 <option value="">Any format</option>
                 <option value="html">HTML</option>
                 <option value="pdf">PDF</option>
-                <option value="docx">DOCX</option>
                 <option value="md">Markdown</option>
                 <option value="pptx">PPTX</option>
               </select>
@@ -318,9 +375,8 @@ class DocumentCreator {
               <div class="doc-option-group">
                 <label>Format:</label>
                 <select id="doc-ai-format">
-                  <option value="docx">Word (DOCX)</option>
-                  <option value="pdf">PDF</option>
                   <option value="html">HTML / Website</option>
+                  <option value="pdf">PDF</option>
                   <option value="pptx">Slides (PPTX)</option>
                 </select>
               </div>
@@ -490,7 +546,7 @@ class DocumentCreator {
 
     const prompt = document.getElementById('doc-ai-prompt')?.value?.trim() || '';
     const documentType = document.getElementById('doc-ai-type')?.value || '';
-    const format = document.getElementById('doc-ai-format')?.value || '';
+    const format = this.normalizeCreationFormat(document.getElementById('doc-ai-format')?.value || 'html');
     const tone = document.getElementById('doc-ai-tone')?.value || 'professional';
     const length = document.getElementById('doc-ai-length')?.value || 'medium';
     const style = document.getElementById('doc-ai-style')?.value || '';
@@ -567,8 +623,12 @@ class DocumentCreator {
         <span class="doc-pack-meta">${pack.templateCount || 0} templates</span>
       </button>
     `).join('');
-    const formatButtons = (plan.recommendedFormats || []).map((entry) => `
-      <button type="button" class="doc-plan-format-chip${entry === plan.recommendedFormat ? ' is-active' : ''}" onclick="documentCreator.applyRecommendedFormat('${entry}')">
+    const recommendedFormats = Array.from(new Set((plan.recommendedFormats || [])
+      .map((entry) => this.normalizeCreationFormat(entry))
+      .filter(Boolean)));
+    const recommendedFormat = this.normalizeCreationFormat(plan.recommendedFormat || recommendedFormats[0] || 'html');
+    const formatButtons = recommendedFormats.map((entry) => `
+      <button type="button" class="doc-plan-format-chip${entry === recommendedFormat ? ' is-active' : ''}" onclick="documentCreator.applyRecommendedFormat('${entry}')">
         ${entry.toUpperCase()}
       </button>
     `).join('');
@@ -594,7 +654,7 @@ class DocumentCreator {
       <p class="doc-plan-summary">${plan.blueprint?.goal || ''}</p>
       <div class="doc-plan-meta">
         <span><strong>Blueprint:</strong> ${plan.blueprint?.label || plan.inferredType || 'document'}</span>
-        <span><strong>Suggested format:</strong> ${String(plan.recommendedFormat || '').toUpperCase()}</span>
+        <span><strong>Suggested format:</strong> ${String(recommendedFormat || '').toUpperCase()}</span>
         ${selectedDesignOption ? `<span><strong>Layout direction:</strong> ${selectedDesignOption.label}</span>` : ''}
       </div>
       <div class="doc-plan-format-row">${formatButtons}</div>
@@ -684,7 +744,7 @@ class DocumentCreator {
   }
 
   selectTemplateSurfaceFormat(format = '') {
-    this.selectedTemplateFormat = format;
+    this.selectedTemplateFormat = format ? this.normalizeCreationFormat(format) : '';
     this.selectedPackId = '';
     this.refreshTemplateCatalog();
   }
@@ -697,7 +757,7 @@ class DocumentCreator {
   applyRecommendedFormat(format) {
     const formatSelect = document.getElementById('doc-ai-format');
     if (formatSelect) {
-      formatSelect.value = format;
+      formatSelect.value = this.normalizeCreationFormat(format);
       this.scheduleProductionPlanRefresh();
     }
   }
@@ -931,9 +991,9 @@ class DocumentCreator {
     const formats = Array.from(new Set([
       ...(Array.isArray(this.currentTemplate.formats) ? this.currentTemplate.formats : []),
       ...(Array.isArray(this.currentTemplate.recommendedFormats) ? this.currentTemplate.recommendedFormats : []),
-    ]));
-    const formatLabels = { docx: 'Word', pdf: 'PDF', html: 'HTML', md: 'Markdown', pptx: 'PowerPoint' };
-    const availableFormats = formats.length > 0 ? formats : ['docx'];
+    ].map((format) => this.normalizeCreationFormat(format)).filter(Boolean)));
+    const formatLabels = { pdf: 'PDF', html: 'HTML', md: 'Markdown', pptx: 'PowerPoint' };
+    const availableFormats = formats.length > 0 ? formats : ['html'];
     
     container.innerHTML = availableFormats.map((format, index) => `
       <label class="doc-format-option">
@@ -979,7 +1039,7 @@ class DocumentCreator {
     }
     
     // Get selected format
-    const format = document.querySelector('input[name="doc-format"]:checked')?.value || 'docx';
+    const format = this.normalizeCreationFormat(document.querySelector('input[name="doc-format"]:checked')?.value || 'html');
     
     // Show loading
     this.showLoading('Generating document...');
@@ -1014,6 +1074,14 @@ class DocumentCreator {
       
       // Download the file
       const blob = await response.blob();
+      const artifact = this.buildArtifactFromDocumentResponse(response, {
+        filename,
+        format,
+        mimeType: blob.type || response.headers.get('Content-Type') || '',
+        sessionId,
+        sizeBytes: blob.size,
+      });
+      this.addCreatedArtifactToFileManager(artifact, sessionId);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -1048,7 +1116,7 @@ class DocumentCreator {
     const tone = document.getElementById('doc-ai-tone').value;
     const length = document.getElementById('doc-ai-length').value;
     const style = document.getElementById('doc-ai-style').value;
-    const format = document.getElementById('doc-ai-format').value;
+    const format = this.normalizeCreationFormat(document.getElementById('doc-ai-format').value || 'html');
     
     this.showLoading('AI is generating your document...');
     
@@ -1085,6 +1153,14 @@ class DocumentCreator {
       const data = await response.json();
       
       if (data.success) {
+        const createdArtifact = {
+          ...(data.artifact || data.document || {}),
+          downloadUrl: data.artifact?.downloadUrl || data.document?.downloadUrl || data.downloadUrl || '',
+          sessionId: data.artifact?.sessionId || data.document?.sessionId || sessionId || '',
+          format: this.normalizeCreationFormat(data.artifact?.format || data.document?.format || data.document?.metadata?.format || format),
+        };
+        this.addCreatedArtifactToFileManager(createdArtifact, sessionId);
+
         // Fetch and download the document
         const docResponse = await fetch(data.downloadUrl);
         const blob = await docResponse.blob();
@@ -1092,14 +1168,14 @@ class DocumentCreator {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = data.document.filename;
+        a.download = data.document.filename || createdArtifact.filename || `document.${format}`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
         
         await this.refreshArtifactInventory();
-        this.showSuccess(`Document created: ${data.document.filename}`);
+        this.showSuccess(`Document created: ${data.document.filename || createdArtifact.filename || `document.${format}`}`);
         setTimeout(() => this.closeModal(), 1500);
       }
       
@@ -1202,7 +1278,8 @@ class DocumentCreator {
   /**
    * Export chat conversation as formatted document
    */
-  async exportChatAsDocument(format = 'docx') {
+  async exportChatAsDocument(format = 'html') {
+    format = this.normalizeCreationFormat(format);
     const messages = window.sessionManager?.getMessages?.(window.sessionManager.currentSessionId) || [];
     const session = window.sessionManager?.getCurrentSession?.();
     
@@ -1224,6 +1301,7 @@ class DocumentCreator {
             sessionId: session?.id,
             messages: messages
           }],
+          sessionId: session?.id,
           format,
           options: {
             title: session?.title || 'Conversation',
@@ -1238,6 +1316,15 @@ class DocumentCreator {
       }
       
       const blob = await response.blob();
+      const artifact = this.buildArtifactFromDocumentResponse(response, {
+        filename: window.uiHelpers?.createUniqueFilename?.(session?.title || 'conversation', format, 'conversation')
+          || `conversation.${format}`,
+        format,
+        mimeType: blob.type || response.headers.get('Content-Type') || '',
+        sessionId: session?.id || '',
+        sizeBytes: blob.size,
+      });
+      this.addCreatedArtifactToFileManager(artifact, session?.id || '');
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

@@ -40,7 +40,7 @@ const {
     renderInteractiveArtifactInstructions,
     shouldUseInteractiveHtmlArtifact,
 } = require('./artifact-experience');
-const MULTI_PASS_DOCUMENT_FORMATS = new Set(['html', 'pdf', 'docx']);
+const MULTI_PASS_DOCUMENT_FORMATS = new Set(['html', 'pdf']);
 const DEFAULT_DOCUMENT_IMAGE_TARGET = 20;
 const COMPOSITION_PLANNING_PATTERNS = [
     /\bpage layout plan\b/i,
@@ -838,7 +838,7 @@ function buildDocumentImageInstructions() {
         `When the user asks for real or image-rich output, reuse as many as ${DEFAULT_DOCUMENT_IMAGE_TARGET} verified image references across the document before falling back to text-only sections.`,
         'For news, research, latest, current-events, and source-backed reports, prefer real sourced photography and fetched online image references over AI-generated illustrations unless the user explicitly asks for generated art.',
         'Prefer standard HTML <img src="..."> elements over background-image-only treatments when the image is meaningful content.',
-        'For HTML, PDF, and DOCX designs, distribute real images throughout the document instead of clustering them in a single appendix or final page.',
+        'For HTML and PDF designs, distribute real images throughout the document instead of clustering them in a single appendix or final page.',
         'Use a strong visual rhythm: opening hero image, repeated section visuals, image cards, and galleries when enough verified image URLs exist.',
         'If there are enough verified images, include visuals in most major sections rather than only one or two isolated slots.',
         'Do not reuse the same image URL across multiple major sections when multiple verified image references are available. Use distinct images first and only repeat an image after the pool is exhausted.',
@@ -1909,7 +1909,7 @@ class ArtifactService {
             ].filter(Boolean).join('\n\n');
         }
 
-        if (normalizedFormat === 'html' || normalizedFormat === 'pdf' || normalizedFormat === 'docx') {
+        if (normalizedFormat === 'html' || normalizedFormat === 'pdf') {
             return [
                 base,
                 buildDocumentImageInstructions(),
@@ -1919,7 +1919,7 @@ class ArtifactService {
                 'Treat any provided template or sample as reference material, not copy to preserve verbatim.',
                 normalizedFormat === 'html'
                     ? 'For HTML outputs, add web-document affordances such as sticky wayfinding, details/summary disclosures, source cards, tasteful CSS motion, and responsive controls when they improve comprehension.'
-                    : 'For PDF and DOCX outputs, keep the HTML print-safe while still visually composed.',
+                    : 'For PDF outputs, keep the HTML print-safe while still visually composed.',
             ].filter(Boolean).join('\n\n');
         }
         if (normalizedFormat === 'xml') {
@@ -2064,7 +2064,7 @@ class ArtifactService {
             'Include one H1 title and then H2/H3 sections as appropriate.',
             'Preserve the section order and cover all requested content.',
             'Use professional formatting suitable for business reports, briefs, plans, and polished notes.',
-            'Keep the layout printer-friendly because the HTML may be rendered to PDF or DOCX.',
+            'Keep the layout printer-friendly because the HTML may be rendered to PDF.',
             'Use CSS variables, a deliberate theme, and section-level hierarchy so the result feels designed rather than default.',
             'Create a strong opening hero, visible section chrome, and alternating density across sections.',
             'Do not let every section reuse the same card treatment, paragraph width, or transition language.',

@@ -3,7 +3,6 @@
  * Handles template-based generation, AI-powered generation, and document assembly
  */
 
-const { DocxGenerator } = require('./generators/docx-generator');
 const { PdfGenerator } = require('./generators/pdf-generator');
 const { PptxGenerator } = require('./generators/pptx-generator');
 const { XlsxGenerator } = require('./generators/xlsx-generator');
@@ -34,7 +33,7 @@ const TEMPLATE_PACK_CATALOG = {
     label: 'Research suite',
     intent: 'research',
     useCase: 'research',
-    formats: ['html', 'pdf', 'docx', 'md'],
+    formats: ['html', 'pdf', 'md'],
     rationale: 'Evidence-first artifacts with citations, assumptions, and decision-ready synthesis.',
   },
   'html-dashboard': {
@@ -233,7 +232,6 @@ function summarizePackRationale(entries = []) {
 class DocumentService {
   constructor(openaiClient) {
     this.generators = {
-      docx: new DocxGenerator(),
       pdf: new PdfGenerator(),
       pptx: new PptxGenerator(),
       xlsx: new XlsxGenerator(),
@@ -249,7 +247,7 @@ class DocumentService {
    * Generate a document from a template
    * @param {string} templateId - Template identifier
    * @param {Object} variables - Template variables
-   * @param {string} format - Output format (docx, pdf, html, md)
+   * @param {string} format - Output format (html, pdf, md, pptx, xlsx)
    * @param {Object} options - Generation options
    * @returns {Promise<Object>} Generated document
    */
@@ -259,7 +257,7 @@ class DocumentService {
       throw new Error(`Template not found: ${templateId}`);
     }
 
-    const normalizedFormat = String(format || '').trim().toLowerCase();
+    const normalizedFormat = this.normalizeCreationFormat(format);
     const formatCompatibility = this.validateTemplateFormatCompatibility(template, normalizedFormat);
     if (!formatCompatibility.supported) {
       throw new Error(formatCompatibility.error);
@@ -281,7 +279,7 @@ class DocumentService {
 
     // Generate document
     const document = await this.renderDocument({
-      format,
+      format: normalizedFormat,
       template: renderableTemplate,
       title: template.name,
       options,
@@ -289,10 +287,10 @@ class DocumentService {
 
     return this.storeGeneratedDocument({
       document,
-      filename: this.generateFilename(template.name, format),
+      filename: this.generateFilename(template.name, normalizedFormat),
       metadata: {
         template: templateId,
-        format,
+        format: normalizedFormat,
         generatedAt: new Date().toISOString(),
         ...document.metadata
       },
@@ -306,7 +304,7 @@ class DocumentService {
    * @returns {Promise<Object>} Generated document
    */
   async aiGenerate(prompt, options = {}) {
-    const format = String(options.format || 'docx').toLowerCase();
+    const format = this.normalizeCreationFormat(options.format || 'html');
     const designPlan = options.designPlan || this.buildDocumentPlan({
       prompt,
       documentType: options.documentType,
@@ -372,7 +370,7 @@ class DocumentService {
    * @returns {Promise<Object>} Generated document
    */
   async expandOutline(outline, options = {}) {
-    const format = options.format || 'docx';
+    const format = this.normalizeCreationFormat(options.format || 'html');
 
     // Expand outline using AI
     const expanded = await this.aiGenerator.expandOutline(outline, options);
@@ -429,7 +427,7 @@ class DocumentService {
     // TODO: Implement document assembly from multiple sources
     // For now, combine text sources into a single document
     const combined = sources.map(s => s.content || s.text || '').join('\n\n');
-    const format = options.format || 'docx';
+    const format = this.normalizeCreationFormat(options.format || 'html');
 
     const document = await this.renderDocument({
       format,
@@ -680,7 +678,7 @@ class DocumentService {
     }
 
     if (intent === 'research') {
-      return ['html', 'pdf', 'docx', 'md'];
+      return ['html', 'pdf', 'md'];
     }
 
     if (intent === 'dashboard') {
@@ -688,11 +686,11 @@ class DocumentService {
     }
 
     if (intent === 'html') {
-      return ['html', 'docx', 'md'];
+      return ['html', 'md'];
     }
 
     if (intent === 'pdf') {
-      return ['pdf', 'docx'];
+      return ['pdf', 'html'];
     }
 
     if (normalizedType === 'presentation' || normalizedType === 'pitch-deck') {
@@ -700,10 +698,21 @@ class DocumentService {
     }
 
     if (normalizedType === 'report' || normalizedType === 'data-story' || normalizedType === 'executive-brief') {
-      return ['pdf', 'docx', 'html', 'md'];
+      return ['pdf', 'html', 'md'];
     }
 
-    return ['docx', 'pdf', 'html', 'md'];
+    return ['html', 'pdf', 'md'];
+  }
+
+  normalizeCreationFormat(format = 'html') {
+    const normalized = String(format || 'html').trim().toLowerCase();
+    if (!normalized || normalized === 'docx' || normalized === 'doc' || normalized === 'word') {
+      return 'html';
+    }
+    if (normalized === 'markdown') {
+      return 'md';
+    }
+    return normalized;
   }
 
   resolveTemplatePackId(template = {}) {
@@ -838,7 +847,7 @@ class DocumentService {
 
   getPipelineForBlueprint(documentType = '', format = '') {
     const normalizedType = normalizeDocumentType(documentType);
-    const normalizedFormat = String(format || '').trim().toLowerCase();
+    const normalizedFormat = format ? this.normalizeCreationFormat(format) : '';
 
     if (normalizedFormat === 'pptx' || normalizedType === 'presentation' || normalizedType === 'pitch-deck' || normalizedType === 'website-slides') {
       return 'presentation';
@@ -1277,11 +1286,10 @@ class DocumentService {
    */
   getSupportedFormats() {
     return [
-      { id: 'docx', name: 'Word Document', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', extension: '.docx' },
+      { id: 'html', name: 'HTML Document', mimeType: 'text/html', extension: '.html' },
       { id: 'pdf', name: 'PDF Document', mimeType: 'application/pdf', extension: '.pdf' },
       { id: 'pptx', name: 'PowerPoint', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', extension: '.pptx' },
       { id: 'xlsx', name: 'Excel Workbook', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', extension: '.xlsx' },
-      { id: 'html', name: 'HTML Document', mimeType: 'text/html', extension: '.html' },
       { id: 'md', name: 'Markdown', mimeType: 'text/markdown', extension: '.md' }
     ];
   }
@@ -1398,7 +1406,7 @@ class DocumentService {
   }
 
   async renderDocument({ format, template = null, content = null, title = 'document', options = {}, rawText = '' }) {
-    const normalizedFormat = String(format || 'docx').toLowerCase();
+    const normalizedFormat = this.normalizeCreationFormat(format || 'html');
     const structuredContent = content || this.templateToContent(template, options);
     const designPlan = buildDocumentDesignPlan({
       content: structuredContent,
@@ -1865,7 +1873,9 @@ class DocumentService {
   getTemplateAvailableFormats(template = {}) {
     const formats = Array.isArray(template.formats) ? template.formats : [];
     const recommendedFormats = Array.isArray(template.recommendedFormats) ? template.recommendedFormats : [];
-    return Array.from(new Set([...formats, ...recommendedFormats].filter(Boolean)));
+    return Array.from(new Set([...formats, ...recommendedFormats]
+      .map((format) => this.normalizeCreationFormat(format))
+      .filter(Boolean)));
   }
 
   escapeHtml(value = '') {
