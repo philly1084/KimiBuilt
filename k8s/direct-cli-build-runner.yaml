@@ -248,12 +248,16 @@ spec:
         fsGroupChangePolicy: OnRootMismatch
       initContainers:
         - name: install-kubectl
-          image: rancher/kubectl:v1.30.4
+          image: bitnami/kubectl:1.30.4
           imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 0
           command:
             - /bin/sh
-            - -c
-            - cp "$(command -v kubectl)" /tools/kubectl && chmod 0755 /tools/kubectl
+            - -ec
+            - |
+              cp /opt/bitnami/kubectl/bin/kubectl /tools/kubectl
+              chmod 0755 /tools/kubectl
           volumeMounts:
             - name: tools
               mountPath: /tools
