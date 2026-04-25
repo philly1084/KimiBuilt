@@ -2108,6 +2108,60 @@ class UIHelpers {
         });
     }
 
+    normalizeHumanReadableMarkdownSegment(source = '') {
+        let text = String(source || '').replace(/\r\n?/g, '\n');
+        if (!text.trim()) {
+            return text;
+        }
+
+        const sectionLabels = [
+            'Short answer',
+            'Summary',
+            'Recommendation',
+            'Result',
+            'Why it matters',
+            'What changed',
+            'Details',
+            'Plan',
+            'Steps',
+            'Next step',
+            'Next steps',
+            'Caveat',
+            'Note',
+            'Verification',
+        ];
+        const labelPattern = new RegExp(`([^\\n])\\s+(?=(${sectionLabels.map((label) => this.escapeRegExp(label)).join('|')}):\\s)`, 'gi');
+
+        text = text
+            .replace(/\u2022/g, '-')
+            .replace(/(^|\s)(\d{1,2})\)\s/g, '$1$2. ')
+            .replace(labelPattern, '$1\n\n');
+
+        const hasMarkdownStructure = /(^|\n)\s*(#{1,6}\s|[-*]\s|\d+\.\s|>|```|\|.+\|)/m.test(text);
+        const paragraphs = text.split(/\n{2,}/);
+        if (hasMarkdownStructure || paragraphs.length > 1 || text.trim().length < 520) {
+            return text.trim();
+        }
+
+        const sentences = text.trim().split(/(?<=[.!?])\s+(?=[A-Z0-9])/);
+        const rebuilt = [];
+        let paragraph = '';
+        sentences.forEach((sentence) => {
+            const candidate = paragraph ? `${paragraph} ${sentence}` : sentence;
+            if (candidate.length > 420 && paragraph) {
+                rebuilt.push(paragraph);
+                paragraph = sentence;
+            } else {
+                paragraph = candidate;
+            }
+        });
+        if (paragraph) {
+            rebuilt.push(paragraph);
+        }
+
+        return (rebuilt.length > 1 ? rebuilt.join('\n\n') : text).trim();
+    }
+
     normalizeStructuredAssistantMarkdown(source = '') {
         return String(source || '')
             .split(/(```[\s\S]*?```)/g)
@@ -2116,7 +2170,9 @@ class UIHelpers {
                     return segment;
                 }
 
-                return this.restoreFlattenedMarkdownBlocks(segment);
+                return this.restoreFlattenedMarkdownBlocks(
+                    this.normalizeHumanReadableMarkdownSegment(segment),
+                );
             })
             .join('');
     }
@@ -5540,6 +5596,10 @@ class UIHelpers {
         }
 
         if (/^working in background\b/i.test(content)) {
+            return false;
+        }
+
+        if (/^\s*(?:```(?:html)?\s*)?(?:html\s+)?(?:<!doctype\s+html\b|<html\b)/i.test(content)) {
             return false;
         }
 

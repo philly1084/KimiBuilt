@@ -93,6 +93,26 @@ describe('buildWebChatSessionMessages', () => {
         expect(messages[1].metadata.displayContent).toBe('Created calgary-guide.html. Preview and Download below.');
     });
 
+    test('replaces raw generated HTML with the artifact summary when an HTML file was created', () => {
+        const messages = buildWebChatSessionMessages({
+            userText: 'Make a dogs photo gallery.',
+            assistantText: 'html <!DOCTYPE html><html><head><title>Dogs</title></head><body><main>Gallery</main></body></html>',
+            artifacts: [{
+                id: 'artifact-html-dogs',
+                filename: 'dogs-photo-gallery.html',
+                format: 'html',
+                downloadUrl: '/api/documents/artifact-html-dogs/download',
+                previewUrl: '/api/artifacts/artifact-html-dogs/preview',
+            }],
+            timestamp: '2026-04-13T12:15:00.000Z',
+        });
+
+        expect(messages).toHaveLength(2);
+        expect(messages[1].content).toBe('Created dogs-photo-gallery.html. Preview and Download below.');
+        expect(messages[1].metadata.displayContent).toBe('Created dogs-photo-gallery.html. Preview and Download below.');
+        expect(messages[1].content).not.toContain('<!DOCTYPE html>');
+    });
+
     test('stores checkpoint fallback display content as a bare survey fence without duplicated prose', () => {
         const messages = buildWebChatSessionMessages({
             userText: 'Please redesign the page.',

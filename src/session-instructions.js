@@ -71,6 +71,38 @@ function buildRemoteWorkingStateInstructions(session = null) {
     return lines.join('\n');
 }
 
+function buildHumanCentricResponseInstructions({
+    clientSurface = '',
+    taskType = '',
+} = {}) {
+    const surface = String(clientSurface || '').trim().toLowerCase();
+    const mode = String(taskType || '').trim().toLowerCase();
+    const isChatSurface = ['chat', 'web-chat', 'cli', 'web-cli'].includes(surface)
+        || (!surface && (!mode || mode === 'chat'))
+        || mode === 'chat';
+    if (!isChatSurface) {
+        return '';
+    }
+
+    const surfaceNote = surface === 'cli' || surface === 'web-cli'
+        ? 'The answer will be rendered in a terminal Markdown view, so avoid very wide tables and keep lists compact.'
+        : 'The answer will be rendered in a web chat Markdown view, so use semantic Markdown that parses cleanly.';
+
+    return [
+        '[Human-facing response format]',
+        'Write for a person reading conversationally, not for a raw transcript parser.',
+        surfaceNote,
+        '- Start with the direct answer, recommendation, or current result in 1-3 short sentences.',
+        '- Use short Markdown sections only when the answer has multiple parts; prefer descriptive headings over a wall of prose.',
+        '- Use bullets or numbered steps for actions, tradeoffs, findings, and next steps. Keep each bullet to one idea.',
+        '- Use fenced code blocks with a language label for code, commands, JSON, Mermaid, logs, or config. Do not hide large code inside inline text.',
+        '- Use compact tables only when comparison is clearer than bullets.',
+        '- Keep paragraphs short enough to scan in chat. Add blank lines between distinct ideas.',
+        '- End with a concrete next step or a necessary clarifying question only when it helps the user move forward.',
+        '- If the user asks for exact text, raw code, JSON-only output, or another strict format, follow that requested format instead of these presentation defaults.',
+    ].join('\n');
+}
+
 function buildSessionInstructions(session, baseInstructions = '') {
     const parts = [];
     const sessionIsolation = isSessionIsolationEnabled(session?.metadata || {}, session);
@@ -134,4 +166,7 @@ function buildSessionInstructions(session, baseInstructions = '') {
     return parts.filter(Boolean).join('\n\n');
 }
 
-module.exports = { buildSessionInstructions };
+module.exports = {
+    buildHumanCentricResponseInstructions,
+    buildSessionInstructions,
+};

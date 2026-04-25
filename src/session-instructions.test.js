@@ -43,7 +43,10 @@ const { buildSoulInstructions } = require('./agent-soul');
 const { buildAgentNotesInstructions } = require('./agent-notes');
 const { buildAssetManagerInstructions } = require('./asset-manager');
 const { buildSessionCompactionInstructions } = require('./session-compaction');
-const { buildSessionInstructions } = require('./session-instructions');
+const {
+  buildHumanCentricResponseInstructions,
+  buildSessionInstructions,
+} = require('./session-instructions');
 
 describe('buildSessionInstructions', () => {
   beforeEach(() => {
@@ -125,5 +128,30 @@ describe('buildSessionInstructions', () => {
     expect(buildSessionCompactionInstructions).toHaveBeenCalled();
     expect(result).toContain('[Session isolation]');
     expect(result).toContain('[Session compaction]\nCompacted summary');
+  });
+
+  test('builds human-facing formatting guidance for CLI and web chat surfaces', () => {
+    const cli = buildHumanCentricResponseInstructions({
+      clientSurface: 'cli',
+      taskType: 'chat',
+    });
+    const webChat = buildHumanCentricResponseInstructions({
+      clientSurface: 'web-chat',
+      taskType: 'chat',
+    });
+
+    expect(cli).toContain('[Human-facing response format]');
+    expect(cli).toContain('terminal Markdown view');
+    expect(webChat).toContain('web chat Markdown view');
+    expect(webChat).toContain('If the user asks for exact text');
+  });
+
+  test('skips human-facing formatting guidance for non-chat task surfaces', () => {
+    const result = buildHumanCentricResponseInstructions({
+      clientSurface: 'notation',
+      taskType: 'notation',
+    });
+
+    expect(result).toBe('');
   });
 });

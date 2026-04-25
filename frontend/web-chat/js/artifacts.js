@@ -760,6 +760,10 @@
         };
     }
 
+    function looksLikeRawGeneratedArtifactText(value = '') {
+        return /^\s*(?:```(?:html)?\s*)?(?:html\s+)?(?:<!doctype\s+html\b|<html\b)/i.test(String(value || '').trim());
+    }
+
     function renderGeneratedArtifacts(artifacts) {
         const container = document.getElementById('messages-container');
         if (!container) return;
@@ -923,10 +927,14 @@
                         const hasSurveyDisplay = typeof window.chatApp?.extractSurveyDefinition === 'function'
                             && Boolean(window.chatApp.extractSurveyDefinition(existingDisplayContent));
                         const hasAssistantText = Boolean(String(lastMessage.content || '').trim());
-                        const shouldUseArtifactSummary = Boolean(artifactSummary && !hasSurveyDisplay && !hasAssistantText);
+                        const hasRawArtifactText = looksLikeRawGeneratedArtifactText(lastMessage.content || '');
+                        const shouldUseArtifactSummary = Boolean(artifactSummary && !hasSurveyDisplay && (!hasAssistantText || hasRawArtifactText));
 
                         if (shouldUseArtifactSummary) {
                             lastMessage.displayContent = artifactSummary;
+                            if (hasRawArtifactText) {
+                                lastMessage.content = artifactSummary;
+                            }
                         } else if (!hasSurveyDisplay && String(lastMessage.displayContent || '').trim() === artifactSummary) {
                             delete lastMessage.displayContent;
                         }

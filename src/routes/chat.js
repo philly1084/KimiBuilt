@@ -32,6 +32,7 @@ const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../a
 const { resolveTranscriptObjectiveFromSession } = require('../conversation-continuity');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 const { buildContinuityInstructions } = require('../runtime-prompts');
+const { buildHumanCentricResponseInstructions } = require('../session-instructions');
 const { buildFrontendAssistantMetadata, buildWebChatSessionMessages } = require('../web-chat-message-state');
 const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
 const { extractArtifactsFromToolEvents, mergeRuntimeArtifacts } = require('../runtime-artifacts');
@@ -713,9 +714,16 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             return;
         }
 
+        const responseFormattingInstructions = buildHumanCentricResponseInstructions({
+            clientSurface,
+            taskType,
+        });
         const instructions = await buildInstructionsWithArtifacts(
             effectiveSession,
-            buildContinuityInstructions(buildUserCheckpointInstructions(userCheckpointPolicy)),
+            [
+                buildContinuityInstructions(buildUserCheckpointInstructions(userCheckpointPolicy)),
+                responseFormattingInstructions,
+            ].filter(Boolean).join('\n\n'),
             effectiveArtifactIds,
         );
 

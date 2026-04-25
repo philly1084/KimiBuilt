@@ -33,6 +33,7 @@ const {
 const { resolveTranscriptObjectiveFromSession } = require('../conversation-continuity');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 const { buildContinuityInstructions } = require('../runtime-prompts');
+const { buildHumanCentricResponseInstructions } = require('../session-instructions');
 const { buildFrontendAssistantMetadata, buildWebChatSessionMessages } = require('../web-chat-message-state');
 const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
 const { extractArtifactsFromToolEvents, mergeRuntimeArtifacts } = require('../runtime-artifacts');
@@ -544,9 +545,16 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
             return;
         }
 
+        const responseFormattingInstructions = buildHumanCentricResponseInstructions({
+            clientSurface,
+            taskType,
+        });
         const instructions = await buildInstructionsWithArtifacts(
             session,
-            buildContinuityInstructions(buildUserCheckpointInstructions(userCheckpointPolicy)),
+            [
+                buildContinuityInstructions(buildUserCheckpointInstructions(userCheckpointPolicy)),
+                responseFormattingInstructions,
+            ].filter(Boolean).join('\n\n'),
             effectiveArtifactIds,
         );
         const execution = await executeConversationRuntime(ws.app, {

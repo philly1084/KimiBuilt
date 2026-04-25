@@ -35,6 +35,7 @@ const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../a
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 const { persistGeneratedImages } = require('../generated-image-artifacts');
 const { buildContinuityInstructions: buildBaseContinuityInstructions } = require('../runtime-prompts');
+const { buildHumanCentricResponseInstructions } = require('../session-instructions');
 const { getSessionControlState } = require('../runtime-control-state');
 const { buildFrontendAssistantMetadata, buildWebChatSessionMessages } = require('../web-chat-message-state');
 const {
@@ -1130,10 +1131,14 @@ router.post('/chat/completions', async (req, res, next) => {
             ? artifactService.getGenerationInstructions(effectiveOutputFormat)
             : '';
         const userCheckpointInstructions = buildUserCheckpointInstructions(userCheckpointPolicy);
+        const responseFormattingInstructions = buildHumanCentricResponseInstructions({
+            clientSurface,
+            taskType,
+        });
         const instructions = await buildInstructionsWithArtifacts(
             session,
             buildContinuityInstructions(
-                [artifactInstructions, userCheckpointInstructions]
+                [artifactInstructions, userCheckpointInstructions, responseFormattingInstructions]
                     .filter(Boolean)
                     .join('\n\n'),
             ),

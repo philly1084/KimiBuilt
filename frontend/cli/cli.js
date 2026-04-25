@@ -1187,41 +1187,33 @@ async function sendChatMessage(message) {
   const timestamp = shouldShowTimestamps 
     ? chalk.gray(`[${new Date().toLocaleTimeString()}] `) 
     : '';
+  const spinner = createSpinner('Thinking...');
+  const pendingArtifacts = [];
   
   try {
-    let hasStarted = false;
-    let hasReasoning = false;
+    let hasReceivedContent = false;
     const startTime = Date.now();
-    const ensureAnswerPrefix = () => {
-      if (hasStarted) {
-        return;
-      }
-
-      process.stdout.write('\n' + timestamp + aiGradient.bold('\nAI: '));
-      hasStarted = true;
-    };
     const appendReasoning = (delta) => {
       const content = String(delta || '');
       if (!content) {
         return;
       }
 
-      if (!hasReasoning) {
-        process.stdout.write(chalk.gray('\n\nReasoning: '));
-        hasReasoning = true;
+      const preview = content.replace(/\s+/g, ' ').trim();
+      if (preview) {
+        spinner.text = chalk.yellow(`Working through it: ${preview.slice(0, 80)}${preview.length > 80 ? '...' : ''}`);
       }
-
-      process.stdout.write(chalk.gray(content));
     };
     
+    spinner.start();
     const outputFormat = inferRequestedOutputFormat(message);
     const result = await api.chat(
       message,
       currentSessionId,
       (delta) => {
-        ensureAnswerPrefix();
+        hasReceivedContent = true;
         accumulatedResponse += delta;
-        process.stdout.write(delta);
+        spinner.text = chalk.yellow('Writing the reply...');
       },
       (done) => {
         if (done.sessionId && done.sessionId !== currentSessionId) {
@@ -1229,10 +1221,7 @@ async function sendChatMessage(message) {
           session.setCurrent(currentSessionId);
         }
         if (Array.isArray(done.artifacts) && done.artifacts.length > 0) {
-          done.artifacts.forEach((artifact) => {
-            console.log(chalk.cyan(`\n   File: ${artifact.filename}`));
-            console.log(chalk.gray(`   Download: ${artifact.downloadUrl}`));
-          });
+          pendingArtifacts.push(...done.artifacts);
         }
       },
       currentModel,
@@ -1246,9 +1235,24 @@ async function sendChatMessage(message) {
     }
     
     const duration = Date.now() - startTime;
-    console.log(chalk.gray(`\n\n  (${duration}ms)`));
+    spinner.stop();
+    const renderedResponse = accumulatedResponse.trim()
+      ? marked(accumulatedResponse.trim()).trimEnd()
+      : chalk.gray(hasReceivedContent ? '' : 'No assistant text was returned.');
+    console.log('\n' + timestamp + aiGradient.bold('AI: '));
+    if (renderedResponse) {
+      console.log(renderedResponse);
+    }
+    if (pendingArtifacts.length > 0) {
+      pendingArtifacts.forEach((artifact) => {
+        console.log(chalk.cyan(`\n   File: ${artifact.filename}`));
+        console.log(chalk.gray(`   Download: ${artifact.downloadUrl}`));
+      });
+    }
+    console.log(chalk.gray(`\n  (${duration}ms)`));
     console.log('');
   } catch (err) {
+    spinner.stop();
     console.error(chalk.red(`\n\n❌ Error: ${err.message}`));
     if (err.statusCode) {
       console.error(chalk.gray(`   Status: ${err.statusCode}`));
