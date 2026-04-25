@@ -77,6 +77,37 @@ function normalizeOutputFormats(value = [], context = {}, params = {}) {
   return uniq(formats);
 }
 
+function normalizeDocumentTarget(value = '') {
+  const target = String(value || '').trim().toLowerCase();
+  if (['markdown', 'html', 'slides', 'pdf'].includes(target)) {
+    return target;
+  }
+  return 'markdown';
+}
+
+function toHtmlFigureEmbed(image = {}, graph = {}) {
+  const title = escapeXml(graph.title || image.title || graph.id || 'Diagram');
+  const src = escapeXml(image.url || '');
+  const alt = escapeXml(image.title || graph.title || graph.id || 'Diagram');
+  const caption = escapeXml(`${graph.type || 'diagram'} · ${graph.id || ''}`.replace(/\s*·\s*$/, ''));
+  return `<figure>
+  <img src="${src}" alt="${alt}" />
+  <figcaption>${title}${caption ? ` (${caption})` : ''}</figcaption>
+</figure>`;
+}
+
+function toMarkdownEmbed(image = {}, graph = {}) {
+  const title = graph.title || image.title || graph.id || 'Diagram';
+  const alt = image.title || title;
+  const meta = `${graph.type || 'diagram'}${graph.id ? ` · ${graph.id}` : ''}`;
+  return `![${alt}](${image.url})\n\n*${title}${meta ? ` (${meta})` : ''}*`;
+}
+
+function toSlidesEmbed(image = {}, graph = {}) {
+  const title = graph.title || image.title || graph.id || 'Diagram';
+  return `![${title}](${image.url})\n<!-- slide: ${graph.id || title} -->`;
+}
+
 function inferNodesFromEdges(edges = []) {
   const nodesById = new Map();
   edges.forEach((edge) => {
@@ -468,6 +499,12 @@ class GraphDiagramTool extends ToolBase {
             enum: ['native', 'svg', 'html', 'artifact', 'sandbox-project'],
             default: 'artifact',
           },
+          documentTarget: {
+            type: 'string',
+            enum: ['markdown', 'html', 'slides', 'pdf'],
+            default: 'markdown',
+            description: 'Target document type for embed snippet generation.',
+          },
           persistArtifacts: { type: 'boolean', default: true },
           width: { type: 'integer', default: 1120 },
           height: { type: 'integer' },
@@ -481,6 +518,7 @@ class GraphDiagramTool extends ToolBase {
           artifacts: { type: 'array' },
           images: { type: 'array' },
           markdownImages: { type: 'array' },
+          embedSnippets: { type: 'array' },
           svgPreferred: { type: 'boolean' },
           usage: { type: 'object' },
         },
@@ -494,12 +532,14 @@ class GraphDiagramTool extends ToolBase {
       : [params.graph && typeof params.graph === 'object' ? params.graph : params];
     const outputFormats = normalizeOutputFormats(params.outputFormats, context, params);
     const svgPreferred = isSvgCapableModel(context, params);
+    const documentTarget = normalizeDocumentTarget(params.documentTarget);
     const renderMode = String(params.renderMode || 'artifact').trim().toLowerCase();
     const persistArtifacts = params.persistArtifacts !== false && Boolean(context.sessionId);
     const graphResults = [];
     const artifacts = [];
     const images = [];
     const markdownImages = [];
+    const embedSnippets = [];
 
     for (let index = 0; index < graphInputs.length; index += 1) {
       const graph = normalizeGraphSpec(graphInputs[index], index);
@@ -555,8 +595,21 @@ class GraphDiagramTool extends ToolBase {
             artifactId: imageArtifact.id,
           });
           markdownImages.push(`![${graph.title}](${imageArtifact.downloadUrl})`);
+          const imageDescriptor = images[images.length - 1];
+          const embed = documentTarget === 'html' || documentTarget === 'pdf'
+            ? toHtmlFigureEmbed(imageDescriptor, graph)
+            : documentTarget === 'slides'
+              ? toSlidesEmbed(imageDescriptor, graph)
+              : toMarkdownEmbed(imageDescriptor, graph);
+          embedSnippets.push({
+            graphId: graph.id,
+            title: graph.title,
+            target: documentTarget,
+            snippet: embed,
+            url: imageArtifact.downloadUrl,
+          });
           result.artifact = imageArtifact;
-          result.image = images[images.length - 1];
+          result.image = imageDescriptor;
         }
       }
 
@@ -613,10 +666,11 @@ class GraphDiagramTool extends ToolBase {
       artifacts,
       images,
       markdownImages,
+      embedSnippets,
       svgPreferred,
       usage: {
         bestForDocuments: images.length > 0
-          ? 'Use images[].url or markdownImages[] to embed rendered SVG diagrams in generated documents, decks, PDFs, or HTML artifacts.'
+          ? 'Use embedSnippets[] for target-aware copy/paste embeds, or images[].url/markdownImages[] for direct linking.'
           : 'Use formats.svg as an image payload, or run with a sessionId and persistArtifacts=true to create reusable image artifacts.',
         nativeGraph: 'Use graphs[].native when another agent or tool can consume structured nodes, edges, groups, and data series directly.',
         svgModelHint: svgPreferred

@@ -47,7 +47,7 @@ function isInteractiveDocumentRequest(prompt = '', existingContent = '') {
     }
 
     if (hasResearchCue(haystack)
-        && /\b(research dashboard|evidence explorer|source explorer|source map|visual report|microsite|web page|webpage|html page|browser page)\b/.test(haystack)) {
+        && /\b(research dashboard|research page|research site|evidence explorer|source explorer|source map|visual report|microsite|web page|webpage|html page|browser page)\b/.test(haystack)) {
         return true;
     }
 

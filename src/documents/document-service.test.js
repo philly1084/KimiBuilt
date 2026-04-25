@@ -36,6 +36,24 @@ describe('DocumentService', () => {
     expect(String(document.content)).toContain('Production Lens');
   });
 
+  test('renders html sections when table payload is null', () => {
+    const service = new DocumentService({
+      responses: {
+        create: jest.fn(),
+      },
+    });
+
+    expect(() => service.renderSectionHtml({
+      heading: 'Findings',
+      content: 'Summary',
+      table: null,
+    }, {
+      layout: 'narrative',
+      number: '1',
+      anchor: 'findings',
+    })).not.toThrow();
+  });
+
   test('uses browser-rendered HTML as the primary PDF pipeline for structured documents', async () => {
     const service = new DocumentService({
       responses: {
