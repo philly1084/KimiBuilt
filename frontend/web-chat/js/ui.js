@@ -2119,11 +2119,16 @@ class UIHelpers {
             'Summary',
             'Recommendation',
             'Result',
+            'Why it works',
             'Why it matters',
             'What changed',
             'Details',
             'Plan',
             'Steps',
+            'Ingredients',
+            'Preparation',
+            'Serving Suggestions',
+            'Variations',
             'Next step',
             'Next steps',
             'Caveat',
@@ -2332,6 +2337,8 @@ class UIHelpers {
             text = wrappedQuoteMatch[1];
         }
 
+        text = this.restoreFlattenedMarkdownTables(text);
+
         if (!/[^\n]\s+(?:#{2,6}\s|\d+\.\s|[*-]\s)/.test(text)) {
             return text.trim();
         }
@@ -2346,6 +2353,115 @@ class UIHelpers {
             .replace(/([^\n])\s+(?=(?:Style|Overview|Summary|Recommendation|Next Step|Next Steps):)/g, '$1\n')
             .replace(/\n{3,}/g, '\n\n')
             .trim();
+    }
+
+    restoreFlattenedMarkdownTables(source = '') {
+        let text = String(source || '').replace(/\r\n?/g, '\n');
+        if (!text.trim() || !/\|/.test(text)) {
+            return text;
+        }
+
+        const tableSectionLabels = [
+            'Ingredients',
+            'Preparation',
+            'Variations',
+            'Equipment',
+            'Nutrition',
+            'Shopping List',
+            'Troubleshooting',
+            'Timeline',
+            'Schedule',
+            'Checklist',
+            'Options',
+            'Comparison',
+        ];
+        const headingSectionLabels = [
+            'Why it works',
+            'Serving Suggestions',
+            'Tips',
+            'Notes',
+        ];
+        const tableLabelPattern = tableSectionLabels.map((label) => this.escapeRegExp(label)).join('|');
+        const headingLabelPattern = headingSectionLabels.map((label) => this.escapeRegExp(label)).join('|');
+
+        text = text
+            .replace(new RegExp(`(^|\\n)(${tableLabelPattern})[^\\S\\n]+\\|`, 'gi'), '$1### $2\n\n|')
+            .replace(new RegExp(`([^\\n])[^\\S\\n]+(${tableLabelPattern})[^\\S\\n]+\\|`, 'gi'), '$1\n\n### $2\n\n|')
+            .replace(new RegExp(`(^|\\n)(${headingLabelPattern})(?=\\s|$)`, 'gi'), '$1### $2')
+            .replace(new RegExp(`([^\\n])[^\\S\\n]+(${headingLabelPattern})(?=\\s|$)`, 'gi'), '$1\n\n### $2\n')
+            .replace(/([^\n])[^\S\n]+---[^\S\n]*/g, '$1\n\n---\n\n')
+            .replace(/\|\s+(?=\|)/g, '|\n')
+            .replace(/(^|\n)(\|[^\n]*\|)\s+(?=\|?\s*:?-{3,}:?\s*\|)/g, '$1$2\n')
+            .replace(/(^|\n)(\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?)\s+(?=\|)/g, '$1$2\n')
+            .replace(/(^|\n)(\|[^\n]*\|)\s+(?=>\s)/g, '$1$2\n\n')
+            .replace(/(^|\n)(\|[^\n]*\|)\s+(?=---(?:\s|$))/g, '$1$2\n\n')
+            .replace(/(^|\n)#{1,6}\s*\n+(?=#{1,6}\s+)/g, '$1')
+            .replace(/\n{3,}/g, '\n\n');
+
+        return this.normalizeMultilineTableCells(text);
+    }
+
+    normalizeMultilineTableCells(source = '') {
+        const lines = String(source || '').replace(/\r\n?/g, '\n').split('\n');
+        const normalizedLines = [];
+        let tableColumnCount = 0;
+        let pendingRow = '';
+
+        const countPipeColumns = (line = '') => {
+            const trimmed = String(line || '').trim();
+            if (!trimmed.startsWith('|') || !trimmed.includes('|')) {
+                return 0;
+            }
+
+            return trimmed
+                .replace(/^\|/, '')
+                .replace(/\|$/, '')
+                .split('|').length;
+        };
+
+        const isSeparatorRow = (line = '') => /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+        const flushPendingRow = () => {
+            if (pendingRow) {
+                normalizedLines.push(pendingRow);
+                pendingRow = '';
+            }
+        };
+
+        lines.forEach((line) => {
+            const trimmed = line.trim();
+            if (isSeparatorRow(trimmed)) {
+                flushPendingRow();
+                tableColumnCount = countPipeColumns(trimmed);
+                normalizedLines.push(line);
+                return;
+            }
+
+            const isTableLine = trimmed.startsWith('|') && trimmed.includes('|');
+            if (!isTableLine) {
+                if (pendingRow && tableColumnCount > 0 && trimmed && !/^#{1,6}\s|^---$|^>/.test(trimmed)) {
+                    pendingRow += `<br>${this.escapeHtml(trimmed)}`;
+                    return;
+                }
+
+                flushPendingRow();
+                if (!trimmed) {
+                    tableColumnCount = 0;
+                }
+                normalizedLines.push(line);
+                return;
+            }
+
+            if (tableColumnCount > 0 && countPipeColumns(trimmed) < tableColumnCount && pendingRow) {
+                pendingRow += `<br>${this.escapeHtml(trimmed.replace(/^\|?\s*/, '').replace(/\|?\s*$/, ''))}`;
+                return;
+            }
+
+            flushPendingRow();
+            pendingRow = line;
+        });
+
+        flushPendingRow();
+        return normalizedLines.join('\n');
     }
 
     looksLikeAgentBrief(markdown = '', message = {}) {
