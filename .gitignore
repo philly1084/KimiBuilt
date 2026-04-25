@@ -9,6 +9,7 @@ asset-index.json
 # Test & Build
 coverage/
 dist/
+output/sandboxes/
 data/
 !data/
 !data/piper/

@@ -19,7 +19,7 @@ const TOOL_SUPPORT = {
   'k3s-deploy': { status: 'requires_setup', notes: ['Requires SSH target credentials and kubectl/git on the remote host.'] },
   'managed-app': { status: 'requires_setup', notes: ['Requires Postgres persistence, external Gitea credentials, and SSH access to the remote k3s host for deployment.'] },
   'docker-exec': { status: 'requires_setup', notes: ['Requires Docker CLI/socket access in the backend runtime.'] },
-  'code-sandbox': { status: 'requires_setup', notes: ['Requires Docker image pull/run capability in the backend runtime.'] },
+  'code-sandbox': { status: 'requires_setup', notes: ['Execute mode requires Docker image pull/run capability in the backend runtime.', 'Project mode can persist previewable frontend bundles without Docker.'] },
   'git-safe': { status: 'requires_setup', notes: ['Requires a git repository in the backend-accessible filesystem and working git credentials for push.'] },
   'tool-doc-read': { status: 'stable', notes: ['Reads detailed tool documentation from the backend docs directory on demand.'] },
   'podcast': {

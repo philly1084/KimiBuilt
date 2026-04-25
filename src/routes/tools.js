@@ -192,8 +192,10 @@ function buildToolRuntime(toolId, options = {}) {
 
   if (toolId === 'code-sandbox') {
     return {
-      configured: Boolean(process.env.DOCKER_HOST),
-      provider: 'docker',
+      configured: true,
+      provider: 'docker-or-project-artifact',
+      dockerConfigured: Boolean(process.env.DOCKER_HOST),
+      projectModeAvailable: true,
       dockerHost: process.env.DOCKER_HOST || '',
     };
   }

@@ -162,4 +162,55 @@ describe('perceived intelligence harness', () => {
         expect(summary.failureTags).toContain('premature_stop_after_failure');
         expect(summary.perceivedIntelligenceScores.plannerDiscipline).toBeLessThan(0.7);
     });
+
+    test('penalizes synthesis with unmet completion criteria and scores resume continuity', () => {
+        const premature = scorePerceivedIntelligence({
+            executionTrace: [
+                {
+                    type: 'review',
+                    name: 'Round review 1',
+                    details: {
+                        harnessDecision: 'synthesize',
+                        completionStatus: 'incomplete',
+                        unmetCriteria: ['Deployment verified'],
+                        stateChanged: false,
+                    },
+                },
+            ],
+            harness: {
+                resumeAvailable: false,
+                completion: {
+                    criteria: [{ text: 'Deployment verified' }],
+                    unmetCriteria: [{ text: 'Deployment verified' }],
+                },
+            },
+        });
+        const resumeable = scorePerceivedIntelligence({
+            executionTrace: [
+                {
+                    type: 'review',
+                    name: 'Round review 1',
+                    details: {
+                        harnessDecision: 'checkpoint',
+                        completionStatus: 'incomplete',
+                        unmetCriteria: ['Deployment verified'],
+                        stateChanged: true,
+                    },
+                },
+            ],
+            harness: {
+                resumeAvailable: true,
+                completion: {
+                    criteria: [{ text: 'Deployment verified' }],
+                    unmetCriteria: [{ text: 'Deployment verified' }],
+                },
+            },
+        });
+
+        expect(premature.failureTags).toContain('premature_synthesis_with_unmet_criteria');
+        expect(premature.perceivedIntelligenceScores.completionDiscipline).toBeLessThan(0.7);
+        expect(resumeable.failureTags).toContain('resume_available_with_unmet_criteria');
+        expect(resumeable.perceivedIntelligenceScores.resumeContinuity).toBeGreaterThan(0.85);
+        expect(resumeable.perceivedIntelligenceScores.autonomyDepth).toBeGreaterThan(premature.perceivedIntelligenceScores.autonomyDepth);
+    });
 });

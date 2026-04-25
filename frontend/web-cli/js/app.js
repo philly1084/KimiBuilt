@@ -1469,7 +1469,7 @@ Session Statistics:
   /buddy             Open the voxel coding buddy panel
   /toolbelt          Show sandbox/build/tool shortcuts
   /build             Show the coding-agent build workflow
-  /sandbox <lang>    Run code with the code-sandbox tool
+  /sandbox <lang>    Run code, or save previewable HTML/Vite-style projects
 
 **AI Controls:**
   /models            List available AI models
@@ -1519,6 +1519,7 @@ Type any message to chat with the AI.
 Your buddy is wired for coding-agent work, not just chat decoration.
 
 - \`/sandbox javascript console.log("hi")\` runs a small isolated code snippet through \`code-sandbox\`.
+- \`/sandbox html <html>...</html>\` saves a previewable frontend artifact.
 - \`/build\` opens a compact build loop for plan -> edit -> test -> verify.
 - \`/tools sandbox\`, \`/tools system\`, \`/tools ssh\`, and \`/tool-help <id>\` inspect the backend tool catalog.
 - \`/files\` and \`/open\` manage generated session files.
@@ -1535,7 +1536,7 @@ Use this when you want the buddy to act like a coding agent.
 1. Describe the target behavior in the prompt.
 2. Let the agent inspect files, edit narrowly, and run checks.
 3. Use \`/tools\` to see available building tools.
-4. Use \`/sandbox <language> <code>\` for quick experiments.
+4. Use \`/sandbox <language> <code>\` for quick experiments, or \`/sandbox html ...\` for previewable UI.
 5. Use \`/files\` for generated artifacts.
 
 Good prompt:
@@ -1547,27 +1548,29 @@ Improve the repo feature that handles <area>. Keep changes scoped, run relevant 
     printSandboxHelp() {
         this.printAI(`## Sandbox Command
 
-Run short code snippets through the backend \`code-sandbox\` tool.
+Run short code snippets through the backend \`code-sandbox\` tool, or persist previewable frontend project files.
 
 Usage:
 \`\`\`text
 /sandbox <language> <code>
+/sandbox project {"projectName":"demo","files":[{"path":"index.html","content":"<h1>Hello</h1>"}]}
 \`\`\`
 
-Languages: \`javascript\`, \`python\`, \`bash\`, \`sql\`, \`ruby\`, \`go\`, \`rust\`
+Languages: \`javascript\`, \`python\`, \`bash\`, \`sql\`, \`ruby\`, \`go\`, \`rust\`, \`html\`, \`vite\`
 
 Examples:
 \`\`\`text
 /sandbox javascript console.log([1,2,3].map(n => n * 2))
 /sandbox python print(sum(range(10)))
 /sandbox bash printf "voxel-ready"
+/sandbox html <!doctype html><html><body><h1>Preview me</h1></body></html>
 \`\`\``);
     }
 
     async invokeSandboxCommand(args = []) {
         const language = String(args[0] || '').toLowerCase();
         const code = args.slice(1).join(' ').trim();
-        const languages = new Set(['javascript', 'python', 'bash', 'sql', 'ruby', 'go', 'rust']);
+        const languages = new Set(['javascript', 'python', 'bash', 'sql', 'ruby', 'go', 'rust', 'html', 'vite', 'project']);
 
         this.setActiveVoxelTool('sandbox');
         if (!languages.has(language) || !code) {
@@ -1580,24 +1583,84 @@ Examples:
         this.recordVoxelToolUse('sandbox');
 
         try {
-            const invocation = await api.invokeTool('code-sandbox', {
+            let params = {
                 language,
                 code,
                 limits: {
                     timeout: 30000,
                     maxOutput: 80000,
                 },
-            });
-            const result = invocation?.result || {};
-            const serialized = JSON.stringify(result, null, 2);
-            this.printAI(`## Sandbox Result: \`${language}\`
+            };
 
-Exit code: \`${Number.isFinite(Number(result.exitCode)) ? result.exitCode : 'unknown'}\`
+            if (language === 'project') {
+                try {
+                    const projectParams = JSON.parse(code);
+                    params = {
+                        mode: 'project',
+                        language: projectParams.language || 'vite',
+                        code: projectParams.code || '',
+                        projectName: projectParams.projectName || projectParams.name || '',
+                        entry: projectParams.entry || 'index.html',
+                        files: Array.isArray(projectParams.files) ? projectParams.files : [],
+                    };
+                } catch (error) {
+                    throw new Error(`Project sandbox expects JSON after /sandbox project: ${error.message}`);
+                }
+            } else if (language === 'html' || language === 'vite') {
+                params = {
+                    mode: 'project',
+                    language,
+                    code,
+                    projectName: `${language}-sandbox`,
+                    entry: 'index.html',
+                };
+            }
 
-\`\`\`json
-${serialized}
-\`\`\``);
-            this.handlePetAction(Number(result.exitCode) === 0 ? 'proud' : 'guard', { silent: true });
+            const invocation = await api.invokeTool('code-sandbox', params);
+            const envelope = invocation?.result || {};
+            const result = envelope?.data || envelope || {};
+            const exitCode = Number.isFinite(Number(result.exitCode)) ? Number(result.exitCode) : 'unknown';
+            const stdout = String(result.stdout || '').trim();
+            const stderr = String(result.stderr || '').trim();
+            const files = Array.isArray(result.files) ? result.files : [];
+            const artifact = result.artifact || (Array.isArray(result.artifacts) ? result.artifacts[0] : null);
+            const lines = [`## Sandbox Result: \`${language}\``, '', `Exit code: \`${exitCode}\``];
+
+            if (stdout) {
+                lines.push('', 'STDOUT:', '', '```text', stdout, '```');
+            }
+
+            if (stderr) {
+                lines.push('', 'STDERR:', '', '```text', stderr, '```');
+            }
+
+            if (result.workspacePath) {
+                lines.push('', `Workspace: \`${result.workspacePath}\``);
+            }
+
+            if (files.length > 0) {
+                lines.push('', 'Files:');
+                files.slice(0, 20).forEach((file) => {
+                    lines.push(`- \`${file.path}\` (${this.formatFileSize(Number(file.sizeBytes) || 0)})`);
+                });
+            }
+
+            if (artifact) {
+                lines.push('', `Artifact: \`${artifact.filename || artifact.id}\``);
+                if (artifact.sandboxUrl || artifact.previewUrl) {
+                    lines.push(`Preview: ${artifact.sandboxUrl || artifact.previewUrl}`);
+                }
+                if (artifact.bundleDownloadUrl || artifact.downloadUrl) {
+                    lines.push(`Download: ${artifact.bundleDownloadUrl || artifact.downloadUrl}`);
+                }
+            }
+
+            if (!stdout && !stderr && !result.workspacePath && !artifact) {
+                lines.push('', '```json', JSON.stringify(result, null, 2), '```');
+            }
+
+            this.printAI(lines.join('\n'));
+            this.handlePetAction(Number(exitCode) === 0 ? 'proud' : 'guard', { silent: true });
         } catch (error) {
             this.printError(`Sandbox failed: ${error.message}`);
             this.handlePetAction('guard', { silent: true });

@@ -34,7 +34,7 @@ function registerSandboxTools() {
             required: tool.toDefinition().inputSchema?.required?.includes(name),
             description: schema.description
           })),
-        requiresSetup: tool.id === 'code-sandbox' // Docker required
+        requiresSetup: false
       }
     };
     

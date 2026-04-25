@@ -84,23 +84,41 @@ function summarizeMemoryReadSet(memoryTrace = null, { projectKey = '', clientSur
     };
 }
 
-function buildInitiativeReview({ executionTrace = [], toolEvents = [] } = {}) {
+function buildInitiativeReview({ executionTrace = [], toolEvents = [], harness = null } = {}) {
     const traceEntries = Array.isArray(executionTrace) ? executionTrace : [];
     const roundReviews = traceEntries
         .filter((entry) => /^Round review \d+$/i.test(String(entry?.name || '')));
-    const decisions = roundReviews.map((entry) => String(entry?.details?.decision || '').trim()).filter(Boolean);
+    const harnessDecisionEntries = traceEntries
+        .filter((entry) => entry?.details?.harnessDecision);
+    const decisions = (harnessDecisionEntries.length > 0 ? harnessDecisionEntries : roundReviews)
+        .map((entry) => String(entry?.details?.harnessDecision || entry?.details?.decision || '').trim())
+        .filter(Boolean);
     const productiveRounds = roundReviews.filter((entry) => entry?.details?.productive !== false).length;
     const toolFailures = (Array.isArray(toolEvents) ? toolEvents : [])
         .filter((event) => event?.result?.success === false).length;
     const repeatedCommandBlocks = traceEntries.filter((entry) => entry?.type === 'harness'
-        && /repeated plan steps blocked/i.test(String(entry?.name || ''))).length;
-    const deterministicRecoveries = traceEntries.filter((entry) => entry?.type === 'harness'
-        && /deterministic recovery selected/i.test(String(entry?.name || ''))).length;
+        && (/repeated plan steps blocked/i.test(String(entry?.name || ''))
+            || entry?.details?.harnessDecision === 'blocked')).length;
+    const deterministicRecoveries = traceEntries.filter((entry) => entry?.details?.recoveryType === 'deterministic'
+        || (entry?.type === 'harness' && /deterministic recovery selected/i.test(String(entry?.name || '')))).length;
     const successfulRecovery = deterministicRecoveries > 0
         && traceEntries.some((entry) => entry?.type === 'review'
             && ['continue', 'synthesize'].includes(String(entry?.details?.decision || '').trim()));
     const checkpointDecisions = decisions.filter((decision) => decision === 'checkpoint').length;
     const finalDecision = decisions[decisions.length - 1] || null;
+    const explicitCompletionEntries = traceEntries.filter((entry) => entry?.details?.completionStatus);
+    const latestCompletionEntry = explicitCompletionEntries[explicitCompletionEntries.length - 1] || null;
+    const harnessCompletion = harness?.completion && typeof harness.completion === 'object' ? harness.completion : null;
+    const unmetCriteria = Array.isArray(harnessCompletion?.unmetCriteria)
+        ? harnessCompletion.unmetCriteria
+        : (Array.isArray(latestCompletionEntry?.details?.unmetCriteria) ? latestCompletionEntry.details.unmetCriteria : []);
+    const completionStatus = String(
+        harnessCompletion?.unmetCriteria?.length === 0 && Array.isArray(harnessCompletion?.criteria) && harnessCompletion.criteria.length > 0
+            ? 'complete'
+            : (latestCompletionEntry?.details?.completionStatus || (unmetCriteria.length > 0 ? 'incomplete' : 'unknown')),
+    );
+    const stateChangingRounds = traceEntries.filter((entry) => entry?.details?.stateChanged === true).length;
+    const resumeAvailable = harness?.resumeAvailable === true;
     const failureTags = [];
 
     if (roundReviews.some((entry) => entry?.details?.productive === false)) {
@@ -121,6 +139,12 @@ function buildInitiativeReview({ executionTrace = [], toolEvents = [] } = {}) {
     if (checkpointDecisions > 1) {
         failureTags.push('checkpoint_overuse');
     }
+    if (finalDecision === 'synthesize' && unmetCriteria.length > 0) {
+        failureTags.push('premature_synthesis_with_unmet_criteria');
+    }
+    if (resumeAvailable && unmetCriteria.length > 0) {
+        failureTags.push('resume_available_with_unmet_criteria');
+    }
 
     return {
         totalRounds: roundReviews.length,
@@ -131,6 +155,10 @@ function buildInitiativeReview({ executionTrace = [], toolEvents = [] } = {}) {
         deterministicRecoveries,
         successfulRecovery,
         checkpointDecisions,
+        completionStatus,
+        unmetCriteriaCount: unmetCriteria.length,
+        stateChangingRounds,
+        resumeAvailable,
         failureTags,
     };
 }
@@ -145,9 +173,10 @@ function scorePerceivedIntelligence({
     toolEvents = [],
     projectKey = '',
     clientSurface = '',
+    harness = null,
 } = {}) {
     const memoryReadSetSummary = summarizeMemoryReadSet(memoryTrace, { projectKey, clientSurface });
-    const initiativeReview = buildInitiativeReview({ executionTrace, toolEvents });
+    const initiativeReview = buildInitiativeReview({ executionTrace, toolEvents, harness });
     const failureTags = [
         ...(memoryReadSetSummary.foreignProjectEntries.length > 0 ? ['cross_project_recall'] : []),
         ...(memoryReadSetSummary.foreignSurfaceEntries.length > 0 ? ['cross_surface_recall'] : []),
@@ -159,10 +188,22 @@ function scorePerceivedIntelligence({
         plannerDiscipline: clampScore(0.92
             - (initiativeReview.failureTags.includes('repeated_command_blocked') ? 0.18 : 0)
             - (initiativeReview.failureTags.includes('premature_stop_after_failure') ? 0.28 : 0)
+            - (initiativeReview.failureTags.includes('premature_synthesis_with_unmet_criteria') ? 0.3 : 0)
             - (initiativeReview.failureTags.includes('checkpoint_overuse') ? 0.12 : 0)),
         recovery: clampScore(initiativeReview.toolFailures > 0
             ? (initiativeReview.successfulRecovery ? 0.92 : 0.62)
             : 0.9),
+        completionDiscipline: clampScore(0.92
+            - (initiativeReview.unmetCriteriaCount > 0 && initiativeReview.lastDecision === 'synthesize' ? 0.35 : 0)
+            - (initiativeReview.completionStatus === 'unknown' ? 0.08 : 0)),
+        autonomyDepth: clampScore(0.72
+            + (initiativeReview.totalRounds >= 2 ? 0.12 : 0)
+            + (initiativeReview.stateChangingRounds > 0 ? 0.08 : 0)
+            + (initiativeReview.successfulRecovery ? 0.08 : 0)
+            - (initiativeReview.failureTags.includes('stalled_after_failure') ? 0.2 : 0)),
+        resumeContinuity: clampScore(initiativeReview.resumeAvailable
+            ? 0.9
+            : (initiativeReview.unmetCriteriaCount > 0 ? 0.68 : 0.86)),
         groundedness: clampScore(Array.isArray(toolEvents) && toolEvents.length > 0 && toolEvents.some((event) => event?.result?.success === false) ? 0.78 : 0.92),
         isolation: clampScore(1 - (memoryReadSetSummary.foreignProjectEntries.length > 0 ? 0.9 : 0) - (memoryReadSetSummary.foreignSurfaceEntries.length > 0 ? 0.45 : 0)),
         surfaceDiscipline: clampScore(memoryReadSetSummary.foreignSurfaceEntries.length > 0 ? 0.55 : 0.92),

@@ -88,6 +88,10 @@ function normalizeRuntimeControlState(state = {}) {
         normalized.activeTaskFrame = null;
     }
 
+    if ('harness' in normalized && !isPlainObject(normalized.harness)) {
+        normalized.harness = null;
+    }
+
     if ('autonomyApproved' in normalized) {
         normalized.autonomyApproved = Boolean(normalized.autonomyApproved);
     }

@@ -4529,6 +4529,129 @@ function classifyToolExecutionResult(event = {}, {
     return 'blocked_failure';
 }
 
+function doesToolEventChangeState(event = {}) {
+    if (event?.result?.success === false) {
+        return false;
+    }
+
+    const toolId = canonicalizeRemoteToolId(event?.toolCall?.function?.name || event?.result?.toolId || '');
+    const args = parseToolCallArguments(event?.toolCall?.function?.arguments || '{}');
+    const command = String(args.command || '').trim().toLowerCase();
+    const action = String(args.action || '').trim().toLowerCase();
+
+    if (['file-write', 'git-safe', 'k3s-deploy', 'opencode-run'].includes(toolId)) {
+        return true;
+    }
+
+    if (toolId === 'managed-app') {
+        return ['create', 'update', 'deploy', 'reconcile'].includes(action);
+    }
+
+    if (isRemoteCommandToolId(toolId)) {
+        return /\b(kubectl\s+(apply|create|delete|patch|scale|rollout\s+restart)|helm\s+(install|upgrade|rollback)|docker\s+(compose\s+)?(up|restart|run|build)|systemctl\s+(restart|start|enable)|npm\s+(install|run\s+build)|git\s+(pull|clone|checkout|merge|commit|push))\b/i.test(command);
+    }
+
+    return false;
+}
+
+function inferCompletionEvidenceFromToolEvent(event = {}, { round = null } = {}) {
+    if (!event || event?.result?.success === false) {
+        return [];
+    }
+
+    const toolId = canonicalizeRemoteToolId(event?.toolCall?.function?.name || event?.result?.toolId || '');
+    const args = parseToolCallArguments(event?.toolCall?.function?.arguments || '{}');
+    const command = String(args.command || '').trim();
+    const action = String(args.action || '').trim().toLowerCase();
+    const data = event?.result?.data || {};
+    const output = [
+        command,
+        data.stdout || '',
+        data.stderr || '',
+        data.body || '',
+        data.title || '',
+        data.status || '',
+        data.buildStatus || '',
+        JSON.stringify(data).slice(0, 1200),
+    ].join('\n');
+    const stateChanged = doesToolEventChangeState(event);
+    const base = {
+        tool: toolId,
+        round,
+        stateChanged,
+        confidence: 'medium',
+    };
+    const evidence = [];
+    const push = (type, summary, extra = {}) => {
+        evidence.push({
+            ...base,
+            type,
+            summary,
+            ...extra,
+        });
+    };
+
+    if (isRemoteCommandToolId(toolId)) {
+        if (/\bkubectl\b/i.test(command) || /\b(pod|deployment|service|ingress|namespace)\b/i.test(output)) {
+            push('k8s-inspection', 'Kubernetes or remote cluster inspection returned a successful result.');
+        }
+        if (/\b(successfully rolled out|rollout status|deployment\s+.+\s+successfully)\b/i.test(output)) {
+            push('rollout', 'Rollout status confirmed a successful deployment.', { confidence: 'high' });
+            push('deployment-verified', 'Deployment verification evidence was captured from rollout status.', { confidence: 'high' });
+        }
+        if (/\b(running|ready|available)\b/i.test(output) && /\b(pod|pods|deployment|deployments)\b/i.test(output)) {
+            push('pod-readiness', 'Pod or deployment readiness was observed in verified remote output.');
+        }
+        if (/\b(service|svc|ingress|traefik|loadbalancer|clusterip)\b/i.test(output)) {
+            push('service-ingress', 'Service or ingress state was inspected successfully.');
+        }
+        if (/\b(curl|http|https|tls|certificate|dns)\b/i.test(command)
+            && /\b(200|301|302|http\/|<html|server:|certificate|issuer|subject)\b/i.test(output)) {
+            push('public-verification', 'Public HTTP/TLS reachability or response evidence was captured.', { confidence: 'high' });
+            push('deployment-verified', 'Deployment verification evidence was captured from public reachability.', { confidence: 'high' });
+        }
+        if (stateChanged && /\b(kubectl\s+apply|helm\s+upgrade|rollout\s+restart|docker\s+compose\s+up|systemctl\s+restart)\b/i.test(command)) {
+            push('deployment-applied', 'A remote deployment or service-changing command completed successfully.', { confidence: 'high' });
+        }
+        if (stateChanged && /\b(npm\s+run\s+build|docker\s+(compose\s+)?build|successfully built|build completed)\b/i.test(output)) {
+            push('build-complete', 'A remote build command completed successfully.');
+        }
+        return evidence;
+    }
+
+    if (toolId === 'managed-app') {
+        if (['create', 'update'].includes(action)) {
+            push('managed-app-authoring', 'Managed app create/update completed and produced app metadata.', { confidence: 'high' });
+        }
+        if (action === 'deploy' || data.deployment || data.deployRun || /\b(deploy|deployed|deployment)\b/i.test(output)) {
+            push('managed-app-deploy', 'Managed app deployment was triggered or completed.', { confidence: 'high' });
+            push('deployment-applied', 'Managed app deployment evidence was captured.', { confidence: 'high' });
+        }
+        if (data.buildRun || /\b(buildStatus|queued|running|succeeded|success|build)\b/i.test(output)) {
+            push('managed-app-build', 'Managed app build state was attached to the tool result.');
+        }
+        if (['inspect', 'doctor', 'reconcile'].includes(action)) {
+            push('remote-inspection', 'Managed app inspection or control-plane diagnostic completed.');
+        }
+        return evidence;
+    }
+
+    if (toolId === 'web-search') {
+        push('research-search', 'Research search returned verified candidate sources.');
+    }
+    if (toolId === 'web-fetch' || toolId === 'web-scrape') {
+        push('research-fetch', 'A source page was fetched or scraped successfully.');
+    }
+    if (toolId === DOCUMENT_WORKFLOW_TOOL_ID || toolId === DEEP_RESEARCH_PRESENTATION_TOOL_ID) {
+        push('document-generated', 'A document or presentation workflow produced an artifact.', { confidence: 'high', stateChanged: true });
+    }
+    if (Array.isArray(data.artifacts) || data.artifact || data.downloadUrl || data.markdownImage) {
+        push('artifact-created', 'A runtime artifact was created by a tool result.', { confidence: 'high', stateChanged: true });
+    }
+
+    return evidence;
+}
+
 function summarizeRoundFailures(toolEvents = [], executionProfile = DEFAULT_EXECUTION_PROFILE) {
     const failures = (Array.isArray(toolEvents) ? toolEvents : [])
         .map((event) => classifyToolFailure(event, executionProfile))
@@ -4611,6 +4734,202 @@ function summarizeHarnessToolEvent(event = {}, classification = '') {
     };
 }
 
+function normalizeHarnessCriterionText(value = '') {
+    return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function buildHarnessCriterionId(text = '', index = 0) {
+    const slug = normalizeHarnessCriterionText(text)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 48);
+    return slug || `criterion-${index + 1}`;
+}
+
+function normalizeHarnessCriterion(value = '', index = 0, source = 'objective') {
+    const raw = typeof value === 'string' ? { text: value } : (value && typeof value === 'object' ? value : {});
+    const text = normalizeHarnessCriterionText(raw.text || raw.title || raw.objective || raw.label || '');
+    if (!text) {
+        return null;
+    }
+
+    const status = String(raw.status || '').trim().toLowerCase() === 'satisfied' ? 'satisfied' : 'pending';
+    return {
+        id: String(raw.id || buildHarnessCriterionId(text, index)).trim(),
+        text,
+        source: String(raw.source || source || 'objective').trim() || 'objective',
+        required: raw.required !== false,
+        status,
+        evidenceIds: Array.isArray(raw.evidenceIds) ? raw.evidenceIds.filter(Boolean) : [],
+    };
+}
+
+function normalizeHarnessEvidence(value = {}, index = 0) {
+    if (!value || typeof value !== 'object') {
+        return null;
+    }
+
+    const summary = normalizeHarnessCriterionText(value.summary || value.text || '');
+    if (!summary) {
+        return null;
+    }
+
+    return {
+        id: String(value.id || `evidence-${Date.now()}-${index + 1}`).trim(),
+        summary,
+        type: String(value.type || 'verified-result').trim() || 'verified-result',
+        tool: value.tool || null,
+        criterionIds: Array.isArray(value.criterionIds) ? value.criterionIds.filter(Boolean) : [],
+        confidence: ['low', 'medium', 'high'].includes(String(value.confidence || '').trim())
+            ? String(value.confidence).trim()
+            : 'medium',
+        stateChanged: value.stateChanged === true,
+        round: Number.isFinite(Number(value.round)) ? Number(value.round) : null,
+        createdAt: value.createdAt || new Date().toISOString(),
+    };
+}
+
+function evidenceMatchesHarnessCriterion(evidence = {}, criterion = {}) {
+    const type = String(evidence.type || '').trim().toLowerCase();
+    const summary = String(evidence.summary || '').trim().toLowerCase();
+    const text = String(criterion.text || '').trim().toLowerCase();
+    const haystack = `${type} ${summary}`;
+
+    if (!text) {
+        return false;
+    }
+
+    if (text.includes('inspection')) {
+        return /\b(remote-inspection|k8s-inspection|pod-readiness|service-ingress|public-verification)\b/.test(haystack);
+    }
+    if (text.includes('deployment applied') || (text.includes('deploy') && !text.includes('verified'))) {
+        return /\b(deployment-applied|managed-app-deploy|k3s-deploy|rollout)\b/.test(haystack);
+    }
+    if (text.includes('verified') || text.includes('verification')) {
+        return /\b(deployment-verified|public-verification|rollout|pod-readiness|service-ingress)\b/.test(haystack);
+    }
+    if (text.includes('repository implementation') || text.includes('implement')) {
+        return /\b(repository-implemented|managed-app-authoring|code-change)\b/.test(haystack);
+    }
+    if (text.includes('workspace built') || text.includes('build')) {
+        return /\b(build-complete|managed-app-build|remote-workspace-build)\b/.test(haystack);
+    }
+    if (text.includes('research')) {
+        return /\b(research-search|research-fetch|document-generated)\b/.test(haystack);
+    }
+    if (text.includes('document') || text.includes('artifact')) {
+        return /\b(document-generated|artifact-created)\b/.test(haystack);
+    }
+
+    return text.split(/\s+/).filter((word) => word.length >= 5).some((word) => haystack.includes(word));
+}
+
+function buildInitialHarnessCriteria({
+    objective = '',
+    executionProfile = DEFAULT_EXECUTION_PROFILE,
+    workflow = null,
+    projectPlan = null,
+    restoredCompletion = null,
+    explicitCriteria = [],
+} = {}) {
+    const criteria = [];
+    const hasExplicitCriteria = Array.isArray(explicitCriteria) && explicitCriteria.some(Boolean);
+    const pushCriterion = (text, source = 'objective') => {
+        const normalized = normalizeHarnessCriterion(text, criteria.length, source);
+        if (!normalized) {
+            return;
+        }
+        if (criteria.some((entry) => entry.text.toLowerCase() === normalized.text.toLowerCase())) {
+            return;
+        }
+        criteria.push(normalized);
+    };
+
+    if (Array.isArray(restoredCompletion?.criteria)) {
+        restoredCompletion.criteria.forEach((criterion, index) => {
+            const normalized = normalizeHarnessCriterion(criterion, index, criterion?.source || 'restored');
+            if (normalized) {
+                criteria.push(normalized);
+            }
+        });
+    }
+
+    if (Array.isArray(workflow?.completionCriteria)) {
+        workflow.completionCriteria.forEach((entry) => pushCriterion(entry, 'workflow'));
+    }
+    if (Array.isArray(workflow?.verificationCriteria)) {
+        workflow.verificationCriteria.forEach((entry) => pushCriterion(entry, 'workflow-verification'));
+    }
+
+    if (Array.isArray(projectPlan?.successDefinition)) {
+        projectPlan.successDefinition.forEach((entry) => pushCriterion(entry, 'project-plan'));
+    }
+    if (Array.isArray(projectPlan?.milestones)) {
+        projectPlan.milestones
+            .filter((milestone) => !['completed', 'skipped'].includes(String(milestone?.status || '').trim().toLowerCase()))
+            .forEach((milestone) => pushCriterion(milestone.title || milestone.objective || '', 'project-plan'));
+    }
+
+    const normalizedObjective = normalizeHarnessCriterionText(objective).toLowerCase();
+    if (!hasExplicitCriteria && criteria.length === 0 && executionProfile === REMOTE_BUILD_EXECUTION_PROFILE) {
+        if (/\b(deploy|redeploy|publish|launch|ship|live|online|rollout|apply)\b/.test(normalizedObjective)) {
+            pushCriterion('Deployment applied', 'objective');
+            pushCriterion('Deployment verified', 'objective');
+        } else if (/\b(inspect|check|status|health|diagnose|debug|logs?|verify)\b/.test(normalizedObjective)) {
+            pushCriterion('Inspection completed', 'objective');
+        }
+    }
+
+    if (!hasExplicitCriteria && criteria.length === 0 && /\b(research|compare|source|sources|latest|current)\b/i.test(objective)) {
+        pushCriterion('Research gathered', 'objective');
+    }
+
+    return criteria;
+}
+
+function isHarnessResumeTurn(rawObjective = '', objective = '') {
+    const raw = normalizeHarnessCriterionText(rawObjective).toLowerCase();
+    const normalized = normalizeHarnessCriterionText(objective).toLowerCase();
+    return isLikelyTranscriptDependentTurn(raw)
+        || hasExplicitForegroundResumeIntent(raw)
+        || /^(continue|resume|keep going|go ahead|proceed|finish|next step|next steps)\b/.test(raw)
+        || /^(continue|resume|keep going|go ahead|proceed|finish|next step|next steps)\b/.test(normalized);
+}
+
+function isHarnessSnapshotResumeable(snapshot = null) {
+    return Boolean(snapshot && typeof snapshot === 'object'
+        && snapshot.version === HARNESS_VERSION
+        && snapshot.currentObjective
+        && snapshot.completion
+        && Array.isArray(snapshot.completion.unmetCriteria)
+        && snapshot.completion.unmetCriteria.length > 0);
+}
+
+function buildHarnessControlStateFromSummary(summary = null) {
+    if (!summary || typeof summary !== 'object') {
+        return undefined;
+    }
+
+    if (!summary.resumeAvailable) {
+        return null;
+    }
+
+    return {
+        version: summary.version || HARNESS_VERSION,
+        runId: summary.runId || '',
+        currentObjective: summary.currentObjective || '',
+        executionProfile: summary.executionProfile || DEFAULT_EXECUTION_PROFILE,
+        autonomyLevel: summary.autonomyLevel || 'guarded',
+        completion: summary.completion || null,
+        blockers: Array.isArray(summary.blockers) ? summary.blockers.slice(-8) : [],
+        recoveryAttempts: Array.isArray(summary.recoveryAttempts) ? summary.recoveryAttempts.slice(-8) : [],
+        decision: summary.decision || 'continue',
+        lastStateChangeAt: summary.lastStateChangeAt || null,
+        updatedAt: new Date().toISOString(),
+    };
+}
+
 class HarnessRunState {
     constructor({
         runId = '',
@@ -4622,6 +4941,11 @@ class HarnessRunState {
         maxRounds = 1,
         maxReplans = null,
         completionCriteria = [],
+        completion = null,
+        workflow = null,
+        projectPlan = null,
+        resumeAvailable = false,
+        lastStateChangeAt = null,
     } = {}) {
         this.version = HARNESS_VERSION;
         this.runId = runId || buildHarnessRunId();
@@ -4634,6 +4958,30 @@ class HarnessRunState {
         this.blockers = [];
         this.recoveryAttempts = [];
         this.decision = 'continue';
+        this.criteria = buildInitialHarnessCriteria({
+            objective,
+            executionProfile: this.executionProfile,
+            workflow,
+            projectPlan,
+            restoredCompletion: completion,
+            explicitCriteria: completionCriteria,
+        });
+        for (const criterion of completionCriteria) {
+            const normalized = normalizeHarnessCriterion(criterion, this.criteria.length, 'explicit');
+            if (normalized && !this.criteria.some((entry) => entry.text.toLowerCase() === normalized.text.toLowerCase())) {
+                this.criteria.push(normalized);
+            }
+        }
+        this.completionCriteria = this.criteria.map((criterion) => criterion.text);
+        this.evidence = Array.isArray(completion?.evidence)
+            ? completion.evidence.map((entry, index) => normalizeHarnessEvidence(entry, index)).filter(Boolean)
+            : [];
+        this.finishConfidence = ['low', 'medium', 'high'].includes(String(completion?.finishConfidence || '').trim())
+            ? String(completion.finishConfidence).trim()
+            : 'low';
+        this.finishReason = String(completion?.finishReason || '').trim() || 'completion_not_reviewed';
+        this.resumeAvailable = Boolean(resumeAvailable);
+        this.lastStateChangeAt = lastStateChangeAt || null;
         this.maxRounds = Math.max(1, Number(maxRounds) || 1);
         this.maxToolCalls = Math.max(1, Number(maxToolCalls) || MAX_PLAN_STEPS);
         this.toolCalls = 0;
@@ -4643,6 +4991,28 @@ class HarnessRunState {
             : (this.executionProfile === REMOTE_BUILD_EXECUTION_PROFILE && this.autonomyApproved
                 ? REMOTE_BUILD_MAX_REPLANS
                 : NORMAL_PROFILE_MAX_REPLANS));
+    }
+
+    static fromControlState(snapshot = null, defaults = {}) {
+        if (!isHarnessSnapshotResumeable(snapshot)) {
+            return new HarnessRunState(defaults);
+        }
+
+        const harness = new HarnessRunState({
+            ...defaults,
+            runId: snapshot.runId || defaults.runId,
+            objective: snapshot.currentObjective || defaults.objective,
+            executionProfile: snapshot.executionProfile || defaults.executionProfile,
+            autonomyLevel: snapshot.autonomyLevel || defaults.autonomyLevel,
+            autonomyApproved: Boolean(defaults.autonomyApproved || snapshot.autonomyLevel === 'guarded-remote'),
+            completion: snapshot.completion,
+            resumeAvailable: true,
+            lastStateChangeAt: snapshot.lastStateChangeAt || null,
+        });
+        harness.blockers = Array.isArray(snapshot.blockers) ? snapshot.blockers.slice(-8) : [];
+        harness.recoveryAttempts = Array.isArray(snapshot.recoveryAttempts) ? snapshot.recoveryAttempts.slice(-8) : [];
+        harness.decision = normalizeHarnessReviewAction(snapshot.decision || harness.decision);
+        return harness;
     }
 
     setBudget({ maxRounds = this.maxRounds, maxToolCalls = this.maxToolCalls } = {}) {
@@ -4664,6 +5034,126 @@ class HarnessRunState {
 
     get remainingReplans() {
         return Math.max(0, this.maxReplans - this.replans);
+    }
+
+    recordCriterion(criterion = '', source = 'objective') {
+        const normalized = normalizeHarnessCriterion(criterion, this.criteria.length, source);
+        if (!normalized) {
+            return null;
+        }
+
+        const existing = this.criteria.find((entry) => entry.id === normalized.id
+            || entry.text.toLowerCase() === normalized.text.toLowerCase());
+        if (existing) {
+            return existing;
+        }
+
+        this.criteria.push(normalized);
+        this.completionCriteria = this.criteria.map((entry) => entry.text);
+        return normalized;
+    }
+
+    markCriterionSatisfied(criterionIdOrText = '', evidenceId = '') {
+        const normalized = normalizeHarnessCriterionText(criterionIdOrText).toLowerCase();
+        const criterion = this.criteria.find((entry) => entry.id === criterionIdOrText
+            || entry.text.toLowerCase() === normalized);
+        if (!criterion) {
+            return false;
+        }
+
+        criterion.status = 'satisfied';
+        if (evidenceId && !criterion.evidenceIds.includes(evidenceId)) {
+            criterion.evidenceIds.push(evidenceId);
+        }
+        return true;
+    }
+
+    getUnmetCriteria() {
+        return this.criteria.filter((criterion) => criterion.required !== false && criterion.status !== 'satisfied');
+    }
+
+    recordEvidence(evidence = {}) {
+        const normalized = normalizeHarnessEvidence(evidence, this.evidence.length);
+        if (!normalized) {
+            return null;
+        }
+
+        const duplicate = this.evidence.find((entry) => entry.summary === normalized.summary && entry.tool === normalized.tool);
+        if (duplicate) {
+            return duplicate;
+        }
+
+        const matchedCriteria = this.criteria.filter((criterion) => evidenceMatchesHarnessCriterion(normalized, criterion));
+        normalized.criterionIds = Array.from(new Set([
+            ...normalized.criterionIds,
+            ...matchedCriteria.map((criterion) => criterion.id),
+        ]));
+        this.evidence.push(normalized);
+
+        for (const criterionId of normalized.criterionIds) {
+            this.markCriterionSatisfied(criterionId, normalized.id);
+        }
+
+        if (normalized.stateChanged) {
+            this.lastStateChangeAt = normalized.createdAt;
+        }
+
+        return normalized;
+    }
+
+    reviewCompletion({
+        budgetExceeded = false,
+        blocking = false,
+        stateChanged = false,
+        progressMade = false,
+        canContinue = false,
+        noToolPath = false,
+    } = {}) {
+        const unmetCriteria = this.getUnmetCriteria();
+        let decision = this.decision;
+        let finishConfidence = unmetCriteria.length === 0 && this.criteria.length > 0 ? 'high' : 'low';
+        let finishReason = unmetCriteria.length === 0 && this.criteria.length > 0
+            ? 'all_required_criteria_satisfied'
+            : 'criteria_unmet';
+
+        if (budgetExceeded) {
+            decision = 'checkpoint';
+            finishConfidence = 'low';
+            finishReason = 'budget_exhausted_with_unmet_criteria';
+        } else if (blocking) {
+            decision = 'blocked';
+            finishConfidence = 'low';
+            finishReason = 'blocking_failure';
+        } else if (unmetCriteria.length > 0 && canContinue && (stateChanged || progressMade)) {
+            decision = 'continue';
+            finishConfidence = 'low';
+            finishReason = 'unmet_criteria_with_progress';
+        } else if (unmetCriteria.length > 0 && noToolPath) {
+            decision = 'synthesize';
+            finishConfidence = 'medium';
+            finishReason = 'no_tool_path_for_unmet_criteria';
+        } else if (unmetCriteria.length > 0) {
+            decision = canContinue ? 'continue' : 'synthesize';
+            finishConfidence = canContinue ? 'low' : 'medium';
+            finishReason = canContinue ? 'unmet_criteria_can_continue' : 'unmet_criteria_budget_or_policy_limited';
+        } else if (this.criteria.length === 0) {
+            finishConfidence = 'medium';
+            finishReason = 'no_explicit_completion_criteria';
+        } else {
+            decision = 'synthesize';
+        }
+
+        this.finishConfidence = finishConfidence;
+        this.finishReason = finishReason;
+        this.resumeAvailable = ['continue', 'checkpoint', 'blocked'].includes(decision) && unmetCriteria.length > 0;
+        this.setDecision(decision, finishReason);
+        return {
+            decision,
+            completionStatus: unmetCriteria.length === 0 ? 'complete' : 'incomplete',
+            finishConfidence,
+            finishReason,
+            unmetCriteria: unmetCriteria.map((criterion) => criterion.text),
+        };
     }
 
     recordPlan({ round = 0, steps = [], source = 'none' } = {}) {
@@ -4813,7 +5303,45 @@ class HarnessRunState {
                 .slice(-6),
             blockers: this.blockers.slice(-6),
             recoveryAttempts: this.recoveryAttempts.slice(-6),
+            completion: {
+                unmetCriteria: this.getUnmetCriteria().map((criterion) => criterion.text),
+                evidence: this.evidence.slice(-8),
+                finishConfidence: this.finishConfidence,
+                finishReason: this.finishReason,
+            },
             decision: this.decision,
+        };
+    }
+
+    getCompletionSummary() {
+        const unmetCriteria = this.getUnmetCriteria();
+        return {
+            criteria: this.criteria,
+            evidence: this.evidence,
+            unmetCriteria: unmetCriteria.map((criterion) => ({
+                id: criterion.id,
+                text: criterion.text,
+                source: criterion.source,
+                required: criterion.required !== false,
+            })),
+            finishConfidence: this.finishConfidence,
+            finishReason: this.finishReason,
+        };
+    }
+
+    toControlState() {
+        return {
+            version: this.version,
+            runId: this.runId,
+            currentObjective: this.currentObjective,
+            executionProfile: this.executionProfile,
+            autonomyLevel: this.autonomyLevel,
+            completion: this.getCompletionSummary(),
+            blockers: this.blockers.slice(-8),
+            recoveryAttempts: this.recoveryAttempts.slice(-8),
+            decision: this.decision,
+            lastStateChangeAt: this.lastStateChangeAt,
+            updatedAt: new Date().toISOString(),
         };
     }
 
@@ -4826,9 +5354,12 @@ class HarnessRunState {
             rounds: this.rounds,
             currentObjective: this.currentObjective,
             completionCriteria: this.completionCriteria,
+            completion: this.getCompletionSummary(),
             blockers: this.blockers,
             recoveryAttempts: this.recoveryAttempts,
             decision: this.decision,
+            resumeAvailable: this.resumeAvailable,
+            lastStateChangeAt: this.lastStateChangeAt,
             ...(this.decisionReason ? { decisionReason: this.decisionReason } : {}),
             budget: {
                 maxRounds: this.maxRounds,
@@ -5809,8 +6340,9 @@ class ConversationOrchestrator extends EventEmitter {
                 session,
             })
             : null;
+        const sessionControlState = getSessionControlState(session);
         const storedForegroundContinuationGate = normalizeForegroundContinuationGate(
-            getSessionControlState(session).foregroundContinuationGate,
+            sessionControlState.foregroundContinuationGate,
         );
         const autonomyContinuationDecision = parseAutonomyContinuationDecision(objective);
         const shouldClearForegroundContinuationGate = autonomyContinuationDecision === 'continue'
@@ -5960,7 +6492,10 @@ class ConversationOrchestrator extends EventEmitter {
             ),
             extensionsUsed: 0,
         };
-        const harnessRun = new HarnessRunState({
+        const restoredHarnessSnapshot = isHarnessResumeTurn(rawObjective, objective)
+            ? sessionControlState.harness
+            : null;
+        const harnessRunDefaults = {
             objective,
             executionProfile: resolvedProfile,
             autonomyApproved,
@@ -5975,7 +6510,12 @@ class ConversationOrchestrator extends EventEmitter {
                     .map((milestone) => milestone.title || milestone.objective || '')
                     .filter(Boolean)
                 : [],
-        });
+            workflow: endToEndWorkflow,
+            projectPlan: activeProjectPlan,
+        };
+        const harnessRun = isHarnessSnapshotResumeable(restoredHarnessSnapshot)
+            ? HarnessRunState.fromControlState(restoredHarnessSnapshot, harnessRunDefaults)
+            : new HarnessRunState(harnessRunDefaults);
         const refreshHarnessMetadata = (decision = null, reason = '') => {
             harnessRun.setBudget({
                 maxRounds: budgetState.maxRounds,
@@ -6485,6 +7025,10 @@ class ConversationOrchestrator extends EventEmitter {
                         status: 'error',
                         details: {
                             round,
+                            harnessDecision: 'blocked',
+                            completionStatus: harnessRun.getUnmetCriteria().length > 0 ? 'incomplete' : 'unknown',
+                            recoveryType: null,
+                            stateChanged: false,
                             blocked: repeatedPlanReport.rejected.map((entry) => ({
                                 tool: entry.step?.tool || '',
                                 reason: entry.step?.reason || '',
@@ -6594,6 +7138,24 @@ class ConversationOrchestrator extends EventEmitter {
                 refreshHarnessMetadata();
 
                 if (nextPlan.length === 0) {
+                    const noToolCompletionReview = harnessRun.reviewCompletion({
+                        noToolPath: true,
+                        canContinue: false,
+                    });
+                    executionTrace.push(createExecutionTraceEntry({
+                        type: 'review',
+                        name: `Completion review ${round}`,
+                        details: {
+                            round,
+                            harnessDecision: noToolCompletionReview.decision,
+                            completionStatus: noToolCompletionReview.completionStatus,
+                            finishConfidence: noToolCompletionReview.finishConfidence,
+                            finishReason: noToolCompletionReview.finishReason,
+                            unmetCriteria: noToolCompletionReview.unmetCriteria,
+                            stateChanged: false,
+                        },
+                    }));
+                    refreshHarnessMetadata(noToolCompletionReview.decision, noToolCompletionReview.finishReason);
                     break;
                 }
 
@@ -6678,6 +7240,8 @@ class ConversationOrchestrator extends EventEmitter {
                 const roundFailureSummary = summarizeRoundFailures(roundToolEvents, resolvedProfile);
                 const roundFailed = roundFailureSummary.anyFailed;
                 const blockingRoundFailure = roundFailureSummary.blockingFailures.length > 0;
+                const roundStateChanged = roundToolEvents.some((event) => doesToolEventChangeState(event));
+                const roundProgressMade = roundToolEvents.some((event) => event?.result?.success !== false);
                 lastAutonomyProgress = summarizeAutonomyProgress(roundToolEvents, roundFailureSummary);
                 executionTrace.push(createExecutionTraceEntry({
                     type: 'execution',
@@ -6693,6 +7257,7 @@ class ConversationOrchestrator extends EventEmitter {
                         failed: roundFailed,
                         budgetExceeded,
                         blockingFailure: blockingRoundFailure,
+                        stateChanged: roundStateChanged,
                         tools: roundToolEvents.map((event) => ({
                             tool: event?.toolCall?.function?.name || '',
                             success: event?.result?.success !== false,
@@ -6806,6 +7371,7 @@ class ConversationOrchestrator extends EventEmitter {
                                 tool: failure.toolId,
                                 error: failure.error || null,
                             })),
+                            recoveryType: 'model-or-deterministic',
                         },
                     }));
                     const deterministicRecoveryPlan = filterRepeatedPlanSteps(
@@ -6835,6 +7401,10 @@ class ConversationOrchestrator extends EventEmitter {
                             name: `Deterministic recovery selected after round ${round}`,
                             details: {
                                 round,
+                                harnessDecision: 'continue',
+                                completionStatus: harnessRun.getUnmetCriteria().length > 0 ? 'incomplete' : 'unknown',
+                                recoveryType: 'deterministic',
+                                stateChanged: false,
                                 stepCount: deterministicRecoveryPlan.length,
                                 steps: deterministicRecoveryPlan.map((step) => ({
                                     tool: step.tool,
@@ -6904,9 +7474,23 @@ class ConversationOrchestrator extends EventEmitter {
                     toolPolicy,
                     endToEndWorkflow,
                 });
+                const completionReview = harnessRun.reviewCompletion({
+                    budgetExceeded,
+                    blocking: blockingRoundFailure,
+                    stateChanged: roundStateChanged,
+                    progressMade: roundProgressMade,
+                    canContinue: autonomyApproved
+                        && toolEvents.length < budgetState.maxToolCalls
+                        && round < budgetState.maxRounds,
+                });
                 const suggestedRoundDecision = forcedRecoveryPlan.length > 0
                     ? 'continue'
-                    : (legacyRoundReview?.decision
+                    : (['blocked', 'checkpoint'].includes(completionReview.decision)
+                        ? completionReview.decision
+                        : (completionReview.decision === 'continue'
+                            ? 'continue'
+                            : null)
+                        || legacyRoundReview?.decision
                         || (planSource === 'deterministic-recovery' && !roundFailed
                             ? 'synthesize'
                             : null)
@@ -6915,13 +7499,16 @@ class ConversationOrchestrator extends EventEmitter {
                             : 'synthesize'));
                 const suggestedRoundReason = forcedRecoveryPlan.length > 0
                     ? 'A deterministic recovery step is ready for the next pass.'
-                    : (legacyRoundReview?.reason
+                    : (['blocked', 'checkpoint', 'continue'].includes(completionReview.decision)
+                        ? completionReview.finishReason
+                        : null)
+                        || legacyRoundReview?.reason
                         || (planSource === 'deterministic-recovery' && !roundFailed
                             ? 'Deterministic recovery succeeded; synthesize the result.'
                             : null)
                         || (autonomyApproved && !blockingRoundFailure && roundToolEvents.length > 0
                             ? 'Continue guarded autonomous work while tool progress is available.'
-                            : 'Synthesize after the completed round.'));
+                            : 'Synthesize after the completed round.');
                 const roundReview = harnessRun.reviewRound({
                     round,
                     roundToolEvents,
@@ -6941,8 +7528,17 @@ class ConversationOrchestrator extends EventEmitter {
                         details: {
                             round,
                             decision: roundReview.decision,
+                            harnessDecision: roundReview.decision,
                             reason: roundReview.reason,
                             replanReason: roundReview.decision === 'replan' ? roundReview.reason : null,
+                            completionStatus: completionReview.completionStatus,
+                            finishConfidence: completionReview.finishConfidence,
+                            finishReason: completionReview.finishReason,
+                            unmetCriteria: completionReview.unmetCriteria,
+                            recoveryType: forcedRecoveryPlan.length > 0
+                                ? 'deterministic'
+                                : (roundReview.decision === 'replan' ? 'model-replan' : null),
+                            stateChanged: roundStateChanged,
                             productive: lastAutonomyProgress?.productive === true,
                             toolCalls: roundToolEvents.length,
                         },
@@ -7028,6 +7624,22 @@ class ConversationOrchestrator extends EventEmitter {
             const latestBudgetTrace = [...executionTrace].reverse()
                 .find((entry) => entry?.type === 'budget' && /budget reached/i.test(String(entry?.name || '')));
             if (latestBudgetTrace && !['blocked', 'checkpoint', 'synthesize'].includes(toolPolicy?.harness?.decision)) {
+                const budgetCompletionReview = harnessRun.reviewCompletion({
+                    budgetExceeded: true,
+                    canContinue: false,
+                });
+                executionTrace.push(createExecutionTraceEntry({
+                    type: 'review',
+                    name: 'Completion review after budget stop',
+                    details: {
+                        harnessDecision: budgetCompletionReview.decision,
+                        completionStatus: budgetCompletionReview.completionStatus,
+                        finishConfidence: budgetCompletionReview.finishConfidence,
+                        finishReason: budgetCompletionReview.finishReason,
+                        unmetCriteria: budgetCompletionReview.unmetCriteria,
+                        stateChanged: false,
+                    },
+                }));
                 refreshHarnessMetadata('checkpoint', latestBudgetTrace.name || 'Guarded autonomy budget reached.');
             } else {
                 refreshHarnessMetadata(
@@ -8840,8 +9452,12 @@ class ConversationOrchestrator extends EventEmitter {
                     executionProfile,
                     budgetExceeded: false,
                 });
+                const stateChanged = doesToolEventChangeState(toolEvent);
                 toolEvents.push(toolEvent);
                 harnessRun?.recordToolEvent?.(toolEvent, { round, classification });
+                for (const evidence of inferCompletionEvidenceFromToolEvent(toolEvent, { round })) {
+                    harnessRun?.recordEvidence?.(evidence);
+                }
                 executionTrace.push(createExecutionTraceEntry({
                     type: 'tool_call',
                     name: `Tool call (${step.tool})`,
@@ -8854,6 +9470,7 @@ class ConversationOrchestrator extends EventEmitter {
                         paramKeys: Object.keys(step.params || {}).sort(),
                         error: normalizedResult.error || null,
                         classification,
+                        stateChanged,
                     },
                 }));
                 emitConversationProgress(onProgress, {
@@ -8889,6 +9506,7 @@ class ConversationOrchestrator extends EventEmitter {
                     executionProfile,
                     budgetExceeded: false,
                 });
+                const stateChanged = doesToolEventChangeState(toolEvent);
                 toolEvents.push(toolEvent);
                 harnessRun?.recordToolEvent?.(toolEvent, { round, classification });
                 executionTrace.push(createExecutionTraceEntry({
@@ -8903,6 +9521,7 @@ class ConversationOrchestrator extends EventEmitter {
                         paramKeys: Object.keys(step.params || {}).sort(),
                         error: normalizedResult.error || null,
                         classification,
+                        stateChanged,
                     },
                 }));
                 emitConversationProgress(onProgress, {
@@ -9527,12 +10146,16 @@ class ConversationOrchestrator extends EventEmitter {
             workflow: toolPolicy?.workflow || null,
             memoryTrace,
         });
+        const harnessSummary = toolPolicy?.harness && typeof toolPolicy.harness === 'object'
+            ? toolPolicy.harness
+            : (metadata?.harness && typeof metadata.harness === 'object' ? metadata.harness : null);
         const intelligenceSummary = scorePerceivedIntelligence({
             memoryTrace,
             executionTrace,
             toolEvents,
             projectKey: toolPolicy?.projectKey || '',
             clientSurface,
+            harness: harnessSummary,
         });
         const tracedUsage = extractUsageMetadataFromTrace(executionTrace);
         const hasModelCall = (Array.isArray(executionTrace) ? executionTrace : [])
@@ -9545,9 +10168,6 @@ class ConversationOrchestrator extends EventEmitter {
             clientSurface,
             executionProfile,
         });
-        const harnessSummary = toolPolicy?.harness && typeof toolPolicy.harness === 'object'
-            ? toolPolicy.harness
-            : (metadata?.harness && typeof metadata.harness === 'object' ? metadata.harness : null);
         const memoryWriteTargets = {
             conversation: buildScopedMemoryMetadata({
                 ...(ownerId ? { ownerId } : {}),
@@ -9581,9 +10201,13 @@ class ConversationOrchestrator extends EventEmitter {
                 runtimeDiagnostics: this.memoryService?.getDiagnostics?.() || null,
             });
         }
+        const harnessControlState = buildHarnessControlStateFromSummary(harnessSummary);
         const finalControlStatePatch = mergeControlState(
             controlStatePatch,
-            activeTaskFrame ? { activeTaskFrame } : {},
+            mergeControlState(
+                activeTaskFrame ? { activeTaskFrame } : {},
+                harnessControlState !== undefined ? { harness: harnessControlState } : {},
+            ),
         );
         await this.persistConversationState({
             sessionId,

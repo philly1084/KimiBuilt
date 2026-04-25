@@ -132,6 +132,84 @@ describe('HarnessRunState', () => {
             signature: '{"tool":"remote-command","params":{"command":"hostname"}}',
         }));
     });
+
+    test('tracks completion criteria, evidence, and resumeable control state', () => {
+        const harness = new HarnessRunState({
+            objective: 'Deploy the app and verify it is live.',
+            executionProfile: 'remote-build',
+            autonomyApproved: true,
+            completionCriteria: ['Deployment applied', 'Deployment verified'],
+        });
+
+        harness.recordEvidence({
+            type: 'deployment-applied',
+            summary: 'kubectl apply completed successfully.',
+            tool: 'remote-command',
+            stateChanged: true,
+        });
+
+        expect(harness.getUnmetCriteria().map((entry) => entry.text)).toEqual(['Deployment verified']);
+
+        const incompleteReview = harness.reviewCompletion({
+            stateChanged: true,
+            progressMade: true,
+            canContinue: true,
+        });
+        expect(incompleteReview).toEqual(expect.objectContaining({
+            decision: 'continue',
+            completionStatus: 'incomplete',
+            finishReason: 'unmet_criteria_with_progress',
+        }));
+        expect(harness.toJSON().resumeAvailable).toBe(true);
+        expect(harness.toControlState()).toEqual(expect.objectContaining({
+            version: 'planner-recovery-v2',
+            completion: expect.objectContaining({
+                unmetCriteria: [expect.objectContaining({ text: 'Deployment verified' })],
+            }),
+        }));
+
+        harness.recordEvidence({
+            type: 'public-verification',
+            summary: 'Public HTTPS check returned HTTP 200.',
+            tool: 'remote-command',
+            confidence: 'high',
+        });
+        const completeReview = harness.reviewCompletion({ canContinue: true });
+        expect(completeReview).toEqual(expect.objectContaining({
+            decision: 'synthesize',
+            completionStatus: 'complete',
+            finishConfidence: 'high',
+            finishReason: 'all_required_criteria_satisfied',
+        }));
+        expect(harness.getUnmetCriteria()).toHaveLength(0);
+    });
+
+    test('restores completion state from a resumeable control-state snapshot', () => {
+        const original = new HarnessRunState({
+            objective: 'Deploy the app.',
+            executionProfile: 'remote-build',
+            autonomyApproved: true,
+            completionCriteria: ['Deployment applied', 'Deployment verified'],
+        });
+        original.recordEvidence({
+            type: 'deployment-applied',
+            summary: 'Deployment command completed.',
+            tool: 'remote-command',
+            stateChanged: true,
+        });
+        original.reviewCompletion({ stateChanged: true, progressMade: true, canContinue: true });
+
+        const restored = HarnessRunState.fromControlState(original.toControlState(), {
+            objective: 'Deploy the app. continue',
+            executionProfile: 'remote-build',
+            autonomyApproved: true,
+        });
+
+        expect(restored.runId).toBe(original.runId);
+        expect(restored.getUnmetCriteria().map((entry) => entry.text)).toEqual(['Deployment verified']);
+        expect(restored.toJSON().completion.evidence).toHaveLength(1);
+        expect(restored.toJSON().resumeAvailable).toBe(true);
+    });
 });
 
 describe('ConversationOrchestrator', () => {
@@ -236,6 +314,83 @@ describe('ConversationOrchestrator', () => {
                 sourceSurface: 'chat',
             }),
         );
+    });
+
+    test('restores harness completion state for a continuation turn', async () => {
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Continuing from the saved harness state.', 'resp_harness_resume')),
+            complete: jest.fn(),
+        };
+        const toolManager = {
+            getTool: jest.fn(() => null),
+        };
+        const savedHarness = {
+            version: 'planner-recovery-v2',
+            runId: 'harness_saved_1',
+            currentObjective: 'Deploy the app and verify it is live.',
+            executionProfile: 'remote-build',
+            autonomyLevel: 'guarded-remote',
+            completion: {
+                criteria: [
+                    { id: 'deployment-applied', text: 'Deployment applied', status: 'satisfied', evidenceIds: ['e1'] },
+                    { id: 'deployment-verified', text: 'Deployment verified', status: 'pending', evidenceIds: [] },
+                ],
+                evidence: [
+                    { id: 'e1', summary: 'Deployment command completed.', type: 'deployment-applied', tool: 'remote-command', criterionIds: ['deployment-applied'] },
+                ],
+                unmetCriteria: [{ id: 'deployment-verified', text: 'Deployment verified' }],
+                finishConfidence: 'low',
+                finishReason: 'unmet_criteria_with_progress',
+            },
+            blockers: [],
+            recoveryAttempts: [],
+            decision: 'continue',
+            lastStateChangeAt: '2026-04-25T00:00:00.000Z',
+        };
+        const session = {
+            id: 'session-harness-resume',
+            metadata: {
+                controlState: {
+                    harness: savedHarness,
+                },
+            },
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue(session),
+            getOrCreate: jest.fn().mockResolvedValue(session),
+            getRecentMessages: jest.fn().mockResolvedValue([
+                { role: 'user', content: 'Deploy the app and verify it is live.' },
+                { role: 'assistant', content: 'Deployment applied; verification remains.' },
+            ]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'continue',
+            sessionId: 'session-harness-resume',
+            stream: false,
+        });
+
+        expect(result.response.metadata.harness).toEqual(expect.objectContaining({
+            runId: 'harness_saved_1',
+            currentObjective: expect.stringContaining('Deploy the app'),
+            completion: expect.objectContaining({
+                unmetCriteria: [expect.objectContaining({ text: 'Deployment verified' })],
+            }),
+        }));
     });
 
     test('persists promptState metadata without crashing the conversation completion path', async () => {
