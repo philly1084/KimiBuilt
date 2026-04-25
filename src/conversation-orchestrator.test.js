@@ -184,6 +184,36 @@ describe('HarnessRunState', () => {
         expect(harness.getUnmetCriteria()).toHaveLength(0);
     });
 
+    test('maps generic project-plan milestones to concrete research and artifact evidence', () => {
+        const harness = new HarnessRunState({
+            objective: 'Make a simple HTML page with research on AI news.',
+            executionProfile: 'default',
+            completionCriteria: [
+                'Inspect the current state',
+                'Produce the requested deliverable',
+                'Validate and review the result',
+            ],
+        });
+
+        harness.recordEvidence({
+            type: 'research-search',
+            summary: 'Research search returned verified candidate sources.',
+            tool: 'web-search',
+        });
+        expect(harness.getUnmetCriteria().map((entry) => entry.text)).toEqual([
+            'Produce the requested deliverable',
+            'Validate and review the result',
+        ]);
+
+        harness.recordEvidence({
+            type: 'document-generated',
+            summary: 'A document or HTML page workflow produced an artifact.',
+            tool: 'document-workflow',
+            stateChanged: true,
+        });
+        expect(harness.getUnmetCriteria()).toHaveLength(0);
+    });
+
     test('restores completion state from a resumeable control-state snapshot', () => {
         const original = new HarnessRunState({
             objective: 'Deploy the app.',
@@ -5469,6 +5499,94 @@ describe('ConversationOrchestrator', () => {
                 ]),
             }),
         }));
+    });
+
+    test('continues guarded research deliverables through fetch and document generation before synthesis', async () => {
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Created the AI news HTML page.', 'resp_ai_news_page')),
+            complete: jest.fn().mockResolvedValue(JSON.stringify({ steps: [] })),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['web-search', 'web-fetch', 'document-workflow'].includes(toolId)
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn(async (toolId) => {
+                if (toolId === 'web-search') {
+                    return {
+                        success: true,
+                        toolId,
+                        data: {
+                            query: 'ai news',
+                            results: [{
+                                title: 'AI News Roundup',
+                                url: 'https://news.example.com/ai',
+                                source: 'news.example.com',
+                                snippet: 'New AI models and policy updates are reshaping the industry.',
+                            }],
+                        },
+                    };
+                }
+
+                if (toolId === 'web-fetch') {
+                    return {
+                        success: true,
+                        toolId,
+                        data: {
+                            url: 'https://news.example.com/ai',
+                            title: 'AI News Roundup',
+                            body: '<html><body><main>AI labs announced model updates and regulators published policy guidance.</main></body></html>',
+                        },
+                    };
+                }
+
+                return {
+                    success: true,
+                    toolId,
+                    data: {
+                        artifact: {
+                            path: 'output/ai-news.html',
+                        },
+                        artifacts: [{
+                            path: 'output/ai-news.html',
+                            kind: 'html',
+                        }],
+                    },
+                };
+            }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-ai-news-page', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'make a simple html page with some research on ai news',
+            sessionId: 'session-ai-news-page',
+            stream: false,
+        });
+
+        expect(toolManager.executeTool.mock.calls.map((call) => call[0])).toEqual([
+            'web-search',
+            'web-fetch',
+            'document-workflow',
+        ]);
+        expect(result.response.metadata.harness.completion.unmetCriteria).toEqual([]);
+        expect(result.trace.failureTags).not.toContain('premature_synthesis_with_unmet_criteria');
     });
 
     test('starts deep research presentation workflow before web search when no grounded sources exist yet', () => {

@@ -3532,7 +3532,9 @@ function buildResearchFollowupPlanFromToolEvents({ objective = '', toolPolicy = 
         return [];
     }
 
-    const maxPages = normalizeResearchFollowupPageCount();
+    const maxPages = hasDocumentWorkflowIntentText(objective)
+        ? Math.min(2, normalizeResearchFollowupPageCount())
+        : normalizeResearchFollowupPageCount();
     const followupCandidates = [];
     const seen = new Set();
 
@@ -3613,6 +3615,39 @@ function buildDocumentWorkflowFollowupPlanFromToolEvents({ objective = '', toolP
         reason: 'Verified research results are ready to be compiled into the requested document or slide deck.',
         params,
     }];
+}
+
+function shouldAllowGuardedCompletionContinuation({
+    objective = '',
+    toolPolicy = {},
+    completionReview = null,
+    autonomyApproved = false,
+    blocking = false,
+    budgetExceeded = false,
+    round = 0,
+    budgetState = null,
+} = {}) {
+    if (autonomyApproved || blocking || budgetExceeded) {
+        return false;
+    }
+
+    if (!Array.isArray(completionReview?.unmetCriteria) || completionReview.unmetCriteria.length === 0) {
+        return false;
+    }
+
+    if (!budgetState
+        || round >= Number(budgetState.maxRounds || 0)
+        || Number(budgetState.maxToolCalls || 0) <= 0) {
+        return false;
+    }
+
+    const objectiveNeedsDeterministicFollowup = hasExplicitWebResearchIntentText(objective)
+        || hasCurrentInfoIntentText(objective)
+        || hasDocumentWorkflowIntentText(objective)
+        || toolPolicy?.projectPlan?.status === 'active'
+        || toolPolicy?.workflow?.status === 'active';
+
+    return objectiveNeedsDeterministicFollowup;
 }
 
 function isSerializedToolCallWrapperText(text = '') {
@@ -4741,7 +4776,10 @@ function evidenceMatchesHarnessCriterion(evidence = {}, criterion = {}) {
     }
 
     if (text.includes('inspection')) {
-        return /\b(remote-inspection|k8s-inspection|pod-readiness|service-ingress|public-verification)\b/.test(haystack);
+        return /\b(remote-inspection|k8s-inspection|pod-readiness|service-ingress|public-verification|research-search|research-fetch)\b/.test(haystack);
+    }
+    if (text.includes('inspect') || text.includes('current state')) {
+        return /\b(remote-inspection|k8s-inspection|pod-readiness|service-ingress|public-verification|research-search|research-fetch|verified-result)\b/.test(haystack);
     }
     if (text.includes('deployment applied') || (text.includes('deploy') && !text.includes('verified'))) {
         return /\b(deployment-applied|managed-app-deploy|k3s-deploy|rollout)\b/.test(haystack);
@@ -4757,6 +4795,12 @@ function evidenceMatchesHarnessCriterion(evidence = {}, criterion = {}) {
     }
     if (text.includes('research')) {
         return /\b(research-search|research-fetch|document-generated)\b/.test(haystack);
+    }
+    if (text.includes('produce') || text.includes('deliverable') || text.includes('deliver requested')) {
+        return /\b(document-generated|artifact-created|managed-app-authoring|code-change)\b/.test(haystack);
+    }
+    if (text.includes('validate') || text.includes('review the result')) {
+        return /\b(document-generated|artifact-created|build-complete|public-verification|deployment-verified|research-fetch)\b/.test(haystack);
     }
     if (text.includes('document') || text.includes('artifact')) {
         return /\b(document-generated|artifact-created)\b/.test(haystack);
@@ -6415,12 +6459,16 @@ class ConversationOrchestrator extends EventEmitter {
             );
         const autonomyBudget = getRemoteBuildAutonomyBudget();
         const autonomyExtensionBudget = getRemoteBuildAutonomyExtensionBudget();
-        const allowsDeterministicResearchFollowup = !autonomyApproved && hasExplicitWebResearchIntentText(objective);
+        const allowsDeterministicResearchFollowup = !autonomyApproved
+            && (hasExplicitWebResearchIntentText(objective) || hasCurrentInfoIntentText(objective));
+        const deterministicFollowupRounds = allowsDeterministicResearchFollowup
+            ? (hasDocumentWorkflowIntentText(objective) ? 3 : 2)
+            : 1;
         const hasCustomToolBudget = Number.isFinite(Number(toolBudget?.maxDurationMs)) && Number(toolBudget.maxDurationMs) > 0;
         const budgetState = {
             maxRounds: normalizePositiveBudget(
                 toolBudget?.maxRounds,
-                autonomyApproved ? autonomyBudget.maxRounds : (allowsDeterministicResearchFollowup ? 2 : 1),
+                autonomyApproved ? autonomyBudget.maxRounds : deterministicFollowupRounds,
             ),
             maxToolCalls: normalizePositiveBudget(
                 toolBudget?.maxToolCalls,
@@ -7059,6 +7107,11 @@ class ConversationOrchestrator extends EventEmitter {
                     nextPlan = [];
                 }
 
+                if (nextPlan.length > 0) {
+                    const remainingToolBudget = Math.max(0, budgetState.maxToolCalls - toolEvents.length);
+                    nextPlan = nextPlan.slice(0, remainingToolBudget);
+                }
+
                 executionTrace.push(createExecutionTraceEntry({
                     type: 'planning',
                     name: `Plan round ${round}`,
@@ -7414,14 +7467,34 @@ class ConversationOrchestrator extends EventEmitter {
                     toolPolicy,
                     endToEndWorkflow,
                 });
+                const hasGuardedCompletionBudget = !autonomyApproved
+                    && toolEvents.length < budgetState.maxToolCalls
+                    && round < budgetState.maxRounds
+                    && (
+                        hasExplicitWebResearchIntentText(objective)
+                        || hasCurrentInfoIntentText(objective)
+                        || hasDocumentWorkflowIntentText(objective)
+                        || toolPolicy?.projectPlan?.status === 'active'
+                        || toolPolicy?.workflow?.status === 'active'
+                    );
                 const completionReview = harnessRun.reviewCompletion({
                     budgetExceeded,
                     blocking: blockingRoundFailure,
                     stateChanged: roundStateChanged,
                     progressMade: roundProgressMade,
-                    canContinue: autonomyApproved
+                    canContinue: (autonomyApproved || hasGuardedCompletionBudget)
                         && toolEvents.length < budgetState.maxToolCalls
                         && round < budgetState.maxRounds,
+                });
+                const shouldContinueGuardedCompletion = shouldAllowGuardedCompletionContinuation({
+                    objective,
+                    toolPolicy,
+                    completionReview,
+                    autonomyApproved,
+                    blocking: blockingRoundFailure,
+                    budgetExceeded,
+                    round,
+                    budgetState,
                 });
                 const suggestedRoundDecision = forcedRecoveryPlan.length > 0
                     ? 'continue'
@@ -7507,6 +7580,10 @@ class ConversationOrchestrator extends EventEmitter {
                 }
 
                 if (!isJudgmentV2Enabled()) {
+                    if (shouldContinueGuardedCompletion) {
+                        continue;
+                    }
+
                     if (autonomyApproved
                         && planSource === 'guided-remote'
                         && !roundFailed
@@ -8320,6 +8397,10 @@ class ConversationOrchestrator extends EventEmitter {
             }
             if ((hasExplicitWebResearchIntent || /\b(latest|current|today|news|headlines?|weather|forecast|temperature|research|look up|search|browse)\b/.test(prompt)) && allowedToolIds.includes('web-search')) {
                 candidates.add('web-search');
+            }
+            if ((hasExplicitWebResearchIntent || hasCurrentInfoIntentText(prompt))
+                && allowedToolIds.includes('web-fetch')) {
+                candidates.add('web-fetch');
             }
             if (hasExplicitScrapeIntent) {
                 if (allowedToolIds.includes('web-search')) {

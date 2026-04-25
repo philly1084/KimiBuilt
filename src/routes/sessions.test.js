@@ -460,4 +460,49 @@ describe('/api/sessions route', () => {
             warnSpy.mockRestore();
         }
     });
+
+    test('permanently deletes all sessions in a requested workspace scope', async () => {
+        sessionStore.list.mockResolvedValue([
+            { id: 'session-1', metadata: { ownerId: 'phill', memoryScope: 'web-chat-workspace-2' } },
+            { id: 'session-2', metadata: { ownerId: 'phill', memoryScope: 'web-chat-workspace-2' } },
+        ]);
+        sessionStore.getActiveOwnedSession.mockResolvedValue({ id: 'session-1' });
+        sessionStore.getOwned.mockImplementation(async (id) => ({
+            id,
+            scopeKey: 'web-chat-workspace-2',
+            metadata: { ownerId: 'phill', memoryScope: 'web-chat-workspace-2' },
+        }));
+        sessionStore.delete.mockResolvedValue(true);
+        artifactService.deleteArtifactsForSession.mockResolvedValue(undefined);
+        memoryService.forget.mockResolvedValue(undefined);
+        sessionStore.setActiveSession.mockResolvedValue(null);
+
+        const app = express();
+        app.use(express.json());
+        app.use((req, _res, next) => {
+            req.user = { username: 'phill' };
+            next();
+        });
+        app.use('/api/sessions', sessionsRouter);
+
+        const response = await request(app)
+            .delete('/api/sessions?clientSurface=web-chat&workspaceKey=web-chat-workspace-2')
+            .send();
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual({
+            deleted: ['session-1', 'session-2'],
+            count: 2,
+            scopeKey: 'web-chat-workspace-2',
+        });
+        expect(sessionStore.list).toHaveBeenCalledWith({
+            ownerId: 'phill',
+            scopeKey: 'web-chat-workspace-2',
+        });
+        expect(sessionStore.delete).toHaveBeenCalledWith('session-1');
+        expect(sessionStore.delete).toHaveBeenCalledWith('session-2');
+        expect(memoryService.forget).toHaveBeenCalledWith('session-1');
+        expect(memoryService.forget).toHaveBeenCalledWith('session-2');
+        expect(sessionStore.setActiveSession).toHaveBeenCalledWith('phill', null, 'web-chat-workspace-2');
+    });
 });

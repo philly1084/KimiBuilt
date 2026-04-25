@@ -16,6 +16,7 @@ const { sessionStore } = require('./session-store');
 const chatRouter = require('./routes/chat');
 const canvasRouter = require('./routes/canvas');
 const notationRouter = require('./routes/notation');
+const notesRouter = require('./routes/notes');
 const sessionsRouter = require('./routes/sessions');
 const preferencesRouter = require('./routes/preferences');
 const modelsRouter = require('./routes/models');
@@ -251,6 +252,7 @@ app.get('/', (_req, res) => {
 app.use('/api/chat', chatRouter);
 app.use('/api/canvas', canvasRouter);
 app.use('/api/notation', notationRouter);
+app.use('/api/notes', notesRouter);
 app.use('/api/sessions', sessionsRouter);
 app.use('/api/preferences', preferencesRouter);
 app.use('/api/models', modelsRouter);

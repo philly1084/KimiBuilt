@@ -5678,6 +5678,7 @@ body.layout-minimal #input-meta-row {
 .code-block {
     position: relative;
     margin: 1rem 0;
+    max-width: 100%;
     border-radius: var(--radius-lg);
     overflow: hidden;
     background-color: #1e1e1e;
@@ -5752,9 +5753,28 @@ body.layout-minimal #input-meta-row {
 .code-block pre {
     margin: 0;
     padding: 1rem;
+    max-width: 100%;
     overflow-x: auto;
     background-color: #1e1e1e;
     position: relative;
+}
+
+.text-code-block pre {
+    overflow-x: hidden;
+    white-space: pre-wrap;
+}
+
+.text-code-block pre::after {
+    display: none;
+}
+
+.text-code-block pre code,
+.text-code-block code[class*="language-"] {
+    display: block;
+    max-width: 100%;
+    white-space: pre-wrap !important;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .mermaid-source-block {

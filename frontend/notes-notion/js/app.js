@@ -27,6 +27,10 @@
         const health = await API.checkHealth();
         state.backendConnected = health.connected;
         console.log(state.backendConnected ? '[Notes] Backend connected' : '[Notes] Backend offline - using local mode');
+
+        if (state.backendConnected && typeof Storage.initializeRemote === 'function') {
+            await Storage.initializeRemote();
+        }
         
         // Update connection status UI
         updateConnectionStatus(state.backendConnected ? 'connected' : 'disconnected');
@@ -96,6 +100,10 @@
             // Show toast if status changed
             if (wasConnected !== health.connected) {
                 if (health.connected) {
+                    const storageStatus = Storage.getStorageStatus?.() || {};
+                    if (typeof Storage.initializeRemote === 'function' && storageStatus.remoteAvailable !== true) {
+                        await Storage.initializeRemote();
+                    }
                     Sidebar.showToast('Backend connected!', 'success');
                 } else {
                     Sidebar.showToast('Backend disconnected - using offline mode', 'warning');

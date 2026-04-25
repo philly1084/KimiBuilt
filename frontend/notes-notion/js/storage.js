@@ -10,9 +10,18 @@ const Storage = (function() {
     const GLOBAL_MODEL_KEY = 'notes_notion_global_model';
     const ASSET_DB_NAME = 'notes_notion_assets';
     const ASSET_STORE_NAME = 'assets';
+    const REMOTE_SYNC_DELAY_MS = 350;
     let storageAvailable = true;
     let storageError = null;
     let memoryFallback = null; // In-memory fallback when localStorage fails
+    let remoteAvailable = false;
+    let remoteError = null;
+    let remoteInitialized = false;
+    let remoteLoadPromise = null;
+    let remoteSaveTimer = null;
+    let suppressRemoteSave = false;
+    let remoteDirty = false;
+    let remoteDeletePending = false;
     
     // Default data structure
     const defaultData = {
@@ -120,8 +129,31 @@ const Storage = (function() {
                 updatedAt: Date.now()
             }
         ],
-        trash: []
+        trash: [],
+        spaces: [
+            {
+                id: 'private',
+                name: 'Private',
+                createdAt: Date.now(),
+                updatedAt: Date.now()
+            }
+        ],
+        currentSpaceId: 'private'
     };
+
+    function getApiBaseUrl() {
+        const localHostnames = new Set(['localhost', '127.0.0.1', '[::1]']);
+        const currentHost = window.location.hostname;
+        const currentOrigin = `${window.location.protocol}//${window.location.host}`;
+
+        return localHostnames.has(currentHost)
+            ? 'http://localhost:3000/api'
+            : `${currentOrigin}/api`;
+    }
+
+    function getNotesEndpoint() {
+        return `${getApiBaseUrl()}/notes`;
+    }
     
     /**
      * Check if localStorage is available and working
@@ -309,6 +341,219 @@ const Storage = (function() {
 
         return mutated;
     }
+
+    function normalizeLoadedData(data) {
+        const source = data && typeof data === 'object' && !Array.isArray(data)
+            ? data
+            : {};
+        let didNormalize = false;
+
+        if (!Array.isArray(source.pages)) {
+            source.pages = [];
+            didNormalize = true;
+        }
+
+        if (!Array.isArray(source.trash)) {
+            source.trash = [];
+            didNormalize = true;
+        }
+
+        if (!Array.isArray(source.spaces) || source.spaces.length === 0) {
+            source.spaces = JSON.parse(JSON.stringify(defaultData.spaces));
+            didNormalize = true;
+        }
+
+        if (!source.currentSpaceId) {
+            source.currentSpaceId = source.spaces[0]?.id || 'private';
+            didNormalize = true;
+        }
+
+        source.pages.forEach(page => {
+            if (!('defaultModel' in page)) {
+                page.defaultModel = null;
+                didNormalize = true;
+            }
+            if (!page.spaceId) {
+                page.spaceId = source.currentSpaceId || 'private';
+                didNormalize = true;
+            }
+            didNormalize = ensureUniqueBlockIds(page.blocks || []) || didNormalize;
+        });
+
+        source.trash.forEach(page => {
+            if (!page.spaceId) {
+                page.spaceId = source.currentSpaceId || 'private';
+                didNormalize = true;
+            }
+            didNormalize = ensureUniqueBlockIds(page.blocks || []) || didNormalize;
+        });
+
+        return { data: source, didNormalize };
+    }
+
+    function saveAllLocally(data) {
+        const normalizedData = normalizeDataForStorage(data);
+        memoryFallback = JSON.parse(JSON.stringify(normalizedData));
+        if (!storageAvailable) {
+            console.warn('Saving to memory only - localStorage unavailable');
+            return { success: false, memoryOnly: true, error: storageError };
+        }
+
+        try {
+            const serialized = JSON.stringify(normalizedData);
+            const sizeInMB = serialized.length / 1024 / 1024;
+            if (sizeInMB > 4.5) {
+                console.warn('Data size is approaching localStorage limit:', sizeInMB.toFixed(2), 'MB');
+            }
+
+            localStorage.setItem(STORAGE_KEY, serialized);
+            return { success: true, memoryOnly: false };
+        } catch (e) {
+            console.error('Error saving to localStorage:', e);
+
+            let errorType = 'unknown';
+            if (e.name === 'QuotaExceededError') {
+                errorType = 'quota_exceeded';
+            } else if (e.message && e.message.includes('denied')) {
+                errorType = 'permission_denied';
+            }
+
+            storageError = e;
+            if (errorType === 'quota_exceeded') {
+                console.warn('Storage quota exceeded. Consider cleaning up old data.');
+            }
+
+            return { success: false, memoryOnly: true, error: e, errorType };
+        }
+    }
+
+    function scheduleRemoteSave(data) {
+        if (suppressRemoteSave) {
+            return;
+        }
+
+        const snapshot = normalizeDataForStorage(data);
+        remoteDirty = true;
+        if (!remoteInitialized || !remoteAvailable) {
+            return;
+        }
+
+        if (remoteSaveTimer) {
+            clearTimeout(remoteSaveTimer);
+        }
+
+        remoteSaveTimer = setTimeout(() => {
+            remoteSaveTimer = null;
+            void saveRemoteData(snapshot);
+        }, REMOTE_SYNC_DELAY_MS);
+    }
+
+    async function saveRemoteData(data, extra = {}) {
+        if (!remoteAvailable && remoteInitialized) {
+            return false;
+        }
+
+        try {
+            const response = await fetch(getNotesEndpoint(), {
+                method: 'PUT',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    data: normalizeDataForStorage(data),
+                    currentPageId: getCurrentPageId(),
+                    globalModel: getGlobalDefaultModel(),
+                    ...extra,
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+            }
+
+            remoteAvailable = true;
+            remoteError = null;
+            remoteDirty = false;
+            return true;
+        } catch (error) {
+            remoteAvailable = false;
+            remoteError = error;
+            remoteDirty = true;
+            console.warn('Failed to sync notes to backend:', error.message);
+            return false;
+        }
+    }
+
+    async function initializeRemote() {
+        if (remoteLoadPromise && (remoteAvailable || !remoteInitialized)) {
+            return remoteLoadPromise;
+        }
+
+        remoteLoadPromise = (async () => {
+            try {
+                if (remoteDeletePending) {
+                    const deleteResponse = await fetch(getNotesEndpoint(), {
+                        method: 'DELETE',
+                        credentials: 'same-origin',
+                    });
+                    if (!deleteResponse.ok) {
+                        throw new Error(`HTTP ${deleteResponse.status}`);
+                    }
+                    remoteAvailable = true;
+                    remoteError = null;
+                    remoteDirty = false;
+                    remoteDeletePending = false;
+                    return { remoteAvailable, remoteError };
+                }
+
+                const response = await fetch(getNotesEndpoint(), {
+                    headers: { 'Accept': 'application/json' },
+                    credentials: 'same-origin',
+                    cache: 'no-store',
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const payload = await response.json();
+                remoteAvailable = true;
+                remoteError = null;
+
+                if (payload?.data && !remoteDirty) {
+                    const { data } = normalizeLoadedData(payload.data);
+                    suppressRemoteSave = true;
+                    saveAllLocally(data);
+                    suppressRemoteSave = false;
+
+                    if (payload.currentPageId) {
+                        setCurrentPageId(payload.currentPageId, { skipRemote: true });
+                    }
+                    if (payload.globalModel) {
+                        setGlobalDefaultModel(payload.globalModel, { skipRemote: true });
+                    }
+                } else {
+                    const localData = loadAll();
+                    await saveRemoteData(localData);
+                }
+            } catch (error) {
+                remoteAvailable = false;
+                remoteError = error;
+                console.warn('Notes backend persistence unavailable; using local notes storage:', error.message);
+            } finally {
+                remoteInitialized = true;
+            }
+
+            return {
+                remoteAvailable,
+                remoteError,
+            };
+        })();
+
+        return remoteLoadPromise;
+    }
     
     /**
      * Load all data from localStorage
@@ -328,26 +573,7 @@ const Storage = (function() {
         try {
             const data = localStorage.getItem(STORAGE_KEY);
             if (data) {
-                const parsed = JSON.parse(data);
-                let didNormalize = false;
-                // Ensure all pages have defaultModel property
-                if (parsed.pages) {
-                    parsed.pages.forEach(page => {
-                        if (!('defaultModel' in page)) {
-                            page.defaultModel = null;
-                            didNormalize = true;
-                        }
-                        didNormalize = ensureUniqueBlockIds(page.blocks || []) || didNormalize;
-                    });
-                }
-                // Ensure trash exists
-                if (!parsed.trash) {
-                    parsed.trash = [];
-                    didNormalize = true;
-                }
-                parsed.trash.forEach(page => {
-                    didNormalize = ensureUniqueBlockIds(page.blocks || []) || didNormalize;
-                });
+                const { data: parsed, didNormalize } = normalizeLoadedData(JSON.parse(data));
                 if (didNormalize) {
                     saveAll(parsed);
                 }
@@ -375,44 +601,9 @@ const Storage = (function() {
      */
     function saveAll(data) {
         const normalizedData = normalizeDataForStorage(data);
-        // Always update memory fallback
-        memoryFallback = JSON.parse(JSON.stringify(normalizedData));
-        if (!storageAvailable) {
-            console.warn('Saving to memory only - localStorage unavailable');
-            return { success: false, memoryOnly: true, error: storageError };
-        }
-        
-        try {
-            const serialized = JSON.stringify(normalizedData);
-            
-            // Check size before saving (localStorage limit is typically 5-10MB)
-            const sizeInMB = serialized.length / 1024 / 1024;
-            if (sizeInMB > 4.5) {
-                console.warn('Data size is approaching localStorage limit:', sizeInMB.toFixed(2), 'MB');
-            }
-            
-            localStorage.setItem(STORAGE_KEY, serialized);
-            return { success: true, memoryOnly: false };
-        } catch (e) {
-            console.error('Error saving to localStorage:', e);
-            
-            // Determine error type
-            let errorType = 'unknown';
-            if (e.name === 'QuotaExceededError') {
-                errorType = 'quota_exceeded';
-            } else if (e.message && e.message.includes('denied')) {
-                errorType = 'permission_denied';
-            }
-            
-            storageError = e;
-            
-            // Try to handle quota exceeded
-            if (errorType === 'quota_exceeded') {
-                console.warn('Storage quota exceeded. Consider cleaning up old data.');
-            }
-            
-            return { success: false, memoryOnly: true, error: e, errorType };
-        }
+        const result = saveAllLocally(normalizedData);
+        scheduleRemoteSave(normalizedData);
+        return result;
     }
     
     /**
@@ -435,6 +626,11 @@ const Storage = (function() {
             error: storageError,
             memoryOnly: !storageAvailable,
             memoryFallback: !!memoryFallback,
+            remoteAvailable,
+            remoteInitialized,
+            remoteDirty,
+            remoteDeletePending,
+            remoteError,
             usage,
             quota
         };
@@ -495,10 +691,18 @@ const Storage = (function() {
     /**
      * Set global default model
      */
-    function setGlobalDefaultModel(model) {
-        if (!storageAvailable) return false;
+    function setGlobalDefaultModel(model, options = {}) {
+        if (!storageAvailable) {
+            if (options.skipRemote !== true && remoteInitialized && remoteAvailable) {
+                void saveRemoteData(loadAll(), { globalModel: model });
+            }
+            return false;
+        }
         try {
             localStorage.setItem(GLOBAL_MODEL_KEY, model);
+            if (options.skipRemote !== true && remoteInitialized && remoteAvailable) {
+                void saveRemoteData(loadAll(), { globalModel: model });
+            }
             return true;
         } catch (e) {
             return false;
@@ -645,10 +849,18 @@ const Storage = (function() {
     /**
      * Set current page ID
      */
-    function setCurrentPageId(pageId) {
-        if (!storageAvailable) return false;
+    function setCurrentPageId(pageId, options = {}) {
+        if (!storageAvailable) {
+            if (options.skipRemote !== true && remoteInitialized && remoteAvailable) {
+                void saveRemoteData(loadAll(), { currentPageId: pageId });
+            }
+            return false;
+        }
         try {
             localStorage.setItem(CURRENT_PAGE_KEY, pageId);
+            if (options.skipRemote !== true && remoteInitialized && remoteAvailable) {
+                void saveRemoteData(loadAll(), { currentPageId: pageId });
+            }
             return true;
         } catch (e) {
             return false;
@@ -771,6 +983,22 @@ const Storage = (function() {
      */
     function clearAll() {
         memoryFallback = null;
+        remoteDeletePending = true;
+        if (remoteInitialized && remoteAvailable) {
+            void fetch(getNotesEndpoint(), {
+                method: 'DELETE',
+                credentials: 'same-origin',
+            }).then((response) => {
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                remoteDeletePending = false;
+                remoteDirty = false;
+            }).catch((error) => {
+                console.warn('Failed to clear remote notes:', error.message);
+            });
+        }
+
         if (!storageAvailable) return;
         try {
             localStorage.removeItem(STORAGE_KEY);
@@ -792,6 +1020,7 @@ const Storage = (function() {
         generateId,
         generateBlockId,
         cloneBlocksWithFreshIds,
+        initializeRemote,
         loadAll,
         saveAll,
         getStorageStatus,

@@ -910,7 +910,9 @@ class UIHelpers {
         
         renderer.code = (code, language) => {
             const normalizedCode = normalizeMarkedText(code);
-            const lang = normalizeMarkedLang(language);
+            const declaredLang = normalizeMarkedLang(language);
+            const declaredNormalizedLang = declaredLang.toLowerCase();
+            const lang = this.inferCodeBlockLanguage(normalizedCode, declaredLang);
             const normalizedLang = lang.toLowerCase();
 
             if (normalizedLang === 'mermaid') {
@@ -949,12 +951,24 @@ class UIHelpers {
             }
 
             if (normalizedLang === 'html') {
-                const htmlSource = normalizedCode.trim();
+                let htmlSource = normalizedCode.trim();
+                let leadIn = '';
+                if (this.isPlainTextCodeLanguage(declaredNormalizedLang)
+                    && !this.looksLikeStandaloneHtmlDocument(htmlSource)
+                    && !this.looksLikePreviewableHtmlFragment(htmlSource)) {
+                    const embedded = this.extractEmbeddedStandaloneHtmlDocument(htmlSource)
+                        || this.extractEmbeddedHtmlPreviewFragment(htmlSource);
+                    if (embedded?.html) {
+                        htmlSource = embedded.html;
+                        leadIn = embedded.prefix || '';
+                    }
+                }
                 const escapedCode = this.escapeHtml(htmlSource);
                 const escapedAttrCode = this.escapeHtmlAttr(htmlSource);
                 const filenameBase = this.createFriendlyFilenameBaseFromHtml(htmlSource, 'preview');
+                const leadInHtml = leadIn ? `<p>${this.escapeHtml(leadIn)}</p>` : '';
 
-                return `
+                return `${leadInHtml}
                     <div class="code-block html-code-block">
                         <div class="code-header">
                             <span class="code-language">html</span>
@@ -985,19 +999,20 @@ class UIHelpers {
             const escapedCode = this.escapeHtml(normalizedCode);
             const prismLang = this.getPrismLanguage(lang);
             const lineCount = normalizedCode.split('\n').length;
+            const isPlainTextCode = this.isPlainTextCodeLanguage(normalizedLang);
             
             // Generate line numbers for code blocks with more than 3 lines
             let lineNumbersHtml = '';
-            if (lineCount > 3) {
+            if (!isPlainTextCode && lineCount > 3) {
                 lineNumbersHtml = `<div class="line-numbers-rows">${
                     Array(lineCount).fill(0).map((_, i) => `<span></span>`).join('')
                 }</div>`;
             }
             
             return `
-                <div class="code-block ${lineCount > 3 ? 'line-numbers' : ''}">
+                <div class="code-block${isPlainTextCode ? ' text-code-block' : ''}${!isPlainTextCode && lineCount > 3 ? ' line-numbers' : ''}">
                     <div class="code-header">
-                        <span class="code-language">${lang}</span>
+                        <span class="code-language">${this.escapeHtml(lang)}</span>
                         <div class="code-actions">
                             <button class="code-copy-btn" onclick="uiHelpers.copyCode(this)" data-code="${this.escapeHtmlAttr(normalizedCode)}" aria-label="Copy code to clipboard">
                                 <i data-lucide="copy" class="w-3.5 h-3.5" aria-hidden="true"></i>
@@ -1006,7 +1021,7 @@ class UIHelpers {
                         </div>
                     </div>
                     ${lineNumbersHtml}
-                    <pre class="language-${prismLang}"><code class="language-${prismLang}">${escapedCode}</code></pre>
+                    <pre class="language-${this.escapeHtmlAttr(prismLang)}"><code class="language-${this.escapeHtmlAttr(prismLang)}">${escapedCode}</code></pre>
                 </div>
             `;
         };
@@ -1074,6 +1089,43 @@ class UIHelpers {
             'postgres': 'sql'
         };
         return languageMap[lang?.toLowerCase()] || lang || 'text';
+    }
+
+    isPlainTextCodeLanguage(lang = '') {
+        const normalized = String(lang || '')
+            .trim()
+            .toLowerCase();
+        return !normalized || ['text', 'txt', 'plain', 'plaintext', 'none'].includes(normalized);
+    }
+
+    inferCodeBlockLanguage(code = '', declaredLang = 'text') {
+        const normalizedLang = String(declaredLang || 'text').trim().toLowerCase();
+        if (!this.isPlainTextCodeLanguage(normalizedLang)) {
+            return declaredLang || 'text';
+        }
+
+        const source = String(code || '').trim();
+        if (!source) {
+            return 'text';
+        }
+
+        if (this.looksLikeStandaloneHtmlDocument(source)
+            || this.looksLikePreviewableHtmlFragment(source)
+            || this.extractEmbeddedStandaloneHtmlDocument(source)
+            || this.extractEmbeddedHtmlPreviewFragment(source)) {
+            return 'html';
+        }
+
+        if (/^[\[{][\s\S]*[\]}]$/.test(source)) {
+            try {
+                JSON.parse(source);
+                return 'json';
+            } catch (_error) {
+                return declaredLang || 'text';
+            }
+        }
+
+        return declaredLang || 'text';
     }
 
     escapeHtml(text) {
@@ -2072,7 +2124,7 @@ class UIHelpers {
 
     looksLikeStandaloneHtmlDocument(source = '') {
         const normalized = String(source || '').trim();
-        if (!normalized || /^```html\b/i.test(normalized)) {
+        if (!normalized || /^```/i.test(normalized)) {
             return false;
         }
 
@@ -2082,7 +2134,7 @@ class UIHelpers {
 
     looksLikePreviewableHtmlFragment(source = '') {
         const normalized = String(source || '').trim();
-        if (!normalized || /^```html\b/i.test(normalized) || this.looksLikeStandaloneHtmlDocument(normalized)) {
+        if (!normalized || /^```/i.test(normalized) || this.looksLikeStandaloneHtmlDocument(normalized)) {
             return false;
         }
 
@@ -2110,7 +2162,7 @@ class UIHelpers {
 
     extractEmbeddedStandaloneHtmlDocument(source = '') {
         const raw = String(source || '');
-        if (!raw.trim() || /^```html\b/i.test(raw.trim())) {
+        if (!raw.trim() || /^```/i.test(raw.trim())) {
             return null;
         }
 
@@ -2147,7 +2199,7 @@ class UIHelpers {
 
     extractEmbeddedHtmlPreviewFragment(source = '') {
         const raw = String(source || '');
-        if (!raw.trim() || /^```html\b/i.test(raw.trim())) {
+        if (!raw.trim() || /^```/i.test(raw.trim())) {
             return null;
         }
 
@@ -2156,6 +2208,7 @@ class UIHelpers {
             /<html\b/i,
             /<head\b/i,
             /<body\b/i,
+            /<title\b/i,
             /<style\b/i,
             /<(?:main|section|div|article|header|nav|aside|table|form|canvas)\b/i,
         ]

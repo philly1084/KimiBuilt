@@ -90,6 +90,33 @@ function extractArtifactsFromMessages(messages = []) {
     return mergeRuntimeArtifacts(...artifactSets);
 }
 
+async function deleteSessionAndCleanup(id, ownerId = null) {
+    const session = await sessionStore.getOwned(id, ownerId);
+    if (!session) {
+        return null;
+    }
+
+    const deletedScopeKey = session?.scopeKey || session?.scope_key || session?.metadata?.memoryScope || null;
+
+    if (typeof sessionStore.isPersistent === 'function' && sessionStore.isPersistent()) {
+        try {
+            await artifactService.deleteArtifactsForSession(id);
+        } catch (error) {
+            console.warn(`[Sessions] Failed to delete artifacts for session ${id}:`, error.message);
+        }
+    }
+
+    await sessionStore.delete(id);
+    void memoryService.forget(id).catch((error) => {
+        console.warn(`[Sessions] Failed to forget memory for deleted session ${id}:`, error.message);
+    });
+
+    return {
+        id,
+        scopeKey: deletedScopeKey,
+    };
+}
+
 router.post('/', async (req, res, next) => {
     try {
         const ownerId = getRequestOwnerId(req);
@@ -172,6 +199,46 @@ router.put('/state', async (req, res, next) => {
         res.json({
             activeSessionId: activeSession?.id || null,
             session: activeSession,
+        });
+    } catch (err) {
+        next(err);
+    }
+});
+
+router.delete('/', async (req, res, next) => {
+    try {
+        const ownerId = getRequestOwnerId(req);
+        const scopeKey = getRequestedScopeKey({
+            ...(req.query || {}),
+            ...(req.body || {}),
+        });
+
+        if (!scopeKey) {
+            return res.status(400).json({ error: { message: 'A scoped space or workspace is required for bulk deletion' } });
+        }
+
+        const sessions = await sessionStore.list({
+            ownerId,
+            scopeKey,
+        });
+        const activeSession = await sessionStore.getActiveOwnedSession(ownerId, scopeKey);
+        const deleted = [];
+
+        for (const session of sessions) {
+            const result = await deleteSessionAndCleanup(session.id, ownerId);
+            if (result) {
+                deleted.push(result.id);
+            }
+        }
+
+        if (activeSession && deleted.includes(activeSession.id)) {
+            await sessionStore.setActiveSession(ownerId, null, scopeKey);
+        }
+
+        res.json({
+            deleted,
+            count: deleted.length,
+            scopeKey,
         });
     } catch (err) {
         next(err);
@@ -370,17 +437,7 @@ router.delete('/:id', async (req, res, next) => {
         const deletedScopeKey = session?.scopeKey || session?.scope_key || session?.metadata?.memoryScope || null;
         const activeSession = await sessionStore.getActiveOwnedSession(ownerId, deletedScopeKey);
 
-        if (typeof sessionStore.isPersistent === 'function' && sessionStore.isPersistent()) {
-            try {
-                await artifactService.deleteArtifactsForSession(id);
-            } catch (error) {
-                console.warn(`[Sessions] Failed to delete artifacts for session ${id}:`, error.message);
-            }
-        }
-        await sessionStore.delete(id);
-        void memoryService.forget(id).catch((error) => {
-            console.warn(`[Sessions] Failed to forget memory for deleted session ${id}:`, error.message);
-        });
+        await deleteSessionAndCleanup(id, ownerId);
 
         if (activeSession?.id === id) {
             const nextSession = await sessionStore.getLatestOwnedSession(ownerId, {
