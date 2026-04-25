@@ -131,6 +131,8 @@ class Verifier {
     this.register('similarity-threshold', this.validateSimilarity.bind(this));
     this.register('custom-function', this.validateCustomFunction.bind(this));
     this.register('output-not-empty', this.validateOutputNotEmpty.bind(this));
+    this.register('output-present', this.validateOutputNotEmpty.bind(this));
+    this.register('custom-check', this.validateCustomCheck.bind(this));
     this.register('contains-string', this.validateContainsString.bind(this));
     this.register('matches-pattern', this.validateMatchesPattern.bind(this));
   }
@@ -485,6 +487,37 @@ class Verifier {
         { error: error.stack }
       );
     }
+  }
+
+  /**
+   * Validates a schema-normalized custom check.
+   * @param {Object} task - Task configuration
+   * @param {Object} executionResult - Execution result
+   * @param {Object} config - Criterion configuration
+   * @returns {Promise<ValidationResult>} Validation result
+   */
+  async validateCustomCheck(task, executionResult, config = {}) {
+    const check = String(config.check || '').trim();
+
+    if (check === 'no-errors') {
+      return this.validateNoErrors(task, executionResult, config);
+    }
+
+    if (check && this.validators.has(check)) {
+      return this.validators.get(check)(task, executionResult, config);
+    }
+
+    if (config.expected === true) {
+      return ValidationResult.success(
+        'custom-check',
+        check ? `Custom check "${check}" accepted` : 'Custom check accepted'
+      );
+    }
+
+    return ValidationResult.failure(
+      'custom-check',
+      check ? `Unknown custom check: ${check}` : 'Custom check name is required'
+    );
   }
   
   /**

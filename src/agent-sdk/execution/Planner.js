@@ -682,6 +682,30 @@ class Planner {
   }
 
   async planConversationalAgent(task, plan, analysis) {
+    const availableTools = Array.isArray(task.tools) ? task.tools : [];
+    if (availableTools.length > 0 && typeof this.llmClient?.complete === 'function') {
+      const plannedSteps = await this.createConversationStepsFromModel(task, availableTools);
+      if (plannedSteps.length > 0) {
+        let previousStepId = null;
+        for (const step of plannedSteps) {
+          previousStepId = plan.addStep(step, previousStepId ? [previousStepId] : []);
+        }
+
+        const lastStep = plannedSteps[plannedSteps.length - 1];
+        if (lastStep?.type !== 'llm-call') {
+          plan.addStep({
+            type: 'llm-call',
+            description: 'Write the final assistant response',
+            resultKey: 'finalResponse',
+            params: {
+              prompt: this.buildConversationSynthesisPrompt(),
+            },
+          }, previousStepId ? [previousStepId] : []);
+        }
+        return;
+      }
+    }
+
     plan.addStep({
       type: 'llm-call',
       description: 'Draft the assistant response',
@@ -690,6 +714,56 @@ class Planner {
         prompt: this.buildConversationSynthesisPrompt(),
       },
     });
+  }
+
+  async createConversationStepsFromModel(task, availableTools = []) {
+    try {
+      const planText = await this.llmClient.complete(
+        this.buildConversationPlanningPrompt(task, availableTools),
+        {
+          temperature: 0,
+          maxTokens: 1200,
+        },
+      );
+      const planSpec = this.parseConversationPlan(planText);
+      return this.normalizeConversationSteps(planSpec, availableTools);
+    } catch (error) {
+      console.warn('[Planner] Failed to create model conversation plan:', error.message);
+      return [];
+    }
+  }
+
+  parseConversationPlan(text = '') {
+    const raw = typeof text === 'string' ? text.trim() : JSON.stringify(text || {});
+    if (!raw) {
+      return {};
+    }
+
+    const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate = fenced ? fenced[1].trim() : raw;
+    return JSON.parse(candidate);
+  }
+
+  buildConversationPlanningPrompt(task, availableTools = []) {
+    const tools = this.toolRegistry?.list?.()
+      ?.filter((tool) => availableTools.includes(tool.id))
+      ?.map((tool) => ({
+        id: tool.id,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+      })) || availableTools.map((id) => ({ id }));
+
+    return [
+      'Create a short execution plan for this assistant turn.',
+      'Return only JSON with this shape: {"steps":[{"type":"tool-call|llm-call","description":"...","tool":"tool-id","params":{},"prompt":"...","resultKey":"...","optional":false,"continueOnError":false}]}',
+      'Use only the listed tools. Add an llm-call as the last step to produce the user-facing response.',
+      '',
+      'User request:',
+      task.objective || '',
+      '',
+      'Available tools:',
+      JSON.stringify(tools, null, 2),
+    ].join('\n');
   }
 
   normalizeConversationSteps(planSpec, availableTools = []) {

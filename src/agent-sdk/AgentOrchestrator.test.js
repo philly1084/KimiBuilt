@@ -9,14 +9,7 @@ describe('AgentOrchestrator', () => {
 
     test('executes a string task input without requiring a vector store', async () => {
         const llmClient = {
-            complete: jest.fn()
-                .mockResolvedValueOnce(JSON.stringify({
-                    complexity: 'low',
-                    requiredTools: [],
-                    estimatedSteps: 1,
-                    challenges: [],
-                }))
-                .mockResolvedValueOnce('done'),
+            complete: jest.fn().mockResolvedValueOnce('done'),
         };
         const embedder = {
             embed: jest.fn().mockResolvedValue([0.1, 0.2, 0.3]),
@@ -94,12 +87,6 @@ describe('AgentOrchestrator', () => {
             createResponse: jest.fn(),
             complete: jest.fn()
                 .mockResolvedValueOnce(JSON.stringify({
-                    complexity: 'medium',
-                    requiredTools: ['lookup-status'],
-                    estimatedSteps: 2,
-                    challenges: [],
-                }))
-                .mockResolvedValueOnce(JSON.stringify({
                     steps: [
                         {
                             type: 'tool-call',
@@ -157,7 +144,7 @@ describe('AgentOrchestrator', () => {
         expect(result.success).toBe(true);
         expect(result.output).toBe('Cluster A is healthy.');
         expect(llmClient.createResponse).not.toHaveBeenCalled();
-        expect(llmClient.complete).toHaveBeenCalledTimes(3);
+        expect(llmClient.complete).toHaveBeenCalledTimes(2);
         expect(result.response.metadata.agentExecutor).toBe(true);
         expect(result.response.metadata.toolEvents).toEqual(expect.arrayContaining([
             expect.objectContaining({
@@ -431,18 +418,20 @@ describe('AgentOrchestrator', () => {
             expect.objectContaining({ role: 'tool' }),
             expect.objectContaining({ role: 'assistant', content: 'Here is the result.' }),
         ]));
-        expect(memoryService.rememberResponse).toHaveBeenCalledWith('session-3', 'Here is the result.', {});
+        expect(memoryService.rememberResponse).toHaveBeenCalledWith('session-3', 'Here is the result.', {
+            memoryScope: 'chat',
+        });
         expect(memoryService.remember).toHaveBeenCalledWith(
             'session-3',
             'Search for the latest update.',
             'user',
-            {},
+            { memoryScope: 'chat' },
         );
         expect(memoryService.remember).toHaveBeenCalledWith(
             'session-3',
             expect.stringContaining('"tool":"web-search"'),
             'tool',
-            {},
+            { memoryScope: 'chat' },
         );
     });
 

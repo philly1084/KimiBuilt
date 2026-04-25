@@ -299,19 +299,25 @@ class Executor {
           
         } catch (error) {
           stepTrace.error = error.message;
+          if (error.toolResult) {
+            stepTrace.output = error.toolResult;
+            stepTrace.metadata.toolId = error.toolId || step.tool || null;
+          }
           stepTrace.setDuration(startTime);
-          plan.markStepFailed(step.id, error);
           
           results.push({
             step: step.id,
             success: false,
-            error: error.message
+            error: error.message,
+            ...(error.toolResult ? { output: error.toolResult } : {}),
           });
           
           this.emit('stepError', { task, step, error });
           
           // Check if we should continue or abort
           if (!this.shouldContinueOnError(step, task)) {
+            plan.markStepFailed(step.id, error);
+            trace.addStep(stepTrace);
             return {
               success: false,
               error: `Step "${step.description}" failed: ${error.message}`,
@@ -319,6 +325,8 @@ class Executor {
               plan: plan.toJSON()
             };
           }
+
+          plan.skipStep(step.id, error.message);
         }
         
         trace.addStep(stepTrace);
@@ -455,11 +463,24 @@ class Executor {
     
     const params = this.resolveParams(step.params || {}, task);
     
-    return this.toolRegistry.execute(step.tool, params, {
+    const execution = await this.toolRegistry.execute(step.tool, params, {
       task,
       workingMemory: this.workingMemory,
       step
     });
+
+    if (execution && typeof execution === 'object' && execution.success === false) {
+      const error = new Error(execution.error || `Tool "${step.tool}" failed`);
+      error.toolId = execution.toolId || step.tool;
+      error.toolResult = execution;
+      throw error;
+    }
+
+    if (execution && typeof execution === 'object' && execution.success === true && Object.prototype.hasOwnProperty.call(execution, 'result')) {
+      return execution.result;
+    }
+
+    return execution;
   }
   
   /**

@@ -481,7 +481,6 @@ class AgentOrchestrator {
       workingMemory.addMessage('user', objective, { source: 'runtime' });
     }
 
-    this.transitionRuntimeTask(task, TaskStatus.EXECUTING);
     this.emit('task:start', {
       task,
       sessionId,
@@ -522,6 +521,7 @@ class AgentOrchestrator {
         }
       }
 
+      this.transitionRuntimeTask(task, TaskStatus.EXECUTING);
       const response = await this.requestResponse({
         input,
         previousResponseId,
@@ -1391,11 +1391,11 @@ class AgentOrchestrator {
 
     if (this.sessionStore?.recordResponse && responseId) {
       try {
-        await this.sessionStore.recordResponse(
-          sessionId,
-          responseId,
-          promptState ? { promptState } : null,
-        );
+        if (promptState) {
+          await this.sessionStore.recordResponse(sessionId, responseId, { promptState });
+        } else {
+          await this.sessionStore.recordResponse(sessionId, responseId);
+        }
       } catch (error) {
         console.error('[AgentOrchestrator] Failed to record response ID:', error.message);
       }
