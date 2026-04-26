@@ -218,6 +218,71 @@ describe('/v1/chat/completions stream forwarding', () => {
         expect(response.text).toContain('data: [DONE]');
     });
 
+    test('forwards orchestration progress events before final stream completion', async () => {
+        executeConversationRuntime.mockImplementation(async (_app, params) => {
+            params.onProgress?.({
+                phase: 'executing',
+                detail: 'Running remote command',
+                steps: [
+                    { id: 'step-1', title: 'Inspect runtime', status: 'in_progress' },
+                    { id: 'step-2', title: 'Summarize result', status: 'pending' },
+                ],
+                completedSteps: 0,
+                totalSteps: 2,
+                percent: 0,
+            });
+
+            return {
+                handledPersistence: true,
+                response: (async function* streamEvents() {
+                    yield {
+                        type: 'response.output_text.delta',
+                        delta: 'Done',
+                    };
+                    yield {
+                        type: 'response.completed',
+                        response: {
+                            id: 'resp-compat-progress-1',
+                            model: 'gpt-4o',
+                            output_text: 'Done',
+                            output: [{
+                                type: 'message',
+                                role: 'assistant',
+                                content: [{ type: 'output_text', text: 'Done' }],
+                            }],
+                            metadata: {
+                                toolEvents: [],
+                            },
+                        },
+                    };
+                }()),
+            };
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use('/v1', openAiCompatRouter);
+
+        const response = await request(app)
+            .post('/v1/chat/completions')
+            .send({
+                messages: [
+                    { role: 'user', content: 'Run the next remote step.' },
+                ],
+                taskType: 'chat',
+                clientSurface: 'web-chat',
+                stream: true,
+                session_id: 'web-chat-stream-1',
+            });
+
+        expect(response.status).toBe(200);
+        expect(response.text).toContain('"type":"progress"');
+        expect(response.text).toContain('"phase":"executing"');
+        expect(response.text).toContain('"detail":"Running remote command"');
+        expect(response.text).toContain('"delta":{"content":"Done"}');
+        expect(response.text).toContain('data: [DONE]');
+    });
+
     test('includes final reasoning on non-stream chat completion messages', async () => {
         executeConversationRuntime.mockResolvedValue({
             handledPersistence: true,

@@ -661,6 +661,75 @@ function closeCompatSseWithError(sse, sessionId, err) {
     return true;
 }
 
+function writeCompatSseProgressPayload(sse, sessionId, progress = {}) {
+    if (!sse || sse.isClosed()) {
+        return false;
+    }
+
+    return sse.write(`data: ${JSON.stringify({
+        type: 'progress',
+        session_id: sessionId,
+        sessionId,
+        progress,
+    })}\n\n`);
+}
+
+function createForegroundProgressPersister({
+    sessionStore,
+    sessionId = '',
+    foregroundTurn = null,
+    intervalMs = config.runtime.foregroundProgressPersistIntervalMs,
+} = {}) {
+    const normalizedSessionId = String(sessionId || '').trim();
+    const turn = foregroundTurn && typeof foregroundTurn === 'object' ? foregroundTurn : null;
+    if (!sessionStore || !normalizedSessionId || !turn?.assistantMessageId) {
+        return null;
+    }
+
+    let lastPersistedAt = 0;
+    let pending = Promise.resolve();
+    return (progress = {}) => {
+        const now = Date.now();
+        if (now - lastPersistedAt < intervalMs) {
+            return pending;
+        }
+        lastPersistedAt = now;
+
+        const progressState = progress && typeof progress === 'object' ? progress : {};
+        const phase = String(progressState.phase || 'thinking').trim() || 'thinking';
+        const detail = String(progressState.detail || '').trim();
+        pending = pending
+            .catch(() => null)
+            .then(() => sessionStore.upsertMessage(normalizedSessionId, {
+                id: turn.assistantMessageId,
+                role: 'assistant',
+                content: turn.placeholderText || 'Working in background...',
+                timestamp: turn.assistantTimestamp || new Date().toISOString(),
+                metadata: {
+                    foregroundRequestId: turn.requestId,
+                    taskType: turn.taskType || 'chat',
+                    clientSurface: turn.clientSurface || '',
+                    isStreaming: true,
+                    pendingForeground: true,
+                    liveState: {
+                        phase,
+                        detail,
+                        reasoningSummary: '',
+                    },
+                    progressState: {
+                        ...progressState,
+                        phase,
+                        detail,
+                    },
+                },
+            }))
+            .catch((error) => {
+                console.warn(`[OpenAICompat] Failed to persist foreground progress: ${error.message}`);
+            });
+        return pending;
+    };
+}
+
 function isNotesSurfaceValue(value = '') {
     const normalized = String(value || '').trim().toLowerCase();
     return [
@@ -1149,6 +1218,11 @@ router.post('/chat/completions', async (req, res, next) => {
         if (stream) {
             activeSse = openSseStream(req, res, sessionId, '/v1/chat/completions');
             const toolManager = await ensureRuntimeToolManager(req.app);
+            const persistForegroundProgress = createForegroundProgressPersister({
+                sessionStore,
+                sessionId,
+                foregroundTurn: pendingForegroundTurn,
+            });
             const execution = await executeConversationRuntime(req.app, {
                 input: messages.map((message) => (
                     message.role === 'user' && message === lastUserMessage
@@ -1191,6 +1265,12 @@ router.post('/chat/completions', async (req, res, next) => {
                 memoryScope,
                 metadata: effectiveRequestMetadata,
                 ownerId,
+                onProgress: (progress) => {
+                    writeCompatSseProgressPayload(activeSse, sessionId, progress);
+                    if (persistForegroundProgress) {
+                        persistForegroundProgress(progress);
+                    }
+                },
             });
             const response = execution.response;
             console.log(`[OpenAICompat] chat/completions stream mode=${response?.kimibuiltStreamMode || 'unknown'} runtime=${execution.runtimeMode || 'unknown'} sessionId=${sessionId}`);

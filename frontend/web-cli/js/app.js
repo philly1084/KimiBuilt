@@ -1216,6 +1216,13 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
                 if (chunk.type === 'delta') {
                     this.pulseVoxelStreaming();
                     this.appendToCurrentOutput(chunk.content);
+                } else if (chunk.type === 'progress') {
+                    const detail = String(chunk.detail || chunk.progress?.detail || '').trim();
+                    const phase = String(chunk.phase || chunk.progress?.phase || 'working').trim();
+                    this.updateProgressLine(detail || phase);
+                } else if (chunk.type === 'tool_event') {
+                    this.recordVoxelToolUse('tool');
+                    this.updateProgressLine(chunk.detail || 'Running tool');
                 }
             }, null, chatOptions);
             
@@ -1223,6 +1230,7 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
             
             // Finalize streaming output - remove streaming line and print full response
             this.finalizeStreamingOutput();
+            this.finalizeProgressLine();
             
             // Print response
             this.printAI(response.content || 'No response');
@@ -1244,6 +1252,7 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
         } finally {
             this.isProcessing = false;
             this.currentOutput = '';
+            this.finalizeProgressLine();
             // Process any queued commands
             this.processQueue();
         }
@@ -1406,6 +1415,32 @@ Session Statistics:
         line.innerHTML = `<span class="timestamp">${this.getTimestamp()}</span> ? ${this.escapeHtml(text)}`;
         this.terminalOutput.appendChild(line);
         this.scrollToBottom();
+    }
+
+    updateProgressLine(text) {
+        const normalized = String(text || '').trim();
+        if (!normalized) {
+            return;
+        }
+
+        const existing = this.terminalOutput.querySelector('.line-output.system.stream-progress');
+        const content = `<span class="timestamp">${this.getTimestamp()}</span> ... ${this.escapeHtml(normalized)}`;
+        if (existing) {
+            existing.innerHTML = content;
+        } else {
+            const line = document.createElement('div');
+            line.className = 'line line-output system stream-progress';
+            line.innerHTML = content;
+            this.terminalOutput.appendChild(line);
+        }
+        this.scrollToBottom();
+    }
+
+    finalizeProgressLine() {
+        const existing = this.terminalOutput.querySelector('.line-output.system.stream-progress');
+        if (existing) {
+            existing.classList.remove('stream-progress');
+        }
     }
     
     printWelcome() {

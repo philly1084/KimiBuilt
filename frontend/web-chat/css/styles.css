@@ -1649,6 +1649,512 @@
     --theme-mobile-action-hover-border: rgba(180, 83, 9, 0.3);
 }
 
+[data-chat-theme="woodland-map"] {
+    --accent: #d6a75c;
+    --accent-hover: #b8874a;
+    --accent-light: rgba(214, 167, 92, 0.14);
+    --accent-glow: rgba(214, 167, 92, 0.22);
+    --info: #84cc16;
+    --purple: #5eead4;
+    --purple-hover: #2dd4bf;
+    --purple-light: rgba(94, 234, 212, 0.12);
+    --user-message-bg: #9a6b38;
+    --assistant-message-bg: rgba(35, 44, 29, 0.92);
+    --page-base-background: linear-gradient(180deg, #12180f 0%, #203018 100%);
+    --page-wallpaper: linear-gradient(120deg, rgba(84, 56, 31, 0.5), rgba(31, 64, 45, 0.54)), repeating-radial-gradient(ellipse at 30% 20%, rgba(218, 165, 88, 0.14) 0 1px, transparent 1px 12px), repeating-linear-gradient(28deg, rgba(132, 204, 22, 0.08) 0 1px, transparent 1px 18px), linear-gradient(180deg, #12180f 0%, #203018 100%);
+    --page-vignette: radial-gradient(circle at 50% 0%, rgba(214, 167, 92, 0.12), transparent 34%), linear-gradient(180deg, rgba(255, 248, 220, 0.025), transparent 24%);
+    --theme-shell-background: linear-gradient(180deg, rgba(254, 243, 199, 0.08), rgba(45, 80, 44, 0.04)), rgba(29, 42, 27, 0.88);
+    --theme-shell-border: rgba(214, 167, 92, 0.14);
+    --theme-sidebar-background: linear-gradient(180deg, rgba(254, 243, 199, 0.07), rgba(132, 204, 22, 0.025)), rgba(27, 38, 25, 0.88);
+    --theme-sidebar-border: rgba(214, 167, 92, 0.14);
+    --theme-header-background: linear-gradient(180deg, rgba(254, 243, 199, 0.06), rgba(45, 80, 44, 0.02)), rgba(29, 42, 27, 0.84);
+    --theme-shell-overlay: radial-gradient(circle at top center, rgba(214, 167, 92, 0.1), transparent 34%), repeating-linear-gradient(90deg, rgba(132, 204, 22, 0.04) 0 1px, transparent 1px 24px);
+    --theme-assistant-bubble-background: linear-gradient(180deg, rgba(254, 243, 199, 0.07), rgba(21, 128, 61, 0.02)), rgba(35, 44, 29, 0.92);
+    --theme-assistant-bubble-border: rgba(214, 167, 92, 0.12);
+    --theme-assistant-stream-border: rgba(214, 167, 92, 0.22);
+    --theme-assistant-stream-shadow: 0 12px 32px rgba(214, 167, 92, 0.1);
+    --theme-user-bubble-background: linear-gradient(135deg, #9a6b38, #537a3a);
+    --theme-user-bubble-shadow: 0 14px 32px rgba(154, 107, 56, 0.24);
+    --theme-welcome-state-background: linear-gradient(180deg, rgba(41, 57, 35, 0.5), rgba(22, 32, 22, 0.25)), rgba(28, 40, 27, 0.28);
+    --theme-welcome-state-border: rgba(214, 167, 92, 0.14);
+    --theme-welcome-state-shadow: 0 28px 58px rgba(9, 13, 8, 0.24);
+    --theme-welcome-badge-background: rgba(42, 54, 34, 0.72);
+    --theme-welcome-badge-border: rgba(214, 167, 92, 0.2);
+    --theme-welcome-capability-background: rgba(35, 48, 31, 0.66);
+    --theme-welcome-capability-border: rgba(214, 167, 92, 0.1);
+    --theme-suggestion-background: linear-gradient(180deg, rgba(254, 243, 199, 0.065), rgba(21, 128, 61, 0.018)), rgba(31, 43, 29, 0.84);
+    --theme-suggestion-overlay: linear-gradient(135deg, rgba(214, 167, 92, 0.12), transparent 48%, rgba(132, 204, 22, 0.08));
+    --theme-input-area-background: linear-gradient(180deg, rgba(25, 35, 24, 0), rgba(25, 35, 24, 0.84) 16%, rgba(17, 25, 18, 0.96) 100%);
+    --theme-composer-frame-background: linear-gradient(180deg, rgba(254, 243, 199, 0.06), rgba(45, 80, 44, 0.025)), rgba(31, 43, 29, 0.84);
+    --theme-composer-frame-border: rgba(214, 167, 92, 0.14);
+    --theme-composer-shell-background: linear-gradient(180deg, rgba(254, 243, 199, 0.07), rgba(45, 80, 44, 0.025)), rgba(35, 48, 31, 0.94);
+    --theme-dialog-background: linear-gradient(180deg, rgba(34, 45, 30, 0.98), rgba(20, 30, 21, 0.99)), rgba(20, 30, 21, 0.98);
+    --theme-dialog-border: rgba(214, 167, 92, 0.16);
+    --theme-dialog-header-background: rgba(36, 49, 32, 0.9);
+    --theme-mobile-sheet-background: linear-gradient(180deg, rgba(34, 45, 30, 0.98), rgba(20, 30, 21, 0.99)), rgba(20, 30, 21, 0.98);
+    --theme-mobile-sheet-border: rgba(214, 167, 92, 0.16);
+    --theme-mobile-action-background: rgba(42, 54, 34, 0.7);
+    --theme-mobile-action-border: rgba(214, 167, 92, 0.12);
+    --theme-mobile-action-hover-background: rgba(214, 167, 92, 0.08);
+    --theme-mobile-action-hover-border: rgba(214, 167, 92, 0.24);
+}
+
+[data-chat-theme="cedar-fog"] {
+    --accent: #e08a4f;
+    --accent-hover: #c46a32;
+    --accent-light: rgba(224, 138, 79, 0.14);
+    --accent-glow: rgba(224, 138, 79, 0.22);
+    --info: #5eead4;
+    --purple: #2dd4bf;
+    --purple-hover: #14b8a6;
+    --purple-light: rgba(45, 212, 191, 0.12);
+    --user-message-bg: #c46a32;
+    --assistant-message-bg: rgba(43, 34, 30, 0.92);
+    --page-base-background: linear-gradient(180deg, #1b1110 0%, #26342d 100%);
+    --page-wallpaper: radial-gradient(circle at 18% 14%, rgba(251, 146, 60, 0.2), transparent 28%), radial-gradient(circle at 76% 18%, rgba(45, 212, 191, 0.18), transparent 25%), repeating-linear-gradient(92deg, rgba(180, 83, 9, 0.11) 0 2px, transparent 2px 16px), linear-gradient(180deg, #1b1110 0%, #26342d 100%);
+    --page-vignette: radial-gradient(circle at 50% 0%, rgba(20, 184, 166, 0.1), transparent 35%), linear-gradient(180deg, rgba(255, 237, 213, 0.025), transparent 24%);
+    --theme-shell-background: linear-gradient(180deg, rgba(255, 237, 213, 0.07), rgba(20, 184, 166, 0.025)), rgba(43, 32, 27, 0.88);
+    --theme-shell-border: rgba(224, 138, 79, 0.14);
+    --theme-sidebar-background: linear-gradient(180deg, rgba(255, 237, 213, 0.06), rgba(20, 184, 166, 0.025)), rgba(39, 31, 28, 0.88);
+    --theme-sidebar-border: rgba(224, 138, 79, 0.14);
+    --theme-header-background: linear-gradient(180deg, rgba(255, 237, 213, 0.06), rgba(20, 184, 166, 0.018)), rgba(39, 31, 28, 0.84);
+    --theme-shell-overlay: radial-gradient(circle at top center, rgba(224, 138, 79, 0.1), transparent 34%), radial-gradient(circle at 75% 0%, rgba(45, 212, 191, 0.07), transparent 28%);
+    --theme-assistant-bubble-background: linear-gradient(180deg, rgba(255, 237, 213, 0.07), rgba(20, 184, 166, 0.02)), rgba(43, 34, 30, 0.92);
+    --theme-assistant-bubble-border: rgba(224, 138, 79, 0.12);
+    --theme-assistant-stream-border: rgba(224, 138, 79, 0.22);
+    --theme-assistant-stream-shadow: 0 12px 32px rgba(224, 138, 79, 0.1);
+    --theme-user-bubble-background: linear-gradient(135deg, #c46a32, #2f8f83);
+    --theme-user-bubble-shadow: 0 14px 32px rgba(196, 106, 50, 0.22);
+    --theme-welcome-state-background: linear-gradient(180deg, rgba(46, 37, 32, 0.52), rgba(27, 25, 23, 0.26)), rgba(35, 32, 29, 0.3);
+    --theme-welcome-state-border: rgba(224, 138, 79, 0.14);
+    --theme-welcome-state-shadow: 0 28px 58px rgba(13, 9, 8, 0.24);
+    --theme-welcome-badge-background: rgba(48, 37, 32, 0.72);
+    --theme-welcome-badge-border: rgba(224, 138, 79, 0.2);
+    --theme-welcome-capability-background: rgba(43, 34, 30, 0.66);
+    --theme-welcome-capability-border: rgba(224, 138, 79, 0.1);
+    --theme-suggestion-background: linear-gradient(180deg, rgba(255, 237, 213, 0.065), rgba(20, 184, 166, 0.018)), rgba(43, 34, 30, 0.84);
+    --theme-suggestion-overlay: linear-gradient(135deg, rgba(224, 138, 79, 0.12), transparent 48%, rgba(45, 212, 191, 0.08));
+    --theme-input-area-background: linear-gradient(180deg, rgba(35, 32, 29, 0), rgba(35, 32, 29, 0.84) 16%, rgba(24, 22, 21, 0.96) 100%);
+    --theme-composer-frame-background: linear-gradient(180deg, rgba(255, 237, 213, 0.06), rgba(20, 184, 166, 0.025)), rgba(43, 32, 27, 0.84);
+    --theme-composer-frame-border: rgba(224, 138, 79, 0.14);
+    --theme-composer-shell-background: linear-gradient(180deg, rgba(255, 237, 213, 0.07), rgba(20, 184, 166, 0.025)), rgba(47, 36, 31, 0.94);
+    --theme-dialog-background: linear-gradient(180deg, rgba(43, 34, 30, 0.98), rgba(27, 25, 23, 0.99)), rgba(27, 25, 23, 0.98);
+    --theme-dialog-border: rgba(224, 138, 79, 0.16);
+    --theme-dialog-header-background: rgba(44, 35, 31, 0.9);
+    --theme-mobile-sheet-background: linear-gradient(180deg, rgba(43, 34, 30, 0.98), rgba(27, 25, 23, 0.99)), rgba(27, 25, 23, 0.98);
+    --theme-mobile-sheet-border: rgba(224, 138, 79, 0.16);
+    --theme-mobile-action-background: rgba(48, 37, 32, 0.7);
+    --theme-mobile-action-border: rgba(224, 138, 79, 0.12);
+    --theme-mobile-action-hover-background: rgba(224, 138, 79, 0.08);
+    --theme-mobile-action-hover-border: rgba(224, 138, 79, 0.24);
+}
+
+[data-chat-theme="walnut-studio"] {
+    --accent: #b8874a;
+    --accent-hover: #9c6935;
+    --accent-light: rgba(184, 135, 74, 0.14);
+    --accent-glow: rgba(184, 135, 74, 0.22);
+    --info: #a3e635;
+    --purple: #8b7fd2;
+    --purple-hover: #6d5dbb;
+    --purple-light: rgba(139, 127, 210, 0.12);
+    --user-message-bg: #8b5e34;
+    --assistant-message-bg: rgba(42, 32, 31, 0.92);
+    --page-base-background: linear-gradient(180deg, #1b1412 0%, #242b24 100%);
+    --page-wallpaper: linear-gradient(135deg, rgba(68, 44, 30, 0.72), rgba(49, 46, 72, 0.42), rgba(36, 64, 51, 0.46)), repeating-linear-gradient(0deg, rgba(245, 158, 11, 0.08) 0 1px, transparent 1px 11px), repeating-linear-gradient(90deg, rgba(88, 28, 135, 0.1) 0 1px, transparent 1px 24px);
+    --page-vignette: radial-gradient(circle at 50% 0%, rgba(184, 135, 74, 0.11), transparent 34%), linear-gradient(180deg, rgba(250, 204, 21, 0.02), transparent 24%);
+    --theme-shell-background: linear-gradient(180deg, rgba(250, 204, 21, 0.06), rgba(88, 28, 135, 0.025)), rgba(38, 30, 29, 0.9);
+    --theme-shell-border: rgba(184, 135, 74, 0.14);
+    --theme-sidebar-background: linear-gradient(180deg, rgba(250, 204, 21, 0.055), rgba(21, 128, 61, 0.02)), rgba(35, 30, 28, 0.9);
+    --theme-sidebar-border: rgba(184, 135, 74, 0.14);
+    --theme-header-background: linear-gradient(180deg, rgba(250, 204, 21, 0.055), rgba(88, 28, 135, 0.02)), rgba(35, 30, 28, 0.84);
+    --theme-shell-overlay: radial-gradient(circle at top center, rgba(184, 135, 74, 0.1), transparent 34%), radial-gradient(circle at 86% 0%, rgba(139, 127, 210, 0.08), transparent 28%);
+    --theme-assistant-bubble-background: linear-gradient(180deg, rgba(250, 204, 21, 0.055), rgba(21, 128, 61, 0.018)), rgba(42, 32, 31, 0.92);
+    --theme-assistant-bubble-border: rgba(184, 135, 74, 0.12);
+    --theme-assistant-stream-border: rgba(184, 135, 74, 0.22);
+    --theme-assistant-stream-shadow: 0 12px 32px rgba(184, 135, 74, 0.1);
+    --theme-user-bubble-background: linear-gradient(135deg, #8b5e34, #58508d);
+    --theme-user-bubble-shadow: 0 14px 32px rgba(139, 94, 52, 0.24);
+    --theme-welcome-state-background: linear-gradient(180deg, rgba(48, 38, 35, 0.5), rgba(28, 25, 24, 0.26)), rgba(36, 31, 29, 0.3);
+    --theme-welcome-state-border: rgba(184, 135, 74, 0.14);
+    --theme-welcome-state-shadow: 0 28px 58px rgba(12, 9, 8, 0.24);
+    --theme-welcome-badge-background: rgba(50, 39, 36, 0.72);
+    --theme-welcome-badge-border: rgba(184, 135, 74, 0.2);
+    --theme-welcome-capability-background: rgba(44, 35, 32, 0.66);
+    --theme-welcome-capability-border: rgba(184, 135, 74, 0.1);
+    --theme-suggestion-background: linear-gradient(180deg, rgba(250, 204, 21, 0.055), rgba(88, 28, 135, 0.018)), rgba(42, 32, 31, 0.84);
+    --theme-suggestion-overlay: linear-gradient(135deg, rgba(184, 135, 74, 0.12), transparent 48%, rgba(139, 127, 210, 0.08));
+    --theme-input-area-background: linear-gradient(180deg, rgba(36, 31, 29, 0), rgba(36, 31, 29, 0.84) 16%, rgba(24, 21, 20, 0.96) 100%);
+    --theme-composer-frame-background: linear-gradient(180deg, rgba(250, 204, 21, 0.06), rgba(88, 28, 135, 0.025)), rgba(38, 30, 29, 0.84);
+    --theme-composer-frame-border: rgba(184, 135, 74, 0.14);
+    --theme-composer-shell-background: linear-gradient(180deg, rgba(250, 204, 21, 0.07), rgba(88, 28, 135, 0.025)), rgba(43, 34, 31, 0.94);
+    --theme-dialog-background: linear-gradient(180deg, rgba(42, 32, 31, 0.98), rgba(28, 25, 24, 0.99)), rgba(28, 25, 24, 0.98);
+    --theme-dialog-border: rgba(184, 135, 74, 0.16);
+    --theme-dialog-header-background: rgba(44, 35, 32, 0.9);
+    --theme-mobile-sheet-background: linear-gradient(180deg, rgba(42, 32, 31, 0.98), rgba(28, 25, 24, 0.99)), rgba(28, 25, 24, 0.98);
+    --theme-mobile-sheet-border: rgba(184, 135, 74, 0.16);
+    --theme-mobile-action-background: rgba(50, 39, 36, 0.7);
+    --theme-mobile-action-border: rgba(184, 135, 74, 0.12);
+    --theme-mobile-action-hover-background: rgba(184, 135, 74, 0.08);
+    --theme-mobile-action-hover-border: rgba(184, 135, 74, 0.24);
+}
+
+[data-chat-theme="moss-copper"] {
+    --accent: #c47a35;
+    --accent-hover: #b56b2a;
+    --accent-light: rgba(196, 122, 53, 0.14);
+    --accent-glow: rgba(196, 122, 53, 0.22);
+    --info: #86efac;
+    --purple: #5eead4;
+    --purple-hover: #2dd4bf;
+    --purple-light: rgba(94, 234, 212, 0.12);
+    --user-message-bg: #b56b2a;
+    --assistant-message-bg: rgba(21, 42, 34, 0.92);
+    --page-base-background: linear-gradient(180deg, #0d1713 0%, #1c2f27 100%);
+    --page-wallpaper: radial-gradient(circle at 18% 18%, rgba(34, 197, 94, 0.2), transparent 30%), radial-gradient(circle at 78% 16%, rgba(217, 119, 6, 0.2), transparent 24%), repeating-linear-gradient(45deg, rgba(20, 184, 166, 0.09) 0 1px, transparent 1px 14px), repeating-linear-gradient(135deg, rgba(217, 119, 6, 0.08) 0 1px, transparent 1px 19px), linear-gradient(180deg, #0d1713 0%, #1c2f27 100%);
+    --page-vignette: radial-gradient(circle at 50% 0%, rgba(196, 122, 53, 0.11), transparent 34%), linear-gradient(180deg, rgba(240, 253, 250, 0.02), transparent 24%);
+    --theme-shell-background: linear-gradient(180deg, rgba(251, 191, 36, 0.06), rgba(20, 184, 166, 0.025)), rgba(19, 42, 34, 0.88);
+    --theme-shell-border: rgba(196, 122, 53, 0.14);
+    --theme-sidebar-background: linear-gradient(180deg, rgba(251, 191, 36, 0.055), rgba(34, 197, 94, 0.02)), rgba(17, 39, 32, 0.88);
+    --theme-sidebar-border: rgba(196, 122, 53, 0.14);
+    --theme-header-background: linear-gradient(180deg, rgba(251, 191, 36, 0.055), rgba(20, 184, 166, 0.02)), rgba(17, 39, 32, 0.84);
+    --theme-shell-overlay: radial-gradient(circle at top center, rgba(196, 122, 53, 0.1), transparent 34%), radial-gradient(circle at 82% 0%, rgba(20, 184, 166, 0.07), transparent 28%);
+    --theme-assistant-bubble-background: linear-gradient(180deg, rgba(251, 191, 36, 0.055), rgba(20, 184, 166, 0.02)), rgba(21, 42, 34, 0.92);
+    --theme-assistant-bubble-border: rgba(196, 122, 53, 0.12);
+    --theme-assistant-stream-border: rgba(196, 122, 53, 0.22);
+    --theme-assistant-stream-shadow: 0 12px 32px rgba(196, 122, 53, 0.1);
+    --theme-user-bubble-background: linear-gradient(135deg, #b56b2a, #2f9f72);
+    --theme-user-bubble-shadow: 0 14px 32px rgba(181, 107, 42, 0.22);
+    --theme-welcome-state-background: linear-gradient(180deg, rgba(23, 49, 39, 0.52), rgba(13, 28, 23, 0.26)), rgba(17, 39, 32, 0.3);
+    --theme-welcome-state-border: rgba(196, 122, 53, 0.14);
+    --theme-welcome-state-shadow: 0 28px 58px rgba(6, 14, 11, 0.24);
+    --theme-welcome-badge-background: rgba(25, 51, 41, 0.72);
+    --theme-welcome-badge-border: rgba(196, 122, 53, 0.2);
+    --theme-welcome-capability-background: rgba(21, 45, 36, 0.66);
+    --theme-welcome-capability-border: rgba(196, 122, 53, 0.1);
+    --theme-suggestion-background: linear-gradient(180deg, rgba(251, 191, 36, 0.055), rgba(20, 184, 166, 0.018)), rgba(21, 42, 34, 0.84);
+    --theme-suggestion-overlay: linear-gradient(135deg, rgba(196, 122, 53, 0.12), transparent 48%, rgba(20, 184, 166, 0.08));
+    --theme-input-area-background: linear-gradient(180deg, rgba(17, 39, 32, 0), rgba(17, 39, 32, 0.84) 16%, rgba(10, 25, 20, 0.96) 100%);
+    --theme-composer-frame-background: linear-gradient(180deg, rgba(251, 191, 36, 0.06), rgba(20, 184, 166, 0.025)), rgba(19, 42, 34, 0.84);
+    --theme-composer-frame-border: rgba(196, 122, 53, 0.14);
+    --theme-composer-shell-background: linear-gradient(180deg, rgba(251, 191, 36, 0.07), rgba(20, 184, 166, 0.025)), rgba(22, 47, 38, 0.94);
+    --theme-dialog-background: linear-gradient(180deg, rgba(21, 42, 34, 0.98), rgba(13, 28, 23, 0.99)), rgba(13, 28, 23, 0.98);
+    --theme-dialog-border: rgba(196, 122, 53, 0.16);
+    --theme-dialog-header-background: rgba(23, 47, 38, 0.9);
+    --theme-mobile-sheet-background: linear-gradient(180deg, rgba(21, 42, 34, 0.98), rgba(13, 28, 23, 0.99)), rgba(13, 28, 23, 0.98);
+    --theme-mobile-sheet-border: rgba(196, 122, 53, 0.16);
+    --theme-mobile-action-background: rgba(25, 51, 41, 0.7);
+    --theme-mobile-action-border: rgba(196, 122, 53, 0.12);
+    --theme-mobile-action-hover-background: rgba(196, 122, 53, 0.08);
+    --theme-mobile-action-hover-border: rgba(196, 122, 53, 0.24);
+}
+
+[data-chat-theme="river-clay"] {
+    --accent: #0e7490;
+    --accent-hover: #155e75;
+    --accent-light: rgba(14, 116, 144, 0.14);
+    --accent-glow: rgba(14, 116, 144, 0.2);
+    --info: #0e7490;
+    --purple: #c15c30;
+    --purple-hover: #9a3412;
+    --purple-light: rgba(193, 92, 48, 0.12);
+    --user-message-bg: #0e7490;
+    --assistant-message-bg: rgba(247, 241, 230, 0.96);
+    --page-base-background: linear-gradient(180deg, #f4ecdc 0%, #d9e6e2 100%);
+    --page-wallpaper: radial-gradient(circle at 16% 14%, rgba(14, 165, 233, 0.18), transparent 30%), radial-gradient(circle at 82% 18%, rgba(194, 65, 12, 0.16), transparent 24%), repeating-linear-gradient(0deg, rgba(120, 113, 108, 0.09) 0 2px, transparent 2px 18px), linear-gradient(180deg, #f4ecdc 0%, #d9e6e2 100%);
+    --page-vignette: radial-gradient(circle at 50% 0%, rgba(14, 116, 144, 0.1), transparent 34%), linear-gradient(180deg, rgba(193, 92, 48, 0.045), transparent 24%);
+    --theme-shell-background: linear-gradient(180deg, rgba(255, 252, 246, 0.98), rgba(224, 238, 235, 0.94)), rgba(241, 234, 221, 0.94);
+    --theme-shell-border: rgba(14, 116, 144, 0.16);
+    --theme-sidebar-background: linear-gradient(180deg, rgba(255, 252, 246, 0.98), rgba(224, 238, 235, 0.94)), rgba(241, 234, 221, 0.94);
+    --theme-sidebar-border: rgba(14, 116, 144, 0.16);
+    --theme-header-background: linear-gradient(180deg, rgba(255, 252, 246, 0.96), rgba(229, 239, 234, 0.9)), rgba(241, 234, 221, 0.9);
+    --theme-shell-overlay: radial-gradient(circle at top center, rgba(14, 116, 144, 0.08), transparent 30%), linear-gradient(180deg, rgba(193, 92, 48, 0.05), transparent 22%);
+    --theme-assistant-bubble-background: linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(235, 229, 216, 0.97)), rgba(247, 241, 230, 0.96);
+    --theme-assistant-bubble-border: rgba(14, 116, 144, 0.16);
+    --theme-assistant-stream-border: rgba(14, 116, 144, 0.2);
+    --theme-assistant-stream-shadow: 0 12px 32px rgba(14, 116, 144, 0.08);
+    --theme-user-bubble-background: linear-gradient(135deg, #0e7490, #c15c30);
+    --theme-user-bubble-shadow: 0 12px 28px rgba(14, 116, 144, 0.18);
+    --theme-welcome-state-background: linear-gradient(180deg, rgba(255, 252, 246, 0.96), rgba(224, 238, 235, 0.58)), rgba(241, 234, 221, 0.58);
+    --theme-welcome-state-border: rgba(14, 116, 144, 0.16);
+    --theme-welcome-state-shadow: 0 28px 54px rgba(14, 116, 144, 0.08);
+    --theme-welcome-badge-background: rgba(241, 234, 221, 0.92);
+    --theme-welcome-badge-border: rgba(14, 116, 144, 0.16);
+    --theme-welcome-capability-background: rgba(232, 235, 225, 0.92);
+    --theme-welcome-capability-border: rgba(14, 116, 144, 0.08);
+    --theme-welcome-shortcut-background: rgba(235, 231, 218, 0.96);
+    --theme-suggestion-background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(235, 229, 216, 0.96)), rgba(241, 234, 221, 0.94);
+    --theme-suggestion-overlay: linear-gradient(135deg, rgba(14, 116, 144, 0.08), transparent 50%, rgba(193, 92, 48, 0.08));
+    --theme-input-area-background: linear-gradient(180deg, rgba(241, 234, 221, 0), rgba(232, 237, 230, 0.84) 16%, rgba(222, 230, 224, 0.96) 100%);
+    --theme-composer-frame-background: linear-gradient(180deg, rgba(255, 252, 246, 0.99), rgba(230, 237, 230, 0.94)), rgba(238, 235, 222, 0.94);
+    --theme-composer-frame-border: rgba(14, 116, 144, 0.16);
+    --theme-composer-shell-background: linear-gradient(180deg, rgba(255, 252, 246, 0.99), rgba(230, 237, 230, 0.94)), rgba(238, 235, 222, 0.94);
+    --theme-dialog-background: linear-gradient(180deg, rgba(255, 252, 246, 0.99), rgba(235, 229, 216, 0.94)), rgba(241, 234, 221, 0.95);
+    --theme-dialog-border: rgba(14, 116, 144, 0.16);
+    --theme-dialog-header-background: rgba(236, 234, 222, 0.96);
+    --theme-overlay-background: rgba(15, 118, 110, 0.22);
+    --theme-mobile-sheet-background: linear-gradient(180deg, rgba(255, 252, 246, 0.99), rgba(235, 229, 216, 0.94)), rgba(241, 234, 221, 0.95);
+    --theme-mobile-sheet-border: rgba(14, 116, 144, 0.16);
+    --theme-mobile-action-background: rgba(238, 235, 222, 0.95);
+    --theme-mobile-action-border: rgba(14, 116, 144, 0.16);
+    --theme-mobile-action-hover-background: rgba(226, 235, 230, 0.98);
+    --theme-mobile-action-hover-border: rgba(14, 116, 144, 0.3);
+}
+
+[data-chat-theme="terrazzo-night"] {
+    --accent: #f472b6;
+    --accent-hover: #ec4899;
+    --accent-light: rgba(244, 114, 182, 0.14);
+    --accent-glow: rgba(244, 114, 182, 0.22);
+    --info: #2dd4bf;
+    --purple: #facc15;
+    --purple-hover: #eab308;
+    --purple-light: rgba(250, 204, 21, 0.12);
+    --user-message-bg: #f472b6;
+    --assistant-message-bg: rgba(31, 32, 51, 0.92);
+    --page-base-background: linear-gradient(180deg, #11131d 0%, #202032 100%);
+    --page-wallpaper: radial-gradient(circle at 18% 18%, rgba(244, 114, 182, 0.18), transparent 28%), radial-gradient(circle at 72% 20%, rgba(45, 212, 191, 0.16), transparent 24%), radial-gradient(circle, rgba(251, 191, 36, 0.16) 1px, transparent 2px), radial-gradient(circle, rgba(125, 211, 252, 0.12) 1px, transparent 2px), linear-gradient(180deg, #11131d 0%, #202032 100%);
+    --page-vignette: radial-gradient(circle at 50% 0%, rgba(244, 114, 182, 0.1), transparent 34%), linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 24%);
+    --theme-shell-background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(244, 114, 182, 0.018)), rgba(30, 31, 49, 0.9);
+    --theme-shell-border: rgba(244, 114, 182, 0.14);
+    --theme-sidebar-background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(45, 212, 191, 0.018)), rgba(28, 30, 47, 0.9);
+    --theme-sidebar-border: rgba(244, 114, 182, 0.14);
+    --theme-header-background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(244, 114, 182, 0.018)), rgba(28, 30, 47, 0.84);
+    --theme-shell-overlay: radial-gradient(circle at top center, rgba(244, 114, 182, 0.1), transparent 34%), radial-gradient(circle at 86% 0%, rgba(45, 212, 191, 0.07), transparent 28%);
+    --theme-assistant-bubble-background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(251, 191, 36, 0.012)), rgba(31, 32, 51, 0.92);
+    --theme-assistant-bubble-border: rgba(244, 114, 182, 0.12);
+    --theme-assistant-stream-border: rgba(244, 114, 182, 0.22);
+    --theme-assistant-stream-shadow: 0 12px 32px rgba(244, 114, 182, 0.1);
+    --theme-user-bubble-background: linear-gradient(135deg, #f472b6, #2dd4bf);
+    --theme-user-bubble-shadow: 0 14px 32px rgba(244, 114, 182, 0.22);
+    --theme-welcome-state-background: linear-gradient(180deg, rgba(35, 36, 57, 0.52), rgba(20, 22, 35, 0.26)), rgba(28, 30, 47, 0.3);
+    --theme-welcome-state-border: rgba(244, 114, 182, 0.14);
+    --theme-welcome-state-shadow: 0 28px 58px rgba(8, 9, 15, 0.24);
+    --theme-welcome-badge-background: rgba(38, 39, 58, 0.72);
+    --theme-welcome-badge-border: rgba(244, 114, 182, 0.2);
+    --theme-welcome-capability-background: rgba(33, 34, 52, 0.66);
+    --theme-welcome-capability-border: rgba(244, 114, 182, 0.1);
+    --theme-suggestion-background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(244, 114, 182, 0.016)), rgba(31, 32, 51, 0.84);
+    --theme-suggestion-overlay: linear-gradient(135deg, rgba(244, 114, 182, 0.12), transparent 48%, rgba(45, 212, 191, 0.08));
+    --theme-input-area-background: linear-gradient(180deg, rgba(28, 30, 47, 0), rgba(28, 30, 47, 0.84) 16%, rgba(17, 18, 30, 0.96) 100%);
+    --theme-composer-frame-background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(244, 114, 182, 0.018)), rgba(30, 31, 49, 0.84);
+    --theme-composer-frame-border: rgba(244, 114, 182, 0.14);
+    --theme-composer-shell-background: linear-gradient(180deg, rgba(255, 255, 255, 0.065), rgba(244, 114, 182, 0.02)), rgba(34, 35, 55, 0.94);
+    --theme-dialog-background: linear-gradient(180deg, rgba(31, 32, 51, 0.98), rgba(20, 22, 35, 0.99)), rgba(20, 22, 35, 0.98);
+    --theme-dialog-border: rgba(244, 114, 182, 0.16);
+    --theme-dialog-header-background: rgba(33, 34, 52, 0.9);
+    --theme-mobile-sheet-background: linear-gradient(180deg, rgba(31, 32, 51, 0.98), rgba(20, 22, 35, 0.99)), rgba(20, 22, 35, 0.98);
+    --theme-mobile-sheet-border: rgba(244, 114, 182, 0.16);
+    --theme-mobile-action-background: rgba(38, 39, 58, 0.7);
+    --theme-mobile-action-border: rgba(244, 114, 182, 0.12);
+    --theme-mobile-action-hover-background: rgba(244, 114, 182, 0.08);
+    --theme-mobile-action-hover-border: rgba(244, 114, 182, 0.24);
+}
+
+[data-chat-theme="corkboard"] {
+    --accent: #1d4ed8;
+    --accent-hover: #1e40af;
+    --accent-light: rgba(29, 78, 216, 0.12);
+    --accent-glow: rgba(29, 78, 216, 0.18);
+    --info: #1d4ed8;
+    --purple: #b45309;
+    --purple-hover: #92400e;
+    --purple-light: rgba(180, 83, 9, 0.12);
+    --user-message-bg: #1d4ed8;
+    --assistant-message-bg: rgba(246, 231, 202, 0.96);
+    --page-base-background: linear-gradient(180deg, #efdcb9 0%, #dbc393 100%);
+    --page-wallpaper: radial-gradient(circle, rgba(120, 53, 15, 0.16) 1px, transparent 1px), radial-gradient(circle at 82% 18%, rgba(30, 64, 175, 0.12), transparent 24%), repeating-linear-gradient(35deg, rgba(180, 83, 9, 0.08) 0 1px, transparent 1px 12px), linear-gradient(180deg, #efdcb9 0%, #dbc393 100%);
+    --page-vignette: radial-gradient(circle at 50% 0%, rgba(29, 78, 216, 0.08), transparent 34%), linear-gradient(180deg, rgba(120, 53, 15, 0.05), transparent 24%);
+    --theme-shell-background: linear-gradient(180deg, rgba(255, 248, 235, 0.98), rgba(232, 211, 174, 0.94)), rgba(239, 220, 184, 0.94);
+    --theme-shell-border: rgba(120, 53, 15, 0.18);
+    --theme-sidebar-background: linear-gradient(180deg, rgba(255, 248, 235, 0.98), rgba(232, 211, 174, 0.94)), rgba(239, 220, 184, 0.94);
+    --theme-sidebar-border: rgba(120, 53, 15, 0.18);
+    --theme-header-background: linear-gradient(180deg, rgba(255, 248, 235, 0.96), rgba(235, 215, 178, 0.9)), rgba(239, 220, 184, 0.9);
+    --theme-shell-overlay: radial-gradient(circle at top center, rgba(29, 78, 216, 0.07), transparent 30%), linear-gradient(180deg, rgba(120, 53, 15, 0.05), transparent 22%);
+    --theme-assistant-bubble-background: linear-gradient(180deg, rgba(255, 252, 244, 0.99), rgba(236, 219, 188, 0.96)), rgba(246, 231, 202, 0.96);
+    --theme-assistant-bubble-border: rgba(120, 53, 15, 0.2);
+    --theme-assistant-stream-border: rgba(29, 78, 216, 0.2);
+    --theme-assistant-stream-shadow: 0 12px 32px rgba(29, 78, 216, 0.08);
+    --theme-user-bubble-background: linear-gradient(135deg, #1d4ed8, #b45309);
+    --theme-user-bubble-shadow: 0 12px 28px rgba(29, 78, 216, 0.16);
+    --theme-welcome-state-background: linear-gradient(180deg, rgba(255, 248, 235, 0.96), rgba(232, 211, 174, 0.58)), rgba(239, 220, 184, 0.58);
+    --theme-welcome-state-border: rgba(120, 53, 15, 0.2);
+    --theme-welcome-state-shadow: 0 28px 54px rgba(120, 53, 15, 0.08);
+    --theme-welcome-badge-background: rgba(239, 220, 184, 0.92);
+    --theme-welcome-badge-border: rgba(29, 78, 216, 0.16);
+    --theme-welcome-capability-background: rgba(234, 216, 184, 0.92);
+    --theme-welcome-capability-border: rgba(120, 53, 15, 0.1);
+    --theme-welcome-shortcut-background: rgba(235, 217, 185, 0.96);
+    --theme-suggestion-background: linear-gradient(180deg, rgba(255, 252, 244, 0.98), rgba(236, 219, 188, 0.96)), rgba(239, 220, 184, 0.94);
+    --theme-suggestion-overlay: linear-gradient(135deg, rgba(29, 78, 216, 0.08), transparent 50%, rgba(180, 83, 9, 0.08));
+    --theme-input-area-background: linear-gradient(180deg, rgba(239, 220, 184, 0), rgba(232, 211, 174, 0.84) 16%, rgba(221, 196, 151, 0.96) 100%);
+    --theme-composer-frame-background: linear-gradient(180deg, rgba(255, 248, 235, 0.99), rgba(232, 211, 174, 0.94)), rgba(239, 220, 184, 0.94);
+    --theme-composer-frame-border: rgba(120, 53, 15, 0.18);
+    --theme-composer-shell-background: linear-gradient(180deg, rgba(255, 248, 235, 0.99), rgba(232, 211, 174, 0.94)), rgba(242, 225, 195, 0.94);
+    --theme-dialog-background: linear-gradient(180deg, rgba(255, 248, 235, 0.99), rgba(236, 219, 188, 0.94)), rgba(239, 220, 184, 0.95);
+    --theme-dialog-border: rgba(120, 53, 15, 0.18);
+    --theme-dialog-header-background: rgba(240, 222, 190, 0.96);
+    --theme-overlay-background: rgba(120, 53, 15, 0.22);
+    --theme-mobile-sheet-background: linear-gradient(180deg, rgba(255, 248, 235, 0.99), rgba(236, 219, 188, 0.94)), rgba(239, 220, 184, 0.95);
+    --theme-mobile-sheet-border: rgba(120, 53, 15, 0.18);
+    --theme-mobile-action-background: rgba(239, 220, 184, 0.95);
+    --theme-mobile-action-border: rgba(120, 53, 15, 0.18);
+    --theme-mobile-action-hover-background: rgba(231, 211, 177, 0.98);
+    --theme-mobile-action-hover-border: rgba(29, 78, 216, 0.28);
+}
+
+[data-chat-theme="patina-lab"] {
+    --accent: #5eead4;
+    --accent-hover: #2dd4bf;
+    --accent-light: rgba(94, 234, 212, 0.14);
+    --accent-glow: rgba(94, 234, 212, 0.22);
+    --info: #5eead4;
+    --purple: #d6a23a;
+    --purple-hover: #b8872e;
+    --purple-light: rgba(214, 162, 58, 0.12);
+    --user-message-bg: #14b8a6;
+    --assistant-message-bg: rgba(17, 51, 52, 0.92);
+    --page-base-background: linear-gradient(180deg, #092022 0%, #17383a 100%);
+    --page-wallpaper: radial-gradient(circle at 16% 15%, rgba(20, 184, 166, 0.3), transparent 30%), radial-gradient(circle at 78% 16%, rgba(250, 204, 21, 0.16), transparent 24%), repeating-linear-gradient(115deg, rgba(45, 212, 191, 0.08) 0 2px, transparent 2px 18px), linear-gradient(180deg, #092022 0%, #17383a 100%);
+    --page-vignette: radial-gradient(circle at 50% 0%, rgba(94, 234, 212, 0.1), transparent 34%), linear-gradient(180deg, rgba(240, 253, 250, 0.02), transparent 24%);
+    --theme-shell-background: linear-gradient(180deg, rgba(240, 253, 250, 0.06), rgba(250, 204, 21, 0.018)), rgba(16, 48, 50, 0.88);
+    --theme-shell-border: rgba(94, 234, 212, 0.14);
+    --theme-sidebar-background: linear-gradient(180deg, rgba(240, 253, 250, 0.055), rgba(250, 204, 21, 0.018)), rgba(15, 44, 47, 0.88);
+    --theme-sidebar-border: rgba(94, 234, 212, 0.14);
+    --theme-header-background: linear-gradient(180deg, rgba(240, 253, 250, 0.055), rgba(250, 204, 21, 0.018)), rgba(15, 44, 47, 0.84);
+    --theme-shell-overlay: radial-gradient(circle at top center, rgba(94, 234, 212, 0.1), transparent 34%), radial-gradient(circle at 82% 0%, rgba(250, 204, 21, 0.07), transparent 28%);
+    --theme-assistant-bubble-background: linear-gradient(180deg, rgba(240, 253, 250, 0.055), rgba(250, 204, 21, 0.014)), rgba(17, 51, 52, 0.92);
+    --theme-assistant-bubble-border: rgba(94, 234, 212, 0.12);
+    --theme-assistant-stream-border: rgba(94, 234, 212, 0.22);
+    --theme-assistant-stream-shadow: 0 12px 32px rgba(94, 234, 212, 0.1);
+    --theme-user-bubble-background: linear-gradient(135deg, #14b8a6, #d6a23a);
+    --theme-user-bubble-shadow: 0 14px 32px rgba(20, 184, 166, 0.22);
+    --theme-welcome-state-background: linear-gradient(180deg, rgba(18, 56, 57, 0.52), rgba(9, 33, 35, 0.26)), rgba(15, 44, 47, 0.3);
+    --theme-welcome-state-border: rgba(94, 234, 212, 0.14);
+    --theme-welcome-state-shadow: 0 28px 58px rgba(4, 13, 14, 0.24);
+    --theme-welcome-badge-background: rgba(20, 56, 58, 0.72);
+    --theme-welcome-badge-border: rgba(94, 234, 212, 0.2);
+    --theme-welcome-capability-background: rgba(18, 50, 52, 0.66);
+    --theme-welcome-capability-border: rgba(94, 234, 212, 0.1);
+    --theme-suggestion-background: linear-gradient(180deg, rgba(240, 253, 250, 0.055), rgba(250, 204, 21, 0.014)), rgba(17, 51, 52, 0.84);
+    --theme-suggestion-overlay: linear-gradient(135deg, rgba(94, 234, 212, 0.12), transparent 48%, rgba(250, 204, 21, 0.08));
+    --theme-input-area-background: linear-gradient(180deg, rgba(15, 44, 47, 0), rgba(15, 44, 47, 0.84) 16%, rgba(7, 28, 30, 0.96) 100%);
+    --theme-composer-frame-background: linear-gradient(180deg, rgba(240, 253, 250, 0.06), rgba(250, 204, 21, 0.018)), rgba(16, 48, 50, 0.84);
+    --theme-composer-frame-border: rgba(94, 234, 212, 0.14);
+    --theme-composer-shell-background: linear-gradient(180deg, rgba(240, 253, 250, 0.065), rgba(250, 204, 21, 0.02)), rgba(18, 55, 57, 0.94);
+    --theme-dialog-background: linear-gradient(180deg, rgba(17, 51, 52, 0.98), rgba(9, 33, 35, 0.99)), rgba(9, 33, 35, 0.98);
+    --theme-dialog-border: rgba(94, 234, 212, 0.16);
+    --theme-dialog-header-background: rgba(18, 50, 52, 0.9);
+    --theme-mobile-sheet-background: linear-gradient(180deg, rgba(17, 51, 52, 0.98), rgba(9, 33, 35, 0.99)), rgba(9, 33, 35, 0.98);
+    --theme-mobile-sheet-border: rgba(94, 234, 212, 0.16);
+    --theme-mobile-action-background: rgba(20, 56, 58, 0.7);
+    --theme-mobile-action-border: rgba(94, 234, 212, 0.12);
+    --theme-mobile-action-hover-background: rgba(94, 234, 212, 0.08);
+    --theme-mobile-action-hover-border: rgba(94, 234, 212, 0.24);
+}
+
+[data-chat-theme="denim-sand"] {
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --accent-light: rgba(37, 99, 235, 0.12);
+    --accent-glow: rgba(37, 99, 235, 0.18);
+    --info: #2563eb;
+    --purple: #ea6f46;
+    --purple-hover: #c2410c;
+    --purple-light: rgba(234, 111, 70, 0.12);
+    --user-message-bg: #2563eb;
+    --assistant-message-bg: rgba(245, 239, 226, 0.96);
+    --page-base-background: linear-gradient(180deg, #ece6d8 0%, #d8dfdf 100%);
+    --page-wallpaper: linear-gradient(135deg, rgba(37, 99, 235, 0.18), rgba(251, 146, 60, 0.13)), repeating-linear-gradient(90deg, rgba(30, 64, 175, 0.08) 0 1px, transparent 1px 10px), repeating-linear-gradient(0deg, rgba(180, 83, 9, 0.06) 0 1px, transparent 1px 14px), linear-gradient(180deg, #ece6d8 0%, #d8dfdf 100%);
+    --page-vignette: radial-gradient(circle at 50% 0%, rgba(37, 99, 235, 0.08), transparent 34%), linear-gradient(180deg, rgba(234, 111, 70, 0.045), transparent 24%);
+    --theme-shell-background: linear-gradient(180deg, rgba(255, 255, 250, 0.98), rgba(226, 226, 215, 0.94)), rgba(239, 233, 220, 0.94);
+    --theme-shell-border: rgba(37, 99, 235, 0.16);
+    --theme-sidebar-background: linear-gradient(180deg, rgba(255, 255, 250, 0.98), rgba(226, 226, 215, 0.94)), rgba(239, 233, 220, 0.94);
+    --theme-sidebar-border: rgba(37, 99, 235, 0.16);
+    --theme-header-background: linear-gradient(180deg, rgba(255, 255, 250, 0.96), rgba(226, 226, 215, 0.9)), rgba(239, 233, 220, 0.9);
+    --theme-shell-overlay: radial-gradient(circle at top center, rgba(37, 99, 235, 0.07), transparent 30%), linear-gradient(180deg, rgba(234, 111, 70, 0.05), transparent 22%);
+    --theme-assistant-bubble-background: linear-gradient(180deg, rgba(255, 255, 250, 0.99), rgba(230, 226, 214, 0.97)), rgba(245, 239, 226, 0.96);
+    --theme-assistant-bubble-border: rgba(37, 99, 235, 0.16);
+    --theme-assistant-stream-border: rgba(37, 99, 235, 0.2);
+    --theme-assistant-stream-shadow: 0 12px 32px rgba(37, 99, 235, 0.08);
+    --theme-user-bubble-background: linear-gradient(135deg, #2563eb, #ea6f46);
+    --theme-user-bubble-shadow: 0 12px 28px rgba(37, 99, 235, 0.16);
+    --theme-welcome-state-background: linear-gradient(180deg, rgba(255, 255, 250, 0.96), rgba(226, 226, 215, 0.58)), rgba(239, 233, 220, 0.58);
+    --theme-welcome-state-border: rgba(37, 99, 235, 0.16);
+    --theme-welcome-state-shadow: 0 28px 54px rgba(37, 99, 235, 0.08);
+    --theme-welcome-badge-background: rgba(239, 233, 220, 0.92);
+    --theme-welcome-badge-border: rgba(37, 99, 235, 0.16);
+    --theme-welcome-capability-background: rgba(231, 229, 218, 0.92);
+    --theme-welcome-capability-border: rgba(37, 99, 235, 0.08);
+    --theme-welcome-shortcut-background: rgba(232, 228, 216, 0.96);
+    --theme-suggestion-background: linear-gradient(180deg, rgba(255, 255, 250, 0.98), rgba(230, 226, 214, 0.96)), rgba(239, 233, 220, 0.94);
+    --theme-suggestion-overlay: linear-gradient(135deg, rgba(37, 99, 235, 0.08), transparent 50%, rgba(234, 111, 70, 0.08));
+    --theme-input-area-background: linear-gradient(180deg, rgba(239, 233, 220, 0), rgba(226, 226, 215, 0.84) 16%, rgba(216, 221, 218, 0.96) 100%);
+    --theme-composer-frame-background: linear-gradient(180deg, rgba(255, 255, 250, 0.99), rgba(226, 226, 215, 0.94)), rgba(239, 233, 220, 0.94);
+    --theme-composer-frame-border: rgba(37, 99, 235, 0.16);
+    --theme-composer-shell-background: linear-gradient(180deg, rgba(255, 255, 250, 0.99), rgba(226, 226, 215, 0.94)), rgba(241, 235, 222, 0.94);
+    --theme-dialog-background: linear-gradient(180deg, rgba(255, 255, 250, 0.99), rgba(230, 226, 214, 0.94)), rgba(239, 233, 220, 0.95);
+    --theme-dialog-border: rgba(37, 99, 235, 0.16);
+    --theme-dialog-header-background: rgba(238, 233, 222, 0.96);
+    --theme-overlay-background: rgba(37, 99, 235, 0.2);
+    --theme-mobile-sheet-background: linear-gradient(180deg, rgba(255, 255, 250, 0.99), rgba(230, 226, 214, 0.94)), rgba(239, 233, 220, 0.95);
+    --theme-mobile-sheet-border: rgba(37, 99, 235, 0.16);
+    --theme-mobile-action-background: rgba(239, 233, 220, 0.95);
+    --theme-mobile-action-border: rgba(37, 99, 235, 0.16);
+    --theme-mobile-action-hover-background: rgba(225, 226, 216, 0.98);
+    --theme-mobile-action-hover-border: rgba(234, 111, 70, 0.28);
+}
+
+[data-chat-theme="mineral-rust"] {
+    --accent: #d97706;
+    --accent-hover: #c2410c;
+    --accent-light: rgba(217, 119, 6, 0.14);
+    --accent-glow: rgba(217, 119, 6, 0.22);
+    --info: #5eead4;
+    --purple: #14b8a6;
+    --purple-hover: #0f766e;
+    --purple-light: rgba(20, 184, 166, 0.12);
+    --user-message-bg: #c2410c;
+    --assistant-message-bg: rgba(43, 33, 29, 0.92);
+    --page-base-background: linear-gradient(180deg, #11100e 0%, #2b221d 100%);
+    --page-wallpaper: radial-gradient(circle at 18% 16%, rgba(194, 65, 12, 0.24), transparent 30%), radial-gradient(circle at 78% 18%, rgba(20, 184, 166, 0.18), transparent 24%), repeating-linear-gradient(32deg, rgba(245, 158, 11, 0.08) 0 1px, transparent 1px 14px), repeating-linear-gradient(132deg, rgba(45, 212, 191, 0.07) 0 1px, transparent 1px 20px), linear-gradient(180deg, #11100e 0%, #2b221d 100%);
+    --page-vignette: radial-gradient(circle at 50% 0%, rgba(217, 119, 6, 0.11), transparent 34%), linear-gradient(180deg, rgba(240, 253, 250, 0.018), transparent 24%);
+    --theme-shell-background: linear-gradient(180deg, rgba(251, 191, 36, 0.055), rgba(20, 184, 166, 0.018)), rgba(40, 31, 27, 0.9);
+    --theme-shell-border: rgba(217, 119, 6, 0.14);
+    --theme-sidebar-background: linear-gradient(180deg, rgba(251, 191, 36, 0.05), rgba(20, 184, 166, 0.018)), rgba(36, 29, 26, 0.9);
+    --theme-sidebar-border: rgba(217, 119, 6, 0.14);
+    --theme-header-background: linear-gradient(180deg, rgba(251, 191, 36, 0.05), rgba(20, 184, 166, 0.018)), rgba(36, 29, 26, 0.84);
+    --theme-shell-overlay: radial-gradient(circle at top center, rgba(217, 119, 6, 0.1), transparent 34%), radial-gradient(circle at 82% 0%, rgba(20, 184, 166, 0.07), transparent 28%);
+    --theme-assistant-bubble-background: linear-gradient(180deg, rgba(251, 191, 36, 0.05), rgba(20, 184, 166, 0.014)), rgba(43, 33, 29, 0.92);
+    --theme-assistant-bubble-border: rgba(217, 119, 6, 0.12);
+    --theme-assistant-stream-border: rgba(217, 119, 6, 0.22);
+    --theme-assistant-stream-shadow: 0 12px 32px rgba(217, 119, 6, 0.1);
+    --theme-user-bubble-background: linear-gradient(135deg, #c2410c, #0f766e);
+    --theme-user-bubble-shadow: 0 14px 32px rgba(194, 65, 12, 0.22);
+    --theme-welcome-state-background: linear-gradient(180deg, rgba(47, 37, 32, 0.52), rgba(25, 22, 20, 0.26)), rgba(36, 29, 26, 0.3);
+    --theme-welcome-state-border: rgba(217, 119, 6, 0.14);
+    --theme-welcome-state-shadow: 0 28px 58px rgba(9, 8, 7, 0.24);
+    --theme-welcome-badge-background: rgba(48, 38, 33, 0.72);
+    --theme-welcome-badge-border: rgba(217, 119, 6, 0.2);
+    --theme-welcome-capability-background: rgba(43, 34, 30, 0.66);
+    --theme-welcome-capability-border: rgba(217, 119, 6, 0.1);
+    --theme-suggestion-background: linear-gradient(180deg, rgba(251, 191, 36, 0.05), rgba(20, 184, 166, 0.014)), rgba(43, 33, 29, 0.84);
+    --theme-suggestion-overlay: linear-gradient(135deg, rgba(217, 119, 6, 0.12), transparent 48%, rgba(20, 184, 166, 0.08));
+    --theme-input-area-background: linear-gradient(180deg, rgba(36, 29, 26, 0), rgba(36, 29, 26, 0.84) 16%, rgba(22, 19, 17, 0.96) 100%);
+    --theme-composer-frame-background: linear-gradient(180deg, rgba(251, 191, 36, 0.055), rgba(20, 184, 166, 0.018)), rgba(40, 31, 27, 0.84);
+    --theme-composer-frame-border: rgba(217, 119, 6, 0.14);
+    --theme-composer-shell-background: linear-gradient(180deg, rgba(251, 191, 36, 0.06), rgba(20, 184, 166, 0.02)), rgba(45, 35, 31, 0.94);
+    --theme-dialog-background: linear-gradient(180deg, rgba(43, 33, 29, 0.98), rgba(25, 22, 20, 0.99)), rgba(25, 22, 20, 0.98);
+    --theme-dialog-border: rgba(217, 119, 6, 0.16);
+    --theme-dialog-header-background: rgba(44, 35, 31, 0.9);
+    --theme-mobile-sheet-background: linear-gradient(180deg, rgba(43, 33, 29, 0.98), rgba(25, 22, 20, 0.99)), rgba(25, 22, 20, 0.98);
+    --theme-mobile-sheet-border: rgba(217, 119, 6, 0.16);
+    --theme-mobile-action-background: rgba(48, 38, 33, 0.7);
+    --theme-mobile-action-border: rgba(217, 119, 6, 0.12);
+    --theme-mobile-action-hover-background: rgba(217, 119, 6, 0.08);
+    --theme-mobile-action-hover-border: rgba(217, 119, 6, 0.24);
+}
+
 html,
 body {
     width: 100%;
@@ -8049,6 +8555,40 @@ code[class*="language-"] {
 
 .theme-gallery-grid {
     display: grid;
+    gap: 1.35rem;
+}
+
+.theme-gallery-section {
+    display: grid;
+    gap: 0.8rem;
+}
+
+.theme-gallery-section__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 1.5rem;
+}
+
+.theme-gallery-section__title {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 0.84rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.theme-gallery-section--experimental {
+    padding-top: 0.25rem;
+}
+
+.theme-gallery-section--experimental .theme-gallery-section__title {
+    color: var(--accent);
+}
+
+.theme-gallery-section__grid {
+    display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 1rem;
 }
@@ -8077,6 +8617,16 @@ code[class*="language-"] {
     border-color: var(--accent);
     box-shadow: var(--shadow-md), var(--shadow-glow);
     background: color-mix(in srgb, var(--accent) 10%, var(--bg-secondary));
+}
+
+.theme-card--experimental {
+    background:
+        linear-gradient(135deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 58%),
+        color-mix(in srgb, var(--bg-secondary) 88%, transparent);
+}
+
+.theme-card--experimental .theme-card__mode {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .theme-card:focus-visible {
@@ -8201,13 +8751,13 @@ code[class*="language-"] {
 }
 
 @media (max-width: 980px) {
-    .theme-gallery-grid {
+    .theme-gallery-section__grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
 
 @media (max-width: 640px) {
-    .theme-gallery-grid {
+    .theme-gallery-section__grid {
         grid-template-columns: 1fr;
     }
 

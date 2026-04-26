@@ -11,6 +11,10 @@ const WEB_CHAT_THEME_DEFAULTS = Object.freeze({
     dark: 'obsidian',
     light: 'paper',
 });
+const WEB_CHAT_THEME_GROUP_LABELS = Object.freeze({
+    core: 'Core themes',
+    experimental: 'Experimental textures',
+});
 const WEB_CHAT_THEME_PRESETS = Object.freeze([
     {
         id: 'obsidian',
@@ -432,6 +436,156 @@ const WEB_CHAT_THEME_PRESETS = Object.freeze([
             accent: '#b45309',
         },
     },
+    {
+        id: 'woodland-map',
+        name: 'Woodland Map',
+        mode: 'dark',
+        group: 'experimental',
+        description: 'Layered woodgrain, moss contour lines, and brass map markings.',
+        metaColor: '#162018',
+        preview: {
+            background: 'linear-gradient(120deg, rgba(84, 56, 31, 0.5), rgba(31, 64, 45, 0.54)), repeating-radial-gradient(ellipse at 30% 20%, rgba(218, 165, 88, 0.14) 0 1px, transparent 1px 12px), repeating-linear-gradient(28deg, rgba(132, 204, 22, 0.08) 0 1px, transparent 1px 18px), linear-gradient(180deg, #12180f 0%, #203018 100%)',
+            surface: 'linear-gradient(180deg, rgba(254, 243, 199, 0.08), rgba(45, 80, 44, 0.04)), rgba(29, 42, 27, 0.88)',
+            userBubble: 'linear-gradient(135deg, #9a6b38, #537a3a)',
+            assistantBubble: 'linear-gradient(180deg, rgba(254, 243, 199, 0.07), rgba(21, 128, 61, 0.02)), rgba(35, 44, 29, 0.92)',
+            accent: '#d6a75c',
+        },
+    },
+    {
+        id: 'cedar-fog',
+        name: 'Cedar Fog',
+        mode: 'dark',
+        group: 'experimental',
+        description: 'Red cedar undertones, blue-green mist, and soft sawdust texture.',
+        metaColor: '#231713',
+        preview: {
+            background: 'radial-gradient(circle at 18% 14%, rgba(251, 146, 60, 0.2), transparent 28%), radial-gradient(circle at 76% 18%, rgba(45, 212, 191, 0.18), transparent 25%), repeating-linear-gradient(92deg, rgba(180, 83, 9, 0.11) 0 2px, transparent 2px 16px), linear-gradient(180deg, #1b1110 0%, #26342d 100%)',
+            surface: 'linear-gradient(180deg, rgba(255, 237, 213, 0.07), rgba(20, 184, 166, 0.025)), rgba(43, 32, 27, 0.88)',
+            userBubble: 'linear-gradient(135deg, #c46a32, #2f8f83)',
+            assistantBubble: 'linear-gradient(180deg, rgba(255, 237, 213, 0.07), rgba(20, 184, 166, 0.02)), rgba(43, 34, 30, 0.92)',
+            accent: '#e08a4f',
+        },
+    },
+    {
+        id: 'walnut-studio',
+        name: 'Walnut Studio',
+        mode: 'dark',
+        group: 'experimental',
+        description: 'Dark walnut panels, plum shadows, and muted studio-green values.',
+        metaColor: '#1b1412',
+        preview: {
+            background: 'linear-gradient(135deg, rgba(68, 44, 30, 0.72), rgba(49, 46, 72, 0.42), rgba(36, 64, 51, 0.46)), repeating-linear-gradient(0deg, rgba(245, 158, 11, 0.08) 0 1px, transparent 1px 11px), repeating-linear-gradient(90deg, rgba(88, 28, 135, 0.1) 0 1px, transparent 1px 24px)',
+            surface: 'linear-gradient(180deg, rgba(250, 204, 21, 0.06), rgba(88, 28, 135, 0.025)), rgba(38, 30, 29, 0.9)',
+            userBubble: 'linear-gradient(135deg, #8b5e34, #58508d)',
+            assistantBubble: 'linear-gradient(180deg, rgba(250, 204, 21, 0.055), rgba(21, 128, 61, 0.018)), rgba(42, 32, 31, 0.92)',
+            accent: '#b8874a',
+        },
+    },
+    {
+        id: 'moss-copper',
+        name: 'Moss Copper',
+        mode: 'dark',
+        group: 'experimental',
+        description: 'Oxidized copper, mossy shadow, and brushed metal crosshatch.',
+        metaColor: '#0f1e1a',
+        preview: {
+            background: 'radial-gradient(circle at 18% 18%, rgba(34, 197, 94, 0.2), transparent 30%), radial-gradient(circle at 78% 16%, rgba(217, 119, 6, 0.2), transparent 24%), repeating-linear-gradient(45deg, rgba(20, 184, 166, 0.09) 0 1px, transparent 1px 14px), repeating-linear-gradient(135deg, rgba(217, 119, 6, 0.08) 0 1px, transparent 1px 19px), linear-gradient(180deg, #0d1713 0%, #1c2f27 100%)',
+            surface: 'linear-gradient(180deg, rgba(251, 191, 36, 0.06), rgba(20, 184, 166, 0.025)), rgba(19, 42, 34, 0.88)',
+            userBubble: 'linear-gradient(135deg, #b56b2a, #2f9f72)',
+            assistantBubble: 'linear-gradient(180deg, rgba(251, 191, 36, 0.055), rgba(20, 184, 166, 0.02)), rgba(21, 42, 34, 0.92)',
+            accent: '#c47a35',
+        },
+    },
+    {
+        id: 'river-clay',
+        name: 'River Clay',
+        mode: 'light',
+        group: 'experimental',
+        description: 'Clay banks, river-blue glaze, and sandy sediment layers.',
+        metaColor: '#efe5d2',
+        preview: {
+            background: 'radial-gradient(circle at 16% 14%, rgba(14, 165, 233, 0.18), transparent 30%), radial-gradient(circle at 82% 18%, rgba(194, 65, 12, 0.16), transparent 24%), repeating-linear-gradient(0deg, rgba(120, 113, 108, 0.09) 0 2px, transparent 2px 18px), linear-gradient(180deg, #f4ecdc 0%, #d9e6e2 100%)',
+            surface: 'linear-gradient(180deg, rgba(255, 252, 246, 0.98), rgba(224, 238, 235, 0.94)), rgba(241, 234, 221, 0.94)',
+            userBubble: 'linear-gradient(135deg, #0e7490, #c15c30)',
+            assistantBubble: 'linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(235, 229, 216, 0.97)), rgba(247, 241, 230, 0.96)',
+            accent: '#0e7490',
+        },
+    },
+    {
+        id: 'terrazzo-night',
+        name: 'Terrazzo Night',
+        mode: 'dark',
+        group: 'experimental',
+        description: 'Chunky terrazzo flecks over midnight plaster and coral glass.',
+        metaColor: '#151621',
+        preview: {
+            background: 'radial-gradient(circle at 18% 18%, rgba(244, 114, 182, 0.18), transparent 28%), radial-gradient(circle at 72% 20%, rgba(45, 212, 191, 0.16), transparent 24%), radial-gradient(circle, rgba(251, 191, 36, 0.16) 1px, transparent 2px), radial-gradient(circle, rgba(125, 211, 252, 0.12) 1px, transparent 2px), linear-gradient(180deg, #11131d 0%, #202032 100%)',
+            surface: 'linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(244, 114, 182, 0.018)), rgba(30, 31, 49, 0.9)',
+            userBubble: 'linear-gradient(135deg, #f472b6, #2dd4bf)',
+            assistantBubble: 'linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(251, 191, 36, 0.012)), rgba(31, 32, 51, 0.92)',
+            accent: '#f472b6',
+        },
+    },
+    {
+        id: 'corkboard',
+        name: 'Corkboard',
+        mode: 'light',
+        group: 'experimental',
+        description: 'Pinned cork texture, navy ink, and muted red paper tabs.',
+        metaColor: '#e9d8b6',
+        preview: {
+            background: 'radial-gradient(circle, rgba(120, 53, 15, 0.16) 1px, transparent 1px), radial-gradient(circle at 82% 18%, rgba(30, 64, 175, 0.12), transparent 24%), repeating-linear-gradient(35deg, rgba(180, 83, 9, 0.08) 0 1px, transparent 1px 12px), linear-gradient(180deg, #efdcb9 0%, #dbc393 100%)',
+            surface: 'linear-gradient(180deg, rgba(255, 248, 235, 0.98), rgba(232, 211, 174, 0.94)), rgba(239, 220, 184, 0.94)',
+            userBubble: 'linear-gradient(135deg, #1d4ed8, #b45309)',
+            assistantBubble: 'linear-gradient(180deg, rgba(255, 252, 244, 0.99), rgba(236, 219, 188, 0.96)), rgba(246, 231, 202, 0.96)',
+            accent: '#1d4ed8',
+        },
+    },
+    {
+        id: 'patina-lab',
+        name: 'Patina Lab',
+        mode: 'dark',
+        group: 'experimental',
+        description: 'Blue-green patina, aged brass, and cloudy lab-glass texture.',
+        metaColor: '#0c2426',
+        preview: {
+            background: 'radial-gradient(circle at 16% 15%, rgba(20, 184, 166, 0.3), transparent 30%), radial-gradient(circle at 78% 16%, rgba(250, 204, 21, 0.16), transparent 24%), repeating-linear-gradient(115deg, rgba(45, 212, 191, 0.08) 0 2px, transparent 2px 18px), linear-gradient(180deg, #092022 0%, #17383a 100%)',
+            surface: 'linear-gradient(180deg, rgba(240, 253, 250, 0.06), rgba(250, 204, 21, 0.018)), rgba(16, 48, 50, 0.88)',
+            userBubble: 'linear-gradient(135deg, #14b8a6, #d6a23a)',
+            assistantBubble: 'linear-gradient(180deg, rgba(240, 253, 250, 0.055), rgba(250, 204, 21, 0.014)), rgba(17, 51, 52, 0.92)',
+            accent: '#5eead4',
+        },
+    },
+    {
+        id: 'denim-sand',
+        name: 'Denim Sand',
+        mode: 'light',
+        group: 'experimental',
+        description: 'Washed denim threads over sand, slate ink, and coral stitches.',
+        metaColor: '#e6dfcf',
+        preview: {
+            background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.18), rgba(251, 146, 60, 0.13)), repeating-linear-gradient(90deg, rgba(30, 64, 175, 0.08) 0 1px, transparent 1px 10px), repeating-linear-gradient(0deg, rgba(180, 83, 9, 0.06) 0 1px, transparent 1px 14px), linear-gradient(180deg, #ece6d8 0%, #d8dfdf 100%)',
+            surface: 'linear-gradient(180deg, rgba(255, 255, 250, 0.98), rgba(226, 226, 215, 0.94)), rgba(239, 233, 220, 0.94)',
+            userBubble: 'linear-gradient(135deg, #2563eb, #ea6f46)',
+            assistantBubble: 'linear-gradient(180deg, rgba(255, 255, 250, 0.99), rgba(230, 226, 214, 0.97)), rgba(245, 239, 226, 0.96)',
+            accent: '#2563eb',
+        },
+    },
+    {
+        id: 'mineral-rust',
+        name: 'Mineral Rust',
+        mode: 'dark',
+        group: 'experimental',
+        description: 'Iron oxide, teal mineral veins, and rough basalt shadows.',
+        metaColor: '#171411',
+        preview: {
+            background: 'radial-gradient(circle at 18% 16%, rgba(194, 65, 12, 0.24), transparent 30%), radial-gradient(circle at 78% 18%, rgba(20, 184, 166, 0.18), transparent 24%), repeating-linear-gradient(32deg, rgba(245, 158, 11, 0.08) 0 1px, transparent 1px 14px), repeating-linear-gradient(132deg, rgba(45, 212, 191, 0.07) 0 1px, transparent 1px 20px), linear-gradient(180deg, #11100e 0%, #2b221d 100%)',
+            surface: 'linear-gradient(180deg, rgba(251, 191, 36, 0.055), rgba(20, 184, 166, 0.018)), rgba(40, 31, 27, 0.9)',
+            userBubble: 'linear-gradient(135deg, #c2410c, #0f766e)',
+            assistantBubble: 'linear-gradient(180deg, rgba(251, 191, 36, 0.05), rgba(20, 184, 166, 0.014)), rgba(43, 33, 29, 0.92)',
+            accent: '#d97706',
+        },
+    },
 ]); 
 const WEB_CHAT_THEME_PRESET_MAP = new Map(WEB_CHAT_THEME_PRESETS.map((preset) => [preset.id, preset]));
 
@@ -673,16 +827,18 @@ class UIHelpers {
         }
 
         const currentPreset = this.getCurrentThemePreset();
-        container.innerHTML = WEB_CHAT_THEME_PRESETS.map((preset) => {
+        const renderThemeCard = (preset) => {
             const isActive = preset.id === currentPreset.id;
             const previewStyle = this.escapeHtmlAttr(this.getThemePreviewStyle(preset.preview));
             const title = this.escapeHtml(preset.name);
             const description = this.escapeHtml(preset.description);
-            const modeLabel = preset.mode === 'light' ? 'Light' : 'Dark';
+            const modeLabel = preset.group === 'experimental'
+                ? 'Experimental'
+                : (preset.mode === 'light' ? 'Light' : 'Dark');
             return `
                 <button
                     type="button"
-                    class="theme-card ${isActive ? 'is-active' : ''}"
+                    class="theme-card ${preset.group === 'experimental' ? 'theme-card--experimental' : ''} ${isActive ? 'is-active' : ''}"
                     data-theme-preset="${this.escapeHtmlAttr(preset.id)}"
                     role="option"
                     aria-selected="${isActive ? 'true' : 'false'}"
@@ -705,7 +861,33 @@ class UIHelpers {
                     </span>
                 </button>
             `;
-        }).join('');
+        };
+
+        const groupedPresets = WEB_CHAT_THEME_PRESETS.reduce((groups, preset) => {
+            const group = preset.group || 'core';
+            if (!groups[group]) {
+                groups[group] = [];
+            }
+            groups[group].push(preset);
+            return groups;
+        }, {});
+
+        const groupOrder = ['core', 'experimental'];
+        container.innerHTML = groupOrder
+            .filter((group) => Array.isArray(groupedPresets[group]) && groupedPresets[group].length > 0)
+            .map((group) => {
+                const groupLabel = WEB_CHAT_THEME_GROUP_LABELS[group] || group;
+                return `
+                <section class="theme-gallery-section theme-gallery-section--${this.escapeHtmlAttr(group)}" role="group" aria-label="${this.escapeHtmlAttr(groupLabel)}">
+                    <div class="theme-gallery-section__header">
+                        <h3 class="theme-gallery-section__title">${this.escapeHtml(groupLabel)}</h3>
+                    </div>
+                    <div class="theme-gallery-section__grid">
+                        ${groupedPresets[group].map(renderThemeCard).join('')}
+                    </div>
+                </section>
+            `;
+            }).join('');
 
         this.reinitializeIcons(container);
     }
@@ -7928,6 +8110,10 @@ class UIHelpers {
     // ============================================
 
     shouldSuppressToast(message = '', type = 'info', title = '') {
+        if (['success', 'error'].includes(String(type || '').trim().toLowerCase())) {
+            return true;
+        }
+
         const normalizedTitle = String(title || '').trim().toLowerCase();
         const normalizedMessage = String(message || '').trim().toLowerCase();
         const combined = `${normalizedTitle} ${normalizedMessage}`.trim();

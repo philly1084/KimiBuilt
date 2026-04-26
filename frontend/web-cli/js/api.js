@@ -84,6 +84,80 @@ class WebCLIAPI {
         );
     }
 
+    extractStreamProgress(payload = {}) {
+        if (payload?.type !== 'progress') {
+            return null;
+        }
+
+        const progress = payload.progress && typeof payload.progress === 'object'
+            ? payload.progress
+            : {};
+        const phase = String(progress.phase || payload.phase || 'thinking').trim() || 'thinking';
+        const detail = String(progress.detail || payload.detail || '').trim();
+
+        return {
+            ...progress,
+            phase,
+            detail,
+        };
+    }
+
+    buildToolEventDetail(toolCall = {}, stage = 'started') {
+        const rawToolName = String(
+            toolCall?.function?.name
+            || toolCall?.name
+            || toolCall?.toolName
+            || toolCall?.id
+            || toolCall?.call_id
+            || 'tool',
+        ).trim();
+        const toolName = rawToolName.replace(/[_-]+/g, ' ').trim() || 'tool';
+        const normalizedStage = String(stage || '').toLowerCase().includes('done') ? 'completed' : 'started';
+
+        return {
+            type: 'tool_event',
+            stage: normalizedStage,
+            toolName: rawToolName,
+            detail: normalizedStage === 'completed'
+                ? `Finished ${toolName}`
+                : `Running ${toolName}`,
+            item: toolCall,
+        };
+    }
+
+    extractStreamToolEvents(payload = {}) {
+        const events = [];
+        const choiceToolCalls = payload?.choices?.[0]?.delta?.tool_calls;
+        if (Array.isArray(choiceToolCalls)) {
+            choiceToolCalls.forEach((toolCall) => {
+                events.push(this.buildToolEventDetail(toolCall, 'started'));
+            });
+        }
+
+        if (Array.isArray(payload?.tool_calls)) {
+            payload.tool_calls.forEach((toolCall) => {
+                events.push(this.buildToolEventDetail(toolCall, 'started'));
+            });
+        }
+
+        if ((payload?.type === 'response.output_item.added' || payload?.type === 'response.output_item.done')
+            && payload?.item) {
+            events.push(this.buildToolEventDetail(payload.item, payload.type.endsWith('.done') ? 'done' : 'started'));
+        }
+
+        return events;
+    }
+
+    extractCompletedToolEvents(payload = {}) {
+        return Array.isArray(payload?.toolEvents)
+            ? payload.toolEvents
+            : (Array.isArray(payload?.tool_events) ? payload.tool_events : []);
+    }
+
+    extractArtifacts(payload = {}) {
+        return Array.isArray(payload?.artifacts) ? payload.artifacts : [];
+    }
+
     isTerminalStreamPayload(payload = {}) {
         const finishReason = String(payload?.choices?.[0]?.finish_reason || '').toLowerCase();
         return payload?.type === 'done'
@@ -237,11 +311,13 @@ class WebCLIAPI {
             model: model || this.currentModel,
             messages,
             stream: true,
+            enableConversationExecutor: true,
             taskType: WEB_CLI_TASK_TYPE,
             clientSurface: WEB_CLI_CLIENT_SURFACE,
             memoryScope: WEB_CLI_CLIENT_SURFACE,
             metadata: {
                 remoteBuildAutonomyApproved: WEB_CLI_REMOTE_BUILD_AUTONOMY_APPROVED,
+                enableConversationExecutor: true,
                 clientSurface: WEB_CLI_CLIENT_SURFACE,
                 memoryScope: WEB_CLI_CLIENT_SURFACE,
                 sessionIsolation: WEB_CLI_SESSION_ISOLATION,
@@ -291,6 +367,11 @@ class WebCLIAPI {
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             let buffer = '';
+            let pendingDone = {
+                sessionId: this.sessionId,
+                artifacts: [],
+                toolEvents: [],
+            };
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -304,7 +385,7 @@ class WebCLIAPI {
                     if (line.startsWith('data: ')) {
                         const data = line.slice(6);
                         if (data === '[DONE]') {
-                            yield { type: 'done', sessionId: this.sessionId };
+                            yield { type: 'done', ...pendingDone, sessionId: this.sessionId || pendingDone.sessionId };
                             return;
                         }
                         try {
@@ -320,12 +401,37 @@ class WebCLIAPI {
                             const content = this.extractStreamContent(parsed);
                             const streamSessionId = this.extractStreamSessionId(parsed);
                             this.sessionId = streamSessionId || this.sessionId;
+                            pendingDone.sessionId = this.sessionId || pendingDone.sessionId;
+                            const completedToolEvents = this.extractCompletedToolEvents(parsed);
+                            if (completedToolEvents.length > 0) {
+                                pendingDone.toolEvents = completedToolEvents;
+                            }
+                            const artifacts = this.extractArtifacts(parsed);
+                            if (artifacts.length > 0) {
+                                pendingDone.artifacts = artifacts;
+                            }
+                            const progress = this.extractStreamProgress(parsed);
+                            if (progress) {
+                                yield {
+                                    type: 'progress',
+                                    progress,
+                                    phase: progress.phase,
+                                    detail: progress.detail,
+                                    sessionId: this.sessionId,
+                                };
+                            }
+                            for (const toolEvent of this.extractStreamToolEvents(parsed)) {
+                                yield {
+                                    ...toolEvent,
+                                    sessionId: this.sessionId,
+                                };
+                            }
                             if (content) {
                                 yield { type: 'delta', content };
                             }
 
                             if (this.isTerminalStreamPayload(parsed)) {
-                                yield { type: 'done', sessionId: this.sessionId };
+                                yield { type: 'done', ...pendingDone, sessionId: this.sessionId || pendingDone.sessionId };
                                 return;
                             }
                         } catch (e) {
@@ -356,6 +462,7 @@ class WebCLIAPI {
         const chunks = [];
         let fullContent = '';
         let tokens = 0;
+        let finalChunk = null;
         
         for await (const chunk of this.streamChat(
             message,
@@ -370,9 +477,14 @@ class WebCLIAPI {
                 if (onChunk) {
                     onChunk(chunk);
                 }
+            } else if (chunk.type === 'progress' || chunk.type === 'tool_event') {
+                if (onChunk) {
+                    onChunk(chunk);
+                }
             } else if (chunk.type === 'error') {
                 throw new Error(chunk.error);
             } else if (chunk.type === 'done') {
+                finalChunk = chunk;
                 break;
             }
         }
@@ -380,7 +492,9 @@ class WebCLIAPI {
         return {
             content: fullContent,
             tokens: tokens,
-            sessionId: this.sessionId
+            sessionId: this.sessionId,
+            artifacts: Array.isArray(finalChunk?.artifacts) ? finalChunk.artifacts : [],
+            toolEvents: Array.isArray(finalChunk?.toolEvents) ? finalChunk.toolEvents : [],
         };
     }
 
