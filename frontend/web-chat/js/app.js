@@ -7503,6 +7503,19 @@ curl -fsSIL --max-time 20 "https://$host"`;
             // Call API
             apiClient.setSessionId(sessionId);
             const result = await apiClient.generateImage(options);
+
+            if (Array.isArray(result.artifacts) && result.artifacts.length > 0) {
+                try {
+                    result.artifacts
+                        .filter((artifact) => artifact?.id && artifact?.downloadUrl)
+                        .forEach((artifact) => {
+                            window.fileManager?.addFile?.(artifact, { sessionId });
+                        });
+                    window.artifactManager?.refresh?.();
+                } catch (error) {
+                    console.warn('[ChatApp] Failed to add generated image artifacts to file manager:', error);
+                }
+            }
             
             // Update the image message with the result
             const generatedImages = (Array.isArray(result.data) ? result.data : [])

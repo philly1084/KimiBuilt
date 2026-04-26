@@ -20,6 +20,7 @@ data/
 graphs/
 code/
 audio/
+videos/
 docs/
 notes/
 refs/
@@ -38,5 +39,7 @@ The root also contains `bucket.json`, a lightweight manifest with path, category
 ## Usage Guidance
 
 Agents should list or search before reading. Read only the selected files needed for the current task, and prefer metadata or snippets over loading large content. Bucket content is not long-term model memory; it enters context only through explicit tool results and normal compaction still applies.
+
+For remote build work, save reusable material here first, then call `remote-command` with `researchBucketPaths` or `researchBucketGlobs`. The remote runner stages those files under `KIMIBUILT_CONTEXT_DIR`, writes a manifest at `KIMIBUILT_CONTEXT_MANIFEST`, and preserves extensions so build tools can consume images, audio, podcasts, videos, JSON, markdown, code, and similar assets directly.
 
 All paths must be relative to the bucket. Absolute paths, traversal (`..`), `.git`, and `node_modules` are rejected.

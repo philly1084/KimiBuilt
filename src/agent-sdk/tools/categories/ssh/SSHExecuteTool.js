@@ -6,9 +6,11 @@ const { ToolBase } = require('../../ToolBase');
 const fs = require('fs').promises;
 const os = require('os');
 const path = require('path');
+const { glob } = require('glob');
 const { spawn } = require('child_process');
 const settingsController = require('../../../../routes/admin/settings.controller');
 const { artifactService } = require('../../../../artifacts/artifact-service');
+const { researchBucketService } = require('../../../../research-buckets');
 const { executeWithRunnerPreference, shouldPreferRunner } = require('../../../../remote-runner/transport');
 const {
   normalizeContextDirectory,
@@ -17,6 +19,8 @@ const {
 } = require('../../../../remote-runner/protocol');
 
 const MAX_REMOTE_CONTEXT_ARTIFACTS = 12;
+const MAX_REMOTE_CONTEXT_RESEARCH_FILES = 16;
+const MAX_REMOTE_CONTEXT_RESEARCH_FILE_BYTES = 5 * 1024 * 1024;
 
 class SSHExecuteTool extends ToolBase {
   constructor(overrides = {}) {
@@ -68,6 +72,14 @@ class SSHExecuteTool extends ToolBase {
           artifactIds: {
             type: 'array',
             description: 'Session artifact IDs to stage into the remote workspace before running the command.'
+          },
+          researchBucketPaths: {
+            type: 'array',
+            description: 'Research bucket relative file paths to stage into the remote workspace before running the command. Extensions are preserved.'
+          },
+          researchBucketGlobs: {
+            type: 'array',
+            description: 'Safe research bucket glob patterns to stage matching files into the remote workspace before running the command.'
           },
           contextFiles: {
             type: 'array',
@@ -399,10 +411,6 @@ class SSHExecuteTool extends ToolBase {
   async prepareContextFiles(params = {}, context = {}) {
     const inlineFiles = normalizeContextFiles(params.contextFiles || []);
     const requestedArtifactIds = this.resolveContextArtifactIds(params, context);
-    if (requestedArtifactIds.length === 0) {
-      return inlineFiles;
-    }
-
     const artifactFiles = [];
     for (const artifactId of requestedArtifactIds.slice(0, MAX_REMOTE_CONTEXT_ARTIFACTS)) {
       try {
@@ -430,7 +438,8 @@ class SSHExecuteTool extends ToolBase {
       }
     }
 
-    return normalizeContextFiles([...inlineFiles, ...artifactFiles]);
+    const researchFiles = await this.prepareResearchBucketContextFiles(params);
+    return normalizeContextFiles([...inlineFiles, ...artifactFiles, ...researchFiles]);
   }
 
   resolveContextArtifactIds(params = {}, context = {}) {
@@ -445,6 +454,127 @@ class SSHExecuteTool extends ToolBase {
         .map((value) => String(value || '').trim())
         .filter(Boolean),
     ));
+  }
+
+  async prepareResearchBucketContextFiles(params = {}) {
+    const hasResearchInputs = [
+      params.researchBucketPaths,
+      params.research_bucket_paths,
+      params.researchBucketGlobs,
+      params.research_bucket_globs,
+    ].some((value) => Array.isArray(value) && value.length > 0);
+    if (!hasResearchInputs) {
+      return [];
+    }
+
+    await researchBucketService.ensureInitialized();
+    const requestedPaths = this.resolveResearchBucketPaths(params);
+    if (requestedPaths.length === 0) {
+      return [];
+    }
+    const files = [];
+    const seen = new Set();
+
+    for (const bucketPath of requestedPaths.slice(0, MAX_REMOTE_CONTEXT_RESEARCH_FILES)) {
+      try {
+        const { absolutePath, relativePath } = researchBucketService.resolveSafePath(bucketPath);
+        if (seen.has(relativePath)) {
+          continue;
+        }
+        seen.add(relativePath);
+
+        const stats = await fs.stat(absolutePath);
+        if (!stats.isFile() || stats.size <= 0 || stats.size > MAX_REMOTE_CONTEXT_RESEARCH_FILE_BYTES) {
+          continue;
+        }
+
+        const buffer = await fs.readFile(absolutePath);
+        files.push({
+          filename: this.buildResearchContextFilename(relativePath),
+          mimeType: this.inferResearchMimeType(relativePath),
+          contentBase64: buffer.toString('base64'),
+          source: 'research-bucket',
+          sourceUrl: `research-bucket://${relativePath}`,
+          sha256: '',
+          description: relativePath,
+        });
+      } catch (error) {
+        console.warn(`[RemoteCommand] Failed to stage research bucket file ${bucketPath}:`, error.message);
+      }
+
+      if (files.length >= MAX_REMOTE_CONTEXT_RESEARCH_FILES) {
+        break;
+      }
+    }
+
+    return files;
+  }
+
+  resolveResearchBucketPaths(params = {}) {
+    const directPaths = [
+      ...(Array.isArray(params.researchBucketPaths) ? params.researchBucketPaths : []),
+      ...(Array.isArray(params.research_bucket_paths) ? params.research_bucket_paths : []),
+    ];
+    const globPatterns = [
+      ...(Array.isArray(params.researchBucketGlobs) ? params.researchBucketGlobs : []),
+      ...(Array.isArray(params.research_bucket_globs) ? params.research_bucket_globs : []),
+    ];
+    const paths = directPaths
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean);
+
+    for (const pattern of globPatterns) {
+      try {
+        const safeGlob = researchBucketService.validateSafeGlob(pattern);
+        const matches = glob.sync(safeGlob, {
+          cwd: researchBucketService.getRootPath(),
+          absolute: false,
+          nodir: true,
+          ignore: ['bucket.json', 'bucket.json.tmp', '**/.git/**', '**/node_modules/**'],
+        });
+        paths.push(...matches);
+      } catch (error) {
+        console.warn(`[RemoteCommand] Ignoring unsafe research bucket glob ${pattern}:`, error.message);
+      }
+    }
+
+    return Array.from(new Set(paths.map((entry) => entry.replace(/\\/g, '/'))));
+  }
+
+  buildResearchContextFilename(relativePath = '') {
+    const normalized = String(relativePath || '')
+      .replace(/\\/g, '/')
+      .split('/')
+      .filter(Boolean)
+      .join('__');
+    return sanitizeContextFilename(normalized, 'research-bucket-file.bin');
+  }
+
+  inferResearchMimeType(relativePath = '') {
+    const extension = path.extname(String(relativePath || '')).replace(/^\./, '').toLowerCase();
+    const byExtension = {
+      css: 'text/css',
+      csv: 'text/csv',
+      gif: 'image/gif',
+      htm: 'text/html',
+      html: 'text/html',
+      jpeg: 'image/jpeg',
+      jpg: 'image/jpeg',
+      js: 'text/javascript',
+      json: 'application/json',
+      m4a: 'audio/mp4',
+      md: 'text/markdown',
+      mp3: 'audio/mpeg',
+      mp4: 'video/mp4',
+      pdf: 'application/pdf',
+      png: 'image/png',
+      svg: 'image/svg+xml',
+      txt: 'text/plain',
+      wav: 'audio/wav',
+      webm: 'video/webm',
+      webp: 'image/webp',
+    };
+    return byExtension[extension] || 'application/octet-stream';
   }
 
   buildRemoteLauncher({ sudo = false } = {}) {

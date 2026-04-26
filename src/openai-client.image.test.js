@@ -248,6 +248,93 @@ describe('openai-client image generation', () => {
         }));
     });
 
+    test('falls back to parallel calls when an auto multi-image request is rejected', async () => {
+        process.env.OPENAI_BASE_URL = 'https://gateway.example/v1';
+        process.env.OPENAI_IMAGE_MODEL = 'gpt-image-2';
+        global.fetch = jest.fn(async (_url, init = {}) => {
+            const body = JSON.parse(init.body);
+            if (body.n > 1) {
+                return {
+                    ok: false,
+                    status: 400,
+                    text: async () => JSON.stringify({
+                        error: { message: 'n must be 1 for this model' },
+                    }),
+                };
+            }
+
+            return {
+                ok: true,
+                json: async () => ({
+                    created: 123,
+                    data: [{
+                        url: `https://images.example.com/${body.n}-${Math.random().toString(36).slice(2)}.png`,
+                    }],
+                }),
+            };
+        });
+
+        const { generateImageBatch } = require('./openai-client');
+        const result = await generateImageBatch({
+            prompt: 'hero set',
+            model: 'gpt-image-2',
+            n: 3,
+            batchMode: 'auto',
+            concurrency: 2,
+        });
+
+        expect(global.fetch).toHaveBeenCalledTimes(4);
+        expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual(expect.objectContaining({
+            prompt: 'hero set',
+            n: 3,
+        }));
+        expect(global.fetch.mock.calls.slice(1).map((call) => JSON.parse(call[1].body).n)).toEqual([1, 1, 1]);
+        expect(result.batch).toEqual(expect.objectContaining({
+            mode: 'parallel',
+            requestedCount: 3,
+        }));
+        expect(result.data).toHaveLength(3);
+    });
+
+    test('fills missing auto multi-image results with parallel calls', async () => {
+        process.env.OPENAI_BASE_URL = 'https://gateway.example/v1';
+        process.env.OPENAI_IMAGE_MODEL = 'gpt-image-2';
+        global.fetch = jest.fn(async (_url, init = {}) => {
+            const body = JSON.parse(init.body);
+            return {
+                ok: true,
+                json: async () => ({
+                    created: body.n > 1 ? 123 : 124,
+                    data: [{
+                        url: `https://images.example.com/${body.n}-${global.fetch.mock.calls.length}.png`,
+                    }],
+                }),
+            };
+        });
+
+        const { generateImageBatch } = require('./openai-client');
+        const result = await generateImageBatch({
+            prompt: 'hero set',
+            model: 'gpt-image-2',
+            n: 3,
+            batchMode: 'auto',
+            concurrency: 2,
+        });
+
+        expect(global.fetch).toHaveBeenCalledTimes(3);
+        expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual(expect.objectContaining({
+            n: 3,
+        }));
+        expect(global.fetch.mock.calls.slice(1).map((call) => JSON.parse(call[1].body).n)).toEqual([1, 1]);
+        expect(result.batch).toEqual(expect.objectContaining({
+            mode: 'auto-fill-parallel',
+            requestedCount: 3,
+            initialCount: 1,
+        }));
+        expect(result.data).toHaveLength(3);
+        expect(result.data.map((entry) => entry.option_index)).toEqual([0, 1, 2]);
+    });
+
     test('ignores a stale Gemini model request when the provider is official OpenAI', async () => {
         global.fetch = jest.fn(async (_url, init = {}) => ({
             ok: true,

@@ -28,6 +28,7 @@ describe('ResearchBucketService', () => {
             'graphs',
             'code',
             'audio',
+            'videos',
             'docs',
             'notes',
             'refs',

@@ -1,3 +1,5 @@
+const fs = require('fs');
+
 jest.mock('../../../../routes/admin/settings.controller', () => ({
   getEffectiveSshConfig: jest.fn(() => ({
     enabled: false,
@@ -15,8 +17,18 @@ jest.mock('../../../../artifacts/artifact-service', () => ({
   },
 }));
 
+jest.mock('../../../../research-buckets', () => ({
+  researchBucketService: {
+    ensureInitialized: jest.fn(),
+    getRootPath: jest.fn(() => '/tmp/research-buckets/shared'),
+    resolveSafePath: jest.fn(),
+    validateSafeGlob: jest.fn((pattern) => pattern),
+  },
+}));
+
 const { SSHExecuteTool } = require('./SSHExecuteTool');
 const { artifactService } = require('../../../../artifacts/artifact-service');
+const { researchBucketService } = require('../../../../research-buckets');
 
 describe('SSHExecuteTool', () => {
   afterEach(() => {
@@ -88,6 +100,33 @@ describe('SSHExecuteTool', () => {
         mimeType: 'image/png',
         artifactId: 'artifact-1',
         source: 'artifact',
+        sizeBytes: 9,
+      }),
+    ]);
+  });
+
+  test('prepareContextFiles stages selected research bucket media with extensions preserved', async () => {
+    const tool = new SSHExecuteTool();
+    researchBucketService.resolveSafePath.mockReturnValue({
+      absolutePath: '/tmp/research-buckets/shared/images/hero.png',
+      relativePath: 'images/hero.png',
+    });
+    jest.spyOn(fs.promises, 'stat').mockResolvedValue({
+      isFile: () => true,
+      size: 9,
+    });
+    jest.spyOn(fs.promises, 'readFile').mockResolvedValue(Buffer.from('png-bytes'));
+
+    const files = await tool.prepareContextFiles({
+      researchBucketPaths: ['images/hero.png'],
+    }, {});
+
+    expect(files).toEqual([
+      expect.objectContaining({
+        filename: 'images__hero.png',
+        mimeType: 'image/png',
+        source: 'research-bucket',
+        sourceUrl: 'research-bucket://images/hero.png',
         sizeBytes: 9,
       }),
     ]);

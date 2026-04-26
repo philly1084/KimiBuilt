@@ -5129,6 +5129,23 @@ function normalizeImagePromptList({ prompt = '', prompts = [], n = 1 } = {}) {
     return Array.from({ length: count }, () => normalizedPrompt).filter(Boolean);
 }
 
+function isLikelyMultiImageCountError(error = {}) {
+    const status = Number(error.status || error.statusCode || 0);
+    if (status && ![400, 422].includes(status)) {
+        return false;
+    }
+
+    const message = String(error.message || '').toLowerCase();
+    return /\bn\b/.test(message)
+        || /\bcount\b/.test(message)
+        || /\bmultiple\b/.test(message)
+        || /\bmore than one\b/.test(message)
+        || /\bonly\b[\s\S]{0,24}\bone\b/.test(message)
+        || /\bsingle\b[\s\S]{0,24}\bimage\b/.test(message)
+        || /\bmax(?:imum)?\b[\s\S]{0,16}\b1\b/.test(message)
+        || /\bmust be 1\b/.test(message);
+}
+
 function buildImageParamsFromSelection({
     prompt,
     modelId,
@@ -5266,30 +5283,8 @@ async function generateImageBatch({
         && promptList.every((entry) => entry === promptList[0]);
     const { modelId, selectedModel } = await resolveImageGenerationSelection(model);
 
-    if (useSingleRequest) {
-        const response = await generateImageWithSelection({
-            prompt: promptList[0],
-            modelId,
-            selectedModel,
-            size,
-            quality,
-            style,
-            background,
-            n: requestedCount,
-        });
-
-        return {
-            ...response,
-            batch: {
-                mode: 'single-request',
-                requestedCount,
-                prompts: [promptList[0]],
-            },
-        };
-    }
-
-    const responses = await mapWithConcurrency(
-        promptList,
+    const generateParallelResponses = (promptsToGenerate) => mapWithConcurrency(
+        promptsToGenerate,
         concurrency,
         (entry) => generateImageWithSelection({
             prompt: entry,
@@ -5302,32 +5297,102 @@ async function generateImageBatch({
             n: 1,
         }),
     );
-    const data = responses.flatMap((response, responseIndex) => (
-        (response.data || []).map((image) => ({
-            ...image,
-            prompt: promptList[responseIndex],
-            option_index: responseIndex,
-        }))
-    ));
-    const firstResponse = responses[0] || {};
 
-    const responseCreatedTimes = responses.map((response) => Number(response.created) || 0).filter(Boolean);
+    const buildParallelResult = (responses, promptsForResponses, mode = 'parallel') => {
+        const data = responses.flatMap((response, responseIndex) => (
+            (response.data || []).map((image) => ({
+                ...image,
+                prompt: promptsForResponses[responseIndex],
+                option_index: responseIndex,
+            }))
+        ));
+        const firstResponse = responses[0] || {};
+        const responseCreatedTimes = responses.map((response) => Number(response.created) || 0).filter(Boolean);
 
-    return {
-        created: responseCreatedTimes.length > 0 ? Math.max(...responseCreatedTimes) : firstResponse.created,
-        model: firstResponse.model || modelId,
-        size: firstResponse.size || size,
-        quality: firstResponse.quality || null,
-        style: firstResponse.style || null,
-        background: firstResponse.background || null,
-        data,
-        batch: {
-            mode: 'parallel',
-            concurrency: Math.min(Math.max(Number(concurrency) || 1, 1), Math.max(promptList.length, 1)),
-            requestedCount,
-            prompts: promptList,
-        },
+        return {
+            created: responseCreatedTimes.length > 0 ? Math.max(...responseCreatedTimes) : firstResponse.created,
+            model: firstResponse.model || modelId,
+            size: firstResponse.size || size,
+            quality: firstResponse.quality || null,
+            style: firstResponse.style || null,
+            background: firstResponse.background || null,
+            data,
+            batch: {
+                mode,
+                concurrency: Math.min(Math.max(Number(concurrency) || 1, 1), Math.max(promptsForResponses.length, 1)),
+                requestedCount,
+                prompts: promptList,
+            },
+        };
     };
+
+    if (useSingleRequest) {
+        try {
+            const response = await generateImageWithSelection({
+                prompt: promptList[0],
+                modelId,
+                selectedModel,
+                size,
+                quality,
+                style,
+                background,
+                n: requestedCount,
+            });
+
+            const responseData = Array.isArray(response.data) ? response.data : [];
+            if (requestedCount <= 1 || responseData.length >= requestedCount) {
+                return {
+                    ...response,
+                    batch: {
+                        mode: 'single-request',
+                        requestedCount,
+                        prompts: [promptList[0]],
+                    },
+                };
+            }
+
+            console.warn(`[OpenAI] Image provider returned ${responseData.length} of ${requestedCount} requested images; generating the remaining options in parallel.`);
+            const remainingPrompts = promptList.slice(responseData.length);
+            const remainingResponses = await generateParallelResponses(remainingPrompts);
+            const remainingResult = buildParallelResult(remainingResponses, remainingPrompts, 'auto-fill-parallel');
+            const responseCreatedTimes = [response, ...remainingResponses].map((entry) => Number(entry.created) || 0).filter(Boolean);
+
+            return {
+                ...response,
+                created: responseCreatedTimes.length > 0 ? Math.max(...responseCreatedTimes) : response.created,
+                data: [
+                    ...responseData.map((image, index) => ({
+                        ...image,
+                        prompt: promptList[index],
+                        option_index: index,
+                    })),
+                    ...remainingResult.data.map((image, index) => ({
+                        ...image,
+                        option_index: responseData.length + index,
+                    })),
+                ],
+                batch: {
+                    mode: 'auto-fill-parallel',
+                    requestedCount,
+                    prompts: promptList,
+                    initialCount: responseData.length,
+                    concurrency: remainingResult.batch.concurrency,
+                },
+            };
+        } catch (error) {
+            if (requestedCount <= 1 || !isLikelyMultiImageCountError(error)) {
+                throw error;
+            }
+
+            console.warn(`[OpenAI] Multi-image request failed; retrying as ${requestedCount} single-image requests: ${error.message}`);
+        }
+    }
+
+    const responses = await generateParallelResponses(promptList);
+    return buildParallelResult(
+        responses,
+        promptList,
+    );
 }
 
 module.exports = {

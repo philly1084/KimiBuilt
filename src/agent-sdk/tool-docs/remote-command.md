@@ -11,6 +11,7 @@ Remote CLI agent pipeline:
 - When the runner reports a default workspace, treat that path as the remote desktop/workbench. The direct CLI runner defaults to `/workspace`.
 - Build and creation work should happen inside the persistent workspace unless the user names another target.
 - When web-chat, WebSocket, Canvas, Notation, or the CLI selected session artifacts, pass their IDs through `artifactIds` on `remote-command`. The runner stages them as files before the command starts and exposes `KIMIBUILT_CONTEXT_DIR` plus `KIMIBUILT_CONTEXT_MANIFEST`.
+- When reusable source material was saved in the shared research bucket, pass selected files through `researchBucketPaths` or safe globs through `researchBucketGlobs`. The backend stages matching bucket files into the same remote context directory and preserves file extensions for images, audio, video, code, docs, and data.
 - For search/fetch results that are not persisted artifacts, pass compact inline files through `contextFiles` such as `research.json`, `source.html`, or `image-references.json`. Keep large binaries as artifacts instead of inline strings.
 - Continue automatically while the action remains on the approved plan: inspect, search, edit planned files, build, test, deploy, rollout, and verify.
 - Stop and report when the work falls off plan: repeated failures, missing credentials, sudo/package install, Kubernetes Secret mutation, destructive delete, force push, unknown host, or recovery that needs a new strategy.
@@ -332,6 +333,8 @@ For build tasks that depend on generated images, uploaded files, scraped pages, 
   "command": "set -e\nls -la \"$KIMIBUILT_CONTEXT_DIR\"\ncat \"$KIMIBUILT_CONTEXT_MANIFEST\"\n# use staged images/research while building",
   "workingDirectory": "/workspace/app",
   "artifactIds": ["selected-artifact-id"],
+  "researchBucketPaths": ["images/hero.png", "audio/intro.wav", "videos/demo.mp4"],
+  "researchBucketGlobs": ["docs/**/*.md"],
   "contextFiles": [
     {
       "filename": "research.json",
