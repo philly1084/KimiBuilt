@@ -54,6 +54,7 @@ const { ManagedAppService } = require('./managed-apps/service');
 const { ProviderSessionService } = require('./provider-session-service');
 const { TemplateStore } = require('./template-store');
 const { podcastService } = require('./podcast/podcast-service');
+const { podcastVideoService } = require('./video/podcast-video-service');
 const { remoteRunnerService } = require('./remote-runner/service');
 
 // Document Service
@@ -175,6 +176,7 @@ app.use('/web-chat', express.static(path.join(frontendPath, 'web-chat'), buildFr
 app.use('/web-cli', express.static(path.join(frontendPath, 'web-cli'), buildFrontendStaticOptions()));
 app.use('/notes', express.static(path.join(frontendPath, 'notes-notion'), buildFrontendStaticOptions()));
 app.use('/canvas', express.static(path.join(frontendPath, 'canvas-excalidraw'), buildFrontendStaticOptions()));
+app.use('/podcast-video', express.static(path.join(frontendPath, 'podcast-video'), buildFrontendStaticOptions()));
 app.use('/admin', express.static(path.join(frontendPath, 'agent-dashboard'), buildFrontendStaticOptions()));
 
 app.get('/', (_req, res) => {
@@ -239,6 +241,10 @@ app.get('/', (_req, res) => {
         <a href="/canvas/" class="card">
             <h3>Canvas</h3>
             <p>Visual canvas with Lilly drawing tools</p>
+        </a>
+        <a href="/podcast-video/" class="card">
+            <h3>Podcast Video</h3>
+            <p>Turn podcast audio into timed image video</p>
         </a>
         <a href="/admin/" class="card" style="border-color: #22c55e;">
             <h3>🎛️ Admin Dashboard</h3>
@@ -381,6 +387,7 @@ async function start() {
         app.locals.documentService = documentService;
         app.locals.artifactService = artifactService;
         app.locals.podcastService = podcastService;
+        app.locals.podcastVideoService = podcastVideoService;
         console.log('[Boot] Document service ready');
 
         console.log('[Boot] Initializing conversation orchestrator...');

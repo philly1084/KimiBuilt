@@ -6,6 +6,9 @@ const { ensureRuntimeToolManager } = require('../runtime-tool-manager');
 const { ttsService } = require('../tts/tts-service');
 const { audioProcessingService } = require('../audio/audio-processing-service');
 const { podcastService } = require('../podcast/podcast-service');
+const { podcastVideoService } = require('../video/podcast-video-service');
+const { parseMultipartRequest } = require('../utils/multipart');
+const { config } = require('../config');
 
 const router = Router();
 
@@ -54,7 +57,75 @@ const generateSchema = {
   ttsChunkMaxChars: { required: false, type: 'number' },
   ttsConcurrency: { required: false, type: 'number' },
   researchConcurrency: { required: false, type: 'number' },
+  includeVideo: { required: false, type: 'boolean' },
+  video: { required: false, type: 'object' },
+  videoAspectRatio: { required: false, type: 'string' },
+  videoImageMode: { required: false, type: 'string' },
+  videoGenerateImages: { required: false, type: 'boolean' },
+  videoSceneCount: { required: false, type: 'number' },
+  videoVisualStyle: { required: false, type: 'string' },
 };
+
+function parseJsonField(value, fallback = null) {
+  if (value == null || value === '') {
+    return fallback;
+  }
+  if (typeof value === 'object') {
+    return value;
+  }
+  try {
+    return JSON.parse(String(value));
+  } catch (_error) {
+    return fallback;
+  }
+}
+
+function parseBooleanField(value, fallback = false) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  const normalized = String(value || '').trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+  if (['0', 'false', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+  return fallback;
+}
+
+function buildPodcastVideoOptions(input = {}, context = {}) {
+  const nested = input.video && typeof input.video === 'object' ? input.video : {};
+  return {
+    topic: input.topic || input.prompt || input.subject || nested.topic || '',
+    aspectRatio: input.videoAspectRatio || input.aspectRatio || nested.aspectRatio || '16:9',
+    imageMode: input.videoImageMode || input.imageMode || nested.imageMode || 'mixed',
+    generateImages: input.videoGenerateImages === true || input.generateImages === true || nested.generateImages === true,
+    sceneCount: Number(input.videoSceneCount || input.sceneCount || nested.sceneCount) || undefined,
+    visualStyle: input.videoVisualStyle || input.visualStyle || nested.visualStyle || '',
+    imageModel: input.videoImageModel || input.imageModel || nested.imageModel || null,
+    model: input.videoModel || input.model || nested.model || null,
+    reasoningEffort: input.videoReasoningEffort || input.reasoningEffort || nested.reasoningEffort || null,
+    useModel: nested.useModel === false || input.useModel === false ? false : undefined,
+    scenes: Array.isArray(input.scenes) ? input.scenes : Array.isArray(nested.scenes) ? nested.scenes : undefined,
+    toolManager: context.toolManager || null,
+    toolContext: context.toolContext || {},
+  };
+}
+
+function buildPodcastVideoContext(req, toolManager, sessionId) {
+  return {
+    sessionId,
+    route: req.originalUrl || req.path || '/api/podcast/video',
+    transport: 'http',
+    executionProfile: 'podcast-video',
+    clientSurface: 'podcast-video',
+    taskType: 'podcast-video',
+    userId: req.user?.id || req.user?.username || null,
+    ownerId: getRequestOwnerId(req),
+    toolManager,
+  };
+}
 
 function normalizePodcastGenerateRequest(req, _res, next) {
   if (!req.body || typeof req.body !== 'object') {
@@ -126,6 +197,7 @@ router.get('/runtime', (_req, res) => {
   res.json({
     tts: ttsService.getPublicConfig(),
     audioProcessing: audioProcessingService.getPublicConfig(),
+    video: podcastVideoService.getPublicConfig(),
   });
 });
 
@@ -133,14 +205,28 @@ router.post('/generate', normalizePodcastGenerateRequest, validate(generateSchem
   try {
     const toolManager = await ensureRuntimeToolManager(req.app);
     const sessionId = await resolvePodcastSessionId(req, req.body.sessionId);
-    const data = await (req.app.locals?.podcastService || podcastService).createPodcast(
+    const podcastData = await (req.app.locals?.podcastService || podcastService).createPodcast(
       req.body || {},
       buildPodcastContext(req, toolManager, sessionId),
     );
+    let videoData = null;
+    if (req.body.includeVideo === true) {
+      videoData = await (req.app.locals?.podcastVideoService || podcastVideoService).createVideoFromPodcast(
+        podcastData,
+        {
+          sessionId,
+          options: buildPodcastVideoOptions(req.body || {}, {
+            toolManager,
+            toolContext: buildPodcastVideoContext(req, toolManager, sessionId),
+          }),
+        },
+      );
+    }
 
     res.json({
       sessionId,
-      ...data,
+      ...podcastData,
+      ...(videoData ? { video: videoData.video, videoArtifact: videoData.artifact, storyboard: videoData.storyboard } : {}),
     });
   } catch (error) {
     if (error?.statusCode) {
@@ -152,6 +238,98 @@ router.post('/generate', normalizePodcastGenerateRequest, validate(generateSchem
       });
     }
 
+    return next(error);
+  }
+});
+
+router.post('/video/storyboard', async (req, res, next) => {
+  try {
+    const sessionId = await resolvePodcastSessionId(req, req.body?.sessionId);
+    const storyboard = await (req.app.locals?.podcastVideoService || podcastVideoService).planStoryboard({
+      title: req.body?.title || req.body?.topic || 'Podcast video',
+      transcript: req.body?.transcript || req.body?.script?.transcript || '',
+      turns: req.body?.turns || req.body?.script?.turns || [],
+      durationSeconds: req.body?.durationSeconds,
+      sceneCount: req.body?.sceneCount,
+      visualStyle: req.body?.visualStyle,
+      model: req.body?.model,
+      reasoningEffort: req.body?.reasoningEffort,
+      useModel: req.body?.useModel,
+    });
+
+    res.json({
+      sessionId,
+      ...storyboard,
+    });
+  } catch (error) {
+    if (error?.statusCode) {
+      return res.status(error.statusCode).json({
+        error: {
+          type: error.code || 'podcast_video_error',
+          message: error.message,
+        },
+      });
+    }
+    return next(error);
+  }
+});
+
+router.post('/video/render', async (req, res, next) => {
+  try {
+    const isMultipart = String(req.headers['content-type'] || '').toLowerCase().includes('multipart/form-data');
+    const toolManager = await ensureRuntimeToolManager(req.app);
+
+    if (isMultipart) {
+      const { fields, file } = await parseMultipartRequest(req, {
+        maxBytes: Math.max(config.audio.maxUploadBytes, 50 * 1024 * 1024),
+      });
+      const scenes = parseJsonField(fields.scenes, undefined);
+      const sessionId = await resolvePodcastSessionId(req, fields.sessionId);
+      const result = await (req.app.locals?.podcastVideoService || podcastVideoService).createVideoFromAudioUpload({
+        sessionId,
+        file,
+        fields: {
+          ...fields,
+          scenes,
+          generateImages: parseBooleanField(fields.generateImages, false),
+          toolManager,
+          toolContext: buildPodcastVideoContext(req, toolManager, sessionId),
+        },
+      });
+
+      return res.status(201).json({
+        sessionId,
+        ...result,
+      });
+    }
+
+    const body = req.body || {};
+    const sessionId = await resolvePodcastSessionId(req, body.sessionId);
+    const result = await (req.app.locals?.podcastVideoService || podcastVideoService).createVideoFromAudioArtifact({
+      sessionId,
+      audioArtifactId: body.audioArtifactId,
+      title: body.title || body.topic || 'Podcast video',
+      transcript: body.transcript || '',
+      turns: body.turns || body.script?.turns || [],
+      options: buildPodcastVideoOptions(body, {
+        toolManager,
+        toolContext: buildPodcastVideoContext(req, toolManager, sessionId),
+      }),
+    });
+
+    return res.status(201).json({
+      sessionId,
+      ...result,
+    });
+  } catch (error) {
+    if (error?.statusCode) {
+      return res.status(error.statusCode).json({
+        error: {
+          type: error.code || 'podcast_video_error',
+          message: error.message,
+        },
+      });
+    }
     return next(error);
   }
 });

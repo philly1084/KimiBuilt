@@ -10,6 +10,10 @@ const {
     isLocalGeneratedAudioArtifactId,
 } = require('../generated-audio-artifacts');
 const {
+    getLocalGeneratedVideoArtifact,
+    isLocalGeneratedVideoArtifactId,
+} = require('../generated-video-artifacts');
+const {
     buildFrontendBundlePreviewUrl,
     createFrontendBundleArchive,
     getArtifactFrontendBundle,
@@ -124,6 +128,16 @@ function getRequestOwnerId(req) {
 async function getOwnedArtifact(req, artifactId, options = {}) {
     if (isLocalGeneratedAudioArtifactId(artifactId)) {
         const localArtifact = await getLocalGeneratedAudioArtifact(artifactId, options);
+        if (!localArtifact) {
+            return null;
+        }
+
+        const session = await sessionStore.getOwned(localArtifact.sessionId, getRequestOwnerId(req));
+        return session ? localArtifact : null;
+    }
+
+    if (isLocalGeneratedVideoArtifactId(artifactId)) {
+        const localArtifact = await getLocalGeneratedVideoArtifact(artifactId, options);
         if (!localArtifact) {
             return null;
         }

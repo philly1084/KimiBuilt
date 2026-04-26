@@ -40,8 +40,23 @@ jest.mock('../podcast/podcast-service', () => ({
   },
 }));
 
+jest.mock('../video/podcast-video-service', () => ({
+  podcastVideoService: {
+    getPublicConfig: jest.fn(() => ({
+      configured: true,
+      provider: 'ffmpeg',
+      supportsMp4: true,
+    })),
+    planStoryboard: jest.fn(),
+    createVideoFromPodcast: jest.fn(),
+    createVideoFromAudioArtifact: jest.fn(),
+    createVideoFromAudioUpload: jest.fn(),
+  },
+}));
+
 const { sessionStore } = require('../session-store');
 const { podcastService } = require('../podcast/podcast-service');
+const { podcastVideoService } = require('../video/podcast-video-service');
 const podcastRouter = require('./podcast');
 
 describe('/api/podcast', () => {
@@ -65,6 +80,10 @@ describe('/api/podcast', () => {
       audioProcessing: expect.objectContaining({
         provider: 'ffmpeg',
         supportsMp3: true,
+      }),
+      video: expect.objectContaining({
+        provider: 'ffmpeg',
+        supportsMp4: true,
       }),
     });
   });
@@ -170,5 +189,87 @@ describe('/api/podcast', () => {
         message: 'ffmpeg is unavailable.',
       },
     });
+  });
+
+  test('can render a video after podcast generation when requested', async () => {
+    podcastService.createPodcast.mockResolvedValue({
+      title: 'Battery Breakdown',
+      audio: { artifactId: 'artifact-podcast-1' },
+      artifacts: [],
+      artifactIds: [],
+      script: {
+        transcript: 'Maya: Batteries store energy.',
+        turns: [{ speaker: 'Maya', text: 'Batteries store energy.' }],
+      },
+    });
+    podcastVideoService.createVideoFromPodcast.mockResolvedValue({
+      video: { artifactId: 'artifact-video-1' },
+      artifact: { id: 'artifact-video-1' },
+      storyboard: { scenes: [{ id: 'scene-01' }] },
+    });
+
+    const app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => {
+      req.user = { username: 'phill' };
+      next();
+    });
+    app.locals.toolManager = { executeTool: jest.fn() };
+    app.use('/api/podcast', podcastRouter);
+
+    const response = await request(app)
+      .post('/api/podcast/generate')
+      .send({
+        topic: 'How batteries work',
+        includeVideo: true,
+        videoAspectRatio: '9:16',
+        videoImageMode: 'mixed',
+      });
+
+    expect(response.status).toBe(200);
+    expect(podcastVideoService.createVideoFromPodcast).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Battery Breakdown',
+    }), expect.objectContaining({
+      sessionId: 'session-1',
+      options: expect.objectContaining({
+        aspectRatio: '9:16',
+        imageMode: 'mixed',
+      }),
+    }));
+    expect(response.body.video).toEqual({ artifactId: 'artifact-video-1' });
+    expect(response.body.storyboard).toEqual({ scenes: [{ id: 'scene-01' }] });
+  });
+
+  test('plans a podcast video storyboard', async () => {
+    podcastVideoService.planStoryboard.mockResolvedValue({
+      title: 'Storyboard',
+      durationSeconds: 60,
+      scenes: [{ id: 'scene-01', start: 0, end: 8 }],
+      planning: { provider: 'local' },
+    });
+
+    const app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => {
+      req.user = { username: 'phill' };
+      next();
+    });
+    app.use('/api/podcast', podcastRouter);
+
+    const response = await request(app)
+      .post('/api/podcast/video/storyboard')
+      .send({
+        title: 'Episode',
+        transcript: 'This is the transcript.',
+        durationSeconds: 60,
+      });
+
+    expect(response.status).toBe(200);
+    expect(podcastVideoService.planStoryboard).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Episode',
+      transcript: 'This is the transcript.',
+      durationSeconds: 60,
+    }));
+    expect(response.body.scenes).toEqual([{ id: 'scene-01', start: 0, end: 8 }]);
   });
 });
