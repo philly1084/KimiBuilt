@@ -457,6 +457,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                     memoryKeywords,
                     timezone: requestTimezone,
                     now: requestNow,
+                    artifactIds: preparedImages.artifactIds,
                     workloadService: ws.app.locals.agentWorkloadService,
                 },
                 executionProfile,
@@ -580,6 +581,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                 memoryKeywords,
                 timezone: requestTimezone,
                 now: requestNow,
+                artifactIds: effectiveArtifactIds,
                 workloadService: ws.app.locals.agentWorkloadService,
                 userCheckpointPolicy,
             },
@@ -803,6 +805,7 @@ async function handleCanvas(ws, session, payload = {}, ownerId = null) {
                 memoryScope,
                 sessionIsolation,
                 memoryKeywords,
+                artifactIds,
             },
         });
         const response = execution.response;
@@ -973,6 +976,7 @@ async function handleNotation(ws, session, payload = {}, ownerId = null) {
                 memoryScope,
                 sessionIsolation,
                 memoryKeywords,
+                artifactIds,
             },
         });
         const response = execution.response;

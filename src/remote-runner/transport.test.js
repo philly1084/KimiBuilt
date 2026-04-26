@@ -22,6 +22,7 @@ describe('RunnerCommandTransport', () => {
       command: 'pwd',
       workingDirectory: '/workspace/app',
       profile: 'inspect',
+      contextFiles: [{ filename: 'research.json', content: '{}' }],
     }, {
       sessionId: 'session-1',
       toolId: 'remote-command',
@@ -32,6 +33,9 @@ describe('RunnerCommandTransport', () => {
       command: 'pwd',
       cwd: '/workspace/app',
       profile: 'inspect',
+      metadata: expect.objectContaining({
+        contextFiles: [{ filename: 'research.json', content: '{}' }],
+      }),
     }), expect.objectContaining({
       sessionId: 'session-1',
       toolId: 'remote-command',

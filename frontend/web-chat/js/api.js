@@ -630,6 +630,15 @@ class OpenAIAPIClient extends EventTarget {
             return payload.response.metadata.tool_events;
         }
 
+        if (Array.isArray(payload.choices?.[0]?.delta?.tool_calls)) {
+            return payload.choices[0].delta.tool_calls.map((toolCall, index) => this.buildToolEventDetail({
+                ...toolCall,
+                index: Number.isInteger(Number(toolCall?.index)) && Number(toolCall.index) >= 0
+                    ? Number(toolCall.index)
+                    : index,
+            }, 'response.output_item.added'));
+        }
+
         return [];
     }
 
@@ -658,10 +667,10 @@ class OpenAIAPIClient extends EventTarget {
 
     getTextDeltaFromStreamPayload(parsed = {}) {
         if (parsed?.type === 'response.output_text.delta') {
-            return stripNullCharacters(parsed.delta || '');
+            return stripNullCharacters(parsed.delta ?? parsed.output_text_delta ?? '');
         }
 
-        return stripNullCharacters(parsed?.choices?.[0]?.delta?.content || '');
+        return stripNullCharacters(parsed?.choices?.[0]?.delta?.content || parsed?.output_text_delta || '');
     }
 
     buildToolEventDetail(item = {}, eventType = '') {
@@ -734,17 +743,18 @@ class OpenAIAPIClient extends EventTarget {
             return events;
         }
 
+        const isReasoningDelta = parsed.type === 'response.reasoning_summary_text.delta';
         const streamedReasoning = extractReasoningSummary(
-            parsed?.choices?.[0]?.delta?.reasoning
+            (isReasoningDelta ? (parsed.delta ?? parsed.reasoning_delta) : '')
+            || parsed?.choices?.[0]?.delta?.reasoning
             || parsed?.choices?.[0]?.delta?.reasoning_text
             || parsed?.choices?.[0]?.delta?.reasoning_content
             || parsed?.choices?.[0]?.delta?.reasoning_details
             || parsed?.reasoning_delta
             || parsed?.output
-            || parsed?.delta
             || '',
         );
-        if ((parsed.type === 'response.reasoning_summary_text.delta' && parsed.delta) || streamedReasoning) {
+        if ((isReasoningDelta && (parsed.delta || parsed.reasoning_delta)) || streamedReasoning) {
             const summary = String(parsed.summary || parsed.reasoningSummary || parsed.reasoning_summary || '').trim()
                 || streamedReasoning.trim();
             pendingDone.assistantMetadata = mergeAssistantMetadata(
@@ -772,6 +782,27 @@ class OpenAIAPIClient extends EventTarget {
                 toolName: toolEvent.toolName,
                 detail: toolEvent.detail,
                 item: parsed.item,
+            });
+        }
+
+        const choiceToolCalls = parsed?.choices?.[0]?.delta?.tool_calls;
+        if (Array.isArray(choiceToolCalls) && choiceToolCalls.length > 0) {
+            choiceToolCalls.forEach((toolCall, index) => {
+                const indexedToolCall = {
+                    ...toolCall,
+                    index: Number.isInteger(Number(toolCall?.index)) && Number(toolCall.index) >= 0
+                        ? Number(toolCall.index)
+                        : index,
+                };
+                const toolEvent = this.buildToolEventDetail(indexedToolCall, 'response.output_item.added');
+                events.push(this.buildStatusEvent('checking-tools', toolEvent.detail));
+                events.push({
+                    type: 'tool_event',
+                    stage: toolEvent.stage,
+                    toolName: toolEvent.toolName,
+                    detail: toolEvent.detail,
+                    item: indexedToolCall,
+                });
             });
         }
 

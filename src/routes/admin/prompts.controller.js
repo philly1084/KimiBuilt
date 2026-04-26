@@ -71,6 +71,7 @@ function buildPlannerPromptSurface() {
     'Do not plan a file-write step that only points at an earlier artifact or previous file when the full content is not already available in the prompt or recent transcript.',
     'Treat "remote CLI", "direct CLI", and "remote command" as aliases for the `remote-command` tool. Do not use the local execution sandbox for those requests.',
     'For remote server, SSH, host, k3s, Kubernetes, and kubectl work, use remote-command as the primary remote CLI lane. Do not choose legacy raw SSH tooling when remote-command is available.',
+    'When remote build work needs selected artifacts, generated images, fetched pages, or search data from web-chat/web-cli, pass selected IDs as params.artifactIds and compact non-artifact evidence as params.contextFiles so the remote runner can stage them before executing.',
     'When an SSH runtime target is already available, prefer trying remote-command before asking the user for host details again.',
     'Only ask for SSH connection details after an actual tool failure shows the target is missing or incorrect.',
     'For remote reconnect or baseline checks, assume Ubuntu/Linux and prefer a concrete command such as: hostname && uname -m && (test -f /etc/os-release && sed -n \'1,3p\' /etc/os-release || true) && uptime',

@@ -224,6 +224,16 @@ function responseToolItemToChatDeltaToolCall(item = {}, index = 0) {
     };
 }
 
+function normalizeChatDeltaToolCalls(toolCalls = []) {
+    return (Array.isArray(toolCalls) ? toolCalls : []).map((toolCall, index) => {
+        const hasValidIndex = Number.isInteger(Number(toolCall?.index)) && Number(toolCall.index) >= 0;
+        return {
+            ...toolCall,
+            index: hasValidIndex ? Number(toolCall.index) : index,
+        };
+    });
+}
+
 function inferOutputFormatFromTranscript(messages = [], session = null) {
     const normalizedMessages = Array.isArray(messages) ? messages : [];
     const lastUserMessage = normalizedMessages.filter((message) => message?.role === 'user').pop();
@@ -1278,6 +1288,15 @@ router.post('/chat/completions', async (req, res, next) => {
             let fullText = '';
             let chunkIndex = 0;
 
+            activeSse.write(`data: ${JSON.stringify({
+                id: `chatcmpl-${sessionId}-${chunkIndex}`,
+                object: 'chat.completion.chunk',
+                created: Math.floor(Date.now() / 1000),
+                model: model || 'gpt-4o',
+                choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }],
+            })}\n\n`);
+            chunkIndex += 1;
+
             for await (const event of response) {
                 if (event.type === 'response.output_text.delta') {
                     fullText += event.delta;
@@ -1309,13 +1328,14 @@ router.post('/chat/completions', async (req, res, next) => {
                 if (event.type === 'chat.completion.tool_calls.delta'
                     && Array.isArray(event.tool_calls)
                     && event.tool_calls.length > 0) {
+                    const toolCalls = normalizeChatDeltaToolCalls(event.tool_calls);
                     activeSse.write(`data: ${JSON.stringify({
                         id: `chatcmpl-${sessionId}-${chunkIndex}`,
                         object: 'chat.completion.chunk',
                         created: Math.floor(Date.now() / 1000),
                         model: model || 'gpt-4o',
-                        choices: [{ index: 0, delta: { tool_calls: event.tool_calls }, finish_reason: null }],
-                        tool_calls: event.tool_calls,
+                        choices: [{ index: 0, delta: { tool_calls: toolCalls }, finish_reason: null }],
+                        tool_calls: toolCalls,
                     })}\n\n`);
                     chunkIndex += 1;
                 }

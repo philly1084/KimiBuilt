@@ -208,6 +208,7 @@ describe('/v1/chat/completions stream forwarding', () => {
         expect(response.headers['cache-control']).toContain('no-transform');
         expect(response.headers['x-accel-buffering']).toBe('no');
         expect(response.text.startsWith(': stream-open\n\n')).toBe(true);
+        expect(response.text).toContain('"delta":{"role":"assistant"}');
         expect(response.text).toContain('"delta":{"reasoning":"Checking the request. "}');
         expect(response.text).toContain('"type":"response.reasoning_summary_text.delta"');
         expect(response.text).toContain('"summary":"Checking the request. "');

@@ -4602,7 +4602,12 @@ async function* normalizeChatCompletionsStream(stream, metadata = {}) {
             sawToolCalls = true;
             yield {
                 type: 'chat.completion.tool_calls.delta',
-                tool_calls: deltaPayload.tool_calls,
+                tool_calls: deltaPayload.tool_calls.map((toolCall, index) => ({
+                    ...toolCall,
+                    index: Number.isInteger(Number(toolCall?.index)) && Number(toolCall.index) >= 0
+                        ? Number(toolCall.index)
+                        : index,
+                })),
             };
         }
 

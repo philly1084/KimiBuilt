@@ -8,7 +8,15 @@ const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 const settingsController = require('../../../../routes/admin/settings.controller');
+const { artifactService } = require('../../../../artifacts/artifact-service');
 const { executeWithRunnerPreference, shouldPreferRunner } = require('../../../../remote-runner/transport');
+const {
+  normalizeContextDirectory,
+  normalizeContextFiles,
+  sanitizeContextFilename,
+} = require('../../../../remote-runner/protocol');
+
+const MAX_REMOTE_CONTEXT_ARTIFACTS = 12;
 
 class SSHExecuteTool extends ToolBase {
   constructor(overrides = {}) {
@@ -57,6 +65,18 @@ class SSHExecuteTool extends ToolBase {
             type: 'object',
             description: 'Environment variables to set'
           },
+          artifactIds: {
+            type: 'array',
+            description: 'Session artifact IDs to stage into the remote workspace before running the command.'
+          },
+          contextFiles: {
+            type: 'array',
+            description: 'Inline files to stage into the remote workspace. Each item supports filename, content or contentBase64, mimeType, sourceUrl, and description.'
+          },
+          contextDirectory: {
+            type: 'string',
+            description: 'Relative directory under the remote working directory for staged context files. Defaults to .kimibuilt/context.'
+          },
           sudo: {
             type: 'boolean',
             default: false,
@@ -91,6 +111,8 @@ class SSHExecuteTool extends ToolBase {
       environment = {},
       sudo = false
     } = params;
+    const contextFiles = await this.prepareContextFiles(params, context);
+    const contextDirectory = normalizeContextDirectory(params.contextDirectory || params.contextDir);
 
     const canUseRunner = !context?.skipRunner
       && !String(this.id || '').includes('internal')
@@ -103,6 +125,8 @@ class SSHExecuteTool extends ToolBase {
           timeout,
           workingDirectory,
           environment,
+          contextFiles,
+          contextDirectory,
           sudo,
           profile: 'deploy',
           approval: params.approval || {},
@@ -149,6 +173,8 @@ class SSHExecuteTool extends ToolBase {
       command,
       workingDirectory,
       environment,
+      contextFiles,
+      contextDirectory,
     });
 
     const result = await this.executeSSH(connection, executionScript, timeout, {
@@ -298,12 +324,17 @@ class SSHExecuteTool extends ToolBase {
     return scriptPath;
   }
 
-  buildExecutionScript({ command, workingDirectory, environment = {} }) {
+  buildExecutionScript({ command, workingDirectory, environment = {}, contextFiles = [], contextDirectory = '' }) {
     const lines = [];
 
     if (workingDirectory) {
       lines.push(`cd -- ${this.quoteShellArg(workingDirectory)}`);
     }
+
+    lines.push(...this.buildContextStagingScript({
+      contextFiles,
+      contextDirectory,
+    }));
 
     Object.entries(environment || {}).forEach(([key, value]) => {
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(String(key || ''))) {
@@ -316,6 +347,104 @@ class SSHExecuteTool extends ToolBase {
     lines.push('');
 
     return lines.filter(Boolean).join('\n');
+  }
+
+  buildContextStagingScript({ contextFiles = [], contextDirectory = '' } = {}) {
+    const files = normalizeContextFiles(contextFiles);
+    if (files.length === 0) {
+      return [];
+    }
+
+    const targetDirectory = normalizeContextDirectory(contextDirectory);
+    const manifest = {
+      generatedAt: new Date().toISOString(),
+      directory: targetDirectory,
+      files: files.map((file) => ({
+        filename: file.filename,
+        path: `${targetDirectory}/${file.filename}`,
+        relativePath: `${targetDirectory}/${file.filename}`,
+        mimeType: file.mimeType,
+        sizeBytes: file.sizeBytes,
+        source: file.source || '',
+        sourceUrl: file.sourceUrl || '',
+        artifactId: file.artifactId || '',
+        sha256: file.sha256 || '',
+        description: file.description || '',
+      })),
+    };
+
+    const lines = [
+      `KIMIBUILT_CONTEXT_DIR=${this.quoteShellArg(targetDirectory)}`,
+      'export KIMIBUILT_CONTEXT_DIR',
+      'mkdir -p -- "$KIMIBUILT_CONTEXT_DIR"',
+      `cat > "$KIMIBUILT_CONTEXT_DIR/manifest.json" <<'KIMIBUILT_CONTEXT_MANIFEST'`,
+      JSON.stringify(manifest, null, 2),
+      'KIMIBUILT_CONTEXT_MANIFEST',
+      'export KIMIBUILT_CONTEXT_MANIFEST="$KIMIBUILT_CONTEXT_DIR/manifest.json"',
+    ];
+
+    files.forEach((file) => {
+      lines.push(
+        `printf '%s' ${this.quoteShellArg(file.contentBase64)} | base64 -d > "$KIMIBUILT_CONTEXT_DIR/${this.escapeDoubleQuotedPath(file.filename)}"`,
+      );
+    });
+
+    return lines;
+  }
+
+  escapeDoubleQuotedPath(value = '') {
+    return String(value || '').replace(/["\\$`]/g, '\\$&');
+  }
+
+  async prepareContextFiles(params = {}, context = {}) {
+    const inlineFiles = normalizeContextFiles(params.contextFiles || []);
+    const requestedArtifactIds = this.resolveContextArtifactIds(params, context);
+    if (requestedArtifactIds.length === 0) {
+      return inlineFiles;
+    }
+
+    const artifactFiles = [];
+    for (const artifactId of requestedArtifactIds.slice(0, MAX_REMOTE_CONTEXT_ARTIFACTS)) {
+      try {
+        const artifact = await artifactService.getArtifact(artifactId, { includeContent: true });
+        if (!artifact?.contentBuffer?.length) {
+          continue;
+        }
+
+        const contextSessionId = String(context?.sessionId || '').trim();
+        if (contextSessionId && artifact.sessionId && artifact.sessionId !== contextSessionId) {
+          continue;
+        }
+
+        artifactFiles.push({
+          filename: sanitizeContextFilename(artifact.filename || `${artifact.id}.bin`, `${artifactId}.bin`),
+          mimeType: artifact.mimeType || 'application/octet-stream',
+          contentBase64: Buffer.from(artifact.contentBuffer).toString('base64'),
+          source: 'artifact',
+          artifactId: artifact.id,
+          sha256: artifact.sha256 || '',
+          description: artifact.metadata?.title || artifact.metadata?.altText || artifact.filename || '',
+        });
+      } catch (error) {
+        console.warn(`[RemoteCommand] Failed to stage artifact ${artifactId}:`, error.message);
+      }
+    }
+
+    return normalizeContextFiles([...inlineFiles, ...artifactFiles]);
+  }
+
+  resolveContextArtifactIds(params = {}, context = {}) {
+    const values = [
+      ...(Array.isArray(params.artifactIds) ? params.artifactIds : []),
+      ...(Array.isArray(params.artifact_ids) ? params.artifact_ids : []),
+      ...(Array.isArray(context.artifactIds) ? context.artifactIds : []),
+      ...(Array.isArray(context.artifact_ids) ? context.artifact_ids : []),
+    ];
+    return Array.from(new Set(
+      values
+        .map((value) => String(value || '').trim())
+        .filter(Boolean),
+    ));
   }
 
   buildRemoteLauncher({ sudo = false } = {}) {

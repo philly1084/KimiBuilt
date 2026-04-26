@@ -62,6 +62,30 @@ describe('openai-sse helpers', () => {
     expect(events[0].artifacts).toEqual([{ id: 'artifact-1' }]);
   });
 
+  test('ignores assistant role-only chat completion chunks and indexes tool calls', () => {
+    expect(normalizeGatewayEventPayload({
+      object: 'chat.completion.chunk',
+      choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }],
+    })).toEqual([]);
+
+    const events = normalizeGatewayEventPayload({
+      object: 'chat.completion.chunk',
+      choices: [{
+        index: 0,
+        delta: {
+          tool_calls: [
+            { id: 'call_1', type: 'function', function: { name: 'search', arguments: '{}' } },
+            { index: 4, id: 'call_2', type: 'function', function: { name: 'lookup', arguments: '{}' } },
+          ],
+        },
+        finish_reason: null,
+      }],
+    });
+
+    expect(events).toHaveLength(1);
+    expect(events[0].toolCalls.map((toolCall) => toolCall.index)).toEqual([0, 4]);
+  });
+
   test('normalizes object-form reasoning from chat completion chunks', () => {
     const events = normalizeGatewayEventPayload({
       object: 'chat.completion.chunk',
@@ -98,6 +122,34 @@ describe('openai-sse helpers', () => {
       'tool_calls',
     ]);
     expect(events[2].toolCalls).toHaveLength(1);
+  });
+
+  test('prefers typed response deltas over legacy compatibility fields', () => {
+    const textEvents = normalizeGatewayEventPayload({
+      object: 'response.chunk',
+      type: 'response.output_text.delta',
+      delta: 'Typed text',
+      output_text_delta: 'Legacy text',
+    });
+    const reasoningEvents = normalizeGatewayEventPayload({
+      object: 'response.chunk',
+      type: 'response.reasoning_summary_text.delta',
+      delta: 'Typed public summary',
+      reasoning_delta: 'Legacy reasoning',
+    });
+
+    expect(textEvents).toHaveLength(1);
+    expect(textEvents[0]).toMatchObject({
+      type: 'text_delta',
+      content: 'Typed text',
+    });
+    expect(reasoningEvents).toHaveLength(1);
+    expect(reasoningEvents[0]).toMatchObject({
+      type: 'reasoning_delta',
+      content: 'Typed public summary',
+      summary: 'Typed public summary',
+      publicSummary: true,
+    });
   });
 
   test('normalizes reasoning items embedded in response chunk output arrays', () => {

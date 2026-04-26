@@ -64,6 +64,8 @@ class RunnerCommandTransport {
       metadata: {
         toolId: context.toolId || '',
         sudo: params.sudo === true,
+        contextDirectory: params.contextDirectory || params.contextDir || '',
+        contextFiles: Array.isArray(params.contextFiles) ? params.contextFiles : [],
       },
     }, context);
 

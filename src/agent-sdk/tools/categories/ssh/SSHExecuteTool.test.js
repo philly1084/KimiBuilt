@@ -9,11 +9,19 @@ jest.mock('../../../../routes/admin/settings.controller', () => ({
   })),
 }));
 
+jest.mock('../../../../artifacts/artifact-service', () => ({
+  artifactService: {
+    getArtifact: jest.fn(),
+  },
+}));
+
 const { SSHExecuteTool } = require('./SSHExecuteTool');
+const { artifactService } = require('../../../../artifacts/artifact-service');
 
 describe('SSHExecuteTool', () => {
   afterEach(() => {
     jest.useRealTimers();
+    jest.clearAllMocks();
     jest.restoreAllMocks();
   });
 
@@ -35,6 +43,54 @@ describe('SSHExecuteTool', () => {
     expect(script).toContain(`export INVALID_KEY_NAME='kept'`);
     expect(script).not.toContain('bad-key');
     expect(script).toContain('hostname && uptime');
+  });
+
+  test('buildExecutionScript stages context files before running the command', () => {
+    const tool = new SSHExecuteTool();
+
+    const script = tool.buildExecutionScript({
+      command: 'npm run build',
+      contextFiles: [{
+        filename: 'research.json',
+        mimeType: 'application/json',
+        content: '{"ok":true}',
+      }],
+    });
+
+    expect(script).toContain('KIMIBUILT_CONTEXT_DIR=');
+    expect(script).toContain('manifest.json');
+    expect(script).toContain('research.json');
+    expect(script).toContain('base64 -d > "$KIMIBUILT_CONTEXT_DIR/research.json"');
+    expect(script).toContain('npm run build');
+  });
+
+  test('prepareContextFiles loads selected session artifacts for remote staging', async () => {
+    const tool = new SSHExecuteTool();
+    artifactService.getArtifact.mockResolvedValue({
+      id: 'artifact-1',
+      sessionId: 'session-1',
+      filename: 'hero.png',
+      mimeType: 'image/png',
+      contentBuffer: Buffer.from('png-bytes'),
+      sha256: 'sha',
+      metadata: { title: 'Hero' },
+    });
+
+    const files = await tool.prepareContextFiles({
+      artifactIds: ['artifact-1'],
+    }, {
+      sessionId: 'session-1',
+    });
+
+    expect(files).toEqual([
+      expect.objectContaining({
+        filename: 'hero.png',
+        mimeType: 'image/png',
+        artifactId: 'artifact-1',
+        source: 'artifact',
+        sizeBytes: 9,
+      }),
+    ]);
   });
 
   test('buildRemoteLauncher prefers bash with fallback to sh and supports sudo', () => {

@@ -231,6 +231,7 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
                 memoryKeywords,
                 timezone: requestTimezone,
                 now: requestNow,
+                artifactIds,
                 workloadService: req.app.locals.agentWorkloadService,
             },
             executionProfile,

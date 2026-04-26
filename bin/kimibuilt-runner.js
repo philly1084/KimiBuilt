@@ -11,6 +11,7 @@ const {
   isApproved,
   isDangerousCommand,
   normalizeCommandJob,
+  normalizeContextDirectory,
   normalizeText,
   truncateText,
 } = require('../src/remote-runner/protocol');
@@ -192,6 +193,68 @@ function resolveJobCwd(requestedCwd = '') {
   return path.resolve(candidate);
 }
 
+function isPathInside(parentPath = '', candidatePath = '') {
+  const parent = path.resolve(parentPath);
+  const candidate = path.resolve(candidatePath);
+  return candidate === parent || candidate.startsWith(`${parent}${path.sep}`);
+}
+
+function materializeJobContext(job = {}, resolvedCwd = '') {
+  const contextFiles = Array.isArray(job.metadata?.contextFiles) ? job.metadata.contextFiles : [];
+  if (contextFiles.length === 0) {
+    return null;
+  }
+
+  const relativeDirectory = normalizeContextDirectory(
+    job.metadata?.contextDirectory || `.kimibuilt/context/${job.id || 'job'}`,
+  );
+  const targetDirectory = path.resolve(resolvedCwd, relativeDirectory);
+  if (!isPathInside(resolvedCwd, targetDirectory)) {
+    throw new Error(`Context directory is outside working directory: ${relativeDirectory}`);
+  }
+
+  fs.mkdirSync(targetDirectory, { recursive: true });
+  const manifest = [];
+
+  for (let index = 0; index < contextFiles.length; index += 1) {
+    const file = contextFiles[index] || {};
+    const filename = normalizeText(file.filename) || `context-${index + 1}.bin`;
+    const targetPath = path.resolve(targetDirectory, filename);
+    if (!isPathInside(targetDirectory, targetPath)) {
+      throw new Error(`Context file is outside context directory: ${filename}`);
+    }
+
+    const buffer = Buffer.from(normalizeText(file.contentBase64), 'base64');
+    fs.writeFileSync(targetPath, buffer);
+    manifest.push({
+      filename,
+      path: targetPath,
+      relativePath: path.relative(resolvedCwd, targetPath),
+      mimeType: normalizeText(file.mimeType) || 'application/octet-stream',
+      sizeBytes: buffer.length,
+      source: normalizeText(file.source),
+      sourceUrl: normalizeText(file.sourceUrl),
+      artifactId: normalizeText(file.artifactId),
+      sha256: normalizeText(file.sha256),
+      description: normalizeText(file.description),
+    });
+  }
+
+  const manifestPath = path.join(targetDirectory, 'manifest.json');
+  fs.writeFileSync(manifestPath, JSON.stringify({
+    generatedAt: new Date().toISOString(),
+    jobId: job.id,
+    directory: targetDirectory,
+    files: manifest,
+  }, null, 2));
+
+  return {
+    directory: targetDirectory,
+    manifestPath,
+    files: manifest,
+  };
+}
+
 function buildHostIdentity() {
   return {
     hostname: os.hostname(),
@@ -252,6 +315,21 @@ function runCommand(job = {}) {
     });
   }
 
+  let contextInfo = null;
+  try {
+    contextInfo = materializeJobContext(normalized, resolvedCwd);
+  } catch (error) {
+    return Promise.resolve({
+      jobId: normalized.id,
+      stdout: '',
+      stderr: error.message,
+      exitCode: 126,
+      duration: 0,
+      host: os.hostname(),
+      error: error.message,
+    });
+  }
+
   return new Promise((resolve) => {
     const startedAt = new Date().toISOString();
     const started = Date.now();
@@ -260,6 +338,10 @@ function runCommand(job = {}) {
       env: {
         ...process.env,
         ...normalized.environment,
+        ...(contextInfo ? {
+          KIMIBUILT_CONTEXT_DIR: contextInfo.directory,
+          KIMIBUILT_CONTEXT_MANIFEST: contextInfo.manifestPath,
+        } : {}),
       },
       shell: runnerShell,
       windowsHide: true,
@@ -284,6 +366,7 @@ function runCommand(job = {}) {
         startedAt,
         finishedAt: new Date().toISOString(),
         error: `Command timed out after ${normalized.timeout}ms`,
+        metadata: contextInfo ? { context: contextInfo } : {},
       });
     }, normalized.timeout);
 
@@ -309,6 +392,7 @@ function runCommand(job = {}) {
         startedAt,
         finishedAt: new Date().toISOString(),
         error: error.message,
+        metadata: contextInfo ? { context: contextInfo } : {},
       });
     });
     child.on('close', (exitCode) => {
@@ -326,6 +410,7 @@ function runCommand(job = {}) {
         host: os.hostname(),
         startedAt,
         finishedAt: new Date().toISOString(),
+        metadata: contextInfo ? { context: contextInfo } : {},
       });
     });
   });

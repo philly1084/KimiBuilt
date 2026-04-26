@@ -522,6 +522,20 @@
     };
   }
 
+  function normalizeToolCallsWithIndexes(toolCalls = []) {
+    return (Array.isArray(toolCalls) ? toolCalls : []).map((toolCall, index) => {
+      if (!toolCall || typeof toolCall !== 'object') {
+        return toolCall;
+      }
+
+      const rawIndex = Number(toolCall.index);
+      return {
+        ...toolCall,
+        index: Number.isInteger(rawIndex) && rawIndex >= 0 ? rawIndex : index,
+      };
+    });
+  }
+
   function extractFinalAssistantText(payload = {}) {
     if (!payload || typeof payload !== 'object') {
       return '';
@@ -598,6 +612,51 @@
       return events;
     }
 
+    if (payload.type === 'response.output_text.delta') {
+      events.push({
+        type: 'text_delta',
+        content: stripNullCharacters(payload.delta ?? payload.output_text_delta ?? ''),
+        raw: payload,
+        ...metadata,
+      });
+      return events;
+    }
+
+    if (payload.type === 'response.reasoning_summary_text.delta') {
+      const reasoning = stripNullCharacters(payload.delta ?? payload.reasoning_delta ?? '');
+      const summary = stripNullCharacters(payload.summary || payload.reasoningSummary || payload.reasoning_summary || reasoning);
+      events.push({
+        type: 'reasoning_delta',
+        content: reasoning,
+        summary,
+        publicSummary: true,
+        raw: payload,
+        ...metadata,
+      });
+      return events;
+    }
+
+    if ((payload.type === 'response.output_item.added' || payload.type === 'response.output_item.done') && isFunctionCallItem(payload.item)) {
+      events.push({
+        type: 'tool_calls',
+        toolCalls: normalizeToolCallsWithIndexes([payload.item]),
+        stage: payload.type.endsWith('.done') ? 'done' : 'started',
+        raw: payload,
+        ...metadata,
+      });
+      return events;
+    }
+
+    if (payload.type === 'response.completed') {
+      events.push({
+        type: 'final',
+        response: payload.response || null,
+        raw: payload,
+        ...metadata,
+      });
+      return events;
+    }
+
     if (payload.object === 'chat.completion.chunk') {
       const choice = payload.choices?.[0] || {};
       const delta = choice.delta || {};
@@ -631,7 +690,7 @@
       if (Array.isArray(delta.tool_calls) && delta.tool_calls.length > 0) {
         events.push({
           type: 'tool_calls',
-          toolCalls: delta.tool_calls,
+          toolCalls: normalizeToolCallsWithIndexes(delta.tool_calls),
           stage: 'started',
           raw: payload,
           ...metadata,
@@ -693,16 +752,6 @@
       return events;
     }
 
-    if (payload.type === 'response.output_text.delta') {
-      events.push({
-        type: 'text_delta',
-        content: stripNullCharacters(payload.delta || ''),
-        raw: payload,
-        ...metadata,
-      });
-      return events;
-    }
-
     if (payload.type === 'progress') {
       const progress = payload.progress && typeof payload.progress === 'object'
         ? payload.progress
@@ -722,40 +771,6 @@
       events.push({
         type: 'text_delta',
         content: stripNullCharacters(payload.content || payload.delta || ''),
-        raw: payload,
-        ...metadata,
-      });
-      return events;
-    }
-
-    if (payload.type === 'response.reasoning_summary_text.delta') {
-      const reasoning = stripNullCharacters(payload.delta || '');
-      const summary = stripNullCharacters(payload.summary || payload.reasoningSummary || payload.reasoning_summary || reasoning);
-      events.push({
-        type: 'reasoning_delta',
-        content: reasoning,
-        summary,
-        raw: payload,
-        ...metadata,
-      });
-      return events;
-    }
-
-    if ((payload.type === 'response.output_item.added' || payload.type === 'response.output_item.done') && isFunctionCallItem(payload.item)) {
-      events.push({
-        type: 'tool_calls',
-        toolCalls: [payload.item],
-        stage: payload.type.endsWith('.done') ? 'done' : 'started',
-        raw: payload,
-        ...metadata,
-      });
-      return events;
-    }
-
-    if (payload.type === 'response.completed') {
-      events.push({
-        type: 'final',
-        response: payload.response || null,
         raw: payload,
         ...metadata,
       });

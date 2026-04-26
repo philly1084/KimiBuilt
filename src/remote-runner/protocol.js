@@ -4,6 +4,9 @@ const crypto = require('crypto');
 
 const CAPABILITY_PROFILES = Object.freeze(['inspect', 'deploy', 'build', 'admin']);
 const JOB_STATUSES = Object.freeze(['queued', 'sent', 'running', 'completed', 'failed', 'timeout']);
+const MAX_CONTEXT_FILE_BYTES = 5 * 1024 * 1024;
+const MAX_CONTEXT_FILES = 16;
+const MAX_CONTEXT_TOTAL_BYTES = 24 * 1024 * 1024;
 
 function normalizeText(value = '') {
   return String(value || '').trim();
@@ -84,6 +87,92 @@ function truncateText(value = '', maxLength = 120000) {
   return `${text.slice(0, limit)}\n[truncated ${text.length - limit} chars]`;
 }
 
+function sanitizeContextFilename(value = '', fallback = 'context.txt') {
+  const raw = normalizeText(value)
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter(Boolean)
+    .pop() || '';
+  const normalized = raw
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/^\.+/, '')
+    .slice(0, 160)
+    .trim();
+  return normalized || fallback;
+}
+
+function sanitizeContextDirectorySegment(value = '') {
+  const normalized = normalizeText(value);
+  if (!normalized || normalized === '.' || normalized === '..') {
+    return '';
+  }
+  return normalized
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
+    .replace(/\s+/g, ' ')
+    .slice(0, 160)
+    .trim();
+}
+
+function normalizeContextDirectory(value = '', fallback = '.kimibuilt/context') {
+  const normalized = normalizeText(value || fallback)
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .split('/')
+    .map((segment) => sanitizeContextDirectorySegment(segment))
+    .filter(Boolean)
+    .join('/');
+  return normalized || fallback;
+}
+
+function normalizeContextFiles(value = []) {
+  const files = Array.isArray(value) ? value : [];
+  const normalized = [];
+  let totalBytes = 0;
+
+  for (let index = 0; index < files.length && normalized.length < MAX_CONTEXT_FILES; index += 1) {
+    const entry = files[index];
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+
+    const filename = sanitizeContextFilename(
+      entry.filename || entry.name || entry.path,
+      `context-${index + 1}.txt`,
+    );
+    const contentBase64 = normalizeText(entry.contentBase64 || entry.base64 || entry.dataBase64);
+    const content = Object.prototype.hasOwnProperty.call(entry, 'content')
+      ? String(entry.content ?? '')
+      : '';
+    const buffer = contentBase64
+      ? Buffer.from(contentBase64, 'base64')
+      : Buffer.from(content, 'utf8');
+
+    if (buffer.length <= 0 || buffer.length > MAX_CONTEXT_FILE_BYTES) {
+      continue;
+    }
+
+    if (totalBytes + buffer.length > MAX_CONTEXT_TOTAL_BYTES) {
+      break;
+    }
+
+    totalBytes += buffer.length;
+    normalized.push({
+      filename,
+      mimeType: normalizeText(entry.mimeType || entry.contentType) || 'application/octet-stream',
+      sizeBytes: buffer.length,
+      contentBase64: buffer.toString('base64'),
+      source: normalizeText(entry.source),
+      sourceUrl: normalizeText(entry.sourceUrl || entry.url),
+      artifactId: normalizeText(entry.artifactId),
+      sha256: normalizeText(entry.sha256),
+      description: normalizeText(entry.description || entry.label),
+    });
+  }
+
+  return normalized;
+}
+
 function normalizeRunnerRegistration(input = {}) {
   const runnerId = normalizeText(input.runnerId || input.id);
   if (!runnerId) {
@@ -111,6 +200,10 @@ function normalizeCommandJob(input = {}) {
     throw new Error('job.command is required');
   }
 
+  const metadata = input.metadata && typeof input.metadata === 'object' ? { ...input.metadata } : {};
+  const contextFiles = normalizeContextFiles(input.contextFiles || metadata.contextFiles || metadata.context_files || []);
+  const contextDirectory = normalizeContextDirectory(input.contextDirectory || metadata.contextDirectory || metadata.context_directory);
+
   return {
     id: normalizeText(input.id) || createId('job'),
     type: 'command',
@@ -120,7 +213,10 @@ function normalizeCommandJob(input = {}) {
     timeout: Math.max(1000, Number(input.timeout) || 120000),
     profile: CAPABILITY_PROFILES.includes(normalizeText(input.profile)) ? normalizeText(input.profile) : 'inspect',
     approval: input.approval && typeof input.approval === 'object' ? { ...input.approval } : {},
-    metadata: input.metadata && typeof input.metadata === 'object' ? { ...input.metadata } : {},
+    metadata: {
+      ...metadata,
+      ...(contextFiles.length > 0 ? { contextFiles, contextDirectory } : {}),
+    },
   };
 }
 
@@ -167,7 +263,10 @@ module.exports = {
   normalizeJobResult,
   normalizeRunnerRegistration,
   normalizeRunnerMetadata,
+  normalizeContextDirectory,
+  normalizeContextFiles,
   normalizeText,
+  sanitizeContextFilename,
   truncateText,
   uniqueStrings,
 };

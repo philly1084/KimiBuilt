@@ -2,6 +2,7 @@
 
 const {
   isDangerousCommand,
+  normalizeContextDirectory,
   normalizeCommandJob,
   normalizeRunnerRegistration,
 } = require('./protocol');
@@ -54,6 +55,33 @@ describe('remote runner protocol', () => {
       cwd: '/workspace/app',
       profile: 'inspect',
     }));
+  });
+
+  test('normalizes staged context files on command jobs', () => {
+    const job = normalizeCommandJob({
+      command: 'node build.js',
+      contextDirectory: '../unsafe/context',
+      contextFiles: [{
+        filename: '../hero.png',
+        mimeType: 'image/png',
+        contentBase64: Buffer.from('png-bytes').toString('base64'),
+        artifactId: 'artifact-1',
+      }],
+    });
+
+    expect(job.metadata.contextDirectory).toBe('unsafe/context');
+    expect(job.metadata.contextFiles).toEqual([
+      expect.objectContaining({
+        filename: 'hero.png',
+        mimeType: 'image/png',
+        artifactId: 'artifact-1',
+        sizeBytes: 9,
+      }),
+    ]);
+  });
+
+  test('preserves the default hidden context directory', () => {
+    expect(normalizeContextDirectory()).toBe('.kimibuilt/context');
   });
 
   test('flags privileged commands for approval gating', () => {
