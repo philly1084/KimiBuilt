@@ -73,6 +73,9 @@ const generateSchema = {
   videoImageModel: { required: false, type: 'string' },
   videoModel: { required: false, type: 'string' },
   videoReasoningEffort: { required: false, type: 'string' },
+  videoFfmpegTimeoutMs: { required: false, type: 'number' },
+  videoSegmentTimeoutMs: { required: false, type: 'number' },
+  videoMuxTimeoutMs: { required: false, type: 'number' },
 };
 
 function parseJsonField(value, fallback = null) {
@@ -115,6 +118,9 @@ function buildPodcastVideoOptions(input = {}, context = {}) {
     imageModel: input.videoImageModel || input.imageModel || nested.imageModel || null,
     model: input.videoModel || input.model || nested.model || null,
     reasoningEffort: input.videoReasoningEffort || input.reasoningEffort || nested.reasoningEffort || null,
+    ffmpegTimeoutMs: Number(input.videoFfmpegTimeoutMs || input.ffmpegTimeoutMs || nested.ffmpegTimeoutMs) || undefined,
+    segmentTimeoutMs: Number(input.videoSegmentTimeoutMs || input.segmentTimeoutMs || nested.segmentTimeoutMs) || undefined,
+    muxTimeoutMs: Number(input.videoMuxTimeoutMs || input.muxTimeoutMs || nested.muxTimeoutMs) || undefined,
     useModel: nested.useModel === false || input.useModel === false ? false : undefined,
     scenes: Array.isArray(input.scenes) ? input.scenes : Array.isArray(nested.scenes) ? nested.scenes : undefined,
     toolManager: context.toolManager || null,

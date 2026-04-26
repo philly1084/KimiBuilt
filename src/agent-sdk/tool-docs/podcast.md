@@ -56,6 +56,7 @@ Notes:
 - MP3 export and intro/outro/music-bed mixing require ffmpeg audio processing to be configured.
 - MP4 podcast video rendering also requires ffmpeg. The video pipeline plans timestamped scenes from the transcript, then tries direct/provided images, web-search page image extraction, Unsplash, generated images when allowed, and deterministic fallback frames.
 - Still images are rendered with slow pan/zoom treatment and fade transitions, then muxed to the actual podcast audio timeframe.
+- Long video renders use adaptive ffmpeg budgets. Override with `videoFfmpegTimeoutMs`, `videoSegmentTimeoutMs`, or `videoMuxTimeoutMs` only when the host is known to need more time.
 - Only use music beds you are licensed to use. Provide a legal audio file path or upload; do not source copyrighted music without permission.
 - Check `/api/tts/voices` for the exact `hostA` / `hostB` voice IDs supported in your current deployment before passing custom `hostAVoiceIds` and `hostBVoiceIds`.
 - Example: `hostAVoiceIds: ["lessac-high", "ljspeech-high", "cori-high"]` and `hostBVoiceIds: ["ryan-high", "ryan-direct", "amy-broadcast"]` lets the same host cycle through multiple Piper voices per turn with a more premium-sounding mix.

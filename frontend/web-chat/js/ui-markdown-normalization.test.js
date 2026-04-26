@@ -119,4 +119,40 @@ Variations | Variation | What changes | |-----------|--------------| | Spicy | A
         expect(html).not.toContain('assistant-reasoning-ribbon');
         expect(html).not.toContain('Snapshot');
     });
+
+    test('renders progress step titles without visible truncation markers', () => {
+        const helper = Object.create(loadUIHelpersPrototype());
+        const html = helper.buildAssistantRenderPlan({
+            role: 'assistant',
+            content: '',
+            isStreaming: true,
+            reasoningDisplaySource: 'generated',
+            reasoningDisplayText: { text: 'Checking the next useful step.' },
+            reasoningDisplayFullText: { text: 'Checking the next useful step.' },
+            reasoningDisplayTitle: 'Live reasoning',
+            reasoningDisplayIcon: 'sparkles',
+            progressState: {
+                phase: 'executing',
+                detail: 'Running the task list.',
+                completedSteps: 0,
+                activeStepIndex: 0,
+                steps: [
+                    {
+                        title: 'Inspect the deployment state before editing. Then keep reading extra context that should not be shown when the compact step row needs to stay readable for the user because this generated planning note keeps going with implementation details, fallback checks, and final verification notes.',
+                        status: 'in_progress',
+                    },
+                    {
+                        title: 'Validate the output after the change [truncated 48 chars]',
+                        status: 'pending',
+                    },
+                ],
+            },
+        }, true).html;
+
+        expect(html).toContain('Inspect the deployment state before editing.');
+        expect(html).toContain('Validate the output after the change');
+        expect(html).not.toContain('Then keep reading extra context');
+        expect(html).not.toContain('[truncated');
+        expect(html).not.toContain('...');
+    });
 });

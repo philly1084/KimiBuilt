@@ -36,6 +36,22 @@ const DEFAULT_FPS = 30;
 const DEFAULT_SCENE_SECONDS = 8;
 const MIN_SCENE_SECONDS = 4;
 const MAX_SCENES = 36;
+const DEFAULT_SEGMENT_TIMEOUT_MS = 240000;
+const DEFAULT_MUX_TIMEOUT_MS = 900000;
+const DEFAULT_MAX_FFMPEG_TIMEOUT_MS = 1800000;
+const DEFAULT_X264_PRESET = 'veryfast';
+const DEFAULT_X264_CRF = 23;
+const X264_PRESETS = new Set([
+  'ultrafast',
+  'superfast',
+  'veryfast',
+  'faster',
+  'fast',
+  'medium',
+  'slow',
+  'slower',
+  'veryslow',
+]);
 
 function createServiceError(statusCode, message, code = 'podcast_video_error') {
   const error = new Error(message);
@@ -64,6 +80,60 @@ function clampNumber(value, min, max, fallback) {
   }
 
   return Math.max(min, Math.min(max, numeric));
+}
+
+function normalizePositiveInteger(value, fallback) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return fallback;
+  }
+  return Math.floor(numeric);
+}
+
+function resolvePodcastVideoRuntimeOptions(options = {}) {
+  const configured = config.podcastVideo || {};
+  const maxFfmpegTimeoutMs = normalizePositiveInteger(
+    options.maxFfmpegTimeoutMs,
+    normalizePositiveInteger(configured.maxFfmpegTimeoutMs, DEFAULT_MAX_FFMPEG_TIMEOUT_MS),
+  );
+  const sharedTimeoutMs = normalizePositiveInteger(options.ffmpegTimeoutMs || options.timeoutMs, null);
+  const segmentTimeoutMs = normalizePositiveInteger(
+    options.segmentTimeoutMs,
+    sharedTimeoutMs || normalizePositiveInteger(configured.segmentTimeoutMs, DEFAULT_SEGMENT_TIMEOUT_MS),
+  );
+  const muxTimeoutMs = normalizePositiveInteger(
+    options.muxTimeoutMs,
+    sharedTimeoutMs || normalizePositiveInteger(configured.muxTimeoutMs, DEFAULT_MUX_TIMEOUT_MS),
+  );
+  const configuredPreset = String(configured.x264Preset || DEFAULT_X264_PRESET).trim().toLowerCase();
+  const requestedPreset = String(options.x264Preset || '').trim().toLowerCase();
+  const x264Preset = X264_PRESETS.has(requestedPreset)
+    ? requestedPreset
+    : X264_PRESETS.has(configuredPreset)
+      ? configuredPreset
+      : DEFAULT_X264_PRESET;
+  const x264Crf = clampNumber(options.x264Crf ?? configured.x264Crf, 18, 32, DEFAULT_X264_CRF);
+
+  return {
+    maxFfmpegTimeoutMs,
+    segmentTimeoutMs: Math.min(maxFfmpegTimeoutMs, segmentTimeoutMs),
+    muxTimeoutMs: Math.min(maxFfmpegTimeoutMs, muxTimeoutMs),
+    x264Preset,
+    x264Crf,
+  };
+}
+
+function resolveAdaptiveFfmpegTimeoutMs(baseTimeoutMs, durationSeconds, {
+  fixedMs = 60000,
+  perSecondMs = 1000,
+  maxTimeoutMs = DEFAULT_MAX_FFMPEG_TIMEOUT_MS,
+} = {}) {
+  const durationMs = Math.max(0, Number(durationSeconds) || 0) * Math.max(0, perSecondMs);
+  const adaptiveTimeoutMs = Math.ceil(Math.max(0, fixedMs) + durationMs);
+  return Math.min(
+    normalizePositiveInteger(maxTimeoutMs, DEFAULT_MAX_FFMPEG_TIMEOUT_MS),
+    Math.max(normalizePositiveInteger(baseTimeoutMs, 1000), adaptiveTimeoutMs),
+  );
 }
 
 function uniqueOrdered(items = []) {
@@ -418,6 +488,7 @@ class PodcastVideoService {
   getPublicConfig() {
     const diagnostics = this.audioProcessingService?.getPublicConfig?.() || {};
     const ffmpegReady = diagnostics?.configured === true;
+    const runtime = resolvePodcastVideoRuntimeOptions();
     return {
       configured: ffmpegReady,
       provider: 'ffmpeg',
@@ -429,6 +500,16 @@ class PodcastVideoService {
         fps: DEFAULT_FPS,
         sceneSeconds: DEFAULT_SCENE_SECONDS,
         maxScenes: MAX_SCENES,
+      },
+      timeouts: {
+        segmentMs: runtime.segmentTimeoutMs,
+        muxMs: runtime.muxTimeoutMs,
+        maxFfmpegMs: runtime.maxFfmpegTimeoutMs,
+      },
+      encoder: {
+        videoCodec: 'libx264',
+        preset: runtime.x264Preset,
+        crf: runtime.x264Crf,
       },
       diagnostics: diagnostics?.diagnostics || diagnostics,
     };
@@ -454,35 +535,59 @@ class PodcastVideoService {
     this.assertFfmpegReady();
     const timeoutMs = Math.max(1000, Number(options.timeoutMs) || Number(config.audioProcessing?.timeoutMs) || 120000);
     const binaryPath = this.getEffectiveFfmpegPath();
+    const stage = sanitizeText(options.stage || 'rendering podcast video') || 'rendering podcast video';
 
     return new Promise((resolve, reject) => {
       const stderr = [];
       const stdout = [];
+      let settled = false;
+      const rejectOnce = (error) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        reject(error);
+      };
+      const resolveOnce = (value) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        resolve(value);
+      };
       const child = this.spawn(binaryPath, args, {
         windowsHide: true,
       });
       const timeout = setTimeout(() => {
-        child.kill('SIGKILL');
-        reject(createServiceError(504, 'ffmpeg timed out while rendering podcast video.', 'video_processing_timeout'));
+        try {
+          child.kill('SIGKILL');
+        } catch (_error) {
+          // The process may have exited between the timer firing and kill.
+        }
+        rejectOnce(createServiceError(
+          504,
+          `ffmpeg timed out while rendering podcast video (${stage}, ${timeoutMs}ms).`,
+          'video_processing_timeout',
+        ));
       }, timeoutMs);
 
       child.stdout?.on('data', (chunk) => stdout.push(Buffer.from(chunk)));
       child.stderr?.on('data', (chunk) => stderr.push(Buffer.from(chunk)));
       child.on('error', (error) => {
         clearTimeout(timeout);
-        reject(createServiceError(503, error.message || 'ffmpeg could not be started.', 'video_processing_unavailable'));
+        rejectOnce(createServiceError(503, error.message || 'ffmpeg could not be started.', 'video_processing_unavailable'));
       });
       child.on('close', (code) => {
         clearTimeout(timeout);
         if (code === 0) {
-          resolve({
+          resolveOnce({
             stdout: Buffer.concat(stdout).toString('utf8'),
             stderr: Buffer.concat(stderr).toString('utf8'),
           });
           return;
         }
 
-        reject(createServiceError(
+        rejectOnce(createServiceError(
           502,
           `ffmpeg failed to render podcast video. ${Buffer.concat(stderr).toString('utf8').trim()}`.trim(),
           'video_processing_failed',
@@ -861,6 +966,12 @@ class PodcastVideoService {
     imageMode = 'mixed',
     generateImages = false,
     imageModel = null,
+    ffmpegTimeoutMs = null,
+    segmentTimeoutMs = null,
+    muxTimeoutMs = null,
+    maxFfmpegTimeoutMs = null,
+    x264Preset = null,
+    x264Crf = null,
     toolManager = null,
     toolContext = {},
   } = {}) {
@@ -875,6 +986,14 @@ class PodcastVideoService {
     }
 
     const dimensions = normalizeAspectRatio(aspectRatio);
+    const runtime = resolvePodcastVideoRuntimeOptions({
+      ffmpegTimeoutMs,
+      segmentTimeoutMs,
+      muxTimeoutMs,
+      maxFfmpegTimeoutMs,
+      x264Preset,
+      x264Crf,
+    });
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-podcast-video-'));
     const audioExtension = String(audioMimeType || '').toLowerCase().includes('mpeg') ? 'mp3' : 'wav';
     const audioPath = path.join(tempDir, `podcast-audio.${audioExtension}`);
@@ -898,7 +1017,7 @@ class PodcastVideoService {
       for (let index = 0; index < normalizedScenes.length; index += 1) {
         const scene = normalizedScenes[index];
         const asset = imageAssets[index];
-      const segmentPath = path.join(tempDir, `segment-${String(index + 1).padStart(3, '0')}.mp4`);
+        const segmentPath = path.join(tempDir, `segment-${String(index + 1).padStart(3, '0')}.mp4`);
         segmentPaths.push(segmentPath);
         const fadeOutStart = Math.max(0, scene.duration - 0.35);
         const panDirection = index % 2 === 0
@@ -921,10 +1040,17 @@ class PodcastVideoService {
           '-r', String(DEFAULT_FPS),
           '-an',
           '-c:v', 'libx264',
+          '-preset', runtime.x264Preset,
+          '-crf', String(runtime.x264Crf),
           '-pix_fmt', 'yuv420p',
           segmentPath,
         ], {
-          timeoutMs: 120000,
+          timeoutMs: resolveAdaptiveFfmpegTimeoutMs(runtime.segmentTimeoutMs, scene.duration, {
+            fixedMs: 60000,
+            perSecondMs: 2000,
+            maxTimeoutMs: runtime.maxFfmpegTimeoutMs,
+          }),
+          stage: `scene ${index + 1}/${normalizedScenes.length}`,
         });
       }
 
@@ -948,7 +1074,16 @@ class PodcastVideoService {
         '-movflags', '+faststart',
         outputPath,
       ], {
-        timeoutMs: 300000,
+        timeoutMs: resolveAdaptiveFfmpegTimeoutMs(
+          runtime.muxTimeoutMs,
+          normalizedScenes.reduce((sum, scene) => sum + Math.max(MIN_SCENE_SECONDS, Number(scene.duration) || 0), 0),
+          {
+            fixedMs: 120000,
+            perSecondMs: 1000,
+            maxTimeoutMs: runtime.maxFfmpegTimeoutMs,
+          },
+        ),
+        stage: 'final mux',
       });
 
       return {
@@ -1085,6 +1220,12 @@ class PodcastVideoService {
       imageMode: options.imageMode || 'mixed',
       generateImages: options.generateImages === true,
       imageModel: options.imageModel || null,
+      ffmpegTimeoutMs: options.ffmpegTimeoutMs || options.videoFfmpegTimeoutMs || options.timeoutMs || null,
+      segmentTimeoutMs: options.segmentTimeoutMs || options.videoSegmentTimeoutMs || null,
+      muxTimeoutMs: options.muxTimeoutMs || options.videoMuxTimeoutMs || null,
+      maxFfmpegTimeoutMs: options.maxFfmpegTimeoutMs || options.videoMaxFfmpegTimeoutMs || null,
+      x264Preset: options.x264Preset || options.videoX264Preset || null,
+      x264Crf: options.x264Crf || options.videoX264Crf || null,
       toolManager: options.toolManager || null,
       toolContext: options.toolContext || {},
     });

@@ -418,7 +418,7 @@ function normalizeProgressStepStatus(status = '') {
 }
 
 function buildProgressTitleFromPlannedStep(step = {}, index = 0) {
-    const reason = truncateText(normalizeInlineText(step?.reason || ''), 88);
+    const reason = truncateProgressStepTitle(step?.reason || '', 160);
     if (reason) {
         return reason;
     }
@@ -439,7 +439,7 @@ function buildProgressStepsFromProjectPlan(projectPlan = null) {
 
     return milestones.map((milestone, index) => ({
         id: normalizeInlineText(milestone?.id || '') || `project-step-${index + 1}`,
-        title: truncateText(normalizeInlineText(milestone?.title || `Step ${index + 1}`), 88),
+        title: truncateProgressStepTitle(milestone?.title || `Step ${index + 1}`, 160),
         status: normalizeProgressStepStatus(milestone?.status),
     }));
 }
@@ -452,7 +452,7 @@ function buildProgressStepsFromWorkflow(workflow = null) {
 
     return taskList.map((task, index) => ({
         id: normalizeInlineText(task?.id || '') || `workflow-step-${index + 1}`,
-        title: truncateText(normalizeInlineText(task?.title || `Task ${index + 1}`), 88),
+        title: truncateProgressStepTitle(task?.title || `Task ${index + 1}`, 160),
         status: normalizeProgressStepStatus(task?.status),
     }));
 }
@@ -1822,6 +1822,45 @@ function truncateText(value = '', limit = MAX_TOOL_RESULT_CHARS) {
     }
 
     return `${text.slice(0, limit)}\n[truncated ${text.length - limit} chars]`;
+}
+
+function truncateProgressStepTitle(value = '', limit = 160) {
+    const text = normalizeInlineText(value);
+    const maxLength = Number.isFinite(Number(limit)) && Number(limit) > 0
+        ? Number(limit)
+        : 160;
+    if (!text || text.length <= maxLength) {
+        return text;
+    }
+
+    const clipped = text.slice(0, maxLength).trimEnd();
+    const minSentenceLength = Math.min(
+        Math.max(18, Math.floor(maxLength * 0.22)),
+        Math.max(1, maxLength - 1),
+    );
+    const sentenceMatches = [...clipped.matchAll(/[.!?](?=\s|$)/g)];
+    const sentenceBoundary = sentenceMatches
+        .map((match) => match.index + 1)
+        .filter((index) => index >= minSentenceLength)
+        .pop();
+    if (sentenceBoundary) {
+        return clipped.slice(0, sentenceBoundary).trim();
+    }
+
+    const minBreakLength = Math.min(
+        Math.max(24, Math.floor(maxLength * 0.68)),
+        Math.max(1, maxLength - 1),
+    );
+    const breakMatches = [...clipped.matchAll(/[\s,;:-]/g)];
+    const readableBoundary = breakMatches
+        .map((match) => match.index)
+        .filter((index) => index >= minBreakLength)
+        .pop();
+    const readableClip = readableBoundary
+        ? clipped.slice(0, readableBoundary)
+        : clipped;
+    return readableClip.replace(/[\s,;:.-]+$/g, '').trim()
+        || clipped.trim();
 }
 
 function stripHtmlToText(html = '') {

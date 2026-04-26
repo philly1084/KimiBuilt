@@ -64,6 +64,82 @@
             --info: #0969da;
         }
 
+        body[data-chat-theme] {
+            background: var(--cli-theme-page-background, var(--bg-primary));
+        }
+
+        body[data-chat-theme] .header,
+        body[data-chat-theme] .input-container {
+            background: var(--cli-theme-panel-background, var(--bg-secondary));
+            border-color: var(--border-color);
+            box-shadow: var(--cli-theme-panel-shadow, none);
+        }
+
+        body[data-chat-theme] .terminal-container {
+            background: var(--cli-theme-page-background, var(--bg-primary));
+        }
+
+        body[data-chat-theme] .line-output.ai,
+        body[data-chat-theme] .line-output.user-message {
+            background: var(--cli-theme-output-background, var(--bg-secondary));
+            border-color: var(--border-color);
+            border-left-color: var(--accent);
+            box-shadow: var(--cli-theme-panel-shadow, none);
+        }
+
+        body[data-chat-theme] .line-input.user-message {
+            background: var(--cli-theme-user-background, var(--bg-tertiary));
+            border-color: transparent;
+            color: #fff;
+        }
+
+        body[data-chat-theme] .line-input.user-message .input-text,
+        body[data-chat-theme] .line-input.user-message .prompt {
+            color: #fff;
+        }
+
+        body[data-chat-theme] .autocomplete,
+        body[data-chat-theme] .modal,
+        body[data-chat-theme] .file-manager-content,
+        body[data-chat-theme] .voxel-panel {
+            background: var(--cli-theme-panel-background, var(--bg-secondary));
+            border-color: var(--border-color);
+            box-shadow: var(--cli-theme-panel-shadow, 0 20px 50px rgba(0, 0, 0, 0.22));
+        }
+
+        body[data-chat-theme] .file-manager-overlay,
+        body[data-chat-theme] .modal-overlay {
+            background: var(--cli-theme-overlay-background, rgba(0, 0, 0, 0.55));
+            backdrop-filter: blur(6px);
+        }
+
+        body[data-chat-theme] .autocomplete-item:hover,
+        body[data-chat-theme] .autocomplete-item.selected,
+        body[data-chat-theme] .file-item:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        body[data-chat-theme] .voxel-tool-chip,
+        body[data-chat-theme] .voxel-tool-card,
+        body[data-chat-theme] .voxel-agent-stat,
+        body[data-chat-theme] .voxel-mini-pet,
+        body[data-chat-theme] .voxel-prompt-pet {
+            background: var(--bg-tertiary);
+            border-color: var(--border-color);
+            box-shadow: var(--cli-theme-control-shadow, none);
+        }
+
+        body[data-chat-theme] .voxel-tool-chip:hover,
+        body[data-chat-theme] .voxel-tool-chip:focus-visible,
+        body[data-chat-theme] .voxel-tool-chip.active,
+        body[data-chat-theme] .voxel-tool-card:hover,
+        body[data-chat-theme] .voxel-tool-card:focus-visible {
+            background: var(--bg-hover);
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px var(--cli-theme-accent-ring, rgba(88, 166, 255, 0.18));
+        }
+
         * { box-sizing: border-box; }
         
         body {
@@ -891,7 +967,7 @@
                 <button class="btn btn-sm" data-short="Exp" onclick="app.exportSession()" title="Export session" aria-label="Export session">
                     <span>Export</span>
                 </button>
-                <button class="btn btn-sm" data-short="Thm" onclick="app.cycleTheme()" title="Toggle theme" aria-label="Toggle theme">
+                <button id="themeButton" class="btn btn-sm" data-short="Thm" onclick="app.cycleTheme()" title="Toggle theme" aria-label="Toggle theme">
                     <span>Theme</span>
                 </button>
                 <button class="btn btn-sm" data-short="Bud" onclick="app.focusVoxelCreator()" title="Voxel buddy" aria-label="Focus voxel buddy">
@@ -1060,6 +1136,7 @@
     </div>
 
     <script src="../shared/model-output-parser.js?v=20260425a"></script>
+    <script src="../shared/theme-presets.js?v=20260426a"></script>
     <script src="js/api.js"></script>
     <script src="js/file-handler.js"></script>
     <script src="js/voxel-pets.js"></script>

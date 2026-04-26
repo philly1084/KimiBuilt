@@ -284,12 +284,19 @@ describe('/api/sessions route', () => {
         ]);
     });
 
-    test('returns message-derived artifacts without querying stored artifacts in file-backed mode', async () => {
+    test('includes local stored artifacts in file-backed mode', async () => {
         sessionStore.isPersistent.mockReturnValue(false);
         sessionStore.getOwned.mockResolvedValue({
             id: 'session-1',
             metadata: { ownerId: 'phill' },
         });
+        artifactService.listSessionArtifacts.mockResolvedValue([{
+            id: 'artifact-local-1',
+            filename: 'research.html',
+            format: 'html',
+            mimeType: 'text/html',
+            downloadUrl: '/api/artifacts/artifact-local-1/download',
+        }]);
         sessionStore.listMessages.mockResolvedValue([
             {
                 id: 'assistant-1',
@@ -316,14 +323,19 @@ describe('/api/sessions route', () => {
         const response = await request(app).get('/api/sessions/session-1/artifacts');
 
         expect(response.status).toBe(200);
-        expect(artifactService.listSessionArtifacts).not.toHaveBeenCalled();
-        expect(response.body.artifacts).toEqual([
+        expect(artifactService.listSessionArtifacts).toHaveBeenCalledWith('session-1');
+        expect(response.body.artifacts).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: 'artifact-local-1',
+                filename: 'research.html',
+                format: 'html',
+            }),
             expect.objectContaining({
                 id: 'doc-88',
                 filename: 'fallback-only.pdf',
                 format: 'pdf',
             }),
-        ]);
+        ]));
     });
 
     test('cancels an active foreground request for the owned session', async () => {

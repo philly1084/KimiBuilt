@@ -9,7 +9,12 @@ class CodeCLIApp {
         this.historyIndex = -1;
         this.currentOutput = '';
         this.isProcessing = false;
-        this.theme = localStorage.getItem('codecli-theme') || 'voxel';
+        this.themeCatalog = window.KimiBuiltThemePresets || null;
+        this.theme = this.normalizeThemeId(
+            localStorage.getItem('codecli-theme')
+            || localStorage.getItem(this.themeCatalog?.storageKeys?.preset || 'kimibuilt_theme_preset')
+            || 'voxel'
+        ) || 'voxel';
         this.commandHistory = JSON.parse(localStorage.getItem('codecli-cmd-history') || '[]');
         this.autocompleteIndex = -1;
         this.autocompleteMatches = [];
@@ -53,6 +58,7 @@ class CodeCLIApp {
         this.terminalOutput = document.getElementById('terminalOutput');
         this.commandInput = document.getElementById('commandInput');
         this.modelSelect = document.getElementById('modelSelect');
+        this.themeButton = document.getElementById('themeButton');
         this.statusDot = document.getElementById('statusDot');
         this.statusText = document.getElementById('statusText');
         this.sessionInfo = document.getElementById('sessionInfo');
@@ -601,7 +607,6 @@ class CodeCLIApp {
 
     useVoxelQuickTool(tool = 'chat') {
         const normalized = String(tool || 'chat').toLowerCase();
-        this.setTheme('voxel', { silent: true });
         this.setActiveVoxelTool(normalized);
         this.setVoxelPetHidden(false);
 
@@ -768,7 +773,6 @@ class CodeCLIApp {
     }
 
     focusVoxelCreator(options = {}) {
-        this.setTheme('voxel', { silent: true });
         this.setVoxelPetHidden(false);
         this.voxelDock?.classList.remove('hidden');
         this.renderVoxelPet('scout');
@@ -1133,7 +1137,12 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
                 break;
             case 'theme':
                 if (args[0]) {
-                    this.setTheme(args[0]);
+                    const themeArg = String(args[0] || '').toLowerCase();
+                    if (['list', 'themes', 'help'].includes(themeArg)) {
+                        this.printThemeList();
+                    } else {
+                        this.setTheme(args[0]);
+                    }
                 } else {
                     this.cycleTheme();
                 }
@@ -1551,7 +1560,8 @@ Session Statistics:
   /new [name]        Start a fresh isolated backend session
   /sessions          List isolated Voxel CLI sessions
   /switch <id>       Switch to a session by number, id, or id prefix
-  /theme [name]      Set voxel, dark, or light theme
+  /theme [name]      Set voxel or a shared web-chat theme
+  /theme list        Show available shared themes
   /voxel             Switch back to the voxel CLI theme
   /shortcuts, /keys  Show keyboard shortcuts
 
@@ -3489,44 +3499,280 @@ ${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${p
         this.terminalOutput.innerHTML = '';
         this.printWelcome();
     }
+
+    getThemePresets() {
+        return Array.isArray(this.themeCatalog?.presets) ? this.themeCatalog.presets : [];
+    }
+
+    getThemePreset(theme) {
+        const normalized = String(theme || '').trim().toLowerCase();
+        if (!normalized) {
+            return null;
+        }
+
+        if (typeof this.themeCatalog?.getById === 'function') {
+            return this.themeCatalog.getById(normalized);
+        }
+
+        return this.getThemePresets().find((preset) => preset.id === normalized) || null;
+    }
+
+    getDefaultSharedThemeId(mode = 'dark') {
+        const normalizedMode = String(mode || '').trim().toLowerCase() === 'light' ? 'light' : 'dark';
+        if (typeof this.themeCatalog?.getDefaultId === 'function') {
+            return this.themeCatalog.getDefaultId(normalizedMode);
+        }
+
+        return this.themeCatalog?.defaults?.[normalizedMode] || (normalizedMode === 'light' ? 'paper' : 'obsidian');
+    }
+
+    normalizeThemeId(theme) {
+        const normalized = String(theme || '').trim().toLowerCase();
+        if (!normalized) {
+            return '';
+        }
+
+        if (normalized === 'voxel') {
+            return 'voxel';
+        }
+
+        const presets = this.getThemePresets();
+        if (presets.length > 0) {
+            if (normalized === 'dark' || normalized === 'light') {
+                return this.getDefaultSharedThemeId(normalized);
+            }
+
+            return this.getThemePreset(normalized) ? normalized : '';
+        }
+
+        return ['dark', 'light'].includes(normalized) ? normalized : '';
+    }
+
+    getThemeCycleIds() {
+        const presetIds = this.getThemePresets().map((preset) => preset.id);
+        return presetIds.length > 0 ? ['voxel', ...presetIds] : ['voxel', 'dark', 'light'];
+    }
+
+    getThemeLabel(theme = this.theme) {
+        if (theme === 'voxel') {
+            return 'Voxel';
+        }
+
+        const preset = this.getThemePreset(theme);
+        if (preset) {
+            return preset.name;
+        }
+
+        return theme === 'light' ? 'Light' : 'Dark';
+    }
+
+    getThemeOptionSummary() {
+        const presets = this.getThemePresets();
+        if (!presets.length) {
+            return 'voxel, dark, or light';
+        }
+
+        return ['voxel', ...presets.map((preset) => preset.id)].join(', ');
+    }
+
+    printThemeList() {
+        const presets = this.getThemePresets();
+        if (!presets.length) {
+            this.printAI('## Themes\n\n- `voxel`\n- `dark`\n- `light`');
+            return;
+        }
+
+        const grouped = presets.reduce((groups, preset) => {
+            const group = preset.group || 'core';
+            if (!groups[group]) {
+                groups[group] = [];
+            }
+            groups[group].push(preset);
+            return groups;
+        }, {});
+
+        const labels = this.themeCatalog?.groupLabels || {};
+        const lines = ['## Themes', '', '- `voxel` - Voxel CLI companion theme'];
+        Object.keys(grouped).forEach((group) => {
+            lines.push('', `### ${labels[group] || group}`);
+            grouped[group].forEach((preset) => {
+                const marker = preset.id === this.theme ? ' (current)' : '';
+                lines.push(`- \`${preset.id}\` - ${preset.name}, ${preset.mode}${marker}`);
+            });
+        });
+
+        this.printAI(lines.join('\n'));
+    }
     
     cycleTheme() {
-        const themes = ['voxel', 'dark', 'light'];
+        const themes = this.getThemeCycleIds();
         const currentIndex = themes.indexOf(this.theme);
-        this.theme = themes[(currentIndex + 1) % themes.length];
-        this.setTheme(this.theme, { silent: true });
-        this.printSystem(`Theme: ${this.theme}`);
+        const nextTheme = themes[(currentIndex + 1) % themes.length] || themes[0];
+        this.setTheme(nextTheme, { silent: true });
+        this.printSystem(`Theme: ${this.getThemeLabel(this.theme)}`);
     }
 
     setTheme(theme, options = {}) {
-        const validThemes = ['voxel', 'dark', 'light'];
-        const normalizedTheme = String(theme || '').toLowerCase();
-        if (!validThemes.includes(normalizedTheme)) {
-            this.printError(`Unknown theme: ${theme}. Use voxel, dark, or light.`);
+        const normalizedTheme = this.normalizeThemeId(theme);
+        if (!normalizedTheme) {
+            this.printError(`Unknown theme: ${theme}. Use ${this.getThemeOptionSummary()}.`);
             return;
         }
 
         this.theme = normalizedTheme;
         this.applyTheme(this.theme);
-        localStorage.setItem('codecli-theme', this.theme);
+        this.persistThemePreference(this.theme);
         this.renderVoxelPet();
         if (!options.silent) {
-            this.printSystem(`Theme: ${this.theme}`);
+            this.printSystem(`Theme: ${this.getThemeLabel(this.theme)}`);
         }
     }
     
     applyTheme(theme) {
-        document.body.setAttribute('data-theme', theme);
+        const normalizedTheme = this.normalizeThemeId(theme) || 'voxel';
+        const preset = this.getThemePreset(normalizedTheme);
+        if (normalizedTheme === 'voxel') {
+            document.body.setAttribute('data-theme', 'voxel');
+            document.body.removeAttribute('data-chat-theme');
+            this.clearSharedThemeProperties();
+        } else {
+            const mode = preset?.mode === 'light' || normalizedTheme === 'light' ? 'light' : 'dark';
+            document.body.setAttribute('data-theme', mode);
+            if (preset) {
+                document.body.setAttribute('data-chat-theme', preset.id);
+                this.applySharedThemeProperties(preset);
+            } else {
+                document.body.removeAttribute('data-chat-theme');
+                this.clearSharedThemeProperties();
+            }
+        }
+        this.updateThemeButton();
         
         // Update mermaid theme
         if (typeof mermaid !== 'undefined') {
             mermaid.initialize({
                 startOnLoad: false,
-                theme: theme === 'light' ? 'default' : 'dark',
+                theme: document.body.getAttribute('data-theme') === 'light' ? 'default' : 'dark',
                 securityLevel: 'loose',
                 fontFamily: 'var(--font-family)'
             });
         }
+    }
+
+    persistThemePreference(theme) {
+        localStorage.setItem('codecli-theme', theme);
+        const preset = this.getThemePreset(theme);
+        if (!preset) {
+            return;
+        }
+
+        const storageKeys = this.themeCatalog?.storageKeys || {
+            preset: 'kimibuilt_theme_preset',
+            mode: 'kimibuilt_theme',
+        };
+        localStorage.setItem(storageKeys.preset, preset.id);
+        localStorage.setItem(storageKeys.mode, preset.mode);
+    }
+
+    applySharedThemeProperties(preset) {
+        const mode = preset?.mode === 'light' ? 'light' : 'dark';
+        const preview = preset?.preview || {};
+        const palette = mode === 'light'
+            ? {
+                bgPrimary: '#f8fafc',
+                bgSecondary: '#ffffff',
+                bgTertiary: '#eef2f7',
+                bgHover: '#e2e8f0',
+                border: 'rgba(15, 23, 42, 0.14)',
+                textPrimary: '#172033',
+                textSecondary: '#475569',
+                textMuted: '#64748b',
+                overlay: 'rgba(15, 23, 42, 0.28)',
+                panelShadow: '0 18px 44px rgba(15, 23, 42, 0.14)',
+                controlShadow: '0 10px 24px rgba(15, 23, 42, 0.08)',
+            }
+            : {
+                bgPrimary: '#0d1117',
+                bgSecondary: '#161b22',
+                bgTertiary: '#21262d',
+                bgHover: '#30363d',
+                border: 'rgba(148, 163, 184, 0.16)',
+                textPrimary: '#e5edf5',
+                textSecondary: '#a7b4c4',
+                textMuted: '#778397',
+                overlay: 'rgba(2, 6, 12, 0.72)',
+                panelShadow: '0 20px 54px rgba(0, 0, 0, 0.34)',
+                controlShadow: '0 10px 24px rgba(0, 0, 0, 0.18)',
+            };
+
+        const accent = preview.accent || (mode === 'light' ? '#2563eb' : '#58a6ff');
+        const properties = {
+            '--bg-primary': palette.bgPrimary,
+            '--bg-secondary': palette.bgSecondary,
+            '--bg-tertiary': palette.bgTertiary,
+            '--bg-hover': palette.bgHover,
+            '--border-color': palette.border,
+            '--text-primary': palette.textPrimary,
+            '--text-secondary': palette.textSecondary,
+            '--text-muted': palette.textMuted,
+            '--accent': accent,
+            '--accent-hover': accent,
+            '--success': mode === 'light' ? '#15803d' : '#238636',
+            '--success-bright': mode === 'light' ? '#16a34a' : '#3fb950',
+            '--warning': mode === 'light' ? '#a16207' : '#d29922',
+            '--error': mode === 'light' ? '#dc2626' : '#f85149',
+            '--info': accent,
+            '--cli-theme-page-background': preview.background || palette.bgPrimary,
+            '--cli-theme-panel-background': preview.surface || palette.bgSecondary,
+            '--cli-theme-output-background': preview.assistantBubble || palette.bgSecondary,
+            '--cli-theme-user-background': preview.userBubble || accent,
+            '--cli-theme-overlay-background': palette.overlay,
+            '--cli-theme-panel-shadow': palette.panelShadow,
+            '--cli-theme-control-shadow': palette.controlShadow,
+            '--cli-theme-accent-ring': mode === 'light' ? 'rgba(37, 99, 235, 0.18)' : 'rgba(88, 166, 255, 0.2)',
+        };
+
+        Object.entries(properties).forEach(([name, value]) => {
+            document.body.style.setProperty(name, value);
+        });
+    }
+
+    clearSharedThemeProperties() {
+        [
+            '--bg-primary',
+            '--bg-secondary',
+            '--bg-tertiary',
+            '--bg-hover',
+            '--border-color',
+            '--text-primary',
+            '--text-secondary',
+            '--text-muted',
+            '--accent',
+            '--accent-hover',
+            '--success',
+            '--success-bright',
+            '--warning',
+            '--error',
+            '--info',
+            '--cli-theme-page-background',
+            '--cli-theme-panel-background',
+            '--cli-theme-output-background',
+            '--cli-theme-user-background',
+            '--cli-theme-overlay-background',
+            '--cli-theme-panel-shadow',
+            '--cli-theme-control-shadow',
+            '--cli-theme-accent-ring',
+        ].forEach((property) => document.body.style.removeProperty(property));
+    }
+
+    updateThemeButton() {
+        if (!this.themeButton) {
+            return;
+        }
+
+        const label = this.getThemeLabel(this.theme);
+        this.themeButton.title = `Theme: ${label}`;
+        this.themeButton.setAttribute('aria-label', `Cycle theme. Current theme: ${label}`);
     }
     
     copyLastOutput() {

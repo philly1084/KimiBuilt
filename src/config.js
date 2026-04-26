@@ -273,6 +273,43 @@ const normalizedPiperPodcastChunkChars = Math.max(
         parseInt(process.env.PIPER_TTS_PODCAST_CHUNK_CHARS, 10) || Math.min(760, normalizedPiperMaxTextChars),
     ),
 );
+const normalizedPodcastVideoSegmentTimeoutMs = Math.max(
+    30000,
+    parseInt(process.env.PODCAST_VIDEO_SEGMENT_TIMEOUT_MS, 10) || 240000,
+);
+const normalizedPodcastVideoMuxTimeoutMs = Math.max(
+    60000,
+    parseInt(process.env.PODCAST_VIDEO_MUX_TIMEOUT_MS, 10)
+        || parseInt(process.env.PODCAST_VIDEO_RENDER_TIMEOUT_MS, 10)
+        || 900000,
+);
+const normalizedPodcastVideoMaxFfmpegTimeoutMs = Math.max(
+    normalizedPodcastVideoMuxTimeoutMs,
+    parseInt(process.env.PODCAST_VIDEO_MAX_FFMPEG_TIMEOUT_MS, 10) || 1800000,
+);
+const normalizedPodcastToolTimeoutMs = Math.max(
+    900000,
+    parseInt(process.env.PODCAST_TOOL_TIMEOUT_MS, 10) || 2700000,
+);
+const allowedPodcastVideoX264Presets = new Set([
+    'ultrafast',
+    'superfast',
+    'veryfast',
+    'faster',
+    'fast',
+    'medium',
+    'slow',
+    'slower',
+    'veryslow',
+]);
+const requestedPodcastVideoX264Preset = String(process.env.PODCAST_VIDEO_X264_PRESET || '').trim().toLowerCase();
+const normalizedPodcastVideoX264Preset = allowedPodcastVideoX264Presets.has(requestedPodcastVideoX264Preset)
+    ? requestedPodcastVideoX264Preset
+    : 'veryfast';
+const normalizedPodcastVideoX264Crf = Math.max(
+    18,
+    Math.min(32, parseOptionalInteger(process.env.PODCAST_VIDEO_X264_CRF) ?? 23),
+);
 
 const config = {
     // Server
@@ -406,6 +443,15 @@ const config = {
         ),
         researchConcurrency: normalizedPodcastResearchConcurrency,
         ttsConcurrency: normalizedPodcastTtsConcurrency,
+        toolTimeoutMs: normalizedPodcastToolTimeoutMs,
+    },
+
+    podcastVideo: {
+        segmentTimeoutMs: normalizedPodcastVideoSegmentTimeoutMs,
+        muxTimeoutMs: normalizedPodcastVideoMuxTimeoutMs,
+        maxFfmpegTimeoutMs: normalizedPodcastVideoMaxFfmpegTimeoutMs,
+        x264Preset: normalizedPodcastVideoX264Preset,
+        x264Crf: normalizedPodcastVideoX264Crf,
     },
 
     auth: {

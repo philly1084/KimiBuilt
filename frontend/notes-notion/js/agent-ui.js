@@ -15,6 +15,7 @@ const AgentUI = (function() {
         { id: 'polish_layout', label: 'Polish layout', title: 'Make the page feel more designed' },
         { id: 'layout_catalog', label: 'Pick layout', title: 'Show indexed page layout options' },
         { id: 'multi_pass', label: 'Work in passes', title: 'Plan, expand, and apply the page in multiple passes' },
+        { id: 'section_agents', label: 'Section agents', title: 'Design the page, split it by headings, and build section chunks' },
         { id: 'brief', label: 'Turn into brief', title: 'Convert the page into an executive brief' },
         { id: 'grammar', label: 'Fix grammar', title: 'Fix grammar and spelling' }
     ]);
@@ -271,6 +272,7 @@ const AgentUI = (function() {
             polish_layout: 'Polish this page so it feels designed. Improve the hierarchy, add stronger support blocks where needed, and tighten the section rhythm.',
             layout_catalog: 'Show me 2-3 best-fit indexed design layouts from the Notes layout catalog, then recommend which one to apply to this page.',
             multi_pass: 'Work through this page in multiple passes. First decide the best section structure, then expand each section, then apply the final page edits.',
+            section_agents: 'Make a design pass for this page, split the work into heading-based section chunks, assign each chunk to a focused section agent, then apply the finished section edits using section-level notes-actions.',
             brief: 'Turn this page into an executive brief with a clear lead, key takeaways, and next steps.'
         };
 

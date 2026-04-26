@@ -5,17 +5,18 @@
 
 const webChatGatewayHelpers = window.KimiBuiltGatewaySSE || {};
 const WEB_CHAT_DEFAULT_MODEL = webChatGatewayHelpers.DEFAULT_CODEX_MODEL_ID || 'gpt-5.4-mini';
-const WEB_CHAT_THEME_PRESET_STORAGE_KEY = 'kimibuilt_theme_preset';
-const WEB_CHAT_THEME_MODE_STORAGE_KEY = 'kimibuilt_theme';
-const WEB_CHAT_THEME_DEFAULTS = Object.freeze({
+const WEB_CHAT_SHARED_THEMES = window.KimiBuiltThemePresets || {};
+const WEB_CHAT_THEME_PRESET_STORAGE_KEY = WEB_CHAT_SHARED_THEMES.storageKeys?.preset || 'kimibuilt_theme_preset';
+const WEB_CHAT_THEME_MODE_STORAGE_KEY = WEB_CHAT_SHARED_THEMES.storageKeys?.mode || 'kimibuilt_theme';
+const WEB_CHAT_THEME_DEFAULTS = WEB_CHAT_SHARED_THEMES.defaults || Object.freeze({
     dark: 'obsidian',
     light: 'paper',
 });
-const WEB_CHAT_THEME_GROUP_LABELS = Object.freeze({
+const WEB_CHAT_THEME_GROUP_LABELS = WEB_CHAT_SHARED_THEMES.groupLabels || Object.freeze({
     core: 'Core themes',
     experimental: 'Experimental textures',
 });
-const WEB_CHAT_THEME_PRESETS = Object.freeze([
+const WEB_CHAT_THEME_PRESETS = WEB_CHAT_SHARED_THEMES.presets || Object.freeze([
     {
         id: 'obsidian',
         name: 'Obsidian',
@@ -587,7 +588,7 @@ const WEB_CHAT_THEME_PRESETS = Object.freeze([
         },
     },
 ]); 
-const WEB_CHAT_THEME_PRESET_MAP = new Map(WEB_CHAT_THEME_PRESETS.map((preset) => [preset.id, preset]));
+const WEB_CHAT_THEME_PRESET_MAP = WEB_CHAT_SHARED_THEMES.map || new Map(WEB_CHAT_THEME_PRESETS.map((preset) => [preset.id, preset]));
 
 function webChatSelectPreferredModel(models = [], preferredModel = '') {
     const availableModels = Array.isArray(models) ? models : [];
@@ -1328,6 +1329,61 @@ class UIHelpers {
         return String(text == null ? '' : text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
 
+    clipDisplayTextAtBoundary(text = '', maxLength = 0, options = {}) {
+        const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+        const limit = Number.isFinite(Number(maxLength)) && Number(maxLength) > 0
+            ? Number(maxLength)
+            : 0;
+        if (!limit || normalized.length <= limit) {
+            return normalized;
+        }
+
+        const clipped = normalized.slice(0, limit).trimEnd();
+        if (!clipped) {
+            return normalized.slice(0, limit).trim();
+        }
+
+        if (options.preferSentenceBoundary === true) {
+            const minSentenceLength = Math.min(
+                Math.max(18, Math.floor(limit * 0.22)),
+                Math.max(1, limit - 1),
+            );
+            const sentencePattern = /[.!?](?=\s|$)/g;
+            let bestSentenceEnd = -1;
+            let match;
+            while ((match = sentencePattern.exec(clipped)) !== null) {
+                const sentenceEnd = match.index + 1;
+                if (sentenceEnd >= minSentenceLength) {
+                    bestSentenceEnd = sentenceEnd;
+                }
+            }
+
+            if (bestSentenceEnd > 0) {
+                return clipped.slice(0, bestSentenceEnd).trim();
+            }
+        }
+
+        const minBreakLength = Math.min(
+            Math.max(24, Math.floor(limit * 0.68)),
+            Math.max(1, limit - 1),
+        );
+        let bestBreak = -1;
+        for (const pattern of [/\s/g, /[,;:](?=\s|$)/g, /[-](?=\s|$)/g]) {
+            let match;
+            while ((match = pattern.exec(clipped)) !== null) {
+                if (match.index >= minBreakLength) {
+                    bestBreak = Math.max(bestBreak, match.index);
+                }
+            }
+        }
+
+        const readableClip = bestBreak > 0
+            ? clipped.slice(0, bestBreak)
+            : clipped;
+        return readableClip.replace(/[\s,;:.-]+$/g, '').trim()
+            || normalized.slice(0, limit).trim();
+    }
+
     extractDisplayText(value = null, options = {}, seen = null) {
         const separator = options.separator == null ? ' ' : String(options.separator);
         const maxLength = Number.isFinite(Number(options.maxLength)) && Number(options.maxLength) > 0
@@ -1415,7 +1471,12 @@ class UIHelpers {
             return collapsed;
         }
 
-        return `${collapsed.slice(0, Math.max(1, maxLength - 1)).trimEnd()}...`;
+        const suffix = options.truncationSuffix == null
+            ? '...'
+            : String(options.truncationSuffix);
+        const clipLength = Math.max(1, maxLength - suffix.length);
+        const clipped = this.clipDisplayTextAtBoundary(collapsed, clipLength, options);
+        return `${clipped}${suffix}`;
     }
 
     extractMessageContentText(value = null) {
@@ -3091,6 +3152,18 @@ class UIHelpers {
         }
     }
 
+    normalizeAssistantProgressStepTitle(value = null, fallback = '') {
+        const rawTitle = this.extractDisplayText(value);
+        const cleanedTitle = rawTitle
+            .replace(/\s*\[truncated\s+\d+\s+chars\]\s*$/i, '')
+            .trim();
+        return this.extractDisplayText(cleanedTitle || rawTitle || fallback, {
+            maxLength: 180,
+            preferSentenceBoundary: true,
+            truncationSuffix: '',
+        });
+    }
+
     getAssistantProgressState(message = null) {
         const rawProgress = message?.progressState
             || message?.metadata?.progressState
@@ -3101,14 +3174,14 @@ class UIHelpers {
 
         let steps = (Array.isArray(rawProgress.steps) ? rawProgress.steps : [])
             .map((step, index) => {
-                const title = this.extractDisplayText(
+                const title = this.normalizeAssistantProgressStepTitle(
                     step?.title
                     || step?.label
                     || step?.summary
                     || step?.reason
                     || step?.text
                     || step,
-                    { maxLength: 120 },
+                    `Step ${index + 1}`,
                 );
                 if (!title) {
                     return null;
@@ -3196,14 +3269,14 @@ class UIHelpers {
 
         const steps = (Array.isArray(rawProgress.steps) ? rawProgress.steps : [])
             .map((step, index) => {
-                const title = this.extractDisplayText(
+                const title = this.normalizeAssistantProgressStepTitle(
                     step?.title
                     || step?.label
                     || step?.summary
                     || step?.reason
                     || step?.text
                     || step,
-                    { maxLength: 120 },
+                    `Step ${index + 1}`,
                 );
                 if (!title) {
                     return null;

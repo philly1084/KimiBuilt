@@ -1,6 +1,7 @@
 jest.mock('./artifacts/artifact-service', () => ({
     artifactService: {
         buildPromptContext: jest.fn(),
+        canStoreArtifacts: jest.fn(() => true),
         generateArtifact: jest.fn(),
     },
 }));
@@ -301,6 +302,8 @@ describe('ai-route-utils', () => {
         expect(inferRequestedOutputFormat('Do some research on AI browser tools and make it an interactive document with filters.')).toBe('html');
         expect(inferRequestedOutputFormat('Create a source-backed research dashboard about local robotics grants.')).toBe('html');
         expect(inferRequestedOutputFormat('Build a research page comparing leading AI coding agents with citations.')).toBe('html');
+        expect(inferRequestedOutputFormat('Create a research paper about penguins with images and citations.')).toBe('html');
+        expect(inferRequestedOutputFormat('Make a long-form evidence document on penguin habitats.')).toBe('html');
         expect(inferRequestedOutputFormat('Do some research on AI browser tools.')).toBeNull();
     });
 

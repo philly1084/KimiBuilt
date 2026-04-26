@@ -20,6 +20,9 @@ const Selection = (function() {
         onDrop: null,
         onDelete: null,
         onDuplicate: null,
+        onMoveUp: null,
+        onMoveDown: null,
+        onDeleteSection: null,
         onNavigate: null
     };
     
@@ -599,7 +602,7 @@ const Selection = (function() {
         
         // Keep menu on screen
         const menuWidth = 220;
-        const menuHeight = 320;
+        const menuHeight = 380;
         
         let posX = x;
         let posY = y;
@@ -615,7 +618,15 @@ const Selection = (function() {
         menu.style.top = `${posY}px`;
         menu.style.display = 'block';
         menu.dataset.blockId = blockId;
-        
+
+        const block = window.Editor?.getBlock?.(blockId);
+        const blockElement = document.querySelector(`.block[data-block-id="${blockId}"]`);
+        const blockType = block?.type || blockElement?.dataset.blockType || '';
+        const isHeading = /^heading_\d+$/.test(String(blockType));
+        menu.querySelectorAll('[data-heading-only="true"]').forEach((item) => {
+            item.style.display = isHeading ? '' : 'none';
+        });
+
         // Select the block
         selectBlock(blockId, false);
         
@@ -655,8 +666,17 @@ const Selection = (function() {
                 case 'duplicate':
                     if (callbacks.onDuplicate) callbacks.onDuplicate(blockId);
                     break;
+                case 'move-up':
+                    if (callbacks.onMoveUp) callbacks.onMoveUp(blockId);
+                    break;
+                case 'move-down':
+                    if (callbacks.onMoveDown) callbacks.onMoveDown(blockId);
+                    break;
                 case 'delete':
                     if (callbacks.onDelete) callbacks.onDelete(blockId);
+                    break;
+                case 'delete-section':
+                    if (callbacks.onDeleteSection) callbacks.onDeleteSection(blockId);
                     break;
                 case 'turn-into':
                     showTurnIntoMenu(blockId);

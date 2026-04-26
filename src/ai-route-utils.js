@@ -356,6 +356,10 @@ function shouldSuppressWebChatImplicitHtmlArtifact({
 }
 
 function isArtifactStorageAvailable() {
+    if (typeof artifactService.canStoreArtifacts === 'function') {
+        return artifactService.canStoreArtifacts();
+    }
+
     return typeof artifactService.isEnabled === 'function'
         ? artifactService.isEnabled()
         : false;
@@ -390,6 +394,9 @@ function inferRequestedOutputFormat(text = '') {
     );
     const hasPrototypeHtmlCue = /\b(demo|prototype|mockup|mock-up|wireframe|microsite)\b/.test(normalized);
     const hasExplicitHtmlCue = /\bhtml\b/.test(normalized);
+    const hasLongFormDocumentSubject = /\b(research paper|research report|research brief|whitepaper|white paper|case study|dossier|long[-\s]?form|large[-\s]?form|article|paper)\b/.test(normalized);
+    const hasDocumentArtifactCue = /\b(document|doc|report|brief|paper|whitepaper|white paper|article|dossier|guide)\b/.test(normalized);
+    const wantsGeneratedDocument = hasBuildIntent && (hasLongFormDocumentSubject || (hasDocumentArtifactCue && /\b(research|source|sources|citations?|evidence|visual|images?|photos?)\b/.test(normalized)));
 
     if ((/\b(power\s*query|\.(pq|m)\b)/.test(normalized) && hasArtifactIntent)
         || /\b(power\s*query)\s+(?:file|script|artifact|export)\b/.test(normalized)) {
@@ -418,6 +425,10 @@ function inferRequestedOutputFormat(text = '') {
     }
 
     if (isInteractiveDocumentRequest(normalized)) {
+        return 'html';
+    }
+
+    if (wantsGeneratedDocument && !/\b(text only|text-only|plain text|no artifact|no file|inline only)\b/.test(normalized)) {
         return 'html';
     }
 

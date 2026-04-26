@@ -32,6 +32,13 @@ describe('model-output-parser', () => {
         expect(normalized).toContain('| A | B |');
     });
 
+    test('restores flattened html fences before preview rendering', () => {
+        const normalized = parser.normalizeModelOutputMarkdown('Save this as `brief.html`.```html <!doctype html><html><head><title>Brief</title></head><body><main>Ready</main></body></html> ```');
+
+        expect(normalized).toContain('```html\n<!doctype html>');
+        expect(normalized).toContain('</html>\n```');
+    });
+
     test('normalizes lightweight presentation markup outside code fences', () => {
         const normalized = parser.normalizeModelOutputMarkdown('This is ==important== and ::warning[check this].\n\n```md\n==literal== ::warning[literal]\n```');
 

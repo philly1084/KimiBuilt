@@ -20,6 +20,8 @@ function loadAgent(overrides = {}) {
         document: {
             readyState: 'loading',
             addEventListener: jest.fn(),
+            querySelector: jest.fn(() => null),
+            querySelectorAll: jest.fn(() => []),
         },
         localStorage: {
             getItem: jest.fn(() => null),
@@ -35,6 +37,18 @@ function loadAgent(overrides = {}) {
             this.detail = init.detail;
         },
         fetch: jest.fn(),
+        Blocks: windowObject.Blocks || {
+            createBlock: jest.fn((type, content, options = {}) => ({
+                id: `generated_${Math.random().toString(36).slice(2)}`,
+                type,
+                content,
+                children: options.children || [],
+                formatting: options.formatting || {},
+                color: options.color || null,
+                textColor: options.textColor || null,
+                icon: options.icon,
+            })),
+        },
     };
 
     context.global = context;
@@ -381,6 +395,12 @@ Approved page plan:
         expect(prompt).toContain('Lead focal blocks');
         expect(prompt).toContain('prefer notes-actions that update the page blocks instead of artifact, file, or export output');
         expect(prompt).toContain('VALID OPERATIONS:');
+        expect(prompt).toContain('replace_section');
+        expect(prompt).toContain('move_section');
+        expect(prompt).toContain('insert_after_section');
+        expect(prompt).toContain('delete_section');
+        expect(prompt).toContain('heading-based chunks');
+        expect(prompt).toContain('from its heading down');
         expect(prompt).toContain('BLOCK TYPES:');
         expect(prompt).toContain('BLOCK DESIGN HEURISTICS:');
         expect(prompt).toContain('Recommended metadata: Evidence: Source-linked');
@@ -391,6 +411,81 @@ Approved page plan:
         expect(prompt).toContain('Executive Brief [brief]');
         expect(prompt).toContain('Research Page [research]');
         expect(prompt).toContain('think in three silent passes');
+    });
+
+    test('expands section replacement text into native block definitions', () => {
+        const agent = loadAgent();
+        const normalizedActions = agent._normalizeStructuredPageActions([
+            {
+                op: 'replace_section',
+                headingBlockId: 'heading_1',
+                blocks: [{
+                    type: 'text',
+                    content: '## Evidence\nPenguins are strong swimmers.\n\n- Dense feathers\n- Streamlined bodies',
+                }],
+            },
+        ], 'Rewrite this section with cleaner structure.', {
+            blockCount: 8,
+            outline: [{ id: 'heading_1', content: 'Evidence' }],
+        });
+
+        expect(normalizedActions).toHaveLength(1);
+        expect(normalizedActions[0].op).toBe('replace_section');
+        expect(normalizedActions[0].headingBlockId).toBe('heading_1');
+        expect(normalizedActions[0].blocks).toEqual(expect.arrayContaining([
+            expect.objectContaining({ type: 'heading_2', content: 'Evidence' }),
+            expect.objectContaining({ type: 'text', content: 'Penguins are strong swimmers.' }),
+            expect.objectContaining({ type: 'bulleted_list', content: 'Dense feathers' }),
+        ]));
+    });
+
+    test('applies section-level actions through editor section APIs', () => {
+        jest.useFakeTimers();
+        const editor = {
+            replaceSectionFromHeading: jest.fn(() => [{ id: 'new_heading' }]),
+            insertBlocksAfterSection: jest.fn(() => [{ id: 'inserted' }]),
+            moveSection: jest.fn(() => true),
+            deleteSectionFromHeading: jest.fn(() => true),
+            savePage: jest.fn(),
+            focusBlock: jest.fn(),
+        };
+        const agent = loadAgent({ Editor: editor });
+
+        const result = agent._applyNotesActions([
+            {
+                op: 'replace_section',
+                headingBlockId: 'heading_a',
+                blocks: [{ type: 'heading_2', content: 'Updated' }],
+            },
+            {
+                op: 'insert_after_section',
+                headingBlockId: 'heading_a',
+                blocks: [{ type: 'text', content: 'Follow-up' }],
+            },
+            {
+                op: 'move_section',
+                headingBlockId: 'heading_a',
+                targetHeadingBlockId: 'heading_b',
+                position: 'before',
+            },
+            {
+                op: 'delete_section',
+                headingBlockId: 'heading_old',
+            },
+        ]);
+
+        expect(result.appliedCount).toBe(4);
+        expect(editor.replaceSectionFromHeading).toHaveBeenCalledWith('heading_a', expect.arrayContaining([
+            expect.objectContaining({ type: 'heading_2', content: 'Updated' }),
+        ]));
+        expect(editor.insertBlocksAfterSection).toHaveBeenCalledWith('heading_a', expect.arrayContaining([
+            expect.objectContaining({ type: 'text', content: 'Follow-up' }),
+        ]));
+        expect(editor.moveSection).toHaveBeenCalledWith('heading_a', 'heading_b', 'before');
+        expect(editor.deleteSectionFromHeading).toHaveBeenCalledWith('heading_old');
+        expect(editor.savePage).toHaveBeenCalled();
+        jest.runOnlyPendingTimers();
+        jest.useRealTimers();
     });
 
     test('uses multi-pass drafting for research-backed notes pages instead of treating "research" as a non-page task', () => {

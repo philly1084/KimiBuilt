@@ -40,6 +40,14 @@ const {
     renderInteractiveArtifactInstructions,
     shouldUseInteractiveHtmlArtifact,
 } = require('./artifact-experience');
+const {
+    deleteLocalGeneratedArtifact,
+    deleteLocalGeneratedArtifactsBySession,
+    getLocalGeneratedArtifact,
+    isLocalGeneratedArtifactId,
+    listLocalGeneratedArtifactsBySession,
+    persistGeneratedArtifactLocally,
+} = require('../generated-file-artifacts');
 const MULTI_PASS_DOCUMENT_FORMATS = new Set(['html', 'pdf']);
 const DEFAULT_DOCUMENT_IMAGE_TARGET = 20;
 const COMPOSITION_PLANNING_PATTERNS = [
@@ -1466,6 +1474,10 @@ class ArtifactService {
         return Boolean(postgres.enabled);
     }
 
+    canStoreArtifacts() {
+        return true;
+    }
+
     ensureEnabled() {
         if (!this.isEnabled()) {
             const error = new Error('Artifacts require Postgres to be configured');
@@ -1593,49 +1605,83 @@ class ArtifactService {
         metadata = {},
         vectorize = true,
     }) {
-        this.ensureEnabled();
-        await this.ensureSessionRecord(sessionId, session);
-
-        const artifact = await artifactStore.create({
-            id: uuidv4(),
-            sessionId,
-            parentArtifactId,
-            direction,
-            sourceMode,
-            filename,
-            extension,
-            mimeType,
-            sizeBytes: buffer.length,
-            sha256: sha256(buffer),
-            contentBuffer: buffer,
-            extractedText,
-            previewHtml,
-            metadata,
-            vectorizedAt: null,
-        });
-
-        let vectorizedAt = null;
-        if (vectorize && extractedText) {
-            vectorizedAt = await this.vectorizeArtifactText(artifact, extractedText);
+        if (!this.isEnabled()) {
+            return persistGeneratedArtifactLocally({
+                sessionId,
+                parentArtifactId,
+                direction,
+                sourceMode,
+                filename,
+                extension,
+                mimeType,
+                buffer,
+                extractedText,
+                previewHtml,
+                metadata,
+            });
         }
 
-        const storedArtifact = await artifactStore.updateProcessing(artifact.id, {
-            extractedText,
-            previewHtml,
-            metadata,
-            vectorizedAt,
-        });
         try {
-            await assetManager.upsertArtifact(storedArtifact, { session });
+            await this.ensureSessionRecord(sessionId, session);
+
+            const artifact = await artifactStore.create({
+                id: uuidv4(),
+                sessionId,
+                parentArtifactId,
+                direction,
+                sourceMode,
+                filename,
+                extension,
+                mimeType,
+                sizeBytes: buffer.length,
+                sha256: sha256(buffer),
+                contentBuffer: buffer,
+                extractedText,
+                previewHtml,
+                metadata,
+                vectorizedAt: null,
+            });
+
+            let vectorizedAt = null;
+            if (vectorize && extractedText) {
+                vectorizedAt = await this.vectorizeArtifactText(artifact, extractedText);
+            }
+
+            const storedArtifact = await artifactStore.updateProcessing(artifact.id, {
+                extractedText,
+                previewHtml,
+                metadata,
+                vectorizedAt,
+            });
+            try {
+                await assetManager.upsertArtifact(storedArtifact, { session });
+            } catch (error) {
+                console.warn('[Artifacts] Failed to index stored artifact:', error.message);
+            }
+            return storedArtifact;
         } catch (error) {
-            console.warn('[Artifacts] Failed to index stored artifact:', error.message);
+            if (error?.statusCode !== 503 && postgres.enabled) {
+                throw error;
+            }
+
+            console.warn(`[Artifacts] Artifact database unavailable; saving generated artifact locally: ${error.message}`);
+            return persistGeneratedArtifactLocally({
+                sessionId,
+                parentArtifactId,
+                direction,
+                sourceMode,
+                filename,
+                extension,
+                mimeType,
+                buffer,
+                extractedText,
+                previewHtml,
+                metadata,
+            });
         }
-        return storedArtifact;
     }
 
     async uploadArtifact({ sessionId, session = null, mode = 'chat', label = '', tags = [], file }) {
-        this.ensureEnabled();
-
         if (!file || !file.buffer || !file.filename) {
             const error = new Error('A file upload is required');
             error.statusCode = 400;
@@ -1695,17 +1741,44 @@ class ArtifactService {
     }
 
     async listSessionArtifacts(sessionId) {
-        const artifacts = await artifactStore.listBySession(sessionId);
+        const artifacts = [];
+        if (this.isEnabled()) {
+            try {
+                artifacts.push(...await artifactStore.listBySession(sessionId));
+            } catch (error) {
+                console.warn('[Artifacts] Failed to list Postgres artifacts:', error.message);
+            }
+        }
+
+        artifacts.push(...await listLocalGeneratedArtifactsBySession(sessionId));
         return artifacts.map((artifact) => this.serializeArtifact(artifact));
     }
 
     async getArtifact(id, options = {}) {
+        if (isLocalGeneratedArtifactId(id)) {
+            const localArtifact = await getLocalGeneratedArtifact(id, options);
+            if (!localArtifact) return null;
+            return options.includeContent ? localArtifact : this.serializeArtifact(localArtifact);
+        }
+
+        if (!this.isEnabled()) {
+            return null;
+        }
+
         const artifact = await artifactStore.get(id, options);
         if (!artifact) return null;
         return options.includeContent ? artifact : this.serializeArtifact(artifact);
     }
 
     async deleteArtifact(id) {
+        if (isLocalGeneratedArtifactId(id)) {
+            return deleteLocalGeneratedArtifact(id);
+        }
+
+        if (!this.isEnabled()) {
+            return false;
+        }
+
         const artifact = await artifactStore.get(id);
         if (!artifact) return false;
 
@@ -1722,11 +1795,18 @@ class ArtifactService {
     }
 
     async deleteArtifactsForSession(sessionId) {
-        const artifacts = await artifactStore.listBySession(sessionId);
-        for (const artifact of artifacts) {
-            await vectorStore.deleteArtifact(artifact.id);
+        if (this.isEnabled()) {
+            try {
+                const artifacts = await artifactStore.listBySession(sessionId);
+                for (const artifact of artifacts) {
+                    await vectorStore.deleteArtifact(artifact.id);
+                }
+                await artifactStore.deleteBySession(sessionId);
+            } catch (error) {
+                console.warn('[Artifacts] Failed to delete Postgres artifacts:', error.message);
+            }
         }
-        await artifactStore.deleteBySession(sessionId);
+        await deleteLocalGeneratedArtifactsBySession(sessionId);
         try {
             await assetManager.removeArtifactsForSession(sessionId);
         } catch (error) {
@@ -1735,11 +1815,16 @@ class ArtifactService {
     }
 
     async buildPromptContext(sessionId, artifactIds = []) {
-        if (!postgres.enabled) {
-            return '';
+        const allArtifacts = [];
+        if (postgres.enabled) {
+            try {
+                allArtifacts.push(...await artifactStore.listBySession(sessionId));
+            } catch (error) {
+                console.warn('[Artifacts] Failed to read Postgres artifacts for prompt context:', error.message);
+            }
         }
 
-        const allArtifacts = await artifactStore.listBySession(sessionId);
+        allArtifacts.push(...await listLocalGeneratedArtifactsBySession(sessionId));
         if (allArtifacts.length === 0) {
             return '';
         }
@@ -2381,8 +2466,13 @@ class ArtifactService {
         }
 
         const promptContext = await this.buildPromptContext(sessionId, artifactIds);
-        const selectedArtifacts = postgres.enabled && artifactIds.length > 0
-            ? (await Promise.all(artifactIds.slice(0, 8).map((artifactId) => artifactStore.get(artifactId)))).filter(Boolean)
+        const selectedArtifacts = artifactIds.length > 0
+            ? (await Promise.all(artifactIds.slice(0, 8).map(async (artifactId) => {
+                if (isLocalGeneratedArtifactId(artifactId)) {
+                    return getLocalGeneratedArtifact(artifactId);
+                }
+                return postgres.enabled ? artifactStore.get(artifactId) : null;
+            }))).filter(Boolean)
             : [];
         const imageReferences = await this.resolveImageReferences(session, prompt, {
             desiredCount: (MULTI_PASS_DOCUMENT_FORMATS.has(normalizedFormat) || frontendDemoRequest) ? DEFAULT_DOCUMENT_IMAGE_TARGET : 3,

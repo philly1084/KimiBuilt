@@ -47,6 +47,15 @@ jest.mock('../asset-manager', () => ({
     buildAssetManagerInstructions: jest.fn(() => ''),
 }));
 
+jest.mock('../generated-file-artifacts', () => ({
+    deleteLocalGeneratedArtifact: jest.fn(),
+    deleteLocalGeneratedArtifactsBySession: jest.fn(),
+    getLocalGeneratedArtifact: jest.fn(),
+    isLocalGeneratedArtifactId: jest.fn(() => false),
+    listLocalGeneratedArtifactsBySession: jest.fn().mockResolvedValue([]),
+    persistGeneratedArtifactLocally: jest.fn(),
+}));
+
 const { artifactService, extractResponseText, resolveCompletedResponseText } = require('./artifact-service');
 const { artifactStore } = require('./artifact-store');
 const { assetManager } = require('../asset-manager');
@@ -54,11 +63,25 @@ const { postgres } = require('../postgres');
 const { renderArtifact } = require('./artifact-renderer');
 const { createResponse } = require('../openai-client');
 const { searchImages, isConfigured } = require('../unsplash-client');
+const { persistGeneratedArtifactLocally } = require('../generated-file-artifacts');
 
 describe('ArtifactService', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        postgres.enabled = true;
         isConfigured.mockReturnValue(false);
+        persistGeneratedArtifactLocally.mockResolvedValue({
+            id: 'artifact-local-1',
+            sessionId: 'session-1',
+            filename: 'test.txt',
+            extension: 'txt',
+            mimeType: 'text/plain',
+            sizeBytes: 4,
+            extractedText: 'test',
+            previewHtml: '',
+            metadata: { storage: 'local-fallback' },
+            vectorizedAt: null,
+        });
         artifactStore.create.mockResolvedValue({
             id: 'artifact-1',
             sessionId: 'session-1',
@@ -124,6 +147,37 @@ describe('ArtifactService', () => {
             expect.objectContaining({ id: 'artifact-1' }),
             expect.objectContaining({ session: null }),
         );
+    });
+
+    test('falls back to local artifacts when Postgres storage is not configured', async () => {
+        postgres.enabled = false;
+
+        const artifact = await artifactService.createStoredArtifact({
+            sessionId: 'session-1',
+            direction: 'generated',
+            sourceMode: 'chat',
+            filename: 'research.html',
+            extension: 'html',
+            mimeType: 'text/html',
+            buffer: Buffer.from('<!DOCTYPE html><html><body>ok</body></html>'),
+            extractedText: 'ok',
+            previewHtml: '<!DOCTYPE html><html><body>ok</body></html>',
+            metadata: { title: 'Research' },
+            vectorize: true,
+        });
+
+        expect(artifactStore.create).not.toHaveBeenCalled();
+        expect(persistGeneratedArtifactLocally).toHaveBeenCalledWith(expect.objectContaining({
+            sessionId: 'session-1',
+            filename: 'research.html',
+            extension: 'html',
+            mimeType: 'text/html',
+            previewHtml: expect.stringContaining('<!DOCTYPE html>'),
+        }));
+        expect(artifact).toEqual(expect.objectContaining({
+            id: 'artifact-local-1',
+            metadata: expect.objectContaining({ storage: 'local-fallback' }),
+        }));
     });
 
     test('extractResponseText handles direct output_text and mixed content item types', () => {

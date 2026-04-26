@@ -341,8 +341,21 @@
             .trim();
     }
 
-    function normalizeStructuredMarkdown(source = '') {
+    function restoreFlattenedCodeFences(source = '') {
         return String(source || '')
+            .replace(/```([a-z0-9_-]+)[^\S\n]+([\s\S]*?)```/gi, (match, language, body) => {
+                const content = String(body || '').trim();
+                if (!content || String(body || '').startsWith('\n')) {
+                    return match;
+                }
+
+                return `\`\`\`${String(language || '').trim()}\n${content}\n\`\`\``;
+            })
+            .replace(/([^\n])(```[a-z0-9_-]*\n)/gi, '$1\n\n$2');
+    }
+
+    function normalizeStructuredMarkdown(source = '') {
+        return restoreFlattenedCodeFences(source)
             .split(/(```[\s\S]*?```)/g)
             .map((segment) => {
                 if (/^```[\s\S]*```$/.test(segment)) {

@@ -252,13 +252,11 @@ router.get('/:id/artifacts', async (req, res, next) => {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
 
-        const canListStoredArtifacts = typeof sessionStore.isPersistent === 'function'
-            ? sessionStore.isPersistent()
-            : false;
         const [storedArtifacts, messages] = await Promise.all([
-            canListStoredArtifacts
-                ? artifactService.listSessionArtifacts(req.params.id)
-                : Promise.resolve([]),
+            artifactService.listSessionArtifacts(req.params.id).catch((error) => {
+                console.warn(`[Sessions] Failed to list stored artifacts for ${req.params.id}: ${error.message}`);
+                return [];
+            }),
             sessionStore.listMessages(req.params.id, 500, getRequestOwnerId(req)),
         ]);
         const artifacts = mergeRuntimeArtifacts(

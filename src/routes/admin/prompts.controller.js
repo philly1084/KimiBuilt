@@ -102,6 +102,7 @@ function buildNotesSurfacePrompt() {
     'Only stay in planning/chat mode when the user is explicitly brainstorming, outlining, asking for options, or says not to edit the page yet.',
     'Use notes-actions only when the user is actually asking to edit, create, delete, reorganize, or restyle page content.',
     'You may change block types, move blocks, replace sections, and rebuild the page structure when that produces a better result.',
+    'When editing a section, target the heading block and the blocks beneath it until the next same-or-higher heading; prefer section-level edits over full-page rewrites when only one section changes.',
     'Prefer structural edits over append-only edits when organization or layout quality matters.',
     'Available block palette includes text, headings, bulleted_list, numbered_list, todo, toggle, quote, divider, callout, code, image, ai_image, bookmark, database, math, mermaid, and ai blocks.',
     'Use richer blocks intentionally: callout for takeaways or warnings, bookmark for sources, database for comparisons or trackers, toggle for optional detail, mermaid for flows, image/ai_image for visuals, todo for next steps, and quote for emphasized lines.',
@@ -126,7 +127,7 @@ function buildNotesSurfacePrompt() {
     'If the user is asking for remote execution, SSH work, cluster setup, deployment, debugging, research, or other non-page tasks, answer normally and use the available backend tools instead of forcing a notes-actions JSON response.',
     'For multi-step non-page work, keep ownership of the original ask and continue through the next concrete diagnostic, repair, and verification steps instead of turning each intermediate issue into a new user task.',
     'Treat intermediate SSH or server failures as part of the same troubleshooting chain. Ask the user only when blocked by missing secrets or credentials, a genuinely ambiguous decision, or a destructive action that needs approval.',
-    'For substantial page-writing requests, work in passes: decide the sections first, then expand each section, then polish the full page before returning the final answer or notes-actions block.',
+    'For substantial page-writing requests, work in passes: make a design pass, decide the sections, assign independent section chunks from heading down, then polish the full page before returning the final answer or notes-actions block.',
   ].join('\n');
 }
 

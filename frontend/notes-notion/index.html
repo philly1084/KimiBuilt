@@ -446,12 +446,32 @@
             </svg>
             Duplicate
         </div>
+        <div class="context-menu-item" data-action="move-up">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="m18 15-6-6-6 6"></path>
+            </svg>
+            Move up
+        </div>
+        <div class="context-menu-item" data-action="move-down">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="m6 9 6 6 6-6"></path>
+            </svg>
+            Move down
+        </div>
         <div class="context-menu-item" data-action="delete">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="3 6 5 6 21 6"></polyline>
                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
             </svg>
             Delete
+        </div>
+        <div class="context-menu-item context-menu-item-warning" data-action="delete-section" data-heading-only="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 6h18"></path>
+                <path d="M8 6V4h8v2"></path>
+                <path d="M19 6l-1 14H6L5 6"></path>
+            </svg>
+            Delete section
         </div>
         <div class="context-divider"></div>
         <div class="context-menu-item" data-action="turn-into">
@@ -645,6 +665,7 @@
                     <button class="agent-action-btn" onclick="AgentUI.quickAction('restructure')">Restructure</button>
                     <button class="agent-action-btn" onclick="AgentUI.quickAction('polish_layout')">Polish layout</button>
                     <button class="agent-action-btn" onclick="AgentUI.quickAction('multi_pass')">Work in passes</button>
+                    <button class="agent-action-btn" onclick="AgentUI.quickAction('section_agents')">Section agents</button>
                     <button class="agent-action-btn" onclick="AgentUI.clearChat()">Clear chat</button>
                 </div>
             </div>

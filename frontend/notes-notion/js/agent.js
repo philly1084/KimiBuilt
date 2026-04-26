@@ -2907,6 +2907,7 @@ TOP-LEVEL LAYOUT:
 ${topLevelLayout}
 
 SECTION EDIT MAP:
+A section target starts at a heading block ID and includes that heading plus every following block until the next same-or-higher heading.
 ${sectionEditMap}
 
 OUTLINE (Headings):
@@ -2978,10 +2979,14 @@ When the user asks you to edit, create, delete, or reorganize content, respond w
     { "op": "update_page", "title": "Research Brief", "icon": "🔎" },
     { "op": "update_block", "blockId": "block_abc123", "type": "text", "content": "New content here" },
     { "op": "replace_block", "blockId": "block_abc123", "blocks": [{ "type": "heading_2", "content": "New Section" }, { "type": "text", "content": "Fresh opening" }] },
+    { "op": "replace_section", "headingBlockId": "block_heading123", "blocks": [{ "type": "heading_2", "content": "Rebuilt Section" }, { "type": "text", "content": "Only this section changed." }] },
     { "op": "move_block", "blockId": "block_abc123", "targetBlockId": "block_xyz789", "position": "before" },
+    { "op": "move_section", "headingBlockId": "block_heading123", "targetHeadingBlockId": "block_heading999", "position": "after" },
     { "op": "insert_after", "blockId": "block_abc123", "blocks": [{ "type": "callout", "content": { "text": "Key takeaway", "icon": "⚡" }, "color": "yellow" }] },
+    { "op": "insert_after_section", "headingBlockId": "block_heading123", "blocks": [{ "type": "heading_2", "content": "New Section" }] },
     { "op": "rebuild_page", "blocks": [{ "type": "heading_1", "content": "New Structure" }, { "type": "text", "content": "Fresh opening" }] },
     { "op": "delete_block", "blockId": "block_def456" },
+    { "op": "delete_section", "headingBlockId": "block_heading123" },
     { "op": "append_to_page", "blocks": [{ "type": "text", "content": "Added at end" }] }
   ]
 }
@@ -2992,6 +2997,11 @@ VALID OPERATIONS:
 - update_block: Change content of an existing block and optionally change its type in place (requires blockId; may include type and content)
 - replace_block: Replace block with new block(s) (requires blockId, blocks array)
 - move_block: Reorder an existing block relative to another block (requires blockId, targetBlockId, optional position "before"|"after")
+- replace_section: Replace a heading and all following blocks until the next same-or-higher heading (requires headingBlockId or blockId, blocks array)
+- move_section: Move a whole heading section relative to another heading section (requires headingBlockId, targetHeadingBlockId, optional position "before"|"after")
+- insert_after_section: Add block(s) after the complete section that starts at a heading (requires headingBlockId, blocks array)
+- insert_before_section: Add block(s) before the complete section that starts at a heading (requires headingBlockId, blocks array)
+- delete_section: Remove a heading and all following blocks until the next same-or-higher heading (requires headingBlockId or blockId)
 - insert_after: Add new block(s) after specified block (requires blockId, blocks array)
 - insert_before: Add new block(s) before specified block (requires blockId, blocks array)
 - append_to_page: Add block(s) at end of page (requires blocks array)
@@ -3037,6 +3047,8 @@ GUIDELINES:
 - Never satisfy a notes-page edit by writing a local repo/runtime file or by mentioning /app or filesystem write failures.
 - For substantial page-writing requests such as briefs, reports, specs, plans, guides, proposals, or polished notes pages, think in three silent passes: architecture, section briefs, then final articulation into notes-actions.
 - Work section by section. Decide the role of each section before writing it, and treat the lead cluster as its own designed editing job.
+- For large pages, make an explicit design pass first, then break the page into heading-based chunks that could be handed to independent section agents. Use section-level operations to apply each chunk from its heading down instead of repeatedly rewriting the whole page.
+- When editing an existing section, target the heading ID with replace_section, insert_after_section, move_section, or delete_section so the edit covers the heading and every block beneath it up to the next same-or-higher heading.
 - Choose a best-fit page template from the template guidance above and adapt it to the user's request instead of inventing the page layout from scratch every time.
 - Also choose a matching visual recipe from the recipe guidance above so the page has a clear opening cluster, body rhythm, and support cluster.
 - Also choose a dominant design scheme from the scheme guidance above so the page has a coherent palette and header treatment.
@@ -3290,8 +3302,16 @@ GUIDELINES:
             notes_actions: 'notes-actions',
             blockid: 'blockId',
             block_id: 'blockId',
+            headingblockid: 'headingBlockId',
+            heading_block_id: 'headingBlockId',
+            sectionblockid: 'sectionBlockId',
+            section_block_id: 'sectionBlockId',
             targetblockid: 'targetBlockId',
             target_block_id: 'targetBlockId',
+            targetheadingblockid: 'targetHeadingBlockId',
+            target_heading_block_id: 'targetHeadingBlockId',
+            targetsectionblockid: 'targetSectionBlockId',
+            target_section_block_id: 'targetSectionBlockId',
             imageurl: 'imageUrl',
             image_url: 'imageUrl',
             imageassetid: 'imageAssetId',
@@ -4900,7 +4920,17 @@ GUIDELINES:
                 return action;
             }
 
-            if (!['replace_block', 'rebuild_page', 'append_to_page', 'prepend_to_page', 'insert_after', 'insert_before'].includes(op)) {
+            if (![
+                'replace_block',
+                'replace_section',
+                'rebuild_page',
+                'append_to_page',
+                'prepend_to_page',
+                'insert_after',
+                'insert_before',
+                'insert_after_section',
+                'insert_before_section',
+            ].includes(op)) {
                 return action;
             }
 
@@ -4989,6 +5019,10 @@ If the request is for a substantial page, brief, report, plan, or rewrite, prefe
                 : `Updated ${appliedCount} page change${appliedCount === 1 ? '' : 's'}.`;
         }
 
+        if (normalizedActions.some((action) => ['replace_section', 'delete_section', 'move_section', 'insert_after_section', 'insert_before_section'].includes(action?.op))) {
+            return `Updated ${appliedCount} section-level page change${appliedCount === 1 ? '' : 's'}.`;
+        }
+
         if (normalizedActions.some((action) => ['append_to_page', 'prepend_to_page', 'insert_after', 'insert_before'].includes(action?.op))) {
             return insertedBlockCount > 0
                 ? `Added ${insertedBlockCount} new block${insertedBlockCount === 1 ? '' : 's'} to the page.`
@@ -5011,6 +5045,141 @@ If the request is for a substantial page, brief, report, plan, or rewrite, prefe
         return fallback;
     }
 
+    function parseHiddenDraftPayload(text = '', fallback = null) {
+        const parsed = safeJsonParse(text);
+        if (isValidHiddenDraftPayload(parsed)) {
+            return parsed;
+        }
+
+        return isValidHiddenDraftPayload(fallback) ? fallback : null;
+    }
+
+    function normalizeSectionAgentExpansionPayload(payload = null, fallbackSection = {}, index = 0) {
+        const section = payload && typeof payload === 'object' && !Array.isArray(payload)
+            ? payload
+            : {};
+        const heading = String(section.heading || fallbackSection.heading || `Section ${index + 1}`).trim();
+        const anchorHint = String(section.anchorHint || fallbackSection.anchorHint || '').trim();
+        const suggestedBlocks = Array.isArray(section.suggestedBlocks) && section.suggestedBlocks.length > 0
+            ? section.suggestedBlocks
+            : (Array.isArray(fallbackSection.suggestedBlocks) && fallbackSection.suggestedBlocks.length > 0
+                ? fallbackSection.suggestedBlocks
+                : []);
+        const keyPoints = Array.isArray(section.keyPoints) && section.keyPoints.length > 0
+            ? section.keyPoints
+            : (Array.isArray(fallbackSection.keyPoints) ? fallbackSection.keyPoints : []);
+        const summary = String(section.summary || section.goal || fallbackSection.summary || fallbackSection.goal || '').trim();
+        const agentRole = String(
+            section.agentRole
+            || fallbackSection.agentRole
+            || (index === 0 ? 'lead-section-agent' : `section-agent-${index + 1}`)
+        ).trim();
+
+        return {
+            ...fallbackSection,
+            ...section,
+            heading,
+            anchorHint,
+            agentRole,
+            summary,
+            keyPoints,
+            suggestedBlocks,
+        };
+    }
+
+    async function buildParallelSectionExpansionPayload({
+        planningClient,
+        model,
+        systemPrompt,
+        question,
+        requestOptions = {},
+        plan = null,
+    }) {
+        const sections = Array.isArray(plan?.sections) ? plan.sections : [];
+        if (!planningClient?.chat || sections.length < 2) {
+            return null;
+        }
+
+        const maxParallelSectionAgents = 6;
+        const sectionAgents = sections.slice(0, maxParallelSectionAgents);
+        const remainingSections = sections.slice(maxParallelSectionAgents).map((section, index) => normalizeSectionAgentExpansionPayload(
+            section,
+            section,
+            index + maxParallelSectionAgents
+        ));
+
+        const sectionAgentPrompt = `${systemPrompt}
+
+Hidden section-agent expansion pass for a substantial notes-writing request.
+Do not return notes-actions in this pass.
+You are one independent section agent working from the shared design pass.
+Work only on the assigned section, keep its heading anchor stable, and produce blocks that can be merged with other section agents.
+Return JSON only in this shape:
+{
+  "heading": "Section heading",
+  "anchorHint": "Reuse [block_id] or create a new section",
+  "agentRole": "lead-section-agent | evidence-section-agent | closeout-section-agent",
+  "summary": "Detailed summary of what this section should say",
+  "keyPoints": ["Point 1", "Point 2"],
+  "suggestedBlocks": [
+    { "type": "heading_2", "content": "Section heading" },
+    { "type": "text", "content": "Opening paragraph guidance" }
+  ],
+  "handoffNotes": ["Any consistency notes for the final page assembler"]
+}`;
+
+        const expansionTasks = sectionAgents.map(async (section, index) => {
+            try {
+                const response = await planningClient.chat([
+                    { role: 'system', content: sectionAgentPrompt },
+                    {
+                        role: 'user',
+                        content: `Original request:
+${question}
+
+Shared design and architecture pass:
+${JSON.stringify(plan, null, 2)}
+
+Assigned section ${index + 1} of ${sections.length}:
+${JSON.stringify(section, null, 2)}`
+                    }
+                ], model, requestOptions);
+
+                if (response?.error) {
+                    throw new Error(response.content || 'Section expansion failed');
+                }
+
+                return normalizeSectionAgentExpansionPayload(
+                    safeJsonParse(response?.content || ''),
+                    section,
+                    index
+                );
+            } catch (error) {
+                console.warn('Section-agent expansion failed:', error);
+                return normalizeSectionAgentExpansionPayload({
+                    ...section,
+                    agentRole: section.agentRole || `section-agent-${index + 1}`,
+                    handoffNotes: [
+                        ...(Array.isArray(section.handoffNotes) ? section.handoffNotes : []),
+                        'Section expansion fell back to the architecture pass.',
+                    ],
+                }, section, index);
+            }
+        });
+
+        const expandedSections = await Promise.all(expansionTasks);
+        return {
+            ...plan,
+            editMode: plan.editMode || 'hybrid_refresh',
+            sections: [
+                ...expandedSections,
+                ...remainingSections,
+            ],
+            sectionAgentMode: 'parallel',
+            sectionAgentLimit: maxParallelSectionAgents,
+        };
+    }
+
     function buildHiddenDraftApplicationBrief(planText = '', expansionText = '') {
         const plan = safeJsonParse(planText);
         const expansion = safeJsonParse(expansionText);
@@ -5024,6 +5193,7 @@ If the request is for a substantial page, brief, report, plan, or rewrite, prefe
 
         const editMode = String(expansion?.editMode || plan?.editMode || '').trim() || 'hybrid_refresh';
         const leadGoal = String(expansion?.leadGoal || plan?.leadGoal || '').trim();
+        const designPass = expansion?.designPass || plan?.designPass || null;
         const polishChecks = Array.isArray(expansion?.polishChecks) && expansion.polishChecks.length > 0
             ? expansion.polishChecks
             : (Array.isArray(plan?.polishChecks) ? plan.polishChecks : []);
@@ -5032,12 +5202,15 @@ If the request is for a substantial page, brief, report, plan, or rewrite, prefe
             `Edit mode: ${editMode}`,
             plan?.templateId ? `Template: ${plan.templateId}` : '',
             plan?.title ? `Target title: ${plan.title}` : '',
+            designPass?.visualDirection ? `Design pass: ${designPass.visualDirection}` : '',
+            designPass?.sectionAgentStrategy ? `Section-agent strategy: ${designPass.sectionAgentStrategy}` : '',
             leadGoal ? `Lead cluster goal: ${leadGoal}` : '',
             'Section sequence:',
             ...sections.map((section, index) => {
                 const heading = String(section?.heading || `Section ${index + 1}`).trim();
                 const anchorHint = String(section?.anchorHint || '').trim();
                 const purpose = String(section?.summary || section?.goal || '').trim();
+                const agentRole = String(section?.agentRole || '').trim();
                 const blockMix = Array.isArray(section?.suggestedBlocks) && section.suggestedBlocks.length > 0
                     ? section.suggestedBlocks
                         .map((block) => canonicalizeBlockType(block?.type || 'text'))
@@ -5045,7 +5218,7 @@ If the request is for a substantial page, brief, report, plan, or rewrite, prefe
                         .join(', ')
                     : (Array.isArray(section?.blockTypes) ? section.blockTypes.join(', ') : '');
 
-                return `${index + 1}. ${heading}${anchorHint ? ` (${anchorHint})` : ''}${purpose ? ` -> ${purpose}` : ''}${blockMix ? ` | block mix: ${blockMix}` : ''}`;
+                return `${index + 1}. ${heading}${anchorHint ? ` (${anchorHint})` : ''}${agentRole ? ` [${agentRole}]` : ''}${purpose ? ` -> ${purpose}` : ''}${blockMix ? ` | block mix: ${blockMix}` : ''}`;
             }),
             polishChecks.length
                 ? `Final polish: ${polishChecks.join(' | ')}`
@@ -5069,18 +5242,25 @@ If the request is for a substantial page, brief, report, plan, or rewrite, prefe
 Hidden planning pass for a substantial notes-writing request.
 Do not return notes-actions in this pass.
 Do not plan filesystem writes, repo paths, or local file creation.
+First make a design pass, then break the page into sections that can be assigned to independent section agents.
 Return JSON only in this shape:
 {
   "templateId": "brief",
   "editMode": "rebuild_page | targeted_section_edits | hybrid_refresh",
   "title": "Page title",
   "leadGoal": "What the first screenful should achieve",
+  "designPass": {
+    "visualDirection": "Overall page composition and design scheme",
+    "sectionAgentStrategy": "How independent section agents should split the work",
+    "sharedConstraints": ["Keep terminology consistent", "Use the selected block palette"]
+  },
   "polishChecks": ["Keep the lead cluster designed", "Avoid long runs of plain text"],
   "sections": [
     {
       "heading": "Section heading",
       "goal": "Why this section exists",
       "anchorHint": "Reuse [block_id] or create a new section",
+      "agentRole": "lead-section-agent | evidence-section-agent | closeout-section-agent",
       "blockTypes": ["heading_2", "text", "bulleted_list"],
       "keyPoints": ["Point 1", "Point 2"]
     }
@@ -5096,10 +5276,24 @@ Return JSON only in this shape:
             throw new Error(planningResponse.content || 'Planning pass failed');
         }
 
+        const planPayload = parseHiddenDraftPayload(planningResponse.content, null);
         const normalizedPlan = normalizeHiddenDraftResult(planningResponse.content, null);
         if (!normalizedPlan) {
             return null;
         }
+
+        const parallelExpansionPayload = await buildParallelSectionExpansionPayload({
+            planningClient,
+            model,
+            systemPrompt,
+            question,
+            requestOptions,
+            plan: planPayload,
+        });
+
+        let normalizedExpansion = parallelExpansionPayload
+            ? JSON.stringify(parallelExpansionPayload, null, 2)
+            : null;
 
         const expansionPrompt = `${systemPrompt}
 
@@ -5108,17 +5302,24 @@ Do not return notes-actions in this pass.
 Do not plan filesystem writes, repo paths, or local file creation.
 You will receive the original request plus the approved page plan.
 Keep the chosen template consistent while expanding sections.
+Treat sections as independently assigned chunks, then return the merged section briefs.
 Return JSON only in this shape:
 {
   "templateId": "brief",
   "editMode": "hybrid_refresh",
   "title": "Page title",
   "leadGoal": "What the first screenful should achieve",
+  "designPass": {
+    "visualDirection": "Overall page composition and design scheme",
+    "sectionAgentStrategy": "How independent section agents split the work",
+    "sharedConstraints": ["Keep terminology consistent", "Use the selected block palette"]
+  },
   "polishChecks": ["Keep the lead cluster designed", "Avoid long runs of plain text"],
   "sections": [
     {
       "heading": "Section heading",
       "anchorHint": "Reuse [block_id] or create a new section",
+      "agentRole": "lead-section-agent | evidence-section-agent | closeout-section-agent",
       "summary": "Detailed summary of what this section should say",
       "suggestedBlocks": [
         { "type": "heading_2", "content": "Section heading" },
@@ -5128,19 +5329,21 @@ Return JSON only in this shape:
   ]
 }`;
 
-        const expansionResponse = await planningClient.chat([
-            { role: 'system', content: expansionPrompt },
-            {
-                role: 'user',
-                content: `Original request:\n${question}\n\nApproved page plan:\n${normalizedPlan}`
+        if (!normalizedExpansion) {
+            const expansionResponse = await planningClient.chat([
+                { role: 'system', content: expansionPrompt },
+                {
+                    role: 'user',
+                    content: `Original request:\n${question}\n\nApproved page plan:\n${normalizedPlan}`
+                }
+            ], model, requestOptions);
+
+            if (expansionResponse?.error) {
+                throw new Error(expansionResponse.content || 'Expansion pass failed');
             }
-        ], model, requestOptions);
 
-        if (expansionResponse?.error) {
-            throw new Error(expansionResponse.content || 'Expansion pass failed');
+            normalizedExpansion = normalizeHiddenDraftResult(expansionResponse.content, normalizedPlan);
         }
-
-        const normalizedExpansion = normalizeHiddenDraftResult(expansionResponse.content, normalizedPlan);
         if (!normalizedExpansion) {
             return null;
         }
@@ -5171,6 +5374,7 @@ ${normalizedExpansion}
 
 ${applicationBrief ? `Use this section-by-section application brief:\n${applicationBrief}\n\n` : ''}Preserve the chosen template's layout rhythm and block variety.
 Apply the page section by section instead of one-shotting the whole document.
+When a section has an existing heading anchor, prefer replace_section, insert_after_section, move_section, or delete_section over a full-page rebuild.
 Silently verify the lead cluster, section order, and final polish before returning the page edits.`
             }
         ];
@@ -6511,6 +6715,22 @@ Silently verify the lead cluster, section order, and final polish before returni
                         appliedCount++;
                         break;
                     }
+                    case 'replace_section': {
+                        const headingBlockId = rawAction.headingBlockId
+                            || rawAction.sectionBlockId
+                            || rawAction.blockId
+                            || targetBlockId;
+                        if (!headingBlockId) return;
+                        const replacements = (blockDefinitions.length ? blockDefinitions : [rawAction]).map((blockDef) => normalizeActionBlock(blockDef, {
+                            defaultType: rawAction.type || blockDef.type || 'text'
+                        }));
+                        const inserted = editor.replaceSectionFromHeading
+                            ? (editor.replaceSectionFromHeading(headingBlockId, replacements) || [])
+                            : (editor.replaceBlockWithBlocks?.(headingBlockId, replacements) || []);
+                        focusBlockId = inserted[0]?.id || inserted[inserted.length - 1]?.id || focusBlockId;
+                        appliedCount++;
+                        break;
+                    }
                     case 'move_block':
                     case 'reorder_block':
                     case 'move': {
@@ -6520,6 +6740,31 @@ Silently verify the lead cluster, section order, and final polish before returni
                         if (!moveBlockId || !destinationBlockId || moveBlockId === destinationBlockId) return;
                         editor.reorderBlocks?.(moveBlockId, destinationBlockId, position);
                         focusBlockId = moveBlockId;
+                        appliedCount++;
+                        break;
+                    }
+                    case 'move_section':
+                    case 'reorder_section': {
+                        const headingBlockId = rawAction.headingBlockId
+                            || rawAction.sectionBlockId
+                            || rawAction.blockId
+                            || rawAction.sourceBlockId
+                            || rawAction.draggedBlockId
+                            || null;
+                        const destinationHeadingId = rawAction.targetHeadingBlockId
+                            || rawAction.targetSectionBlockId
+                            || rawAction.targetBlockId
+                            || rawAction.destinationBlockId
+                            || rawAction.referenceBlockId
+                            || rawAction.anchorBlockId
+                            || null;
+                        const position = String(rawAction.position || 'after').toLowerCase() === 'before' ? 'before' : 'after';
+                        if (!headingBlockId || !destinationHeadingId || headingBlockId === destinationHeadingId) return;
+                        const moved = editor.moveSection
+                            ? editor.moveSection(headingBlockId, destinationHeadingId, position)
+                            : editor.reorderBlocks?.(headingBlockId, destinationHeadingId, position);
+                        if (!moved) return;
+                        focusBlockId = headingBlockId;
                         appliedCount++;
                         break;
                     }
@@ -6539,6 +6784,27 @@ Silently verify the lead cluster, section order, and final polish before returni
                         appliedCount++;
                         break;
                     }
+                    case 'insert_after_section': {
+                        const headingBlockId = rawAction.headingBlockId
+                            || rawAction.sectionBlockId
+                            || rawAction.blockId
+                            || targetBlockId
+                            || getLastBlockId();
+                        if (!headingBlockId) return;
+                        const blocksToInsert = blockDefinitions.length ? blockDefinitions : [{
+                            type: rawAction.type || 'text',
+                            content: rawAction.content || ''
+                        }];
+                        const normalizedBlocks = blocksToInsert.map((blockDef) => normalizeActionBlock(blockDef, {
+                            defaultType: rawAction.type || blockDef.type || 'text'
+                        }));
+                        const inserted = editor.insertBlocksAfterSection
+                            ? (editor.insertBlocksAfterSection(headingBlockId, normalizedBlocks) || [])
+                            : (editor.insertBlocksAfter?.(headingBlockId, normalizedBlocks) || []);
+                        focusBlockId = inserted[inserted.length - 1]?.id || focusBlockId;
+                        appliedCount++;
+                        break;
+                    }
                     case 'insert_before': {
                         const insertBeforeId = targetBlockId || getFirstBlockId();
                         if (!insertBeforeId) return;
@@ -6552,6 +6818,27 @@ Silently verify the lead cluster, section order, and final polish before returni
                                 defaultType: rawAction.type || blockDef.type || 'text'
                             }))
                         ) || [];
+                        focusBlockId = inserted[inserted.length - 1]?.id || focusBlockId;
+                        appliedCount++;
+                        break;
+                    }
+                    case 'insert_before_section': {
+                        const headingBlockId = rawAction.headingBlockId
+                            || rawAction.sectionBlockId
+                            || rawAction.blockId
+                            || targetBlockId
+                            || getFirstBlockId();
+                        if (!headingBlockId) return;
+                        const blocksToInsert = blockDefinitions.length ? blockDefinitions : [{
+                            type: rawAction.type || 'text',
+                            content: rawAction.content || ''
+                        }];
+                        const normalizedBlocks = blocksToInsert.map((blockDef) => normalizeActionBlock(blockDef, {
+                            defaultType: rawAction.type || blockDef.type || 'text'
+                        }));
+                        const inserted = editor.insertBlocksBeforeSection
+                            ? (editor.insertBlocksBeforeSection(headingBlockId, normalizedBlocks) || [])
+                            : (editor.insertBlocksBefore?.(headingBlockId, normalizedBlocks) || []);
                         focusBlockId = inserted[inserted.length - 1]?.id || focusBlockId;
                         appliedCount++;
                         break;
@@ -6616,6 +6903,19 @@ Silently verify the lead cluster, section order, and final polish before returni
                     case 'delete': {
                         if (!targetBlockId) return;
                         editor.deleteBlock?.(targetBlockId);
+                        appliedCount++;
+                        break;
+                    }
+                    case 'delete_section': {
+                        const headingBlockId = rawAction.headingBlockId
+                            || rawAction.sectionBlockId
+                            || rawAction.blockId
+                            || targetBlockId;
+                        if (!headingBlockId) return;
+                        const deleted = editor.deleteSectionFromHeading
+                            ? editor.deleteSectionFromHeading(headingBlockId)
+                            : editor.deleteBlock?.(headingBlockId);
+                        if (!deleted && editor.deleteSectionFromHeading) return;
                         appliedCount++;
                         break;
                     }
@@ -6988,7 +7288,11 @@ Silently verify the lead cluster, section order, and final polish before returni
         
         actions.forEach(action => {
             if (action.blockId) blockIds.add(action.blockId);
+            if (action.headingBlockId) blockIds.add(action.headingBlockId);
+            if (action.sectionBlockId) blockIds.add(action.sectionBlockId);
             if (action.targetBlockId) blockIds.add(action.targetBlockId);
+            if (action.targetHeadingBlockId) blockIds.add(action.targetHeadingBlockId);
+            if (action.targetSectionBlockId) blockIds.add(action.targetSectionBlockId);
             if (action.draggedBlockId) blockIds.add(action.draggedBlockId);
             if (action.sourceBlockId) blockIds.add(action.sourceBlockId);
             if (action.destinationBlockId) blockIds.add(action.destinationBlockId);

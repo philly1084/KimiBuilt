@@ -164,6 +164,65 @@ const Editor = (function() {
             .replace(/\b\w/g, (char) => char.toUpperCase());
     }
 
+    function createBlockActionButton({ action, title, svg, className = '' }) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `block-action ${className}`.trim();
+        button.dataset.action = action;
+        button.title = title;
+        button.setAttribute('aria-label', title);
+        button.innerHTML = svg;
+        return button;
+    }
+
+    function createBlockActions(block) {
+        const actions = document.createElement('div');
+        actions.className = 'block-actions';
+
+        const icons = {
+            edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+            up: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m18 15-6-6-6 6"/></svg>',
+            down: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>',
+            delete: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/></svg>',
+        };
+
+        [
+            { action: 'edit', title: 'Edit block', svg: icons.edit },
+            { action: 'move-up', title: 'Move block up', svg: icons.up },
+            { action: 'move-down', title: 'Move block down', svg: icons.down },
+            { action: 'delete', title: 'Delete block', svg: icons.delete, className: 'block-action-danger' },
+        ].forEach((definition) => {
+            actions.appendChild(createBlockActionButton(definition));
+        });
+
+        actions.addEventListener('click', (event) => {
+            const button = event.target.closest('.block-action');
+            if (!button) return;
+
+            event.preventDefault();
+            event.stopPropagation();
+
+            switch (button.dataset.action) {
+                case 'edit':
+                    focusBlock(block.id);
+                    break;
+                case 'move-up':
+                    moveBlockUp(block.id);
+                    break;
+                case 'move-down':
+                    moveBlockDown(block.id);
+                    break;
+                case 'delete':
+                    deleteBlock(block.id);
+                    break;
+                default:
+                    break;
+            }
+        });
+
+        return actions;
+    }
+
     function getBlockConversionInfo(blockId, newType, newContent = null) {
         const block = getBlock(blockId);
         if (!block || block.type === newType) {
@@ -298,6 +357,11 @@ const Editor = (function() {
             if (child.id === targetId) return true;
             return blockContainsDescendant(child, targetId);
         });
+    }
+
+    function getHeadingLevel(block) {
+        const match = String(block?.type || '').match(/^heading_(\d+)$/);
+        return match ? Number(match[1]) : null;
     }
 
     function getOutlineHeadings() {
@@ -978,6 +1042,8 @@ const Editor = (function() {
         handle.className = 'block-handle';
         handle.title = 'Drag to move, click for menu';
         blockEl.appendChild(handle);
+
+        blockEl.appendChild(createBlockActions(block));
         
         // Block content based on type
         const contentWrapper = document.createElement('div');
@@ -1445,6 +1511,38 @@ const Editor = (function() {
                 restoreDeletedBlock(deletedBlock, location);
             });
         }
+    }
+
+    function moveBlockWithinSiblings(blockId, direction) {
+        if (!currentPage) return false;
+
+        const location = findBlockLocation(blockId);
+        if (!location) return false;
+
+        const offset = direction === 'up' ? -1 : 1;
+        const nextIndex = location.index + offset;
+        if (nextIndex < 0 || nextIndex >= location.siblings.length) {
+            return false;
+        }
+
+        saveToHistory();
+
+        const [block] = location.siblings.splice(location.index, 1);
+        location.siblings.splice(nextIndex, 0, block);
+
+        refreshEditor();
+        autoSave();
+        focusBlock(blockId);
+
+        return true;
+    }
+
+    function moveBlockUp(blockId) {
+        return moveBlockWithinSiblings(blockId, 'up');
+    }
+
+    function moveBlockDown(blockId) {
+        return moveBlockWithinSiblings(blockId, 'down');
     }
     
     /**
@@ -1966,6 +2064,191 @@ const Editor = (function() {
 
         return normalizedBlocks;
     }
+
+    function getSectionRangeFromHeading(headingBlockId) {
+        if (!currentPage || !headingBlockId) return null;
+
+        const location = findBlockLocation(headingBlockId);
+        const headingLevel = getHeadingLevel(location?.block);
+        if (!location || !headingLevel) return null;
+
+        let endIndex = location.index;
+        for (let index = location.index + 1; index < location.siblings.length; index += 1) {
+            const nextLevel = getHeadingLevel(location.siblings[index]);
+            if (nextLevel && nextLevel <= headingLevel) {
+                break;
+            }
+            endIndex = index;
+        }
+
+        return {
+            heading: location.block,
+            siblings: location.siblings,
+            parent: location.parent,
+            startIndex: location.index,
+            endIndex,
+            blocks: location.siblings.slice(location.index, endIndex + 1),
+        };
+    }
+
+    function replaceSectionFromHeading(headingBlockId, blocks = []) {
+        if (!currentPage || !Array.isArray(blocks) || blocks.length === 0) return [];
+
+        const section = getSectionRangeFromHeading(headingBlockId);
+        if (!section) return [];
+
+        saveToHistory();
+
+        const normalizedBlocks = normalizeBlocks(Storage.cloneBlocksWithFreshIds(blocks));
+        section.siblings.splice(
+            section.startIndex,
+            section.endIndex - section.startIndex + 1,
+            ...normalizedBlocks
+        );
+
+        refreshEditor();
+        autoSave();
+
+        return normalizedBlocks;
+    }
+
+    function insertBlocksAfterSection(headingBlockId, blocks = []) {
+        if (!currentPage || !Array.isArray(blocks) || blocks.length === 0) return [];
+
+        const section = getSectionRangeFromHeading(headingBlockId);
+        if (!section) return [];
+
+        saveToHistory();
+
+        const normalizedBlocks = normalizeBlocks(Storage.cloneBlocksWithFreshIds(blocks));
+        section.siblings.splice(section.endIndex + 1, 0, ...normalizedBlocks);
+
+        refreshEditor();
+        autoSave();
+
+        return normalizedBlocks;
+    }
+
+    function insertBlocksBeforeSection(headingBlockId, blocks = []) {
+        if (!currentPage || !Array.isArray(blocks) || blocks.length === 0) return [];
+
+        const section = getSectionRangeFromHeading(headingBlockId);
+        if (!section) return [];
+
+        saveToHistory();
+
+        const normalizedBlocks = normalizeBlocks(Storage.cloneBlocksWithFreshIds(blocks));
+        section.siblings.splice(section.startIndex, 0, ...normalizedBlocks);
+
+        refreshEditor();
+        autoSave();
+
+        return normalizedBlocks;
+    }
+
+    function deleteSectionFromHeading(headingBlockId) {
+        if (!currentPage) return false;
+
+        const section = getSectionRangeFromHeading(headingBlockId);
+        if (!section) return false;
+
+        const removedCount = section.endIndex - section.startIndex + 1;
+        const focusFallback = section.siblings[section.endIndex + 1]?.id
+            || section.siblings[section.startIndex - 1]?.id
+            || null;
+
+        saveToHistory();
+        section.siblings.splice(section.startIndex, removedCount);
+
+        if (!currentPage.blocks.length) {
+            currentPage.blocks = [Blocks.createBlock('text', '')];
+        }
+
+        refreshEditor();
+        autoSave();
+
+        const nextFocusId = focusFallback || currentPage.blocks[0]?.id;
+        if (nextFocusId) {
+            focusBlock(nextFocusId);
+        }
+
+        return true;
+    }
+
+    function moveSection(headingBlockId, targetHeadingBlockId, position = 'after') {
+        if (!currentPage || !headingBlockId || !targetHeadingBlockId || headingBlockId === targetHeadingBlockId) {
+            return false;
+        }
+
+        const source = getSectionRangeFromHeading(headingBlockId);
+        const target = getSectionRangeFromHeading(targetHeadingBlockId);
+        if (!source || !target || source.siblings !== target.siblings) {
+            return false;
+        }
+
+        if (target.startIndex >= source.startIndex && target.startIndex <= source.endIndex) {
+            return false;
+        }
+
+        saveToHistory();
+
+        const count = source.endIndex - source.startIndex + 1;
+        const movingBlocks = source.siblings.splice(source.startIndex, count);
+        const refreshedTarget = getSectionRangeFromHeading(targetHeadingBlockId);
+        if (!refreshedTarget) {
+            source.siblings.splice(source.startIndex, 0, ...movingBlocks);
+            return false;
+        }
+
+        const insertIndex = String(position).toLowerCase() === 'before'
+            ? refreshedTarget.startIndex
+            : refreshedTarget.endIndex + 1;
+
+        refreshedTarget.siblings.splice(insertIndex, 0, ...movingBlocks);
+
+        refreshEditor();
+        autoSave();
+        focusBlock(headingBlockId);
+
+        return true;
+    }
+
+    function getAdjacentSectionHeadingId(headingBlockId, direction = 'next') {
+        const section = getSectionRangeFromHeading(headingBlockId);
+        if (!section) return null;
+
+        const headingLevel = getHeadingLevel(section.heading);
+        if (!headingLevel) return null;
+
+        if (direction === 'previous') {
+            for (let index = section.startIndex - 1; index >= 0; index -= 1) {
+                const level = getHeadingLevel(section.siblings[index]);
+                if (level && level <= headingLevel) {
+                    return section.siblings[index].id;
+                }
+            }
+            return null;
+        }
+
+        for (let index = section.endIndex + 1; index < section.siblings.length; index += 1) {
+            const level = getHeadingLevel(section.siblings[index]);
+            if (level && level <= headingLevel) {
+                return section.siblings[index].id;
+            }
+        }
+
+        return null;
+    }
+
+    function moveSectionUp(headingBlockId) {
+        const previousHeadingId = getAdjacentSectionHeadingId(headingBlockId, 'previous');
+        return previousHeadingId ? moveSection(headingBlockId, previousHeadingId, 'before') : false;
+    }
+
+    function moveSectionDown(headingBlockId) {
+        const nextHeadingId = getAdjacentSectionHeadingId(headingBlockId, 'next');
+        return nextHeadingId ? moveSection(headingBlockId, nextHeadingId, 'after') : false;
+    }
     
     /**
      * Update empty state visibility
@@ -2213,6 +2496,8 @@ const Editor = (function() {
         insertBlockAtIndex,
         deleteBlock,
         duplicateBlock,
+        moveBlockUp,
+        moveBlockDown,
         convertBlockType,
         swapBlockType,
         wipeBlock,
@@ -2238,6 +2523,14 @@ const Editor = (function() {
         replaceBlockWithBlocks,
         insertBlocksAfter,
         insertBlocksBefore,
+        getSectionRangeFromHeading,
+        replaceSectionFromHeading,
+        insertBlocksAfterSection,
+        insertBlocksBeforeSection,
+        deleteSectionFromHeading,
+        moveSection,
+        moveSectionUp,
+        moveSectionDown,
         addBlockAtEnd,
         updatePageMetadata,
         getCurrentModel,

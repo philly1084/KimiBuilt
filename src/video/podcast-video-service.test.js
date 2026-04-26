@@ -1,3 +1,4 @@
+const fs = require('fs/promises');
 const { PodcastVideoService, buildFallbackStoryboard } = require('./podcast-video-service');
 
 describe('PodcastVideoService', () => {
@@ -44,6 +45,56 @@ describe('PodcastVideoService', () => {
 
     expect(result.planning.provider).toBe('local');
     expect(result.scenes).toHaveLength(2);
+  });
+
+  test('uses adaptive ffmpeg timeouts and fast x264 settings when rendering', async () => {
+    const service = new PodcastVideoService({
+      audioProcessingService: {
+        assertConfigured: jest.fn(),
+        getEffectiveBinaryPath: () => 'ffmpeg',
+      },
+      isUnsplashConfigured: () => false,
+    });
+    const ffmpegCalls = [];
+    jest.spyOn(service, 'runFfmpeg').mockImplementation(async (args, options) => {
+      ffmpegCalls.push({ args, options });
+      await fs.writeFile(args[args.length - 1], Buffer.from('mp4'));
+      return { stdout: '', stderr: '' };
+    });
+
+    const result = await service.renderMp4({
+      audioBuffer: Buffer.from('audio'),
+      audioMimeType: 'audio/wav',
+      title: 'Longer render',
+      imageMode: 'fallback',
+      scenes: [{
+        start: 0,
+        end: 90,
+        summary: 'Particle physics update',
+        visualPrompt: 'particle detector newsroom still',
+      }],
+      segmentTimeoutMs: 90000,
+      muxTimeoutMs: 100000,
+      maxFfmpegTimeoutMs: 300000,
+      x264Preset: 'ultrafast',
+      x264Crf: 28,
+    });
+
+    expect(result.buffer).toEqual(Buffer.from('mp4'));
+    expect(ffmpegCalls).toHaveLength(2);
+    expect(ffmpegCalls[0].args).toEqual(expect.arrayContaining([
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      '-crf', '28',
+    ]));
+    expect(ffmpegCalls[0].options).toEqual(expect.objectContaining({
+      timeoutMs: 240000,
+      stage: 'scene 1/1',
+    }));
+    expect(ffmpegCalls[1].options).toEqual(expect.objectContaining({
+      timeoutMs: 210000,
+      stage: 'final mux',
+    }));
   });
 
   test('can harvest an image from a web-search result via web-fetch', async () => {

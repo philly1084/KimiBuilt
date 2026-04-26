@@ -162,6 +162,12 @@
             onDuplicate: (blockId) => {
                 Editor.duplicateBlock(blockId);
             },
+            onMoveUp: (blockId) => {
+                Editor.moveBlockUp(blockId);
+            },
+            onMoveDown: (blockId) => {
+                Editor.moveBlockDown(blockId);
+            },
             onDrop: (draggedId, targetId, position) => {
                 Editor.reorderBlocks(draggedId, targetId, position);
             },
@@ -208,6 +214,20 @@
 
                 Editor.wipeBlock(blockId);
                 Sidebar.showToast(`Wiped ${typeName}`, 'success');
+            },
+            onDeleteSection: (blockId) => {
+                const block = Editor.getBlock?.(blockId);
+                const title = typeof block?.content === 'string'
+                    ? block.content
+                    : (block?.content?.text || 'this section');
+                const confirmed = window.confirm(`Delete "${title}" and every block under that heading?`);
+                if (!confirmed) {
+                    return;
+                }
+
+                if (Editor.deleteSectionFromHeading?.(blockId)) {
+                    Sidebar.showToast('Section deleted', 'success');
+                }
             }
         });
         
