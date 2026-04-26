@@ -206,6 +206,10 @@ class Dashboard {
             e.preventDefault();
             this.saveDefaultConfig();
         });
+        document.getElementById('orchestrationConfigForm')?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.saveOrchestrationConfig();
+        });
         
         document.getElementById('addModelBtn')?.addEventListener('click', () => {
             this.showToast('Add model functionality coming soon', 'info');
@@ -1927,14 +1931,43 @@ class Dashboard {
                 models: {
                     defaultModel: document.getElementById('defaultModel').value,
                     temperature: parseFloat(document.getElementById('defaultTemperature').value),
-                    maxTokens: parseInt(document.getElementById('defaultMaxTokens').value),
+                    maxTokens: parseInt(document.getElementById('defaultMaxTokens').value, 10),
+                    topP: parseFloat(document.getElementById('defaultTopP').value),
+                    frequencyPenalty: parseFloat(document.getElementById('defaultFrequencyPenalty').value),
+                    presencePenalty: parseFloat(document.getElementById('defaultPresencePenalty').value),
                 }
             };
 
-            await apiClient.put('/api/admin/settings', settings);
+            const response = await apiClient.put('/api/admin/settings', settings);
+            this.applySettings(this.unwrapApiPayload(response, settings));
             this.showToast('Configuration saved', 'success');
         } catch (error) {
             this.showToast('Failed to save configuration', 'error');
+        }
+    }
+
+    async saveOrchestrationConfig() {
+        try {
+            const settings = {
+                orchestration: {
+                    enabled: document.getElementById('orchestrationEnabled').value === 'true',
+                    defaultModel: document.getElementById('orchestrationDefaultModel').value.trim(),
+                    plannerModel: document.getElementById('orchestrationPlannerModel').value.trim(),
+                    synthesisModel: document.getElementById('orchestrationSynthesisModel').value.trim(),
+                    repairModel: document.getElementById('orchestrationRepairModel').value.trim(),
+                    fallbackModels: this.parseDelimitedList(document.getElementById('orchestrationFallbackModels').value),
+                    plannerReasoningEffort: document.getElementById('orchestrationPlannerReasoning').value,
+                    synthesisReasoningEffort: document.getElementById('orchestrationSynthesisReasoning').value,
+                    repairReasoningEffort: document.getElementById('orchestrationRepairReasoning').value,
+                },
+            };
+
+            const response = await apiClient.put('/api/admin/settings', settings);
+            this.applySettings(this.unwrapApiPayload(response, settings));
+            this.showToast('Orchestration settings saved', 'success');
+        } catch (error) {
+            console.error('Error saving orchestration settings:', error);
+            this.showToast('Failed to save orchestration settings', 'error');
         }
     }
     
@@ -3934,6 +3967,7 @@ class Dashboard {
         const models = settings.models || {};
         const api = settings.api || {};
         const features = settings.features || {};
+        const orchestration = settings.orchestration || {};
         const personality = settings.personality || {};
         const agentNotes = settings.agentNotes || {};
         const ssh = settings.integrations?.ssh || {};
@@ -3989,6 +4023,15 @@ class Dashboard {
 
         this.syncModelOptions();
         this.setInputValue('defaultModel', models.defaultModel || 'gpt-4o');
+        this.setInputValue('orchestrationEnabled', String(orchestration.enabled !== false));
+        this.setInputValue('orchestrationDefaultModel', orchestration.defaultModel || 'gpt-5.5');
+        this.setInputValue('orchestrationPlannerModel', orchestration.plannerModel || orchestration.defaultModel || 'gpt-5.5');
+        this.setInputValue('orchestrationSynthesisModel', orchestration.synthesisModel || orchestration.defaultModel || 'gpt-5.5');
+        this.setInputValue('orchestrationRepairModel', orchestration.repairModel || orchestration.defaultModel || 'gpt-5.5');
+        this.setInputValue('orchestrationFallbackModels', this.joinListForTextarea(orchestration.fallbackModels || ['gemini-3.1-pro', 'groq-compound']));
+        this.setInputValue('orchestrationPlannerReasoning', orchestration.plannerReasoningEffort || 'high');
+        this.setInputValue('orchestrationSynthesisReasoning', orchestration.synthesisReasoningEffort || 'medium');
+        this.setInputValue('orchestrationRepairReasoning', orchestration.repairReasoningEffort || 'high');
         apiClient.baseUrl = window.location.origin;
 
         this.setCheckboxValue('featureWebsocket', Boolean(features.realTimeUpdates));

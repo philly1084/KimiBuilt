@@ -902,6 +902,14 @@ function isJudgmentV2Enabled() {
     return config.runtime?.judgmentV2Enabled === true;
 }
 
+function getEffectiveOrchestrationConfig() {
+    if (typeof settingsController?.getEffectiveOrchestrationConfig === 'function') {
+        return settingsController.getEffectiveOrchestrationConfig();
+    }
+
+    return settingsController?.settings?.orchestration || {};
+}
+
 function normalizeConfidence(value = null, fallback = 0.5) {
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) {
@@ -1511,7 +1519,9 @@ function resolveRoleExecutionOptions({
     toolPolicy = {},
     toolEvents = [],
 } = {}) {
-    if (!isJudgmentV2Enabled()) {
+    const orchestrationConfig = getEffectiveOrchestrationConfig();
+    const useOrchestrationConfig = isJudgmentV2Enabled() && orchestrationConfig?.enabled !== false;
+    if (!useOrchestrationConfig) {
         return {
             model,
             reasoningEffort,
@@ -1526,8 +1536,17 @@ function resolveRoleExecutionOptions({
     const roleReasoningKey = role === 'planner'
         ? 'plannerReasoningEffort'
         : (role === 'repair' ? 'repairReasoningEffort' : 'synthesisReasoningEffort');
-    const configuredModel = String(config.runtime?.[roleModelKey] || '').trim() || model || null;
-    const configuredReasoning = String(config.runtime?.[roleReasoningKey] || '').trim();
+    const configuredModel = String(
+        config.runtime?.[roleModelKey]
+        || orchestrationConfig?.[roleModelKey]
+        || orchestrationConfig?.defaultModel
+        || '',
+    ).trim() || model || null;
+    const configuredReasoning = String(
+        config.runtime?.[roleReasoningKey]
+        || orchestrationConfig?.[roleReasoningKey]
+        || '',
+    ).trim();
     const ambiguous = classification?.ambiguous === true || Number(classification?.confidence || 0) < 0.72;
     const toolHeavy = Array.isArray(toolEvents) && toolEvents.length >= 3;
     const defaultReasoning = role === 'planner'
@@ -1539,6 +1558,9 @@ function resolveRoleExecutionOptions({
     return {
         model: configuredModel,
         reasoningEffort: explicitReasoning || configuredReasoning || defaultReasoning,
+        fallbackModels: Array.isArray(orchestrationConfig?.fallbackModels)
+            ? orchestrationConfig.fallbackModels
+            : [],
     };
 }
 
@@ -11113,37 +11135,67 @@ class ConversationOrchestrator extends EventEmitter {
     async completeText(prompt, options = {}) {
         const {
             onModelResponse = null,
+            fallbackModels = [],
             ...completionOptions
         } = options || {};
-
-        if (typeof this.llmClient?.complete === 'function') {
-            const completion = await this.llmClient.complete(prompt, completionOptions);
-            const normalizedResponse = completion && typeof completion === 'object' && !Array.isArray(completion)
-                ? normalizeModelResponseShape(completion)
-                : buildSyntheticResponse({
-                    output: String(completion || ''),
-                    model: completionOptions.model || null,
-                });
-
-            if (typeof onModelResponse === 'function') {
-                onModelResponse(normalizedResponse);
-            }
-
-            return typeof completion === 'string'
-                ? completion
-                : extractResponseText(normalizedResponse);
+        const modelCandidates = [
+            completionOptions.model || null,
+            ...(Array.isArray(fallbackModels) ? fallbackModels : []),
+        ].filter((entry, index, list) => {
+            const normalized = String(entry || '').trim();
+            return normalized && list.findIndex((candidate) => String(candidate || '').trim() === normalized) === index;
+        });
+        if (modelCandidates.length === 0) {
+            modelCandidates.push(null);
         }
 
-        const response = await this.requestResponse({
-            input: prompt,
-            stream: false,
-            model: completionOptions.model || null,
-            reasoningEffort: completionOptions.reasoningEffort || null,
-            enableAutomaticToolCalls: false,
-            onModelResponse,
-        });
+        let lastError = null;
+        for (let index = 0; index < modelCandidates.length; index += 1) {
+            const candidateModel = modelCandidates[index];
+            const attemptOptions = {
+                ...completionOptions,
+                model: candidateModel,
+            };
 
-        return extractResponseText(response);
+            try {
+                if (typeof this.llmClient?.complete === 'function') {
+                    const completion = await this.llmClient.complete(prompt, attemptOptions);
+                    const normalizedResponse = completion && typeof completion === 'object' && !Array.isArray(completion)
+                        ? normalizeModelResponseShape(completion)
+                        : buildSyntheticResponse({
+                            output: String(completion || ''),
+                            model: attemptOptions.model || null,
+                        });
+
+                    if (typeof onModelResponse === 'function') {
+                        onModelResponse(normalizedResponse);
+                    }
+
+                    return typeof completion === 'string'
+                        ? completion
+                        : extractResponseText(normalizedResponse);
+                }
+
+                const response = await this.requestResponse({
+                    input: prompt,
+                    stream: false,
+                    model: attemptOptions.model || null,
+                    reasoningEffort: attemptOptions.reasoningEffort || null,
+                    enableAutomaticToolCalls: false,
+                    onModelResponse,
+                });
+
+                return extractResponseText(response);
+            } catch (error) {
+                lastError = error;
+                if (index >= modelCandidates.length - 1) {
+                    break;
+                }
+                console.warn(`[ConversationOrchestrator] Orchestration model ${candidateModel || 'default'} failed; trying fallback ${modelCandidates[index + 1]}: ${error.message}`);
+            }
+        }
+
+        throw lastError || new Error('Orchestration model request failed');
     }
 
     async requestResponse(params = {}) {

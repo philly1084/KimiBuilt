@@ -6,6 +6,7 @@
 const fs = require('fs').promises;
 const path = require('path');
 const { config } = require('../../config');
+const { postgres } = require('../../postgres');
 const {
   getEffectiveSoulConfig,
   resetSoulFile,
@@ -84,6 +85,17 @@ class SettingsController {
         fallbackModel: 'gpt-4o-mini',
         maxTokens: 4096,
         temperature: 0.7
+      },
+      orchestration: {
+        enabled: true,
+        defaultModel: 'gpt-5.5',
+        fallbackModels: ['gemini-3.1-pro', 'groq-compound'],
+        plannerModel: 'gpt-5.5',
+        synthesisModel: 'gpt-5.5',
+        repairModel: 'gpt-5.5',
+        plannerReasoningEffort: 'high',
+        synthesisReasoningEffort: 'medium',
+        repairReasoningEffort: 'high'
       },
       personality: {
         enabled: true,
@@ -293,6 +305,23 @@ class SettingsController {
    * Save settings to file
    */
   async saveSettings() {
+    if (this.canUsePostgresSettings()) {
+      try {
+        await postgres.query(
+          `
+            INSERT INTO app_settings (key, value, updated_at)
+            VALUES ($1, $2::jsonb, NOW())
+            ON CONFLICT (key)
+            DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+          `,
+          ['dashboard', JSON.stringify(this.settings)],
+        );
+        return;
+      } catch (error) {
+        console.warn('[Settings] Failed to save dashboard settings to Postgres, falling back to file:', error.message);
+      }
+    }
+
     try {
       const settingsPath = this.getSettingsPath();
       await fs.mkdir(path.dirname(settingsPath), { recursive: true });
@@ -306,6 +335,22 @@ class SettingsController {
    * Load settings from file
    */
   async loadSettings() {
+    if (this.canUsePostgresSettings()) {
+      try {
+        const result = await postgres.query('SELECT value FROM app_settings WHERE key = $1', ['dashboard']);
+        const stored = result.rows?.[0]?.value;
+        if (stored && typeof stored === 'object') {
+          this.settings = this.deepMerge(this.getDefaultSettings(), stored);
+          if (this.settings?.integrations?.opencode) {
+            delete this.settings.integrations.opencode;
+          }
+          return;
+        }
+      } catch (error) {
+        console.warn('[Settings] Failed to load dashboard settings from Postgres, falling back to file:', error.message);
+      }
+    }
+
     try {
       const settingsPath = this.getSettingsPath();
       const data = await fs.readFile(settingsPath, 'utf8');
@@ -319,6 +364,10 @@ class SettingsController {
         console.log('Using default settings');
       }
     }
+  }
+
+  canUsePostgresSettings() {
+    return Boolean(postgres?.getStatus?.().initialized);
   }
 
   normalizeIncomingSettings(updates = {}) {
@@ -442,6 +491,11 @@ class SettingsController {
     const deployUpdate = normalized.integrations?.deploy;
     const giteaUpdate = normalized.integrations?.gitea;
     const managedAppsUpdate = normalized.integrations?.managedApps;
+    const orchestrationUpdate = normalized.orchestration;
+    if (orchestrationUpdate && typeof orchestrationUpdate === 'object') {
+      normalized.orchestration = this.normalizeOrchestrationSettings(orchestrationUpdate);
+    }
+
     if (deployUpdate) {
       const currentDeploy = this.settings?.integrations?.deploy || {};
       const nextDeploy = {
@@ -554,6 +608,36 @@ class SettingsController {
     return normalized;
   }
 
+  normalizeOrchestrationSettings(value = {}) {
+    const current = this.settings?.orchestration || this.getDefaultSettings().orchestration;
+    const next = {
+      ...current,
+      ...value,
+    };
+
+    next.enabled = value.enabled !== undefined ? Boolean(value.enabled) : current.enabled !== false;
+    [
+      'defaultModel',
+      'plannerModel',
+      'synthesisModel',
+      'repairModel',
+      'plannerReasoningEffort',
+      'synthesisReasoningEffort',
+      'repairReasoningEffort',
+    ].forEach((key) => {
+      if (next[key] !== undefined) {
+        next[key] = String(next[key] || '').trim();
+      }
+    });
+
+    next.fallbackModels = this.normalizeStringArray(
+      value.fallbackModels ?? value.fallbackModelList ?? next.fallbackModels,
+      current.fallbackModels || [],
+    );
+
+    return next;
+  }
+
   getPublicSettings() {
     const publicSettings = JSON.parse(JSON.stringify(this.settings));
     const ssh = publicSettings.integrations?.ssh;
@@ -589,6 +673,7 @@ class SettingsController {
     if (publicSettings.security) {
       publicSettings.security.requireAuth = authEnabled;
     }
+    publicSettings.orchestration = this.getEffectiveOrchestrationConfig();
     if (publicSettings.integrations?.opencode) {
       delete publicSettings.integrations.opencode;
     }
@@ -760,6 +845,34 @@ class SettingsController {
     return normalized.length > 0 ? Array.from(new Set(normalized)) : [...fallback];
   }
 
+  getEffectiveOrchestrationConfig() {
+    const defaults = this.getDefaultSettings().orchestration;
+    const stored = this.settings?.orchestration || {};
+    const merged = this.normalizeOrchestrationSettings({
+      ...defaults,
+      ...stored,
+    });
+
+    const envPlanner = String(config.runtime?.plannerModel || '').trim();
+    const envSynthesis = String(config.runtime?.synthesisModel || '').trim();
+    const envRepair = String(config.runtime?.repairModel || '').trim();
+    const envPlannerReasoning = String(config.runtime?.plannerReasoningEffort || '').trim();
+    const envSynthesisReasoning = String(config.runtime?.synthesisReasoningEffort || '').trim();
+    const envRepairReasoning = String(config.runtime?.repairReasoningEffort || '').trim();
+
+    return {
+      ...merged,
+      plannerModel: envPlanner || merged.plannerModel || merged.defaultModel,
+      synthesisModel: envSynthesis || merged.synthesisModel || merged.defaultModel,
+      repairModel: envRepair || merged.repairModel || merged.defaultModel,
+      plannerReasoningEffort: envPlannerReasoning || merged.plannerReasoningEffort || 'high',
+      synthesisReasoningEffort: envSynthesisReasoning || merged.synthesisReasoningEffort || 'medium',
+      repairReasoningEffort: envRepairReasoning || merged.repairReasoningEffort || 'high',
+      fallbackModels: this.normalizeStringArray(merged.fallbackModels, defaults.fallbackModels),
+      source: this.canUsePostgresSettings() ? 'postgres' : 'file',
+    };
+  }
+
   /**
    * Get default settings
    */
@@ -793,6 +906,17 @@ class SettingsController {
         fallbackModel: 'gpt-4o-mini',
         maxTokens: 4096,
         temperature: 0.7
+      },
+      orchestration: {
+        enabled: true,
+        defaultModel: 'gpt-5.5',
+        fallbackModels: ['gemini-3.1-pro', 'groq-compound'],
+        plannerModel: 'gpt-5.5',
+        synthesisModel: 'gpt-5.5',
+        repairModel: 'gpt-5.5',
+        plannerReasoningEffort: 'high',
+        synthesisReasoningEffort: 'medium',
+        repairReasoningEffort: 'high'
       },
       personality: {
         enabled: true,

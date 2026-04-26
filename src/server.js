@@ -35,6 +35,7 @@ const templatesRouter = require('./routes/templates');
 const designResourcesRouter = require('./routes/design-resources');
 const unsplashRouter = require('./routes/unsplash');
 const adminRouter = require('./routes/admin');
+const settingsController = require('./routes/admin/settings.controller');
 const authRouter = require('./routes/auth');
 const toolsRouter = require('./routes/tools');
 const workloadsRouter = require('./routes/workloads');
@@ -310,6 +311,8 @@ async function start() {
         console.log('[Boot] Initializing session store...');
         await sessionStore.initialize();
         console.log('[Boot] Session store ready');
+        await settingsController.loadSettings();
+        console.log('[Boot] Admin settings loaded');
 
         let runtimeVectorStore = vectorStore;
         console.log('[Boot] Initializing memory service...');

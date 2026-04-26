@@ -87,6 +87,13 @@ jest.mock('../../agent-notes', () => ({
   resetAgentNotesFile: jest.fn(),
 }));
 
+jest.mock('../../postgres', () => ({
+  postgres: {
+    getStatus: jest.fn(() => ({ initialized: false })),
+    query: jest.fn(),
+  },
+}));
+
 describe('settings.controller personality support', () => {
   let controller;
   let fsPromises;
@@ -209,6 +216,54 @@ describe('settings.controller personality support', () => {
       filePath: 'agent-notes.md',
     }));
     expect(publicSettings.integrations.ssh.password).toBeUndefined();
+    expect(publicSettings.orchestration).toEqual(expect.objectContaining({
+      enabled: true,
+      defaultModel: 'gpt-5.5',
+      plannerModel: 'gpt-5.5',
+      fallbackModels: ['gemini-3.1-pro', 'groq-compound'],
+    }));
+  });
+
+  test('normalizes orchestration model routing settings for the admin dashboard', async () => {
+    const req = {
+      body: {
+        orchestration: {
+          enabled: true,
+          defaultModel: ' gpt-5.5 ',
+          plannerModel: ' gpt-5.5 ',
+          synthesisModel: '',
+          repairModel: 'gpt-5.5',
+          fallbackModels: 'gemini-3.1-pro, groq-compound, gemini-3.1-pro',
+          plannerReasoningEffort: 'high',
+          synthesisReasoningEffort: 'medium',
+          repairReasoningEffort: 'high',
+        },
+      },
+    };
+    const res = {
+      json: jest.fn(),
+      status: jest.fn().mockReturnThis(),
+    };
+
+    await controller.update(req, res);
+
+    expect(controller.settings.orchestration).toEqual(expect.objectContaining({
+      enabled: true,
+      defaultModel: 'gpt-5.5',
+      plannerModel: 'gpt-5.5',
+      repairModel: 'gpt-5.5',
+      fallbackModels: ['gemini-3.1-pro', 'groq-compound'],
+      plannerReasoningEffort: 'high',
+    }));
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      data: expect.objectContaining({
+        orchestration: expect.objectContaining({
+          plannerModel: 'gpt-5.5',
+          fallbackModels: ['gemini-3.1-pro', 'groq-compound'],
+        }),
+      }),
+    }));
   });
 
   test('prefers stored deploy defaults over config defaults and exposes them publicly', () => {
