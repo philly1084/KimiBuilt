@@ -17,6 +17,7 @@ const config = require('./lib/config');
 const session = require('./lib/session');
 const api = require('./lib/api');
 const workbench = require('./lib/workbench');
+const modelOutputParser = require('../shared/model-output-parser');
 
 // CLI metadata
 const CLI_VERSION = '2.2.0';
@@ -47,7 +48,7 @@ let remoteToolContext = null;
 
 // Command definitions for auto-completion
 const COMMANDS = [
-  '/new', '/mode', '/history', '/sessions', '/clear', '/help', '/quit', '/exit',
+  '/new', '/mode', '/history', '/reasoning', '/sessions', '/clear', '/help', '/quit', '/exit',
   '/url', '/config', '/theme', '/export', '/import', '/rename', '/delete',
   '/copy', '/paste', '/undo', '/redo', '/search', '/settings', '/download-image',
   '/models', '/model', '/image', '/img', '/imgmodels', '/providers', '/attach',
@@ -88,6 +89,27 @@ marked.setOptions({
   gfm: true,
   breaks: true,
 });
+
+function normalizeTerminalPresentationMarkdown(text = '') {
+  const normalized = modelOutputParser.normalizeModelOutputMarkdown(text);
+  return String(normalized || '')
+    .split(/(```[\s\S]*?```)/g)
+    .map((segment) => {
+      if (/^```[\s\S]*```$/.test(segment)) {
+        return segment;
+      }
+
+      return segment
+        .replace(/<mark class="kb-highlight">([\s\S]*?)<\/mark>/g, '**$1**')
+        .replace(/<span class="kb-tone kb-tone--(?:accent|success|warning|danger|info|muted)">([\s\S]*?)<\/span>/g, '**$1**')
+        .replace(/^>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|SUCCESS|DANGER|INFO)\]\s*(.*)$/gim, (_match, type, title) => {
+          const label = String(type || 'note').toLowerCase().replace(/^\w/, (char) => char.toUpperCase());
+          const suffix = String(title || '').trim();
+          return `> **${label}${suffix ? `: ${suffix}` : ''}**`;
+        });
+    })
+    .join('');
+}
 
 /**
  * Print a fancy ASCII banner.
@@ -142,6 +164,7 @@ function printHelp() {
     ['/download-artifact <id> [file]', 'Download an artifact by ID'],
     ['/makefile <format> <prompt>', 'Generate a file artifact from a prompt'],
     ['/history', 'Show current session ID'],
+    ['/reasoning [all]', 'Show saved reasoning summaries for this session'],
     ['/sessions', 'List all sessions'],
     ['/clear', 'Clear the screen'],
     ['/url <url>', 'Set API base URL'],
@@ -389,6 +412,37 @@ function handleHistory() {
   } else {
     console.log(chalk.yellow('⚠ No active session'));
   }
+}
+
+function handleReasoningHistory(args = '') {
+  if (!currentSessionId) {
+    console.log(chalk.yellow('No active session'));
+    return;
+  }
+
+  const entries = session.getReasoningHistory(currentSessionId);
+  if (entries.length === 0) {
+    console.log(chalk.yellow('\nNo reasoning summaries saved for this session yet.\n'));
+    return;
+  }
+
+  const showAll = String(args || '').trim().toLowerCase() === 'all';
+  const visibleEntries = showAll ? entries : entries.slice(0, 1);
+  console.log(chalk.cyan.bold('\nReasoning History'));
+  visibleEntries.forEach((entry, index) => {
+    const timestamp = entry.timestamp ? new Date(entry.timestamp).toLocaleString() : 'unknown time';
+    const prompt = String(entry.prompt || '').replace(/\s+/g, ' ').trim();
+    console.log(chalk.gray(`\n[${index + 1}] ${timestamp}${entry.model ? ` | ${entry.model}` : ''}`));
+    if (prompt) {
+      console.log(chalk.gray(`Prompt: ${prompt.slice(0, 120)}${prompt.length > 120 ? '...' : ''}`));
+    }
+    console.log(chalk.blueBright(String(entry.text || '').trim()));
+  });
+
+  if (!showAll && entries.length > 1) {
+    console.log(chalk.gray(`\n${entries.length - 1} older reasoning summar${entries.length - 1 === 1 ? 'y' : 'ies'} hidden. Use /reasoning all to show them.`));
+  }
+  console.log('');
 }
 
 /**
@@ -711,7 +765,7 @@ async function handleImage(args) {
       currentSessionId = result.sessionId;
       session.setCurrent(currentSessionId);
     }
-    
+
     console.log(chalk.cyan.bold('\n┌─ Image Generated ─────────────────────┐'));
     console.log(chalk.gray(`  Model: ${chalk.cyan(result.model || imageOptions.model)}`));
     console.log(chalk.gray(`  Size: ${chalk.cyan(result.size || imageOptions.size)}`));
@@ -1201,13 +1255,15 @@ async function sendChatMessage(message) {
   
   try {
     let hasReceivedContent = false;
+    let reasoningSummary = '';
     const startTime = Date.now();
-    const appendReasoning = (delta) => {
+    const appendReasoning = (delta, metadata = {}) => {
       const content = String(delta || '');
       if (!content) {
         return;
       }
 
+      reasoningSummary = String(metadata.summary || `${reasoningSummary}${content}` || '').trim();
       const preview = content.replace(/\s+/g, ' ').trim();
       if (preview) {
         spinner.text = chalk.yellow(`Working through it: ${preview.slice(0, 80)}${preview.length > 80 ? '...' : ''}`);
@@ -1242,15 +1298,34 @@ async function sendChatMessage(message) {
       currentSessionId = result.sessionId;
       session.setCurrent(currentSessionId);
     }
+
+    const finalReasoningSummary = String(
+      result.assistantMetadata?.reasoningSummary
+      || result.assistantMetadata?.reasoning_summary
+      || reasoningSummary
+      || ''
+    ).trim();
     
     const duration = Date.now() - startTime;
     spinner.stop();
     const renderedResponse = accumulatedResponse.trim()
-      ? marked(accumulatedResponse.trim()).trimEnd()
+      ? marked(normalizeTerminalPresentationMarkdown(accumulatedResponse.trim())).trimEnd()
       : chalk.gray(hasReceivedContent ? '' : 'No assistant text was returned.');
     console.log('\n' + timestamp + aiGradient.bold('AI: '));
     if (renderedResponse) {
       console.log(renderedResponse);
+    }
+    if (finalReasoningSummary) {
+      session.addReasoningEntry(currentSessionId, {
+        prompt: message,
+        text: finalReasoningSummary,
+        model: currentModel,
+        mode: currentMode,
+      });
+      const preview = finalReasoningSummary.replace(/\s+/g, ' ').slice(0, 180);
+      console.log(chalk.cyan.bold('\nReasoning summary'));
+      console.log(chalk.blueBright(`${preview}${finalReasoningSummary.length > 180 ? '...' : ''}`));
+      console.log(chalk.gray('Use /reasoning to read the saved history for this session.'));
     }
     if (pendingArtifacts.length > 0) {
       pendingArtifacts.forEach((artifact) => {
@@ -1295,7 +1370,7 @@ async function sendCanvasMessage(message) {
       currentSessionId = result.sessionId;
       session.setCurrent(currentSessionId);
     }
-    
+
     const duration = Date.now() - startTime;
     
     console.log(chalk.cyan.bold('\n┌─ Canvas Result ───────────────────────┐'));
@@ -1308,7 +1383,7 @@ async function sendCanvasMessage(message) {
     
     // Render the content as markdown
     if (result.content) {
-      console.log(marked(result.content));
+      console.log(marked(normalizeTerminalPresentationMarkdown(result.content)));
     }
     
     if (result.suggestions && result.suggestions.length > 0) {
@@ -1349,6 +1424,12 @@ async function sendNotation(notationText) {
       currentSessionId = result.sessionId;
       session.setCurrent(currentSessionId);
     }
+
+    const reasoningSummary = String(
+      result.assistantMetadata?.reasoningSummary
+      || result.assistantMetadata?.reasoning_summary
+      || ''
+    ).trim();
     
     const duration = Date.now() - startTime;
     
@@ -1359,7 +1440,19 @@ async function sendNotation(notationText) {
     
     // Render the result as markdown
     if (result.result) {
-      console.log(marked(result.result));
+      console.log(marked(normalizeTerminalPresentationMarkdown(result.result)));
+    }
+
+    if (reasoningSummary) {
+      session.addReasoningEntry(currentSessionId, {
+        prompt: notationText,
+        text: reasoningSummary,
+        model: currentModel,
+        mode: 'notation',
+      });
+      console.log(chalk.cyan.bold('\nReasoning summary'));
+      console.log(chalk.blueBright(`${reasoningSummary.replace(/\s+/g, ' ').slice(0, 180)}${reasoningSummary.length > 180 ? '...' : ''}`));
+      console.log(chalk.gray('Use /reasoning to read the saved history for this session.'));
     }
     
     if (result.annotations && result.annotations.length > 0) {
@@ -1830,6 +1923,9 @@ async function processInput(input) {
       case 'history':
         handleHistory();
         return true;
+      case 'reasoning':
+        handleReasoningHistory(args);
+        return true;
       case 'sessions':
         await handleSessions();
         return true;
@@ -2019,7 +2115,7 @@ async function handlePipedInput(input) {
     }
     
     // Render as markdown
-    console.log(marked(result.message || result.content || ''));
+    console.log(marked(normalizeTerminalPresentationMarkdown(result.message || result.content || '')));
   } catch (err) {
     console.error(chalk.red(`❌ Error: ${err.message}`));
     process.exit(1);

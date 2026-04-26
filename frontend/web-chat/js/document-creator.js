@@ -1161,8 +1161,23 @@ class DocumentCreator {
         };
         this.addCreatedArtifactToFileManager(createdArtifact, sessionId);
 
+        const documentDownloadUrl = createdArtifact.downloadUrl || data.downloadUrl || data.document?.downloadUrl || '';
+        if (!documentDownloadUrl) {
+          throw new Error('Generated document did not include a download URL');
+        }
+
         // Fetch and download the document
-        const docResponse = await fetch(data.downloadUrl);
+        const docResponse = await fetch(documentDownloadUrl);
+        if (!docResponse.ok) {
+          let detail = '';
+          try {
+            const errorBody = await docResponse.json();
+            detail = errorBody?.error?.message || errorBody?.message || '';
+          } catch (_error) {
+            detail = await docResponse.text().catch(() => '');
+          }
+          throw new Error(detail || `Document download failed: HTTP ${docResponse.status}`);
+        }
         const blob = await docResponse.blob();
         
         const url = URL.createObjectURL(blob);

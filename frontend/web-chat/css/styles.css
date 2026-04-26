@@ -5171,22 +5171,33 @@ body.layout-minimal #input-meta-row {
     padding: 0.2rem 0.25rem 0;
 }
 
+.assistant-reasoning-ribbon > summary {
+    list-style: none;
+}
+
+.assistant-reasoning-ribbon > summary::-webkit-details-marker {
+    display: none;
+}
+
 .assistant-reasoning-ribbon__surface {
     display: flex;
-    flex-direction: column;
-    gap: 0.62rem;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.9rem;
     width: 100%;
     padding: 0.7rem 0.82rem;
     border: 1px solid rgba(88, 166, 255, 0.16);
     border-radius: 0.95rem;
     background: rgba(88, 166, 255, 0.08);
+    cursor: pointer;
+    transition: border-color var(--transition-fast), background-color var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-.assistant-reasoning-ribbon__header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.9rem;
+.assistant-reasoning-ribbon__surface:hover {
+    transform: translateY(-1px);
+    border-color: rgba(88, 166, 255, 0.28);
+    background: rgba(88, 166, 255, 0.1);
+    box-shadow: 0 14px 28px rgba(5, 10, 18, 0.16);
 }
 
 .assistant-reasoning-ribbon__toggle {
@@ -5285,10 +5296,15 @@ body.layout-minimal #input-meta-row {
 }
 
 .assistant-reasoning-ribbon__body {
-    padding: 0.1rem 0.92rem 0.35rem;
+    margin-top: 0.55rem;
+    padding: 0.72rem 0.92rem;
+    border-left: 2px solid rgba(88, 166, 255, 0.36);
+    background: rgba(88, 166, 255, 0.055);
+    border-radius: 0.7rem;
     font-size: 0.84rem;
     line-height: 1.6;
     color: var(--text-secondary);
+    white-space: normal;
 }
 
 .assistant-reasoning-ribbon__body--inline {
@@ -5297,6 +5313,17 @@ body.layout-minimal #input-meta-row {
 
 .assistant-reasoning-ribbon__body--synthetic {
     color: var(--text-primary);
+}
+
+.assistant-reasoning-ribbon__chevron {
+    display: inline-flex;
+    color: var(--text-tertiary);
+    transition: transform var(--transition-fast), color var(--transition-fast);
+}
+
+.assistant-reasoning-ribbon[open] .assistant-reasoning-ribbon__chevron {
+    transform: rotate(180deg);
+    color: var(--accent);
 }
 
 .assistant-stream-placeholder {
@@ -6112,6 +6139,80 @@ body.layout-minimal #input-meta-row {
     margin: 1rem 0;
     color: var(--text-secondary);
     font-style: italic;
+}
+
+.markdown-content .kb-highlight {
+    padding: 0.05rem 0.25rem;
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--warning) 24%, transparent);
+    color: var(--text-primary);
+}
+
+.markdown-content .kb-tone {
+    font-weight: 600;
+}
+
+.markdown-content .kb-tone--accent,
+.markdown-content .kb-tone--info {
+    color: var(--accent);
+}
+
+.markdown-content .kb-tone--success {
+    color: var(--success);
+}
+
+.markdown-content .kb-tone--warning {
+    color: var(--warning);
+}
+
+.markdown-content .kb-tone--danger {
+    color: var(--error);
+}
+
+.markdown-content .kb-tone--muted {
+    color: var(--text-secondary);
+}
+
+.markdown-content .kb-callout {
+    margin: 1rem 0;
+    padding: 0.875rem 1rem;
+    border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));
+    border-left: 4px solid var(--accent);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.markdown-content .kb-callout__title {
+    margin-bottom: 0.35rem;
+    color: var(--text-primary);
+    font-weight: 700;
+}
+
+.markdown-content .kb-callout__body {
+    color: var(--text-secondary);
+}
+
+.markdown-content .kb-callout__body > :last-child {
+    margin-bottom: 0;
+}
+
+.markdown-content .kb-callout--tip,
+.markdown-content .kb-callout--success {
+    border-color: color-mix(in srgb, var(--success) 30%, var(--border));
+    border-left-color: var(--success);
+    background: color-mix(in srgb, var(--success) 9%, transparent);
+}
+
+.markdown-content .kb-callout--warning {
+    border-color: color-mix(in srgb, var(--warning) 34%, var(--border));
+    border-left-color: var(--warning);
+    background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+.markdown-content .kb-callout--danger {
+    border-color: color-mix(in srgb, var(--error) 34%, var(--border));
+    border-left-color: var(--error);
+    background: color-mix(in srgb, var(--error) 9%, transparent);
 }
 
 .markdown-content code {

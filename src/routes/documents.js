@@ -135,6 +135,14 @@ function setPersistedArtifactHeaders(res, artifact = null) {
   res.setHeader('X-Artifact-Size-Bytes', String(artifact.sizeBytes || artifact.size || 0));
 }
 
+function applyInlineDocumentResponseHeaders(res) {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('Origin-Agent-Cluster', '?0');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+}
+
 function normalizeDocumentContentBuffer(document = null) {
   if (Buffer.isBuffer(document?.contentBuffer)) {
     return document.contentBuffer;
@@ -149,6 +157,39 @@ function normalizeDocumentContentBuffer(document = null) {
   }
 
   return null;
+}
+
+function isInlineDocumentRequest(req) {
+  const inlineValue = String(req.query?.inline || '').trim().toLowerCase();
+  return ['1', 'true', 'yes'].includes(inlineValue);
+}
+
+function buildContentDisposition(disposition = 'attachment', filename = 'document') {
+  const safeDisposition = disposition === 'inline' ? 'inline' : 'attachment';
+  const safeFilename = String(filename || 'document').replace(/["\r\n]/g, '');
+  return `${safeDisposition}; filename="${safeFilename || 'document'}"`;
+}
+
+function isSafeHeaderValue(value = '') {
+  return /^[\x09\x20-\x7e]*$/.test(String(value || ''));
+}
+
+function setDocumentMetadataHeaders(res, metadata = {}) {
+  let json = '{}';
+  try {
+    json = JSON.stringify(metadata || {}) || '{}';
+  } catch (_error) {
+    json = '{}';
+  }
+
+  const canSendRawMetadata = json.length <= 4096 && isSafeHeaderValue(json);
+  res.setHeader('X-Document-Metadata', canSendRawMetadata ? json : '{}');
+
+  if (!canSendRawMetadata && Buffer.byteLength(json, 'utf8') <= 8192) {
+    res.setHeader('X-Document-Metadata-Base64', Buffer.from(json, 'utf8').toString('base64'));
+  } else if (!canSendRawMetadata) {
+    res.setHeader('X-Document-Metadata-Truncated', 'true');
+  }
 }
 
 function resolveDocumentPreviewHtml(document = null) {
@@ -524,7 +565,7 @@ router.post('/generate', validate(generateSchema), async (req, res, next) => {
     res.setHeader('Content-Type', document.mimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${document.filename}"`);
     res.setHeader('X-Document-Id', document.id);
-    res.setHeader('X-Document-Metadata', JSON.stringify(document.metadata));
+    setDocumentMetadataHeaders(res, document.metadata);
     setPersistedArtifactHeaders(res, persistedArtifact);
     
     res.send(document.content);
@@ -929,7 +970,7 @@ router.post('/export-notes-page-pdf', validate(exportNotesPagePdfSchema), async 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('X-Document-Filename', filename);
-    res.setHeader('X-Document-Metadata', JSON.stringify(document.metadata || {}));
+    setDocumentMetadataHeaders(res, document.metadata);
 
     res.send(document.buffer);
   } catch (err) {
@@ -944,7 +985,7 @@ router.post('/export-notes-page-pdf', validate(exportNotesPagePdfSchema), async 
 router.get('/:id/download', async (req, res, next) => {
   try {
     const documentService = req.app.locals.documentService;
-    const document = documentService?.getDocument?.(req.params.id);
+    const document = await Promise.resolve(documentService?.getDocument?.(req.params.id));
 
     if (!document) {
       return res.status(404).json({
@@ -952,12 +993,23 @@ router.get('/:id/download', async (req, res, next) => {
       });
     }
 
-    res.setHeader('Content-Type', document.mimeType || 'application/octet-stream');
-    res.setHeader('Content-Disposition', `attachment; filename="${document.filename || 'document'}"`);
-    res.setHeader('X-Document-Id', document.id);
-    res.setHeader('X-Document-Metadata', JSON.stringify(document.metadata || {}));
+    const disposition = isInlineDocumentRequest(req) ? 'inline' : 'attachment';
+    const contentBuffer = normalizeDocumentContentBuffer(document);
+    if (!contentBuffer) {
+      return res.status(410).json({
+        error: { message: `Document content is no longer available: ${req.params.id}` }
+      });
+    }
 
-    res.send(document.contentBuffer || document.content);
+    res.setHeader('Content-Type', document.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Disposition', buildContentDisposition(disposition, document.filename || 'document'));
+    res.setHeader('X-Document-Id', document.id);
+    setDocumentMetadataHeaders(res, document.metadata);
+    if (disposition === 'inline') {
+      applyInlineDocumentResponseHeaders(res);
+    }
+
+    res.send(contentBuffer);
   } catch (err) {
     next(err);
   }

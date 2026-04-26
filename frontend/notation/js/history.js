@@ -44,6 +44,7 @@ const NotationHistory = {
             context: item.context || '',
             annotations: item.annotations || [],
             suggestions: item.suggestions || [],
+            reasoningSummary: item.reasoningSummary || '',
             timestamp: Date.now(),
             sessionId: item.sessionId || null
         };

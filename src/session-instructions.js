@@ -98,6 +98,8 @@ function buildHumanCentricResponseInstructions({
         '- Use fenced code blocks with a language label for code, commands, JSON, Mermaid, logs, or config. Do not hide large code inside inline text.',
         '- Use compact tables only when comparison is clearer than bullets.',
         '- Keep paragraphs short enough to scan in chat. Add blank lines between distinct ideas.',
+        '- Use presentation cues sparingly when they improve comprehension: `> [!NOTE]`, `> [!TIP]`, `> [!IMPORTANT]`, `> [!WARNING]`, `> [!SUCCESS]`, or `> [!DANGER]` for callouts; `==short phrase==` for a small highlight; and `::info[text]`, `::success[text]`, `::warning[text]`, `::danger[text]`, `::accent[text]`, or `::muted[text]` for subtle inline tone.',
+        '- Do not use presentation cues as decoration. Use them only for status, risk, result, warning, next action, or a key phrase the user should notice.',
         '- End with a concrete next step or a necessary clarifying question only when it helps the user move forward.',
         '- If the user asks for exact text, raw code, JSON-only output, or another strict format, follow that requested format instead of these presentation defaults.',
     ].join('\n');

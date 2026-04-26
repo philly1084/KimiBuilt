@@ -2152,6 +2152,9 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
         let source = window.KimiBuiltModelOutputParser?.normalizeModelOutputMarkdown
             ? window.KimiBuiltModelOutputParser.normalizeModelOutputMarkdown(text)
             : String(text || '');
+        if (window.KimiBuiltModelOutputParser?.normalizePresentationMarkupMarkdown) {
+            source = window.KimiBuiltModelOutputParser.normalizePresentationMarkupMarkdown(source);
+        }
         source = String(source || '').replace(/\r\n?/g, '\n');
         
         // Code blocks (including mermaid)
@@ -2295,6 +2298,19 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
                     quoteLines.push(lines[i].replace(/^>\s?/, '').trim());
                     i += 1;
                 }
+                const callout = quoteLines[0]?.match(/^\[!(NOTE|TIP|IMPORTANT|WARNING|SUCCESS|DANGER|INFO)\]\s*(.*)$/i);
+                if (callout) {
+                    const tone = String(callout[1] || 'note').toLowerCase();
+                    const title = String(callout[2] || this.getPresentationCalloutLabel(tone)).trim();
+                    const body = quoteLines.slice(1).filter(Boolean);
+                    blocks.push(`
+                        <div class="kb-callout kb-callout--${tone}">
+                            <div class="kb-callout__title">${this.renderInlineMarkdown(title)}</div>
+                            ${body.length > 0 ? `<div class="kb-callout__body">${body.map((item) => this.renderInlineMarkdown(item)).join('<br>')}</div>` : ''}
+                        </div>
+                    `);
+                    continue;
+                }
                 blocks.push(`<blockquote>${quoteLines.map((item) => this.renderInlineMarkdown(item)).join('<br>')}</blockquote>`);
                 continue;
             }
@@ -2320,6 +2336,18 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
             .map((cell) => cell.trim());
     }
 
+    getPresentationCalloutLabel(tone = '') {
+        return ({
+            note: 'Note',
+            tip: 'Tip',
+            important: 'Important',
+            warning: 'Warning',
+            success: 'Success',
+            danger: 'Danger',
+            info: 'Info',
+        })[String(tone || '').toLowerCase()] || 'Note';
+    }
+
     renderInlineMarkdown(text) {
         const inlineCodes = [];
         let html = String(text || '').replace(/`([^`]+)`/g, (match, code) => {
@@ -2331,6 +2359,8 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
         html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
         html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
         html = html.replace(/(^|[\s(])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+        html = html.replace(/&lt;mark class=&quot;kb-highlight&quot;&gt;([\s\S]*?)&lt;\/mark&gt;/g, '<mark class="kb-highlight">$1</mark>');
+        html = html.replace(/&lt;span class=&quot;kb-tone kb-tone--(accent|success|warning|danger|info|muted)&quot;&gt;([\s\S]*?)&lt;\/span&gt;/g, '<span class="kb-tone kb-tone--$1">$2</span>');
         html = html.replace(/__INLINE_CODE_(\d+)__/g, (match, index) => inlineCodes[Number(index)] || match);
 
         return html;

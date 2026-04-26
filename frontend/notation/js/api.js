@@ -335,7 +335,8 @@ const NotationAPI = {
                         helperMode: data.helperMode,
                         content: content,
                         annotations: data.annotations || [],
-                        suggestions: data.suggestions || []
+                        suggestions: data.suggestions || [],
+                        assistantMetadata: data.assistantMetadata || data.assistant_metadata || null
                     });
                 }
                 break;

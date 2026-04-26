@@ -93,6 +93,54 @@ function addToHistory(sessionId, metadata = {}) {
   }
 }
 
+function addReasoningEntry(sessionId, entry = {}) {
+  ensureSessionDir();
+  try {
+    const history = getHistory();
+    const index = history.findIndex(s => s.id === sessionId);
+    if (index < 0) {
+      return false;
+    }
+
+    const reasoningHistory = Array.isArray(history[index].reasoningHistory)
+      ? history[index].reasoningHistory
+      : [];
+    const text = String(entry.text || entry.reasoningSummary || '').trim();
+    if (!text) {
+      return false;
+    }
+
+    history[index] = {
+      ...history[index],
+      updatedAt: new Date().toISOString(),
+      reasoningHistory: [
+        {
+          id: entry.id || `reasoning-${Date.now()}`,
+          timestamp: entry.timestamp || new Date().toISOString(),
+          prompt: entry.prompt || '',
+          text,
+          model: entry.model || history[index].model || null,
+          mode: entry.mode || history[index].mode || 'chat',
+        },
+        ...reasoningHistory,
+      ].slice(0, 25),
+    };
+
+    const historyFile = path.join(CONFIG_DIR, 'session-history.json');
+    fs.writeFileSync(historyFile, JSON.stringify(history, null, 2), { mode: 0o600 });
+    return true;
+  } catch (err) {
+    console.error('[Session] Error saving reasoning history:', err.message);
+    return false;
+  }
+}
+
+function getReasoningHistory(sessionId) {
+  const history = getHistory();
+  const current = history.find(s => s.id === sessionId);
+  return Array.isArray(current?.reasoningHistory) ? current.reasoningHistory : [];
+}
+
 /**
  * Get session history.
  * @returns {Array} Array of session objects
@@ -307,4 +355,6 @@ module.exports = {
   getHistory,
   getAll,
   addToHistory,
+  addReasoningEntry,
+  getReasoningHistory,
 };

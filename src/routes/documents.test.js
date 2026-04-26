@@ -48,6 +48,80 @@ describe('/api/documents route', () => {
     expect(documentService.getDocument).toHaveBeenCalledWith('doc-1');
   });
 
+  test('serves generated documents inline when requested for preview', async () => {
+    const documentService = {
+      getDocument: jest.fn().mockReturnValue({
+        id: 'doc-html-1',
+        filename: 'climate-change.html',
+        mimeType: 'text/html',
+        metadata: { format: 'html' },
+        contentBuffer: Buffer.from('<!DOCTYPE html><html><body><h1>Climate Change</h1></body></html>'),
+      }),
+    };
+
+    const response = await request(buildApp(documentService)).get('/api/documents/doc-html-1/download?inline=1');
+
+    expect(response.status).toBe(200);
+    expect(response.header['content-type']).toContain('text/html');
+    expect(response.header['content-disposition']).toBe('inline; filename="climate-change.html"');
+    expect(response.header['origin-agent-cluster']).toBe('?0');
+    expect(response.text).toContain('<h1>Climate Change</h1>');
+  });
+
+  test('serves inline documents with non-ascii metadata without invalid response headers', async () => {
+    const documentService = {
+      getDocument: jest.fn().mockResolvedValue({
+        id: 'doc-html-unicode',
+        filename: 'questionnaire-result.html',
+        mimeType: 'text/html',
+        metadata: { title: 'Questionnaire response ✓', prompt: 'Résumé avec unicode' },
+        content: '<!DOCTYPE html><html><body><h1>Questionnaire</h1></body></html>',
+      }),
+    };
+
+    const response = await request(buildApp(documentService)).get('/api/documents/doc-html-unicode/download?inline=1');
+
+    expect(response.status).toBe(200);
+    expect(response.header['x-document-metadata']).toBe('{}');
+    expect(response.header['x-document-metadata-base64']).toBeTruthy();
+    expect(response.text).toContain('<h1>Questionnaire</h1>');
+  });
+
+  test('omits oversized document metadata from download headers', async () => {
+    const documentService = {
+      getDocument: jest.fn().mockReturnValue({
+        id: 'doc-html-large-metadata',
+        filename: 'large-metadata.html',
+        mimeType: 'text/html',
+        metadata: { prompt: 'x'.repeat(12000) },
+        contentBuffer: Buffer.from('<!DOCTYPE html><html><body><h1>Large</h1></body></html>'),
+      }),
+    };
+
+    const response = await request(buildApp(documentService)).get('/api/documents/doc-html-large-metadata/download?inline=1');
+
+    expect(response.status).toBe(200);
+    expect(response.header['x-document-metadata']).toBe('{}');
+    expect(response.header['x-document-metadata-base64']).toBeUndefined();
+    expect(response.header['x-document-metadata-truncated']).toBe('true');
+  });
+
+  test('returns a clean gone response when stored document content is missing', async () => {
+    const documentService = {
+      getDocument: jest.fn().mockReturnValue({
+        id: 'doc-empty',
+        filename: 'empty.html',
+        mimeType: 'text/html',
+        metadata: { format: 'html' },
+      }),
+    };
+
+    const response = await request(buildApp(documentService)).get('/api/documents/doc-empty/download?inline=1');
+
+    expect(response.status).toBe(410);
+    expect(response.body.error.message).toContain('Document content is no longer available');
+  });
+
   test('returns 404 when a stored document is missing', async () => {
     const documentService = {
       getDocument: jest.fn().mockReturnValue(null),

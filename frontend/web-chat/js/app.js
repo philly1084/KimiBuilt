@@ -4118,9 +4118,7 @@ class ChatApp {
             button.disabled = true;
         }
 
-        const sendSucceeded = await this.sendPreparedMessage(responseContent, {
-            reuseAssistantMessageId: surveyMessage?.id || '',
-        });
+        const sendSucceeded = await this.sendPreparedMessage(responseContent);
         if (!sendSucceeded) {
             if (surveyMessage) {
                 surveyMessage.surveyState = this.buildSurveyStatePayload({

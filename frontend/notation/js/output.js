@@ -54,6 +54,7 @@ const OutputManager = {
         this.currentMode = data.mode || 'expand';
         this.annotations = data.annotations || [];
         this.suggestions = data.suggestions || [];
+        this.reasoningSummary = String(data.reasoningSummary || '').trim();
 
         // Hide empty state, show content
         if (this.elements.empty) {
@@ -97,7 +98,7 @@ const OutputManager = {
             html = this._renderPlainText(this.currentResult);
         }
 
-        this.elements.rendered.innerHTML = html;
+        this.elements.rendered.innerHTML = `${this._renderReasoningSummary()}${html}`;
 
         // Add line numbers and annotations
         this._addLineAnnotations();
@@ -146,6 +147,28 @@ const OutputManager = {
         });
     },
 
+    _renderReasoningSummary() {
+        if (!this.reasoningSummary) {
+            return '';
+        }
+
+        const preview = this._truncate(this.reasoningSummary.replace(/\s+/g, ' '), 110);
+        const body = this.escapeHtml(this.reasoningSummary).replace(/\n/g, '<br>');
+
+        return `
+            <details class="reasoning-history-card">
+                <summary>
+                    <span class="reasoning-history-title">
+                        <i class="fas fa-brain"></i>
+                        Reasoning history
+                    </span>
+                    <span class="reasoning-history-preview">${this.escapeHtml(preview)}</span>
+                </summary>
+                <div class="reasoning-history-body">${body}</div>
+            </details>
+        `;
+    },
+
     /**
      * Apply a suggestion to the input
      * @param {number} index - Suggestion index
@@ -188,6 +211,7 @@ const OutputManager = {
         this.currentResult = '';
         this.annotations = [];
         this.suggestions = [];
+        this.reasoningSummary = '';
 
         if (this.elements.empty) {
             this.elements.empty.classList.remove('hidden');

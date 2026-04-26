@@ -528,6 +528,7 @@
                         <i class="fas fa-times"></i>
                     </button>
                     <span class="history-mode mode-${h.mode}">${h.mode}</span>
+                    ${h.reasoningSummary ? '<span class="history-reasoning-badge">reasoning</span>' : ''}
                     <div class="history-preview">${NotationHistory.getPreview(h.notation)}</div>
                     <div class="history-time">${NotationHistory.formatDate(h.timestamp)}</div>
                 </div>
@@ -592,7 +593,8 @@
                     result: item.result,
                     mode: item.mode,
                     annotations: item.annotations || [],
-                    suggestions: item.suggestions || []
+                    suggestions: item.suggestions || [],
+                    reasoningSummary: item.reasoningSummary || ''
                 });
             }
 
@@ -692,7 +694,21 @@
             this.isProcessing = false;
             this._showLoading(false);
 
-            const content = data.content || {};
+            const rawContent = data.content || {};
+            const content = typeof rawContent === 'string'
+                ? {
+                    result: rawContent,
+                    helperMode: data.helperMode || this.currentMode,
+                    annotations: data.annotations || [],
+                    suggestions: data.suggestions || [],
+                }
+                : rawContent;
+            const assistantMetadata = content.assistantMetadata
+                || content.assistant_metadata
+                || data.assistantMetadata
+                || data.assistant_metadata
+                || {};
+            const reasoningSummary = this._extractReasoningSummary(assistantMetadata);
             
             // Display result
             if (window.OutputManager) {
@@ -700,7 +716,8 @@
                     result: content.result || content.content || 'No result',
                     mode: content.helperMode || this.currentMode,
                     annotations: content.annotations || [],
-                    suggestions: content.suggestions || []
+                    suggestions: content.suggestions || [],
+                    reasoningSummary
                 });
             }
 
@@ -721,12 +738,51 @@
                     context: this.elements.contextInput?.value || '',
                     annotations: content.annotations || [],
                     suggestions: content.suggestions || [],
+                    reasoningSummary,
                     sessionId: data.sessionId
                 });
                 this._renderHistory();
             }
 
             this._showToast('Processing complete', 'success');
+        },
+
+        _extractReasoningSummary(value) {
+            if (typeof value === 'string') {
+                return value.trim();
+            }
+
+            if (Array.isArray(value)) {
+                return value
+                    .map((entry) => this._extractReasoningSummary(entry))
+                    .filter(Boolean)
+                    .join('\n')
+                    .trim();
+            }
+
+            if (!value || typeof value !== 'object') {
+                return '';
+            }
+
+            const candidates = [
+                value.reasoningSummary,
+                value.reasoning_summary,
+                value.reasoningText,
+                value.reasoning_text,
+                value.reasoning,
+                value.reasoning_content,
+                value.summary,
+                value.summary_text,
+            ];
+
+            for (const candidate of candidates) {
+                const summary = this._extractReasoningSummary(candidate);
+                if (summary) {
+                    return summary;
+                }
+            }
+
+            return '';
         },
 
         /**

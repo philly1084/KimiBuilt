@@ -31,4 +31,12 @@ describe('model-output-parser', () => {
         expect(normalized).toContain('### Ingredients');
         expect(normalized).toContain('| A | B |');
     });
+
+    test('normalizes lightweight presentation markup outside code fences', () => {
+        const normalized = parser.normalizeModelOutputMarkdown('This is ==important== and ::warning[check this].\n\n```md\n==literal== ::warning[literal]\n```');
+
+        expect(normalized).toContain('<mark class="kb-highlight">important</mark>');
+        expect(normalized).toContain('<span class="kb-tone kb-tone--warning">check this</span>');
+        expect(normalized).toContain('```md\n==literal== ::warning[literal]\n```');
+    });
 });

@@ -440,33 +440,33 @@ class OpenAIClient {
    */
   async notation(notationText, sessionId, helperMode = 'expand', context = '', model = null) {
     this.refreshClient();
-    
-    const systemPrompt = `You are in notation mode. Mode: ${helperMode}. ${context ? `Context: ${context}` : ''}`;
-    
-    const messages = [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: notationText },
-    ];
-    
-    const params = {
+
+    const payload = {
       model: resolvePreferredChatModel([], model || DEFAULT_CHAT_MODEL),
-      messages,
-      stream: false,
+      notation: notationText,
+      helperMode,
+      context,
+      clientSurface: CLI_CLIENT_SURFACE,
+      taskType: 'notation',
     };
     
     if (sessionId) {
-      params.session_id = sessionId;
+      payload.sessionId = sessionId;
     }
 
     try {
-      const response = await this.client.chat.completions.create(params);
-      
+      const response = await this.apiRequest('/api/notation', {
+        method: 'POST',
+        body: payload,
+      });
+
       return {
-        result: response.choices[0]?.message?.content || '',
-        helperMode,
-        annotations: [],
-        suggestions: [],
-        sessionId: response.session_id || sessionId,
+        result: response.result || response.content || '',
+        helperMode: response.helperMode || helperMode,
+        annotations: response.annotations || [],
+        suggestions: response.suggestions || [],
+        sessionId: response.sessionId || sessionId,
+        assistantMetadata: response.assistantMetadata || response.assistant_metadata || null,
       };
     } catch (err) {
       throw this._handleError(err);

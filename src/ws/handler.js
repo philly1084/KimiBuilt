@@ -989,6 +989,9 @@ async function handleNotation(ws, session, payload = {}, ownerId = null) {
         }
 
         const outputText = extractResponseText(response);
+        const assistantMetadata = buildFrontendAssistantMetadata({
+            ...(response?.metadata || {}),
+        });
         if (!execution.handledPersistence) {
             memoryService.rememberResponse(session.id, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope, {
                 sourceSurface: clientSurface || 'notation',
@@ -996,7 +999,7 @@ async function handleNotation(ws, session, payload = {}, ownerId = null) {
             }));
             await sessionStore.appendMessages(session.id, [
                 { role: 'user', content: notation },
-                { role: 'assistant', content: outputText },
+                { role: 'assistant', content: outputText, metadata: assistantMetadata },
             ]);
         }
         const generatedArtifacts = await maybeGenerateOutputArtifact({
@@ -1058,6 +1061,8 @@ async function handleNotation(ws, session, payload = {}, ownerId = null) {
             helperMode,
             content: outputText,
             artifacts,
+            assistant_metadata: assistantMetadata,
+            assistantMetadata,
         }));
     } catch (error) {
         failRuntimeTask(runtimeTask?.id, {

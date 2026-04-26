@@ -2265,7 +2265,7 @@ class UIHelpers {
     sanitizeAssistantHtml(html = '') {
         return DOMPurify.sanitize(html, {
             ALLOWED_TAGS: [
-                'p', 'br', 'strong', 'em', 'u', 's', 'del', 'ins',
+                'p', 'br', 'strong', 'em', 'u', 's', 'del', 'ins', 'mark',
                 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
                 'ul', 'ol', 'li',
                 'blockquote', 'hr',
@@ -2288,6 +2288,34 @@ class UIHelpers {
             ],
             ALLOW_DATA_ATTR: false,
         });
+    }
+
+    enhancePresentationCallouts(html = '') {
+        const calloutLabels = {
+            note: 'Note',
+            tip: 'Tip',
+            important: 'Important',
+            warning: 'Warning',
+            success: 'Success',
+            danger: 'Danger',
+            info: 'Info',
+        };
+
+        return String(html || '').replace(
+            /<blockquote>\s*<p>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|SUCCESS|DANGER|INFO)\](?:\s+([^<\n]*?))?\s*(?:<br\s*\/?>|\n)([\s\S]*?)<\/p>\s*<\/blockquote>/gi,
+            (_match, type, title, body) => {
+                const tone = String(type || '').toLowerCase();
+                const label = calloutLabels[tone] || 'Note';
+                const normalizedTitle = String(title || '').trim();
+                const bodyHtml = String(body || '').trim();
+                return `
+                    <div class="kb-callout kb-callout--${tone}">
+                        <div class="kb-callout__title">${this.escapeHtml(normalizedTitle || label)}</div>
+                        ${bodyHtml ? `<div class="kb-callout__body">${bodyHtml}</div>` : ''}
+                    </div>
+                `;
+            },
+        );
     }
 
     normalizeHumanReadableMarkdownSegment(source = '') {
@@ -3326,26 +3354,28 @@ class UIHelpers {
         const bodyHtml = `${this.escapeHtml(visibleText).replace(/\n/g, '<br>')}${reasoningState.animated ? '<span class="streaming-cursor" aria-hidden="true"></span>' : ''}`;
 
         return `
-            <div class="assistant-reasoning-ribbon${isStreaming ? ' is-live' : ''}${reasoningState.source === 'generated' ? ' is-synthetic' : ''}">
-                <div class="assistant-reasoning-ribbon__surface" aria-live="polite">
-                    <div class="assistant-reasoning-ribbon__header">
+            <details class="assistant-reasoning-ribbon${isStreaming ? ' is-live' : ''}${reasoningState.source === 'generated' ? ' is-synthetic' : ''}" ${isStreaming ? 'open' : ''}>
+                <summary class="assistant-reasoning-ribbon__surface" aria-live="polite">
                     <span class="assistant-reasoning-ribbon__main">
                         <span class="assistant-reasoning-ribbon__icon" aria-hidden="true">
                             <i data-lucide="${reasoningState.icon}" class="w-3.5 h-3.5"></i>
                         </span>
                         <span class="assistant-reasoning-ribbon__copy">
                             <span class="assistant-reasoning-ribbon__title">${this.escapeHtml(reasoningState.title)}</span>
+                            <span class="assistant-reasoning-ribbon__preview${reasoningState.source === 'generated' ? ' assistant-reasoning-ribbon__preview--synthetic' : ''}">${this.escapeHtml(reasoningState.previewText || 'Reasoning data is available for this reply.')}</span>
                         </span>
                     </span>
                     <span class="assistant-reasoning-ribbon__meta">
                         <span class="assistant-reasoning-ribbon__badge${reasoningState.live ? ' assistant-reasoning-ribbon__badge--live' : ''}">
-                            ${reasoningState.live ? '<span class="assistant-reasoning-ribbon__pulse" aria-hidden="true"></span>Live' : 'Summary'}
+                            ${reasoningState.live ? '<span class="assistant-reasoning-ribbon__pulse" aria-hidden="true"></span>Live' : 'History'}
+                        </span>
+                        <span class="assistant-reasoning-ribbon__chevron" aria-hidden="true">
+                            <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
                         </span>
                     </span>
-                    </div>
-                    <div class="assistant-reasoning-ribbon__body assistant-reasoning-ribbon__body--inline${reasoningState.source === 'generated' ? ' assistant-reasoning-ribbon__body--synthetic' : ''}">${bodyHtml}</div>
-                </div>
-            </div>
+                </summary>
+                <div class="assistant-reasoning-ribbon__body${reasoningState.source === 'generated' ? ' assistant-reasoning-ribbon__body--synthetic' : ''}">${bodyHtml}</div>
+            </details>
         `;
     }
 
@@ -3405,16 +3435,19 @@ class UIHelpers {
             ? window.KimiBuiltModelOutputParser.normalizeModelOutputMarkdown(content, { model: message?.model || '' })
             : content;
         const surveyRenderPlan = this.buildSurveyRenderPlan(modelNormalizedContent, message);
-        const normalizedMarkdown = this.normalizeInlineHtmlAssistantMarkdown(
+        const baseNormalizedMarkdown = this.normalizeInlineHtmlAssistantMarkdown(
             this.normalizeStructuredAssistantMarkdown(surveyRenderPlan.markdown),
         );
+        const normalizedMarkdown = window.KimiBuiltModelOutputParser?.normalizePresentationMarkupMarkdown
+            ? window.KimiBuiltModelOutputParser.normalizePresentationMarkupMarkdown(baseNormalizedMarkdown)
+            : baseNormalizedMarkdown;
 
         if (this.looksLikeAgentBrief(normalizedMarkdown, message)) {
             const sections = this.buildAgentBriefSections(normalizedMarkdown);
             const introHtml = sections.intro
                 ? this.sanitizeAssistantHtml(marked.parse(sections.intro))
                 : '';
-            const bodyHtml = this.sanitizeAssistantHtml(marked.parse(sections.bodyMarkdown));
+            const bodyHtml = this.enhancePresentationCallouts(this.sanitizeAssistantHtml(marked.parse(sections.bodyMarkdown)));
             const footerHtml = sections.footer
                 ? `<div class="agent-brief-card__footer">
                         <div class="agent-brief-card__hint">Next move</div>
@@ -3448,7 +3481,7 @@ class UIHelpers {
             };
         }
 
-        let html = this.sanitizeAssistantHtml(marked.parse(normalizedMarkdown));
+        let html = this.enhancePresentationCallouts(this.sanitizeAssistantHtml(marked.parse(normalizedMarkdown)));
         html = this.replaceSurveyRenderTokens(html, surveyRenderPlan.surveys);
 
         if (effectiveStreaming) {

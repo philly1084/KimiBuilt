@@ -356,6 +356,28 @@
             .join('');
     }
 
+    function normalizePresentationMarkupSegment(source = '') {
+        return String(source || '')
+            .replace(/(^|[^\\])==([^=\n][^=\n]*?)==/g, '$1<mark class="kb-highlight">$2</mark>')
+            .replace(/::(accent|success|warning|danger|info|muted)\[([^\]\n]+)\]/gi, (_match, tone, text) => {
+                const normalizedTone = String(tone || '').toLowerCase();
+                return `<span class="kb-tone kb-tone--${normalizedTone}">${text}</span>`;
+            });
+    }
+
+    function normalizePresentationMarkupMarkdown(source = '') {
+        return String(source || '')
+            .split(/(```[\s\S]*?```)/g)
+            .map((segment) => {
+                if (/^```[\s\S]*```$/.test(segment)) {
+                    return segment;
+                }
+
+                return normalizePresentationMarkupSegment(segment);
+            })
+            .join('');
+    }
+
     function collectMetadata(value) {
         if (!value || typeof value !== 'object') {
             return {};
@@ -399,7 +421,9 @@
         }
 
         text = stripXmlLikeModelWrappers(text);
-        const normalizedMarkdown = options.markdown === false ? String(text || '').trim() : normalizeStructuredMarkdown(text);
+        const normalizedMarkdown = options.markdown === false
+            ? String(text || '').trim()
+            : normalizePresentationMarkupMarkdown(normalizeStructuredMarkdown(text));
 
         return {
             text: normalizedMarkdown,
@@ -414,6 +438,8 @@
             return normalizeModelOutput(value, options).text;
         },
         normalizeStructuredMarkdown,
+        normalizePresentationMarkupMarkdown,
+        normalizePresentationMarkupSegment,
         normalizeHumanReadableMarkdownSegment,
         restoreFlattenedMarkdownBlocks,
         restoreFlattenedMarkdownTables,

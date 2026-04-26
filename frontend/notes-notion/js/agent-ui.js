@@ -27,6 +27,7 @@ const AgentUI = (function() {
     let streamState = {
         active: false,
         content: '',
+        reasoning: '',
         error: null
     };
 
@@ -289,7 +290,7 @@ const AgentUI = (function() {
     async function runPrompt(promptText, askOptions = {}) {
         if (!window.Agent) return;
 
-        setStreamState({ active: true, content: '', error: null });
+        setStreamState({ active: true, content: '', reasoning: '', error: null });
 
         try {
             const request = window.Agent.ask(promptText, {
@@ -300,13 +301,18 @@ const AgentUI = (function() {
                     renderMessages();
                     scrollToBottom();
                 },
+                onReasoning: (_delta, summary) => {
+                    setStreamState({ active: true, reasoning: String(summary || _delta || '').trim(), error: null });
+                    renderMessages();
+                    scrollToBottom();
+                },
                 onStreamComplete: () => {
-                    setStreamState({ active: false, content: '', error: null });
+                    setStreamState({ active: false, content: '', reasoning: '', error: null });
                     renderMessages();
                     scrollToBottom();
                 },
                 onComplete: () => {
-                    setStreamState({ active: false, content: '', error: null });
+                    setStreamState({ active: false, content: '', reasoning: '', error: null });
                     renderMessages();
                     scrollToBottom();
                 },
@@ -315,6 +321,7 @@ const AgentUI = (function() {
                     setStreamState({
                         active: false,
                         content: '',
+                        reasoning: '',
                         error: error?.message || 'Something went wrong. Please try again.'
                     });
                     renderMessages();
@@ -330,6 +337,7 @@ const AgentUI = (function() {
             setStreamState({
                 active: false,
                 content: '',
+                reasoning: '',
                 error: error?.message || 'Something went wrong. Please try again.'
             });
             renderMessages();
@@ -604,7 +612,7 @@ const AgentUI = (function() {
         });
 
         if (streamState.active) {
-            elements.messagesContainer.appendChild(renderStreamingMessage(streamState.content));
+            elements.messagesContainer.appendChild(renderStreamingMessage(streamState.content, streamState.reasoning));
         }
 
         if (streamState.error) {
@@ -620,11 +628,13 @@ const AgentUI = (function() {
         renderComposerDesignOptions();
     }
 
-    function renderStreamingMessage(content) {
+    function renderStreamingMessage(content, reasoning = '') {
         const message = renderMessage({
             role: 'assistant',
             content: content || '...',
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            reasoningSummary: reasoning || '',
+            reasoningLive: Boolean(reasoning)
         });
 
         message.classList.add('agent-message-streaming');
@@ -641,15 +651,47 @@ const AgentUI = (function() {
             ? new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             : '';
 
+        const reasoningSummary = !isUser ? extractReasoningSummary(message) : '';
+        const reasoningMarkup = reasoningSummary ? `
+            <details class="agent-reasoning-card" ${message.reasoningLive ? 'open' : ''}>
+                <summary>
+                    <span class="agent-reasoning-title">Reasoning</span>
+                    <span class="agent-reasoning-preview">${escapeHtml(truncateText(reasoningSummary.replace(/\s+/g, ' '), 96))}</span>
+                </summary>
+                <div class="agent-reasoning-body">${escapeHtml(reasoningSummary).replace(/\n/g, '<br>')}</div>
+            </details>
+        ` : '';
+
         div.innerHTML = `
             <div class="agent-message-avatar">${avatar}</div>
             <div class="agent-message-content">
+                ${reasoningMarkup}
                 <div class="agent-message-text">${markdownToHtml(message.content)}</div>
                 ${timestamp ? `<div class="agent-message-time">${timestamp}</div>` : ''}
             </div>
         `;
 
         return div;
+    }
+
+    function extractReasoningSummary(message = {}) {
+        return String(
+            message.reasoningSummary
+            || message.reasoning_summary
+            || message.reasoning
+            || message.assistantMetadata?.reasoningSummary
+            || message.assistant_metadata?.reasoningSummary
+            || message.metadata?.reasoningSummary
+            || ''
+        ).trim();
+    }
+
+    function truncateText(value = '', maxLength = 96) {
+        const normalized = String(value || '').trim();
+        if (normalized.length <= maxLength) {
+            return normalized;
+        }
+        return `${normalized.slice(0, Math.max(24, maxLength - 1)).trimEnd()}...`;
     }
 
     function scrollToBottom() {

@@ -843,6 +843,52 @@ describe('ToolManager image tools', () => {
     }));
   });
 
+  test('infers pdf output for document-workflow prompts when format is omitted', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const documentService = {
+      recommendDocumentWorkflow: jest.fn(() => ({
+        inferredType: 'document',
+        recommendedFormat: 'html',
+        blueprint: { label: 'Document' },
+      })),
+      buildDocumentPlan: jest.fn(),
+      aiGenerate: jest.fn(async () => ({
+        id: 'doc-pdf-1',
+        filename: 'fighting-climate-change.pdf',
+        mimeType: 'application/pdf',
+        contentBuffer: Buffer.from('%PDF-1.4\n'),
+        size: 9,
+        metadata: { format: 'pdf' },
+        downloadUrl: '/api/documents/doc-pdf-1/download',
+      })),
+      assemble: jest.fn(),
+      generatePresentation: jest.fn(),
+    };
+
+    const result = await toolManager.executeTool('document-workflow', {
+      action: 'generate',
+      prompt: 'Can you make me a pdf on fighting climate change?',
+    }, {
+      documentService,
+    });
+
+    expect(result.success).toBe(true);
+    expect(documentService.recommendDocumentWorkflow).toHaveBeenCalledWith(expect.objectContaining({
+      format: 'pdf',
+    }));
+    expect(documentService.aiGenerate).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ format: 'pdf' }),
+    );
+    expect(result.data.document).toEqual(expect.objectContaining({
+      filename: 'fighting-climate-change.pdf',
+      mimeType: 'application/pdf',
+      downloadUrl: '/api/documents/doc-pdf-1/download',
+    }));
+  });
+
   test('persists document-workflow documents as session artifacts when session context is available', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();

@@ -8352,6 +8352,7 @@ Silently verify the lead cluster, section order, and final polish before returni
     async function ask(question, options = {}) {
         const {
             onChunk,
+            onReasoning,
             onStreamComplete,
             onComplete,
             onError,
@@ -8394,6 +8395,7 @@ Silently verify the lead cluster, section order, and final polish before returni
                 try {
                     const responseText = await askWithAPI(question, context, {
                         onChunk,
+                        onReasoning,
                         onStreamComplete,
                         onComplete,
                         onError,
@@ -8437,7 +8439,7 @@ Silently verify the lead cluster, section order, and final polish before returni
     
     // Call the real API with streaming support
     async function askWithAPI(question, context, options) {
-        const { onChunk, onStreamComplete, onComplete, onError, hiddenAssistantMessage = false } = options;
+        const { onChunk, onReasoning, onStreamComplete, onComplete, onError, hiddenAssistantMessage = false } = options;
         const apiClient = getAPIClient();
         syncAPIClientSession(apiClient, context);
         const explicitPageEditIntent = isExplicitPageEditIntent(question);
@@ -8487,6 +8489,7 @@ Silently verify the lead cluster, section order, and final polish before returni
                 let inJsonBlock = false;
                 let generatedArtifacts = [];
                 let generatedToolEvents = [];
+                let assistantMetadata = null;
                 let processingReleased = false;
 
                 const releaseProcessing = async (detail = {}) => {
@@ -8565,6 +8568,27 @@ Silently verify the lead cluster, section order, and final polish before returni
                             if (chunk.type === 'done') {
                                 generatedArtifacts = Array.isArray(chunk.artifacts) ? chunk.artifacts : [];
                                 generatedToolEvents = Array.isArray(chunk.toolEvents) ? chunk.toolEvents : [];
+                                if (chunk.assistantMetadata && typeof chunk.assistantMetadata === 'object') {
+                                    assistantMetadata = {
+                                        ...(assistantMetadata || {}),
+                                        ...chunk.assistantMetadata,
+                                    };
+                                }
+                                continue;
+                            }
+
+                            if (chunk.type === 'reasoning') {
+                                const summary = String(chunk.summary || chunk.content || '').trim();
+                                if (summary) {
+                                    assistantMetadata = {
+                                        ...(assistantMetadata || {}),
+                                        reasoningSummary: summary,
+                                        reasoningAvailable: true,
+                                    };
+                                    if (onReasoning) {
+                                        onReasoning(chunk.content || summary, summary);
+                                    }
+                                }
                                 continue;
                             }
 
@@ -8585,6 +8609,7 @@ Silently verify the lead cluster, section order, and final polish before returni
                         responseText = response.content || response.message || String(response);
                         generatedArtifacts = Array.isArray(response.artifacts) ? response.artifacts : [];
                         generatedToolEvents = Array.isArray(response.toolEvents) ? response.toolEvents : [];
+                        assistantMetadata = response.assistantMetadata || null;
                     }
 
                     await releaseProcessing({
@@ -8696,7 +8721,8 @@ Silently verify the lead cluster, section order, and final polish before returni
                             source: 'api',
                             appliedCount: (preparedResponse.appliedCount || 0)
                                 + (mermaidArtifactApplyResult.appliedCount || 0)
-                                + (blindArtifactSelectionResult.appliedCount || 0)
+                                + (blindArtifactSelectionResult.appliedCount || 0),
+                            ...(assistantMetadata || {})
                         });
 
                     if (model !== state.selectedModel && !toolSensitiveRequest) {

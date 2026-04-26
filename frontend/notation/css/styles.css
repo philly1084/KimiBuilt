@@ -595,6 +595,20 @@ body {
     color: var(--color-text-muted);
 }
 
+.history-reasoning-badge {
+    display: inline-flex;
+    width: fit-content;
+    margin: 0.2rem 0 var(--spacing-xs);
+    padding: 2px 6px;
+    border: 1px solid rgba(59, 130, 246, 0.28);
+    border-radius: var(--radius-sm);
+    background: rgba(59, 130, 246, 0.1);
+    color: var(--color-accent);
+    font-size: 0.625rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
 .history-delete {
     position: absolute;
     top: 50%;
@@ -1148,6 +1162,54 @@ body {
     margin-left: 0;
     margin-bottom: var(--spacing-md);
     color: var(--color-text-secondary);
+}
+
+.reasoning-history-card {
+    margin-bottom: var(--spacing-lg);
+    border: 1px solid rgba(59, 130, 246, 0.24);
+    border-radius: var(--radius-md);
+    background: rgba(59, 130, 246, 0.08);
+    overflow: hidden;
+}
+
+.reasoning-history-card summary {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-md);
+    cursor: pointer;
+    list-style: none;
+}
+
+.reasoning-history-card summary::-webkit-details-marker {
+    display: none;
+}
+
+.reasoning-history-title {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    flex: 0 0 auto;
+    color: var(--color-accent);
+    font-weight: 700;
+    font-size: 0.82rem;
+    text-transform: uppercase;
+}
+
+.reasoning-history-preview {
+    min-width: 0;
+    color: var(--color-text-secondary);
+    font-size: 0.85rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.reasoning-history-body {
+    padding: 0 var(--spacing-md) var(--spacing-md);
+    color: var(--color-text-secondary);
+    font-size: 0.9rem;
+    line-height: 1.55;
 }
 
 .output-rendered table {

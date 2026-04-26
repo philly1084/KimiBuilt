@@ -133,6 +133,79 @@ function extractStreamTextDelta(payload = {}) {
     );
 }
 
+function extractReasoningSummary(value) {
+    if (typeof value === 'string') {
+        return stripNullCharacters(value).trim();
+    }
+
+    if (Array.isArray(value)) {
+        return value
+            .map((entry) => extractReasoningSummary(entry))
+            .filter(Boolean)
+            .join('')
+            .trim();
+    }
+
+    if (!value || typeof value !== 'object') {
+        return '';
+    }
+
+    if (value.type === 'reasoning') {
+        return extractReasoningSummary(
+            value.summary
+            || value.summary_text
+            || value.reasoning
+            || value.reasoning_text
+            || value.reasoning_content
+            || value.text
+            || value.content
+            || '',
+        );
+    }
+
+    const directCandidates = [
+        value.reasoningSummary,
+        value.reasoning_summary,
+        value.reasoning,
+        value.reasoning_text,
+        value.reasoningText,
+        value.reasoning_content,
+        value.reasoningContent,
+        value.reasoning_details,
+        value.reasoningDetails,
+        value.summary,
+        value.summary_text,
+    ];
+
+    for (const candidate of directCandidates) {
+        const summary = extractReasoningSummary(candidate);
+        if (summary) {
+            return summary;
+        }
+    }
+
+    return '';
+}
+
+function extractAssistantMetadata(payload = {}) {
+    if (!payload || typeof payload !== 'object') {
+        return null;
+    }
+
+    const metadata = payload.assistantMetadata
+        || payload.assistant_metadata
+        || payload.metadata
+        || payload.response?.metadata
+        || payload.choices?.[0]?.message
+        || payload.choices?.[0]?.delta
+        || null;
+    const reasoningSummary = extractReasoningSummary(metadata || payload);
+
+    return reasoningSummary
+        ? { reasoningSummary, reasoningAvailable: true }
+        : null;
+}
+
 function isTerminalStreamPayload(payload = {}) {
     return payload?.type === 'done'
         || payload?.type === 'response.completed'
@@ -470,6 +543,7 @@ class NotesAPIClient {
                     sessionId: this.currentSessionId,
                     artifacts: [],
                     toolEvents: [],
+                    assistantMetadata: null,
                 };
 
                 try {
@@ -492,6 +566,7 @@ class NotesAPIClient {
                                         sessionId: pendingDone.sessionId || this.currentSessionId,
                                         artifacts: pendingDone.artifacts || [],
                                         toolEvents: pendingDone.toolEvents || [],
+                                        assistantMetadata: pendingDone.assistantMetadata,
                                     };
                                     return;
                                 }
@@ -515,9 +590,38 @@ class NotesAPIClient {
                                     if (content) {
                                         yield { type: 'delta', content };
                                     }
+
+                                    const isReasoningDelta = parsed.type === 'response.reasoning_summary_text.delta';
+                                    const reasoning = extractReasoningSummary(
+                                        (isReasoningDelta ? (parsed.delta ?? parsed.reasoning_delta) : '')
+                                        || parsed?.choices?.[0]?.delta?.reasoning
+                                        || parsed?.choices?.[0]?.delta?.reasoning_text
+                                        || parsed?.choices?.[0]?.delta?.reasoning_content
+                                        || parsed?.reasoning_delta
+                                        || '',
+                                    );
+                                    if (reasoning) {
+                                        const currentSummary = String(pendingDone.assistantMetadata?.reasoningSummary || '').trim();
+                                        const summary = String(parsed.summary || parsed.reasoningSummary || parsed.reasoning_summary || '').trim()
+                                            || `${currentSummary}${reasoning}`.trim();
+                                        pendingDone.assistantMetadata = {
+                                            ...(pendingDone.assistantMetadata || {}),
+                                            reasoningSummary: summary,
+                                            reasoningAvailable: true,
+                                        };
+                                        yield { type: 'reasoning', content: reasoning, summary };
+                                    }
                                     
                                     if (Array.isArray(parsed.artifacts)) {
                                         pendingDone.artifacts = parsed.artifacts;
+                                    }
+
+                                    const assistantMetadata = extractAssistantMetadata(parsed);
+                                    if (assistantMetadata) {
+                                        pendingDone.assistantMetadata = {
+                                            ...(pendingDone.assistantMetadata || {}),
+                                            ...assistantMetadata,
+                                        };
                                     }
 
                                     const toolEvents = extractToolEvents(parsed);
@@ -531,6 +635,7 @@ class NotesAPIClient {
                                             sessionId: pendingDone.sessionId || this.currentSessionId,
                                             artifacts: pendingDone.artifacts || [],
                                             toolEvents: pendingDone.toolEvents || [],
+                                            assistantMetadata: pendingDone.assistantMetadata,
                                         };
                                         return;
                                     }
@@ -556,6 +661,7 @@ class NotesAPIClient {
                     sessionId: pendingDone.sessionId || this.currentSessionId,
                     artifacts: pendingDone.artifacts || [],
                     toolEvents: pendingDone.toolEvents || [],
+                    assistantMetadata: pendingDone.assistantMetadata,
                 };
                 return;
                 
@@ -682,6 +788,7 @@ class NotesAPIClient {
                     sessionId: this.currentSessionId,
                     artifacts: Array.isArray(data.artifacts) ? data.artifacts : [],
                     toolEvents: extractToolEvents(data),
+                    assistantMetadata: extractAssistantMetadata(data),
                 };
                 
             } catch (error) {

@@ -74,7 +74,10 @@ let startupState = {
     startedAt: new Date().toISOString(),
 };
 
-app.use(helmet({ contentSecurityPolicy: false }));
+app.use(helmet({
+    contentSecurityPolicy: false,
+    originAgentCluster: false,
+}));
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 

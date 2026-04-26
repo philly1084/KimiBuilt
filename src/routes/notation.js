@@ -8,6 +8,7 @@ const { extractResponseText } = require('../artifacts/artifact-service');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
 const { extractArtifactsFromToolEvents, mergeRuntimeArtifacts } = require('../runtime-artifacts');
+const { buildFrontendAssistantMetadata } = require('../web-chat-message-state');
 const {
     buildScopedMemoryMetadata,
     buildScopedSessionMetadata,
@@ -183,6 +184,9 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
         }
 
         const outputText = extractResponseText(response);
+        const assistantMetadata = buildFrontendAssistantMetadata({
+            ...(response?.metadata || {}),
+        });
         if (!execution.handledPersistence) {
             memoryService.rememberResponse(sessionId, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope, {
                 sourceSurface: clientSurface || 'notation',
@@ -190,7 +194,7 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
             }));
             await sessionStore.appendMessages(sessionId, [
                 { role: 'user', content: notation },
-                { role: 'assistant', content: outputText },
+                { role: 'assistant', content: outputText, metadata: assistantMetadata },
             ]);
         }
         const structured = parseNotationResponse(outputText);
@@ -252,6 +256,8 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
             responseId: response.id,
             helperMode,
             artifacts,
+            assistant_metadata: assistantMetadata,
+            assistantMetadata,
             ...structured,
         });
     } catch (err) {

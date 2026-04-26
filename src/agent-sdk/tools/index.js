@@ -540,6 +540,35 @@ function normalizeDocumentWorkflowFormat(value = '') {
   return normalized;
 }
 
+function inferDocumentWorkflowFormatFromText(text = '') {
+  const normalized = String(text || '').trim().toLowerCase();
+  if (!normalized) {
+    return '';
+  }
+
+  if (/\bpdf\b|\.pdf\b/.test(normalized)) {
+    return 'pdf';
+  }
+
+  if (/\b(?:powerpoint|pptx|ppt|slide deck|slides?|deck)\b/.test(normalized)) {
+    return 'pptx';
+  }
+
+  if (/\b(?:excel|xlsx|spreadsheet|workbook)\b/.test(normalized)) {
+    return 'xlsx';
+  }
+
+  if (/\b(?:markdown|md)\b/.test(normalized)) {
+    return 'md';
+  }
+
+  if (/\b(?:html|web page|webpage|landing page|site page)\b/.test(normalized)) {
+    return 'html';
+  }
+
+  return '';
+}
+
 function normalizeDocumentWorkflowFormats(values = [], fallback = 'html') {
   const rawValues = Array.isArray(values)
     ? values
@@ -2338,7 +2367,17 @@ class ToolManager {
             const documentType = String(params.documentType || params.document_type || '').trim();
             const tone = String(params.tone || 'professional').trim() || 'professional';
             const length = String(params.length || 'medium').trim() || 'medium';
-            const formatPreference = normalizeDocumentWorkflowFormat(params.format || '');
+            const promptFormatPreference = inferDocumentWorkflowFormatFromText([
+              params.prompt,
+              params.request,
+              params.topic,
+              params.title,
+              params.documentType,
+            ].filter(Boolean).join('\n'));
+            const explicitFormat = String(params.format || '').trim();
+            const formatPreference = explicitFormat
+              ? normalizeDocumentWorkflowFormat(explicitFormat)
+              : promptFormatPreference;
             const requestedFormats = normalizeDocumentWorkflowFormats(
               params.formats || params.outputFormats || [],
               formatPreference || 'html',

@@ -76,4 +76,13 @@ Variations | Variation | What changes | |-----------|--------------| | Spicy | A
         expect(normalized).toContain('### Variations');
         expect(normalized).not.toMatch(/(^|\n)#{1,6}\s*(\n|$)/);
     });
+
+    test('enhances presentation callout blockquotes', () => {
+        const helper = Object.create(loadUIHelpersPrototype());
+        const html = helper.enhancePresentationCallouts('<blockquote><p>[!WARNING] Check this<br>Review the deployment target.</p></blockquote>');
+
+        expect(html).toContain('kb-callout kb-callout--warning');
+        expect(html).toContain('kb-callout__title">Check this</div>');
+        expect(html).toContain('Review the deployment target.');
+    });
 });
