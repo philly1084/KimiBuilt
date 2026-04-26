@@ -822,6 +822,24 @@ function hasResearchBucketIntentText(text = '') {
     ].some((pattern) => pattern.test(normalized));
 }
 
+function hasPublicSourceIndexIntentText(text = '') {
+    const normalized = String(text || '').trim();
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        /\bpublic source index\b/i,
+        /\bpublic api index\b/i,
+        /\bpublic api catalog(?:ue)?\b/i,
+        /\bapi source library\b/i,
+        /\bdashboard source catalog(?:ue)?\b/i,
+        /\b(news|rss|data|public)\s+feed\s+(index|catalog|catalogue|source|sources)\b/i,
+        /\b(find|search|list|show|add|save|store|index|verify|refresh)\b[\s\S]{0,60}\b(public api|public endpoint|public feed|news feed|rss feed|dashboard source|data portal|open data source)\b/i,
+        /\b(public api|public endpoint|public feed|news feed|rss feed|dashboard source|data portal|open data source)\b[\s\S]{0,60}\b(find|search|list|show|add|save|store|index|verify|refresh)\b/i,
+    ].some((pattern) => pattern.test(normalized));
+}
+
 function hasExplicitCheckpointRequestText(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -1088,6 +1106,7 @@ function buildScoredCandidateToolMap({
     hasDirectImageUrl = false,
     hasAssetCatalogIntent = false,
     hasResearchBucketIntent = false,
+    hasPublicSourceIndexIntent = false,
     hasPodcastIntent = false,
     hasDocumentWorkflowIntent = false,
     hasSubAgentIntent = false,
@@ -1213,6 +1232,13 @@ function buildScoredCandidateToolMap({
         adjustCandidateToolScore(scoreMap, 'research-bucket-read', 0.7, 'The request may need selected bucket file contents.');
         adjustCandidateToolScore(scoreMap, 'research-bucket-write', /\b(write|save|add|store|capture|create|update|append)\b/.test(normalizedPrompt) ? 0.85 : 0, 'The request may add material to the shared research bucket.');
         adjustCandidateToolScore(scoreMap, 'research-bucket-mkdir', /\b(mkdir|folder|directory)\b/.test(normalizedPrompt) ? 0.65 : 0, 'The request may create a bucket folder.');
+    }
+    if (hasPublicSourceIndexIntent) {
+        adjustCandidateToolScore(scoreMap, 'public-source-list', 0.85, 'The request refers to the public source index.');
+        adjustCandidateToolScore(scoreMap, 'public-source-search', 0.95, 'The request may need lookup in indexed public APIs, dashboards, or feeds.');
+        adjustCandidateToolScore(scoreMap, 'public-source-get', 0.65, 'The request may need details for a selected public source.');
+        adjustCandidateToolScore(scoreMap, 'public-source-add', /\b(add|save|store|index|catalog|catalogue|create|update)\b/.test(normalizedPrompt) ? 0.85 : 0, 'The request may add a reusable public source.');
+        adjustCandidateToolScore(scoreMap, 'public-source-refresh', /\b(refresh|verify|check|validate|probe)\b/.test(normalizedPrompt) ? 0.8 : 0, 'The request may verify a public source endpoint.');
     }
     if (hasPodcastIntent) {
         adjustCandidateToolScore(scoreMap, 'podcast', 1.4, 'Explicit podcast wording should keep the podcast workflow tool in the candidate set.');
@@ -8387,6 +8413,7 @@ class ConversationOrchestrator extends EventEmitter {
         const hasDocumentWorkflowIntent = hasDocumentWorkflowIntentText(prompt);
         const hasAssetCatalogIntent = hasIndexedAssetIntentText(prompt);
         const hasResearchBucketIntent = hasResearchBucketIntentText(prompt);
+        const hasPublicSourceIndexIntent = hasPublicSourceIndexIntentText(prompt);
         const hasSubAgentIntent = hasExplicitSubAgentIntentText(prompt);
         const hasManagedAppIntent = hasManagedAppIntentText(prompt);
         const hasManagedAppAuthoringRequest = hasManagedAppAuthoringIntent(prompt, {
@@ -8518,6 +8545,7 @@ class ConversationOrchestrator extends EventEmitter {
                 hasDirectImageUrl,
                 hasAssetCatalogIntent,
                 hasResearchBucketIntent,
+                hasPublicSourceIndexIntent,
                 hasPodcastIntent,
                 hasDocumentWorkflowIntent,
                 hasSubAgentIntent,
@@ -8629,6 +8657,15 @@ class ConversationOrchestrator extends EventEmitter {
                     candidates.add('research-bucket-mkdir');
                 }
             }
+            if (hasPublicSourceIndexIntent) {
+                ['public-source-list', 'public-source-search', 'public-source-get'].forEach((toolId) => allowedToolIds.includes(toolId) && candidates.add(toolId));
+                if (/\b(add|save|store|index|catalog|catalogue|create|update)\b/.test(prompt) && allowedToolIds.includes('public-source-add')) {
+                    candidates.add('public-source-add');
+                }
+                if (/\b(refresh|verify|check|validate|probe)\b/.test(prompt) && allowedToolIds.includes('public-source-refresh')) {
+                    candidates.add('public-source-refresh');
+                }
+            }
             if (!shouldPreferRemoteWebsiteSource
                 && allowedToolIds.includes('file-write')
                 && /\b(write|create|update|edit|save|patch|fix)\b/.test(prompt)) {
@@ -8700,6 +8737,15 @@ class ConversationOrchestrator extends EventEmitter {
                 }
                 if (/\b(mkdir|folder|directory)\b/.test(prompt) && allowedToolIds.includes('research-bucket-mkdir')) {
                     candidates.add('research-bucket-mkdir');
+                }
+            }
+            if (hasPublicSourceIndexIntent) {
+                ['public-source-list', 'public-source-search', 'public-source-get'].forEach((toolId) => allowedToolIds.includes(toolId) && candidates.add(toolId));
+                if (/\b(add|save|store|index|catalog|catalogue|create|update)\b/.test(prompt) && allowedToolIds.includes('public-source-add')) {
+                    candidates.add('public-source-add');
+                }
+                if (/\b(refresh|verify|check|validate|probe)\b/.test(prompt) && allowedToolIds.includes('public-source-refresh')) {
+                    candidates.add('public-source-refresh');
                 }
             }
             if (/\b(read|open|show|print|cat)\b[\s\S]{0,40}\bfile\b/.test(prompt) && allowedToolIds.includes('file-read')) {
@@ -9527,6 +9573,8 @@ class ConversationOrchestrator extends EventEmitter {
             'Set `asset-search.params.includeContent = true` when the stored text preview would help choose the right document.',
             'Use `research-bucket-*` tools when the user mentions a research bucket, reference bucket, source library, saved research, project references, or reusable web-project assets.',
             'For research bucket work, list or search first, then read only the specific files required. Use `research-bucket-write` or `research-bucket-mkdir` only when the user wants bucket contents created or updated.',
+            'Use `public-source-*` tools when the user asks about the public source index, public API catalog, dashboard sources, RSS/news feeds, data portals, or reusable public endpoints.',
+            'For public source index work, list or search first, then read selected entries. Add sources only after discovery/verification, and refresh only when live status or content type matters.',
             ...(toolPolicy.sessionIsolation
                 ? ['Do not use `agent-notes-write` in this isolated session.']
                 : [
@@ -10303,6 +10351,10 @@ class ConversationOrchestrator extends EventEmitter {
         if (allowedToolIds.some((toolId) => String(toolId || '').startsWith('research-bucket-'))) {
             parts.push('Use `research-bucket-*` tools for shared durable bucket references. Treat bucket contents as callable storage, not memory: list/search first, then read only selected files.');
             parts.push('Use `research-bucket-write` or `research-bucket-mkdir` only when the user wants to add or organize bucket material.');
+        }
+        if (allowedToolIds.some((toolId) => String(toolId || '').startsWith('public-source-'))) {
+            parts.push('Use `public-source-*` tools for the durable public API/dashboard/feed/source index. Search or list before fresh discovery when the user asks about reusable public data sources.');
+            parts.push('Use `public-source-add` for reusable public endpoints discovered through research, and `public-source-refresh` only when live verification matters.');
         }
 
         if (toolEvents.length > 0) {

@@ -24,6 +24,34 @@ jest.mock('../../research-buckets', () => ({
   },
 }));
 
+jest.mock('../../public-source-index', () => ({
+  SOURCE_KINDS: [
+    'public_api',
+    'dashboard',
+    'news_feed',
+    'rss_feed',
+    'data_portal',
+    'open_data',
+    'download',
+    'web_page',
+  ],
+  STATUSES: [
+    'candidate',
+    'verified',
+    'stale',
+    'broken',
+    'blocked',
+    'retired',
+  ],
+  publicSourceIndexService: {
+    list: jest.fn(),
+    search: jest.fn(),
+    get: jest.fn(),
+    upsert: jest.fn(),
+    refresh: jest.fn(),
+  },
+}));
+
 jest.mock('../../tts/piper-tts-service', () => ({
   piperTtsService: {
     synthesize: jest.fn(),
@@ -49,6 +77,7 @@ const { ToolManager } = require('./index');
 const { artifactService } = require('../../artifacts/artifact-service');
 const { assetManager } = require('../../asset-manager');
 const { researchBucketService } = require('../../research-buckets');
+const { publicSourceIndexService } = require('../../public-source-index');
 const config = require('../../config');
 const { piperTtsService } = require('../../tts/piper-tts-service');
 const { persistGeneratedAudio } = require('../../generated-audio-artifacts');
@@ -72,6 +101,11 @@ describe('ToolManager image tools', () => {
     researchBucketService.read.mockReset();
     researchBucketService.write.mockReset();
     researchBucketService.mkdir.mockReset();
+    publicSourceIndexService.list.mockReset();
+    publicSourceIndexService.search.mockReset();
+    publicSourceIndexService.get.mockReset();
+    publicSourceIndexService.upsert.mockReset();
+    publicSourceIndexService.refresh.mockReset();
     piperTtsService.synthesize.mockReset();
     persistGeneratedAudio.mockReset();
     artifactService.createStoredArtifact.mockResolvedValue({
@@ -554,6 +588,68 @@ describe('ToolManager image tools', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('mode must be');
+  });
+
+  test('registers and executes public source index tools', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    publicSourceIndexService.list.mockResolvedValue({
+      count: 1,
+      results: [{ id: 'sec-edgar-submissions-api', kind: 'public_api' }],
+    });
+    publicSourceIndexService.search.mockResolvedValue({
+      query: 'filings',
+      count: 1,
+      results: [{ id: 'sec-edgar-submissions-api', score: 3 }],
+    });
+    publicSourceIndexService.get.mockResolvedValue({
+      id: 'sec-edgar-submissions-api',
+      name: 'SEC EDGAR Submissions API',
+    });
+    publicSourceIndexService.upsert.mockResolvedValue({
+      action: 'created',
+      entry: { id: 'sec-edgar-submissions-api', status: 'candidate' },
+    });
+    publicSourceIndexService.refresh.mockResolvedValue({
+      entry: { id: 'sec-edgar-submissions-api', status: 'verified' },
+      verification: { ok: true, httpStatus: 200 },
+    });
+
+    expect(toolManager.getTool('public-source-list')).toBeTruthy();
+    expect(toolManager.getTool('public-source-search')).toBeTruthy();
+    expect(toolManager.getTool('public-source-get')).toBeTruthy();
+    expect(toolManager.getTool('public-source-add')).toBeTruthy();
+    expect(toolManager.getTool('public-source-refresh')).toBeTruthy();
+
+    await expect(toolManager.executeTool('public-source-list', { kind: 'public_api' })).resolves.toEqual(expect.objectContaining({
+      success: true,
+      data: expect.objectContaining({ count: 1 }),
+    }));
+    await expect(toolManager.executeTool('public-source-search', { query: 'filings' })).resolves.toEqual(expect.objectContaining({
+      success: true,
+      data: expect.objectContaining({ query: 'filings' }),
+    }));
+    await expect(toolManager.executeTool('public-source-get', { id: 'sec-edgar-submissions-api' })).resolves.toEqual(expect.objectContaining({
+      success: true,
+      data: expect.objectContaining({ name: 'SEC EDGAR Submissions API' }),
+    }));
+    await expect(toolManager.executeTool('public-source-add', {
+      name: 'SEC EDGAR Submissions API',
+      kind: 'public_api',
+      url: 'https://data.sec.gov/submissions/',
+    })).resolves.toEqual(expect.objectContaining({
+      success: true,
+      data: expect.objectContaining({ action: 'created' }),
+    }));
+    await expect(toolManager.executeTool('public-source-refresh', {
+      id: 'sec-edgar-submissions-api',
+    })).resolves.toEqual(expect.objectContaining({
+      success: true,
+      data: expect.objectContaining({
+        verification: expect.objectContaining({ ok: true }),
+      }),
+    }));
   });
 
   test('synthesizes speech with Piper and persists the audio into the active session', async () => {

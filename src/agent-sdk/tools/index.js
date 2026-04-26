@@ -13,6 +13,7 @@ const { persistGeneratedAudio } = require('../../generated-audio-artifacts');
 const { artifactService } = require('../../artifacts/artifact-service');
 const { assetManager } = require('../../asset-manager');
 const { researchBucketService } = require('../../research-buckets');
+const { publicSourceIndexService, SOURCE_KINDS, STATUSES } = require('../../public-source-index');
 const { piperTtsService } = require('../../tts/piper-tts-service');
 const { audioProcessingService } = require('../../audio/audio-processing-service');
 const { podcastService } = require('../../podcast/podcast-service');
@@ -1770,6 +1771,220 @@ class ToolManager {
         frontend: {
           exposeToFrontend: true,
           icon: 'folder-plus'
+        }
+      },
+      {
+        id: 'public-source-list',
+        name: 'Public Source Index List',
+        category: 'web',
+        description: 'List indexed public APIs, dashboards, news feeds, data portals, RSS feeds, and other public information sources.',
+        backend: {
+          handler: async (params = {}, context = {}) => {
+            const service = context.publicSourceIndexService || publicSourceIndexService;
+            return service.list(params);
+          },
+          sideEffects: ['read'],
+          timeout: 10000
+        },
+        inputSchema: {
+          type: 'object',
+          properties: {
+            kind: { type: 'string', enum: SOURCE_KINDS },
+            domain: { type: 'string' },
+            status: { type: 'string', enum: STATUSES },
+            topics: {
+              type: 'array',
+              items: { type: 'string' }
+            },
+            tags: {
+              type: 'array',
+              items: { type: 'string' }
+            },
+            limit: { type: 'integer', minimum: 1, maximum: 200, default: 50 }
+          },
+          additionalProperties: false
+        },
+        skill: {
+          triggerPatterns: [
+            'public source index',
+            'public api index',
+            'dashboard source catalog',
+            'news feed catalog',
+            'data feed index',
+            'api source library'
+          ],
+          requiresConfirmation: false
+        },
+        frontend: {
+          exposeToFrontend: true,
+          icon: 'radio'
+        }
+      },
+      {
+        id: 'public-source-search',
+        name: 'Public Source Index Search',
+        category: 'web',
+        description: 'Search the durable index of public APIs, dashboards, news feeds, RSS feeds, data portals, and public data endpoints.',
+        backend: {
+          handler: async (params = {}, context = {}) => {
+            const service = context.publicSourceIndexService || publicSourceIndexService;
+            return service.search(params);
+          },
+          sideEffects: ['read'],
+          timeout: 10000
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['query'],
+          properties: {
+            query: { type: 'string' },
+            kind: { type: 'string', enum: SOURCE_KINDS },
+            domain: { type: 'string' },
+            status: { type: 'string', enum: STATUSES },
+            limit: { type: 'integer', minimum: 1, maximum: 200, default: 50 }
+          },
+          additionalProperties: false
+        },
+        skill: {
+          triggerPatterns: [
+            'search public source index',
+            'find public api',
+            'find dashboard endpoint',
+            'find news feed',
+            'lookup public data source',
+            'search api source library'
+          ],
+          requiresConfirmation: false
+        },
+        frontend: {
+          exposeToFrontend: true,
+          icon: 'search'
+        }
+      },
+      {
+        id: 'public-source-get',
+        name: 'Public Source Index Entry Reader',
+        category: 'web',
+        description: 'Read one indexed public source entry with endpoint, auth, freshness, format, and verification metadata.',
+        backend: {
+          handler: async (params = {}, context = {}) => {
+            const service = context.publicSourceIndexService || publicSourceIndexService;
+            return service.get(params);
+          },
+          sideEffects: ['read'],
+          timeout: 10000
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string' }
+          },
+          additionalProperties: false
+        },
+        skill: {
+          triggerPatterns: [
+            'read public source',
+            'open public source index entry',
+            'public api details',
+            'source endpoint details'
+          ],
+          requiresConfirmation: false
+        },
+        frontend: {
+          exposeToFrontend: true,
+          icon: 'file-search'
+        }
+      },
+      {
+        id: 'public-source-add',
+        name: 'Public Source Index Add',
+        category: 'web',
+        description: 'Create or update a structured catalog entry for a public API, dashboard, feed, data portal, download, or public web source.',
+        backend: {
+          handler: async (params = {}, context = {}) => {
+            const service = context.publicSourceIndexService || publicSourceIndexService;
+            return service.upsert(params);
+          },
+          sideEffects: ['write'],
+          timeout: 10000
+        },
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            name: { type: 'string' },
+            kind: { type: 'string', enum: SOURCE_KINDS },
+            url: { type: 'string' },
+            domain: { type: 'string' },
+            description: { type: 'string' },
+            topics: { type: 'array', items: { type: 'string' } },
+            tags: { type: 'array', items: { type: 'string' } },
+            formats: { type: 'array', items: { type: 'string' } },
+            endpoints: { type: 'array', items: { type: 'object' } },
+            auth: { type: 'object' },
+            rateLimit: { type: 'string' },
+            freshness: { type: 'string' },
+            termsUrl: { type: 'string' },
+            docsUrl: { type: 'string' },
+            sourceUrls: { type: 'array', items: { type: 'string' } },
+            examples: { type: 'array', items: { type: 'object' } },
+            notes: { type: 'string' },
+            status: { type: 'string', enum: STATUSES }
+          },
+          additionalProperties: false
+        },
+        skill: {
+          triggerPatterns: [
+            'add public source',
+            'index public api',
+            'save public api endpoint',
+            'catalog dashboard source',
+            'store news feed source',
+            'add data feed'
+          ],
+          requiresConfirmation: false
+        },
+        frontend: {
+          exposeToFrontend: true,
+          icon: 'bookmark-plus'
+        }
+      },
+      {
+        id: 'public-source-refresh',
+        name: 'Public Source Index Refresh',
+        category: 'web',
+        description: 'Verify an indexed public source URL and update status, HTTP, content type, format, and freshness metadata.',
+        backend: {
+          handler: async (params = {}, context = {}) => {
+            const service = context.publicSourceIndexService || publicSourceIndexService;
+            return service.refresh(params);
+          },
+          sideEffects: ['network', 'write'],
+          timeout: 20000
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string' },
+            url: { type: 'string' }
+          },
+          additionalProperties: false
+        },
+        skill: {
+          triggerPatterns: [
+            'refresh public source',
+            'verify public api source',
+            'check public feed',
+            'validate dashboard endpoint',
+            'refresh source index'
+          ],
+          requiresConfirmation: false
+        },
+        frontend: {
+          exposeToFrontend: true,
+          icon: 'refresh-cw'
         }
       },
       {

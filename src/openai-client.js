@@ -192,6 +192,11 @@ const AUTO_TOOL_ALLOWLIST = new Set([
     'research-bucket-read',
     'research-bucket-write',
     'research-bucket-mkdir',
+    'public-source-list',
+    'public-source-search',
+    'public-source-get',
+    'public-source-add',
+    'public-source-refresh',
     'file-read',
     'file-write',
     'file-search',
@@ -1265,6 +1270,24 @@ function hasResearchBucketIntent(prompt = '') {
         /\blong[- ]term bucket\b/i,
         /\bbucket\b[\s\S]{0,60}\b(images?|data|graphs?|code|audio|wave|wav|docs?|references?|assets?)\b/i,
         /\b(images?|data|graphs?|code|audio|wave|wav|docs?|references?|assets?)\b[\s\S]{0,60}\bbucket\b/i,
+    ].some((pattern) => pattern.test(source));
+}
+
+function hasPublicSourceIndexIntent(prompt = '') {
+    const source = String(prompt || '').trim();
+    if (!source) {
+        return false;
+    }
+
+    return [
+        /\bpublic source index\b/i,
+        /\bpublic api index\b/i,
+        /\bpublic api catalog(?:ue)?\b/i,
+        /\bapi source library\b/i,
+        /\bdashboard source catalog(?:ue)?\b/i,
+        /\b(news|rss|data|public)\s+feed\s+(index|catalog|catalogue|source|sources)\b/i,
+        /\b(find|search|list|show|add|save|store|index|verify|refresh)\b[\s\S]{0,60}\b(public api|public endpoint|public feed|news feed|rss feed|dashboard source|data portal|open data source)\b/i,
+        /\b(public api|public endpoint|public feed|news feed|rss feed|dashboard source|data portal|open data source)\b[\s\S]{0,60}\b(find|search|list|show|add|save|store|index|verify|refresh)\b/i,
     ].some((pattern) => pattern.test(source));
 }
 
@@ -2377,6 +2400,7 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
         || canonicalWorkload?.trigger?.type === 'once';
     const hasAssetCatalogIntent = hasIndexedAssetIntent(prompt);
     const hasResearchBucketCatalogIntent = hasResearchBucketIntent(prompt);
+    const hasPublicSourceCatalogIntent = hasPublicSourceIndexIntent(prompt);
     const remoteToolId = availableToolIds.has('remote-command')
         ? 'remote-command'
         : (availableToolIds.has('ssh-execute') ? 'ssh-execute' : null);
@@ -2486,6 +2510,22 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
         if (/\b(mkdir|folder|directory)\b/i.test(normalizedPrompt)
             && availableToolIds.has('research-bucket-mkdir')) {
             selectedIds.add('research-bucket-mkdir');
+        }
+    }
+
+    if (hasPublicSourceCatalogIntent) {
+        ['public-source-list', 'public-source-search', 'public-source-get'].forEach((toolId) => {
+            if (availableToolIds.has(toolId)) {
+                selectedIds.add(toolId);
+            }
+        });
+        if (/\b(add|save|store|index|catalog|catalogue|create|update)\b/i.test(normalizedPrompt)
+            && availableToolIds.has('public-source-add')) {
+            selectedIds.add('public-source-add');
+        }
+        if (/\b(refresh|verify|check|validate|probe)\b/i.test(normalizedPrompt)
+            && availableToolIds.has('public-source-refresh')) {
+            selectedIds.add('public-source-refresh');
         }
     }
 
@@ -2791,6 +2831,13 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Treat the research bucket as callable storage, not memory. List or search first, then read only the specific files needed for the current turn.');
         guidance.push('- Use `research-bucket-list` for metadata, `research-bucket-search` for grep-style lookup, `research-bucket-read` for selected files, and `research-bucket-write` or `research-bucket-mkdir` only when the user wants bucket contents created or updated.');
         guidance.push('- Prefer bucket paths and metadata over copying large bucket contents into the conversation. Normal compaction still applies.');
+    }
+
+    if (automaticTools.some((entry) => String(entry.id || '').startsWith('public-source-'))) {
+        guidance.push('- Use the `public-source-*` tools for durable public API, dashboard, RSS, news-feed, open-data, and public endpoint catalogs.');
+        guidance.push('- Search or list the public source index before doing fresh discovery when the user asks about known public data/API/feed sources.');
+        guidance.push('- Use `public-source-add` to save reusable public sources discovered through `web-search` and verified pages; mark unverified discoveries as `candidate`.');
+        guidance.push('- Use `public-source-refresh` only when live status, content type, or source freshness matters for the current task.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'file-read')) {

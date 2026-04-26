@@ -109,6 +109,11 @@ const TOOL_SUPPORT = {
   'research-bucket-read': { status: 'stable', notes: ['Reads selected bucket files with byte limits; binary files require explicit base64 mode.'] },
   'research-bucket-write': { status: 'stable', notes: ['Creates or updates guarded files inside the shared research bucket and indexes supported assets.'] },
   'research-bucket-mkdir': { status: 'stable', notes: ['Creates guarded subfolders inside the shared research bucket.'] },
+  'public-source-list': { status: 'stable', notes: ['Lists indexed public APIs, dashboards, news feeds, data portals, RSS feeds, downloads, and public web sources.'] },
+  'public-source-search': { status: 'stable', notes: ['Searches the durable public source catalog by topic, domain, format, source kind, and notes.'] },
+  'public-source-get': { status: 'stable', notes: ['Reads one public source catalog entry with endpoint, auth, freshness, and verification metadata.'] },
+  'public-source-add': { status: 'stable', notes: ['Creates or updates public source catalog entries for later agent use.'] },
+  'public-source-refresh': { status: 'stable', notes: ['Performs a lightweight URL verification and updates status, HTTP, content type, and inferred format metadata.'] },
   'podcast': {
     status: 'stable',
     notes: [
@@ -124,6 +129,9 @@ function getToolDocPath(toolId) {
   const normalizedToolId = String(toolId || '').trim();
   if (normalizedToolId.startsWith('research-bucket-')) {
     return path.join(TOOL_DOCS_DIR, 'research-bucket.md');
+  }
+  if (normalizedToolId.startsWith('public-source-')) {
+    return path.join(TOOL_DOCS_DIR, 'public-source-index.md');
   }
   return path.join(TOOL_DOCS_DIR, `${normalizedToolId}.md`);
 }
