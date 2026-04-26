@@ -547,6 +547,79 @@ body[data-theme="voxel"] .line-output.error {
     text-underline-offset: 3px;
 }
 
+.markdown-content .tool-payload-flag {
+    margin: 12px 0;
+    overflow: hidden;
+    border: 1px solid rgba(244, 201, 93, 0.55);
+    border-left: 4px solid var(--warning);
+    border-radius: 6px;
+    background: rgba(244, 201, 93, 0.08);
+}
+
+.markdown-content .tool-payload-flag summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    cursor: pointer;
+    color: #fff7d6;
+    list-style: none;
+}
+
+.markdown-content .tool-payload-flag summary::-webkit-details-marker {
+    display: none;
+}
+
+.markdown-content .tool-payload-flag summary::after {
+    content: "show";
+    margin-left: auto;
+    color: var(--warning);
+    font-size: 11px;
+    text-transform: uppercase;
+}
+
+.markdown-content .tool-payload-flag[open] summary::after {
+    content: "hide";
+}
+
+.markdown-content .tool-payload-flag__badge {
+    padding: 1px 5px;
+    border: 1px solid rgba(244, 201, 93, 0.65);
+    border-radius: 3px;
+    background: rgba(244, 201, 93, 0.16);
+    color: var(--warning);
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.markdown-content .tool-payload-flag__title {
+    color: #fff7d6;
+    font-weight: 800;
+}
+
+.markdown-content .tool-payload-flag__meta {
+    min-width: 0;
+    color: var(--text-muted);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.markdown-content .tool-payload-flag__body {
+    padding: 0 10px 10px;
+}
+
+.markdown-content .tool-payload-flag__command {
+    margin: 0 0 8px;
+    color: var(--text-secondary);
+}
+
+.markdown-content .tool-payload-flag .code-block {
+    margin-bottom: 0;
+}
+
 body[data-theme="voxel"] .streaming .voxel-response-head::after {
     content: " live";
     color: var(--success-bright);

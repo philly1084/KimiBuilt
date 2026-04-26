@@ -46,4 +46,28 @@ describe('model-output-parser', () => {
         expect(normalized).toContain('<span class="kb-tone kb-tone--warning">check this</span>');
         expect(normalized).toContain('```md\n==literal== ::warning[literal]\n```');
     });
+
+    test('detects leaked remote-command JSON payloads without normalizing them away', () => {
+        const payload = parser.detectToolPayload(JSON.stringify({
+            command: 'kubectl get pods -A',
+            hostname: '162.55.163.199',
+            port: 22,
+            username: 'root',
+        }));
+
+        expect(payload).toEqual(expect.objectContaining({
+            toolId: 'remote-command',
+            command: 'kubectl get pods -A',
+            host: '162.55.163.199',
+            username: 'root',
+            port: 22,
+        }));
+    });
+
+    test('does not flag ordinary command examples as remote payloads', () => {
+        expect(parser.detectToolPayload(JSON.stringify({
+            command: 'npm test',
+            description: 'Local package test command.',
+        }))).toBeNull();
+    });
 });

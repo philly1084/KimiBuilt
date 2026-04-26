@@ -2171,6 +2171,11 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
                 ? this.sanitizeMermaidCode(code)
                 : code.trim();
             const escapedCode = this.escapeHtml(trimmedCode);
+            const flaggedToolPayload = this.detectToolPayloadBlock(language, trimmedCode);
+            if (flaggedToolPayload) {
+                codeBlocks.push(this.renderFlaggedToolPayloadBlock(flaggedToolPayload, language, trimmedCode));
+                return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
+            }
             
             // Special handling for mermaid diagrams
             if (language === 'mermaid') {
@@ -2216,6 +2221,73 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
         html = html.replace(/__CODE_BLOCK_(\d+)__/g, (match, index) => codeBlocks[Number(index)] || match);
         
         return `<div class="markdown-content">${html}</div>`;
+    }
+
+    detectToolPayloadBlock(language = '', code = '') {
+        const normalizedLanguage = String(language || '').trim().toLowerCase();
+        if (!['json', 'javascript', 'js', 'text', ''].includes(normalizedLanguage)) {
+            return null;
+        }
+
+        if (window.LillyModelOutputParser?.detectToolPayload) {
+            return window.LillyModelOutputParser.detectToolPayload(code);
+        }
+
+        try {
+            const payload = JSON.parse(String(code || '').trim());
+            const command = String(payload?.command || payload?.params?.command || '').trim();
+            const toolId = String(payload?.tool || payload?.toolId || payload?.name || '').trim().toLowerCase().replace(/_/g, '-');
+            const hasRemoteTarget = Boolean(payload?.host || payload?.hostname || payload?.username || payload?.port);
+            if (command && (toolId === 'remote-command' || hasRemoteTarget)) {
+                return {
+                    toolId: toolId || 'remote-command',
+                    command,
+                    host: String(payload.host || payload.hostname || '').trim(),
+                    username: String(payload.username || '').trim(),
+                    port: payload.port || null,
+                    payload,
+                };
+            }
+        } catch (_error) {
+            return null;
+        }
+
+        return null;
+    }
+
+    renderFlaggedToolPayloadBlock(payload = {}, language = 'json', code = '') {
+        const toolId = String(payload.toolId || 'remote-command').trim() || 'remote-command';
+        const host = [payload.username, payload.host].filter(Boolean).join('@');
+        const target = [host || payload.host || '', payload.port ? `:${payload.port}` : ''].join('').trim();
+        const command = String(payload.command || '').trim();
+        const preview = command.length > 220 ? `${command.slice(0, 217)}...` : command;
+        const meta = [
+            `tool=${toolId}`,
+            target ? `target=${target}` : '',
+        ].filter(Boolean).join(' | ');
+        const displayLanguage = String(language || 'json').trim() || 'json';
+
+        return `
+            <details class="tool-payload-flag">
+                <summary>
+                    <span class="tool-payload-flag__badge">Flagged</span>
+                    <span class="tool-payload-flag__title">Remote command payload appeared in assistant text</span>
+                    <span class="tool-payload-flag__meta">${this.escapeHtml(meta)}</span>
+                </summary>
+                <div class="tool-payload-flag__body">
+                    ${preview ? `<div class="tool-payload-flag__command"><code class="inline-code">${this.escapeHtml(preview)}</code></div>` : ''}
+                    <div class="code-block">
+                        <div class="code-header">
+                            <span>${this.escapeHtml(displayLanguage)}</span>
+                            <div class="code-actions">
+                                <button class="code-action-btn" onclick="app.copyCode(this)" aria-label="Copy code">Copy</button>
+                            </div>
+                        </div>
+                        <pre><code class="language-${this.escapeHtmlAttr(displayLanguage)}">${this.escapeHtml(code)}</code></pre>
+                    </div>
+                </div>
+            </details>
+        `;
     }
 
     renderMarkdownBlocks(source) {

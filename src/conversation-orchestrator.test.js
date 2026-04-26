@@ -2683,6 +2683,93 @@ describe('ConversationOrchestrator', () => {
         expect(result.output).toBe('I connected to the server and completed the verified remote check. If you want me to continue, I need the next concrete server task rather than assuming tool access is missing.');
     });
 
+    test('repairs invalid final responses that surface bare remote-command JSON payloads', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const leakedPayload = [
+            'Good - I can see the host is alive. Let me fix this cleanly.',
+            '```json',
+            JSON.stringify({
+                command: 'kubectl get pods -n kimibuilt -o wide',
+                hostname: '10.0.0.5',
+                port: 22,
+                username: 'ubuntu',
+            }, null, 2),
+            '```',
+        ].join('\n');
+        const llmClient = {
+            createResponse: jest.fn()
+                .mockResolvedValueOnce(buildResponse(leakedPayload, 'resp_invalid_bare_remote_payload'))
+                .mockResolvedValueOnce(buildResponse(
+                    'The remote pod inspection ran and found the backend pod running, but public ingress still needs verification.',
+                    'resp_repaired_bare_remote_payload',
+                )),
+            complete: jest.fn().mockResolvedValue(JSON.stringify({ steps: [] })),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['remote-command', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read']
+                    .includes(toolId)
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn().mockResolvedValue({
+                success: true,
+                toolId: 'remote-command',
+                data: {
+                    stdout: 'backend-7d9c4dfc5b-abcde 1/1 Running',
+                    stderr: '',
+                    host: '10.0.0.5:22',
+                },
+            }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-bare-remote-payload', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'SSH into 10.0.0.5 and run kubectl get pods -n kimibuilt -o wide.',
+            sessionId: 'session-bare-remote-payload',
+            executionProfile: 'remote-build',
+            stream: false,
+        });
+
+        expect(toolManager.executeTool).toHaveBeenCalledTimes(1);
+        expect(toolManager.executeTool).toHaveBeenCalledWith(
+            'remote-command',
+            expect.objectContaining({
+                command: 'kubectl get pods -n kimibuilt -o wide',
+            }),
+            expect.objectContaining({
+                sessionId: 'session-bare-remote-payload',
+            }),
+        );
+        expect(llmClient.createResponse).toHaveBeenCalledTimes(2);
+        expect(result.output).toBe('The remote pod inspection ran and found the backend pod running, but public ingress still needs verification.');
+    });
+
     test('repairs invalid final responses that surface serialized tool-call wrapper payloads', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,

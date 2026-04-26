@@ -4045,8 +4045,166 @@ function isSerializedToolCallWrapperText(text = '') {
     return !displayText && (!outputText || finishReason === 'tool_calls');
 }
 
+function collectJsonCandidatesFromText(text = '') {
+    const source = String(text || '').trim();
+    if (!source) {
+        return [];
+    }
+
+    const candidates = [];
+    const whole = safeJsonParse(source);
+    if (whole && typeof whole === 'object') {
+        candidates.push(whole);
+    }
+
+    const fencePattern = /```(?:json|javascript|js|text)?\s*([\s\S]*?)```/gi;
+    let match;
+    while ((match = fencePattern.exec(source)) !== null) {
+        const parsed = safeJsonParse(match[1] || '');
+        if (parsed && typeof parsed === 'object') {
+            candidates.push(parsed);
+        }
+    }
+
+    return candidates;
+}
+
+function parsePayloadObject(value = null) {
+    if (!value) {
+        return null;
+    }
+
+    if (typeof value === 'object') {
+        return value;
+    }
+
+    if (typeof value === 'string') {
+        return parseLenientJson(value);
+    }
+
+    return null;
+}
+
+function findRemoteCommandPayload(value = null, seen = null) {
+    if (!value || typeof value !== 'object') {
+        return null;
+    }
+
+    const visited = seen || new WeakSet();
+    if (visited.has(value)) {
+        return null;
+    }
+    visited.add(value);
+
+    if (Array.isArray(value)) {
+        for (const item of value) {
+            const match = findRemoteCommandPayload(item, visited);
+            if (match) {
+                return match;
+            }
+        }
+        return null;
+    }
+
+    const toolId = canonicalizeRemoteToolId(
+        value.tool
+        || value.toolId
+        || value.name
+        || value.function?.name
+        || value.toolCall?.function?.name
+        || '',
+    );
+    const args = parsePayloadObject(value.arguments || value.function?.arguments || value.toolCall?.function?.arguments) || {};
+    const params = parsePayloadObject(value.params || value.parameters) || {};
+    const merged = {
+        ...args,
+        ...params,
+        ...value,
+    };
+    const command = typeof merged.command === 'string' ? merged.command.trim() : '';
+    const hasRemoteTarget = Boolean(
+        merged.host
+        || merged.hostname
+        || merged.username
+        || merged.port
+        || merged.profile
+        || merged.workflowAction
+        || merged.workflow_action
+    );
+
+    const recoveredParams = {
+        ...(command ? { command } : {}),
+        ...(merged.host || merged.hostname ? { host: String(merged.host || merged.hostname).trim() } : {}),
+        ...(merged.username ? { username: String(merged.username).trim() } : {}),
+        ...(merged.port ? { port: merged.port } : {}),
+        ...(merged.profile ? { profile: merged.profile } : {}),
+        ...(merged.workflowAction ? { workflowAction: merged.workflowAction } : {}),
+        ...(merged.workflow_action ? { workflowAction: merged.workflow_action } : {}),
+        ...(merged.timeout ? { timeout: merged.timeout } : {}),
+    };
+
+    if (command && (isRemoteCommandToolId(toolId) || hasRemoteTarget)) {
+        return {
+            toolId: isRemoteCommandToolId(toolId) ? toolId : 'remote-command',
+            command,
+            params: recoveredParams,
+        };
+    }
+
+    if (isRemoteCommandToolId(toolId) && (Object.keys(args).length > 0 || Object.keys(params).length > 0)) {
+        return {
+            toolId,
+            command,
+            params: recoveredParams,
+        };
+    }
+
+    for (const key of ['tool_calls', 'toolCalls', 'calls', 'items', 'output']) {
+        const match = findRemoteCommandPayload(value[key], visited);
+        if (match) {
+            return match;
+        }
+    }
+
+    return null;
+}
+
+function isLeakedRemoteCommandPayloadText(text = '') {
+    const source = String(text || '').trim();
+    if (!source || !/(command|hostname|username|tool_calls|remote-command|ssh-execute|k3s-deploy)/i.test(source)) {
+        return false;
+    }
+
+    return collectJsonCandidatesFromText(source).some((candidate) => Boolean(findRemoteCommandPayload(candidate)));
+}
+
+function buildRecoveryPlanFromLeakedRemoteCommandPayload(text = '', toolPolicy = {}) {
+    const remoteToolId = getPreferredRemoteToolId(toolPolicy) || 'remote-command';
+    if (!Array.isArray(toolPolicy?.candidateToolIds) || !toolPolicy.candidateToolIds.includes(remoteToolId)) {
+        return [];
+    }
+
+    for (const candidate of collectJsonCandidatesFromText(text)) {
+        const payload = findRemoteCommandPayload(candidate);
+        if (!payload?.params?.command) {
+            continue;
+        }
+
+        return [{
+            tool: remoteToolId,
+            reason: 'Recover leaked remote-command JSON by executing it as a verified tool call.',
+            params: payload.params,
+        }];
+    }
+
+    return [];
+}
+
 function isInvalidRuntimeResponseText(text = '') {
     if (isSerializedToolCallWrapperText(text)) {
+        return true;
+    }
+    if (isLeakedRemoteCommandPayloadText(text)) {
         return true;
     }
     const normalized = String(text || '').trim().toLowerCase().replace(/[â€™]/g, '\'');
@@ -8262,15 +8420,18 @@ class ConversationOrchestrator extends EventEmitter {
             output = extractResponseText(finalResponse);
             if (canRecoverFromInvalidRuntimeResponse({ output, toolEvents, toolPolicy })) {
                 const previousInvalidOutput = output;
-                const recoveryPlan = this.buildFallbackPlan({
-                    objective,
-                    session,
-                    toolContext,
-                    executionProfile: resolvedProfile,
-                    toolPolicy,
-                    toolEvents,
-                    model,
-                });
+                const leakedPayloadRecoveryPlan = buildRecoveryPlanFromLeakedRemoteCommandPayload(previousInvalidOutput, toolPolicy);
+                const recoveryPlan = leakedPayloadRecoveryPlan.length > 0
+                    ? leakedPayloadRecoveryPlan
+                    : this.buildFallbackPlan({
+                        objective,
+                        session,
+                        toolContext,
+                        executionProfile: resolvedProfile,
+                        toolPolicy,
+                        toolEvents,
+                        model,
+                    });
                 const filteredRecoveryPlan = filterRepeatedPlanSteps(
                     recoveryPlan,
                     executedStepSignatures,
@@ -10057,9 +10218,9 @@ class ConversationOrchestrator extends EventEmitter {
 
         const repairPrompt = [
             'The previous draft was invalid after verified tool execution.',
-            'It may have denied runtime tool access, returned a tool-call wrapper object, or surfaced execution metadata instead of a user-facing answer.',
+            'It may have denied runtime tool access, returned a tool-call wrapper object, leaked a remote-command JSON payload, or surfaced execution metadata instead of a user-facing answer.',
             'Rewrite the answer using only the verified tool results below.',
-            'Do not mention turn-level tool availability, missing tools, sandbox limits, inability to execute commands, or raw tool-call wrapper fields.',
+            'Do not mention turn-level tool availability, missing tools, sandbox limits, inability to execute commands, raw remote-command JSON payloads, or raw tool-call wrapper fields.',
             'If additional work may still be needed, explain what remains based on the verified results and the user request without claiming the tool is unavailable.',
             'If a tool failed, state the exact tool failure plainly.',
             'Do not mention the local CLI environment, local workspace state, startup health, or shell behavior unless a verified tool result is directly about that.',
@@ -10216,7 +10377,7 @@ class ConversationOrchestrator extends EventEmitter {
                 ]
                 : [
                     'Return plain user-facing text only.',
-                    'Do not return JSON, assistant wrapper objects, tool call objects, or fields like `role`, `content`, `type`, `name`, `parameters`, `output_text`, or `finish_reason`.',
+                    'Do not return JSON, assistant wrapper objects, tool call objects, remote-command payloads, or fields like `role`, `content`, `type`, `name`, `parameters`, `output_text`, or `finish_reason`.',
                     'Do not wrap the final answer in code fences.',
                 ]),
             'Do not generate SVG placeholders, HTML overlays, or fake image mockups when verified image URLs are available.',

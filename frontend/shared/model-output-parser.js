@@ -405,6 +405,116 @@
         return metadata;
     }
 
+    function parseJsonLikeValue(value) {
+        if (!value) {
+            return null;
+        }
+
+        if (typeof value === 'object') {
+            return value;
+        }
+
+        return tryParseJson(String(value || '').trim());
+    }
+
+    function normalizeToolId(value = '') {
+        return String(value || '').trim().toLowerCase().replace(/_/g, '-');
+    }
+
+    function isRemoteToolId(value = '') {
+        return ['remote-command', 'ssh-execute', 'remote-cli-agent', 'k3s-deploy'].includes(normalizeToolId(value));
+    }
+
+    function findRemotePayloadObject(value, seen = null) {
+        if (!value || typeof value !== 'object') {
+            return null;
+        }
+
+        const visited = seen || new WeakSet();
+        if (visited.has(value)) {
+            return null;
+        }
+        visited.add(value);
+
+        if (Array.isArray(value)) {
+            for (const item of value) {
+                const match = findRemotePayloadObject(item, visited);
+                if (match) {
+                    return match;
+                }
+            }
+            return null;
+        }
+
+        const directToolId = normalizeToolId(
+            value.tool
+            || value.toolId
+            || value.name
+            || value.function?.name
+            || value.toolCall?.function?.name
+            || '',
+        );
+        const parsedArguments = parseJsonLikeValue(value.arguments || value.function?.arguments || value.toolCall?.function?.arguments);
+        const params = parseJsonLikeValue(value.params || value.parameters) || {};
+        const argumentParams = parsedArguments && typeof parsedArguments === 'object' ? parsedArguments : {};
+        const merged = {
+            ...argumentParams,
+            ...params,
+            ...value,
+        };
+        const command = typeof merged.command === 'string' ? merged.command.trim() : '';
+        const hasRemoteTarget = Boolean(
+            merged.host
+            || merged.hostname
+            || merged.username
+            || merged.port
+            || merged.profile
+            || merged.workflowAction
+            || merged.workflow_action
+        );
+
+        if (command && (isRemoteToolId(directToolId) || hasRemoteTarget)) {
+            return {
+                toolId: isRemoteToolId(directToolId) ? directToolId : 'remote-command',
+                command,
+                host: String(merged.host || merged.hostname || '').trim(),
+                username: String(merged.username || '').trim(),
+                port: merged.port || null,
+                payload: value,
+            };
+        }
+
+        if (isRemoteToolId(directToolId) && (Object.keys(argumentParams).length > 0 || Object.keys(params).length > 0)) {
+            return {
+                toolId: directToolId,
+                command,
+                host: String(merged.host || merged.hostname || '').trim(),
+                username: String(merged.username || '').trim(),
+                port: merged.port || null,
+                payload: value,
+            };
+        }
+
+        const nestedKeys = ['tool_calls', 'toolCalls', 'calls', 'items', 'output'];
+        for (const key of nestedKeys) {
+            const match = findRemotePayloadObject(value[key], visited);
+            if (match) {
+                return match;
+            }
+        }
+
+        return null;
+    }
+
+    function detectToolPayload(value = '') {
+        const parsed = parseJsonLikeValue(value);
+        if (!parsed) {
+            return null;
+        }
+
+        return findRemotePayloadObject(parsed);
+    }
+
     function normalizeModelOutput(value, options = {}) {
         const metadata = collectMetadata(value);
         let sourceFormat = typeof value;
@@ -457,6 +567,7 @@
         restoreFlattenedMarkdownBlocks,
         restoreFlattenedMarkdownTables,
         normalizeMultilineTableCells,
+        detectToolPayload,
     };
 
     if (typeof module !== 'undefined' && module.exports) {
