@@ -66,6 +66,37 @@ describe('runtime artifact helpers', () => {
         ]);
     });
 
+    test('extracts podcast video artifacts from successful tool events', () => {
+        const artifacts = extractArtifactsFromToolEvents([{
+            toolCall: {
+                function: {
+                    name: 'podcast',
+                },
+            },
+            result: {
+                success: true,
+                data: {
+                    video: {
+                        artifactId: 'artifact-video-1',
+                        filename: 'battery-breakdown.mp4',
+                        mimeType: 'video/mp4',
+                        downloadUrl: '/api/artifacts/artifact-video-1/download',
+                    },
+                },
+            },
+        }]);
+
+        expect(artifacts).toEqual([
+            expect.objectContaining({
+                id: 'artifact-video-1',
+                filename: 'battery-breakdown.mp4',
+                format: 'mp4',
+                mimeType: 'video/mp4',
+                downloadUrl: '/api/artifacts/artifact-video-1/download',
+            }),
+        ]);
+    });
+
     test('extracts file-write mirrored artifacts from successful tool events', () => {
         const artifacts = extractArtifactsFromToolEvents([{
             toolCall: {

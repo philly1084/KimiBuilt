@@ -17,6 +17,7 @@ const { publicSourceIndexService, SOURCE_KINDS, STATUSES } = require('../../publ
 const { piperTtsService } = require('../../tts/piper-tts-service');
 const { audioProcessingService } = require('../../audio/audio-processing-service');
 const { podcastService } = require('../../podcast/podcast-service');
+const { podcastVideoService } = require('../../video/podcast-video-service');
 const { config } = require('../../config');
 const { isDashboardRequest } = require('../../dashboard-template-catalog');
 const { escapeHtml, normalizeWhitespace, stripHtml } = require('../../utils/text');
@@ -514,6 +515,42 @@ function resolvePodcastService(context = {}) {
   }
 
   return service;
+}
+
+function resolvePodcastVideoService(context = {}) {
+  const service = context?.podcastVideoService || podcastVideoService;
+  if (!service?.createVideoFromPodcast) {
+    throw new Error('Podcast video rendering is unavailable because the podcast video service is not initialized.');
+  }
+
+  return service;
+}
+
+function buildPodcastVideoOptions(params = {}, context = {}) {
+  const nested = params.video && typeof params.video === 'object' && !Array.isArray(params.video)
+    ? params.video
+    : {};
+
+  return {
+    topic: params.topic || params.prompt || params.subject || nested.topic || '',
+    aspectRatio: params.videoAspectRatio || params.aspectRatio || nested.aspectRatio || '16:9',
+    imageMode: params.videoImageMode || params.imageMode || nested.imageMode || 'mixed',
+    generateImages: params.videoGenerateImages === true || params.generateImages === true || nested.generateImages === true,
+    sceneCount: Number(params.videoSceneCount || params.sceneCount || nested.sceneCount) || undefined,
+    visualStyle: params.videoVisualStyle || params.visualStyle || nested.visualStyle || '',
+    imageModel: params.videoImageModel || params.imageModel || nested.imageModel || null,
+    model: params.videoModel || params.model || nested.model || null,
+    reasoningEffort: params.videoReasoningEffort || params.reasoningEffort || nested.reasoningEffort || null,
+    useModel: nested.useModel === false || params.useModel === false ? false : undefined,
+    scenes: Array.isArray(params.scenes) ? params.scenes : Array.isArray(nested.scenes) ? nested.scenes : undefined,
+    toolManager: context.toolManager || null,
+    toolContext: {
+      ...context,
+      executionProfile: 'podcast-video',
+      clientSurface: 'podcast-video',
+      taskType: 'podcast-video',
+    },
+  };
 }
 
 function normalizeDocumentWorkflowAction(value = '') {
@@ -3477,11 +3514,33 @@ class ToolManager {
         id: 'podcast',
         name: 'Podcast',
         category: 'system',
-        description: 'Research a topic, script a two-host episode, synthesize both voices with Piper, and stitch the final podcast audio into a saved artifact.',
+        description: 'Research a topic, script a two-host episode, synthesize both voices with Piper, stitch the final podcast audio into a saved artifact, and optionally render an MP4 podcast video with scene images.',
         backend: {
           handler: async (params = {}, context = {}) => {
             const service = resolvePodcastService(context);
-            return service.createPodcast(params, context);
+            const podcast = await service.createPodcast(params, context);
+            if (params.includeVideo !== true) {
+              return podcast;
+            }
+
+            const videoService = resolvePodcastVideoService(context);
+            const videoData = await videoService.createVideoFromPodcast(podcast, {
+              sessionId: context.sessionId,
+              options: buildPodcastVideoOptions(params, context),
+            });
+            const artifacts = [
+              ...(Array.isArray(podcast.artifacts) ? podcast.artifacts : []),
+              videoData.artifact,
+            ].filter(Boolean);
+
+            return {
+              ...podcast,
+              video: videoData.video,
+              videoArtifact: videoData.artifact,
+              storyboard: videoData.storyboard,
+              artifacts,
+              artifactIds: artifacts.map((artifact) => artifact.id).filter(Boolean),
+            };
           },
           sideEffects: ['write', 'execute', 'network'],
           timeout: 900000,
@@ -3547,6 +3606,30 @@ class ToolManager {
             ttsChunkMaxChars: { type: 'integer', minimum: 250, maximum: 2400 },
             ttsConcurrency: { type: 'integer', minimum: 1, maximum: 24 },
             researchConcurrency: { type: 'integer', minimum: 1, maximum: 12 },
+            includeVideo: { type: 'boolean' },
+            video: {
+              type: 'object',
+              properties: {
+                topic: { type: 'string' },
+                aspectRatio: { type: 'string', enum: ['16:9', '9:16', '1:1'] },
+                imageMode: { type: 'string', enum: ['mixed', 'web', 'unsplash', 'generated', 'fallback', 'provided'] },
+                generateImages: { type: 'boolean' },
+                sceneCount: { type: 'integer', minimum: 1, maximum: 36 },
+                visualStyle: { type: 'string' },
+                imageModel: { type: 'string' },
+                model: { type: 'string' },
+                reasoningEffort: { type: 'string' },
+              },
+              additionalProperties: false,
+            },
+            videoAspectRatio: { type: 'string', enum: ['16:9', '9:16', '1:1'] },
+            videoImageMode: { type: 'string', enum: ['mixed', 'web', 'unsplash', 'generated', 'fallback', 'provided'] },
+            videoGenerateImages: { type: 'boolean' },
+            videoSceneCount: { type: 'integer', minimum: 1, maximum: 36 },
+            videoVisualStyle: { type: 'string' },
+            videoImageModel: { type: 'string' },
+            videoModel: { type: 'string' },
+            videoReasoningEffort: { type: 'string' },
           },
           additionalProperties: false,
         },
@@ -3554,6 +3637,9 @@ class ToolManager {
           triggerPatterns: [
             'podcast',
             'podcast episode',
+            'video podcast',
+            'podcast video',
+            'mp4 podcast',
             'two host podcast',
             'research and script audio',
             'two agent voices',

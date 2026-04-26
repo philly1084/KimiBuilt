@@ -45,6 +45,7 @@ Useful optional inputs:
 Notes:
 
 - The tool requires an active session because it persists the final audio artifact.
+- For "video podcast", "podcast video", "MP4 podcast", visual podcast, scene-image, or cover-art requests, pass `includeVideo: true`, keep `videoImageMode: "mixed"` by default, and pass `videoGenerateImages: true` unless the user explicitly asks not to use generated imagery.
 - Research quality depends on `web-search` availability and source accessibility.
 - Speech stitching is native PCM WAV concatenation, so the selected Piper voices must emit compatible WAV output.
 - Podcast renders prefer the stable two-host voice pair first and only apply ffmpeg mastering when `enhanceSpeech` is explicitly enabled.

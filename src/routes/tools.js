@@ -12,6 +12,7 @@ const settingsController = require('./admin/settings.controller');
 const { config } = require('../config');
 const { piperTtsService } = require('../tts/piper-tts-service');
 const { audioProcessingService } = require('../audio/audio-processing-service');
+const { podcastVideoService } = require('../video/podcast-video-service');
 const { sessionStore } = require('../session-store');
 const { inferExecutionProfile } = require('../runtime-execution');
 const { canonicalizeRemoteToolId, isRemoteCommandToolId, isSuspiciousSshTargetHost } = require('../ai-route-utils');
@@ -312,6 +313,7 @@ function buildToolRuntime(toolId, options = {}) {
     return {
       tts: piperTtsService.getPublicConfig(),
       audioProcessing: audioProcessingService.getPublicConfig(),
+      video: podcastVideoService.getPublicConfig(),
       researchConfigured: Boolean(process.env.PERPLEXITY_API_KEY),
       modelConfigured: Boolean(config.openai.apiKey),
     };

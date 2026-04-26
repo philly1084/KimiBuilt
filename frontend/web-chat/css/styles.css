@@ -4945,12 +4945,36 @@ body.layout-minimal #input-meta-row {
 .assistant-progress-card__surface {
     display: flex;
     flex-direction: column;
-    gap: 0.72rem;
+    gap: 0.62rem;
     width: 100%;
-    padding: 0.78rem 0.88rem;
+    padding: 0.72rem 0.82rem;
     border: 1px solid rgba(88, 166, 255, 0.16);
-    border-radius: 0.95rem;
+    border-radius: 0.72rem;
     background: rgba(88, 166, 255, 0.06);
+}
+
+.assistant-progress-card--reasoning .assistant-progress-card__surface {
+    gap: 0.7rem;
+    background: rgba(88, 166, 255, 0.05);
+}
+
+.assistant-progress-card__reasoning {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.62rem;
+    align-items: flex-start;
+}
+
+.assistant-progress-card__reasoning-icon {
+    width: 1.85rem;
+    height: 1.85rem;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    background: rgba(88, 166, 255, 0.14);
+    color: var(--accent);
 }
 
 .assistant-progress-card__header {
@@ -4979,6 +5003,7 @@ body.layout-minimal #input-meta-row {
     font-size: 0.92rem;
     font-weight: 600;
     color: var(--text-primary);
+    line-height: 1.45;
 }
 
 .assistant-progress-card__badge {
@@ -5053,7 +5078,7 @@ body.layout-minimal #input-meta-row {
 .assistant-progress-card__steps {
     display: flex;
     flex-direction: column;
-    gap: 0.42rem;
+    gap: 0.36rem;
     margin: 0;
     padding: 0;
     list-style: none;
@@ -5061,9 +5086,9 @@ body.layout-minimal #input-meta-row {
 
 .assistant-progress-card__step {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
-    gap: 0.55rem;
+    gap: 0.52rem;
     font-size: 0.82rem;
     color: var(--text-secondary);
 }
@@ -5079,6 +5104,8 @@ body.layout-minimal #input-meta-row {
 .assistant-progress-card__step-title {
     min-width: 0;
     color: var(--text-primary);
+    line-height: 1.4;
+    transition: color var(--transition-fast), opacity var(--transition-fast), text-decoration-color var(--transition-fast);
 }
 
 .assistant-progress-card__step-state {
@@ -5093,6 +5120,14 @@ body.layout-minimal #input-meta-row {
 .assistant-progress-card__step--skipped .assistant-progress-card__step-dot {
     background: rgba(52, 211, 153, 0.92);
     border-color: rgba(52, 211, 153, 0.92);
+}
+
+.assistant-progress-card__step--completed .assistant-progress-card__step-title,
+.assistant-progress-card__step--skipped .assistant-progress-card__step-title {
+    color: var(--text-tertiary);
+    text-decoration: line-through;
+    text-decoration-thickness: 1.5px;
+    text-decoration-color: rgba(52, 211, 153, 0.78);
 }
 
 .assistant-progress-card__step--in_progress .assistant-progress-card__step-dot {

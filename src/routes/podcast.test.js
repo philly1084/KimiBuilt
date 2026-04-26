@@ -224,6 +224,7 @@ describe('/api/podcast', () => {
         includeVideo: true,
         videoAspectRatio: '9:16',
         videoImageMode: 'mixed',
+        videoGenerateImages: true,
       });
 
     expect(response.status).toBe(200);
@@ -234,10 +235,55 @@ describe('/api/podcast', () => {
       options: expect.objectContaining({
         aspectRatio: '9:16',
         imageMode: 'mixed',
+        generateImages: true,
       }),
     }));
     expect(response.body.video).toEqual({ artifactId: 'artifact-video-1' });
     expect(response.body.storyboard).toEqual({ scenes: [{ id: 'scene-01' }] });
+  });
+
+  test('infers video rendering for video podcast prompt aliases', async () => {
+    podcastService.createPodcast.mockResolvedValue({
+      title: 'Battery Breakdown',
+      audio: { artifactId: 'artifact-podcast-1' },
+      artifacts: [],
+      artifactIds: [],
+      script: {
+        transcript: 'Maya: Batteries store energy.',
+        turns: [{ speaker: 'Maya', text: 'Batteries store energy.' }],
+      },
+    });
+    podcastVideoService.createVideoFromPodcast.mockResolvedValue({
+      video: { artifactId: 'artifact-video-1' },
+      artifact: { id: 'artifact-video-1' },
+      storyboard: { scenes: [{ id: 'scene-01' }] },
+    });
+
+    const app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => {
+      req.user = { username: 'phill' };
+      next();
+    });
+    app.locals.toolManager = { executeTool: jest.fn() };
+    app.use('/api/podcast', podcastRouter);
+
+    const response = await request(app)
+      .post('/api/podcast/generate')
+      .send({
+        prompt: 'Make a vertical video podcast about battery storage with generated images.',
+      });
+
+    expect(response.status).toBe(200);
+    expect(podcastService.createPodcast).toHaveBeenCalledWith(expect.objectContaining({
+      topic: 'battery storage',
+      includeVideo: true,
+      videoAspectRatio: '9:16',
+      videoImageMode: 'generated',
+      videoGenerateImages: true,
+    }), expect.any(Object));
+    expect(podcastVideoService.createVideoFromPodcast).toHaveBeenCalled();
+    expect(response.body.video).toEqual({ artifactId: 'artifact-video-1' });
   });
 
   test('plans a podcast video storyboard', async () => {

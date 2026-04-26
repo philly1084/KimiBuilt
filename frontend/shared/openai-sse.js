@@ -24,6 +24,55 @@
     return String(value || '').replace(/\u0000/g, '');
   }
 
+  function extractStreamText(value = null) {
+    if (typeof value === 'string') {
+      return stripNullCharacters(value);
+    }
+    if (Array.isArray(value)) {
+      return value.map((entry) => extractStreamText(entry)).join('');
+    }
+    return extractAssistantText(value);
+  }
+
+  function extractDisplayText(value = null) {
+    if (typeof value === 'string') {
+      return stripNullCharacters(value).replace(/\s+/g, ' ').trim();
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return String(value);
+    }
+    if (Array.isArray(value)) {
+      return value
+        .map((entry) => extractDisplayText(entry))
+        .filter(Boolean)
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+    if (!value || typeof value !== 'object') {
+      return '';
+    }
+
+    const assistantText = extractAssistantText(value);
+    if (assistantText) {
+      return assistantText.replace(/\s+/g, ' ').trim();
+    }
+
+    for (const key of ['summary', 'detail', 'message', 'text', 'content', 'title', 'label', 'reason', 'description']) {
+      const extracted = extractDisplayText(value[key]);
+      if (extracted) {
+        return extracted;
+      }
+    }
+
+    try {
+      const serialized = JSON.stringify(value);
+      return serialized && serialized !== '{}' ? serialized : '';
+    } catch (_error) {
+      return '';
+    }
+  }
+
   function normalizeModelId(modelOrId = '') {
     if (modelOrId && typeof modelOrId === 'object') {
       return String(modelOrId.id || '').trim();
@@ -615,7 +664,7 @@
     if (payload.type === 'response.output_text.delta') {
       events.push({
         type: 'text_delta',
-        content: stripNullCharacters(payload.delta ?? payload.output_text_delta ?? ''),
+        content: extractStreamText(payload.delta ?? payload.output_text_delta ?? ''),
         raw: payload,
         ...metadata,
       });
@@ -623,8 +672,8 @@
     }
 
     if (payload.type === 'response.reasoning_summary_text.delta') {
-      const reasoning = stripNullCharacters(payload.delta ?? payload.reasoning_delta ?? '');
-      const summary = stripNullCharacters(payload.summary || payload.reasoningSummary || payload.reasoning_summary || reasoning);
+      const reasoning = extractReasoningSummary(payload.delta ?? payload.reasoning_delta ?? '');
+      const summary = extractReasoningSummary(payload.summary || payload.reasoningSummary || payload.reasoning_summary || reasoning);
       events.push({
         type: 'reasoning_delta',
         content: reasoning,
@@ -664,7 +713,7 @@
       if (delta.content) {
         events.push({
           type: 'text_delta',
-          content: stripNullCharacters(delta.content),
+          content: extractStreamText(delta.content),
           raw: payload,
           ...metadata,
         });
@@ -713,7 +762,7 @@
       if (payload.output_text_delta) {
         events.push({
           type: 'text_delta',
-          content: stripNullCharacters(payload.output_text_delta),
+          content: extractStreamText(payload.output_text_delta),
           raw: payload,
           ...metadata,
         });
@@ -759,8 +808,8 @@
       events.push({
         type: 'progress',
         progress,
-        phase: stripNullCharacters(progress.phase || payload.phase || ''),
-        detail: stripNullCharacters(progress.detail || payload.detail || ''),
+        phase: extractDisplayText(progress.phase || payload.phase || ''),
+        detail: extractDisplayText(progress.detail || payload.detail || ''),
         raw: payload,
         ...metadata,
       });
@@ -770,7 +819,7 @@
     if (payload.type === 'delta') {
       events.push({
         type: 'text_delta',
-        content: stripNullCharacters(payload.content || payload.delta || ''),
+        content: extractStreamText(payload.content || payload.delta || ''),
         raw: payload,
         ...metadata,
       });

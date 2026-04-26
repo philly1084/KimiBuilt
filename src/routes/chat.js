@@ -73,6 +73,46 @@ function normalizeClientNow(value = '') {
     return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
+function normalizeDisplayText(value = '', seen = null) {
+    if (typeof value === 'string') {
+        return value.replace(/\s+/g, ' ').trim();
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+        return String(value);
+    }
+    if (Array.isArray(value)) {
+        return value
+            .map((entry) => normalizeDisplayText(entry, seen))
+            .filter(Boolean)
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+    if (!value || typeof value !== 'object') {
+        return '';
+    }
+
+    const visited = seen || new WeakSet();
+    if (visited.has(value)) {
+        return '';
+    }
+    visited.add(value);
+
+    for (const key of ['summary', 'detail', 'message', 'text', 'content', 'title', 'label', 'reason', 'description', 'name', 'value']) {
+        const extracted = normalizeDisplayText(value[key], visited);
+        if (extracted) {
+            return extracted;
+        }
+    }
+
+    try {
+        const serialized = JSON.stringify(value);
+        return serialized && serialized !== '{}' ? serialized.replace(/\s+/g, ' ').trim() : '';
+    } catch (_error) {
+        return '';
+    }
+}
+
 function getRequestOwnerId(req) {
     return String(req.user?.username || '').trim() || null;
 }
@@ -152,8 +192,8 @@ function createForegroundProgressPersister({
         lastPersistedAt = now;
 
         const progressState = progress && typeof progress === 'object' ? progress : {};
-        const phase = String(progressState.phase || 'thinking').trim() || 'thinking';
-        const detail = String(progressState.detail || '').trim();
+        const phase = normalizeDisplayText(progressState.phase || 'thinking') || 'thinking';
+        const detail = normalizeDisplayText(progressState.detail || '');
         pending = pending
             .catch(() => null)
             .then(() => sessionStore.upsertMessage(normalizedSessionId, {

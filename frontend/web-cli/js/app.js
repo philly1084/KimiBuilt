@@ -608,7 +608,7 @@ class CodeCLIApp {
         const actions = {
             chat: () => {
                 this.commandInput.value = '';
-                this.commandInput.placeholder = 'Ask the coding buddy what to build next...';
+                this.commandInput.placeholder = 'Ask Lilly for help, open /files, or list /tools...';
                 this.commandInput.focus();
                 this.roamVoxelPet('prompt', 'scout', 1000, { thought: 'buddy link' });
             },
@@ -779,7 +779,7 @@ class CodeCLIApp {
         }, 0);
 
         if (!options.silent) {
-            this.printSystem('Voxel buddy opened. Use the tool cards for sandbox/build work, or type a buddy idea and press Enter for AI fill.');
+            this.printSystem('Voxel buddy opened. Use Chat, Tools, or Files, or type a buddy idea and press Enter for AI fill.');
         }
     }
 
@@ -1517,15 +1517,15 @@ Session Statistics:
         line.className = 'line line-output ai';
         line.innerHTML = `
             <div class="voxel-response-head">
-                <span>KimiBuilt Voxel Agent</span>
+                <span>Lilly Voxel Agent</span>
                 <span class="voxel-response-meta">${this.escapeHtml(new Date().toLocaleString())}</span>
             </div>
             <div class="voxel-response-body">
                 <div class="voxel-boot">
                     <div>
-                        <div class="voxel-boot-title">Buddy Build Link Ready</div>
+                        <div class="voxel-boot-title">Lilly Chat Link Ready</div>
                         <div class="voxel-boot-copy">Mode: chat | Model: ${this.escapeHtml(api.currentModel || 'loading')}</div>
-                        <div class="voxel-boot-copy">Use <code>/build</code>, <code>/sandbox-help</code>, or <code>/help</code>.</div>
+                        <div class="voxel-boot-copy">Use <code>/tools</code>, <code>/files</code>, or <code>/help</code>.</div>
                     </div>
                     <div class="voxel-mini-pet" data-voxel-mini-pet></div>
                 </div>
@@ -1566,7 +1566,7 @@ Session Statistics:
   /pet name <name>   Rename the active pet
   /pet hide|show     Hide prompt pet or open creator
   /buddy             Open the voxel coding buddy panel
-  /toolbelt          Show sandbox/build/tool shortcuts
+  /toolbelt          Show chat/tools/files shortcuts
   /build             Show the coding-agent build workflow
   /remote <cmd>      status, tools, plan, run, or verify through remote CLI
   /sandbox <lang>    Run code, or save previewable HTML/Vite-style projects
@@ -1614,18 +1614,15 @@ Type any message to chat with the AI.
 
     printToolbeltCard() {
         const personality = this.voxelPersonality || {};
-        this.printAI(`## Voxel Coding Toolbelt
+        this.printAI(`## Lilly Coding Toolbelt
 
-Your buddy is wired for coding-agent work, not just chat decoration.
+Your buddy is focused on the three primary actions in the prompt bar.
 
-- \`/sandbox javascript console.log("hi")\` runs a small isolated code snippet through \`code-sandbox\`.
-- \`/sandbox html <html>...</html>\` saves a previewable frontend artifact.
-- \`/build\` opens the remote CLI build loop for plan -> inspect -> build/test -> verify.
-- \`/remote status\`, \`/remote tools\`, and \`/remote run <command>\` use the server-side remote runner lane.
-- \`/tools sandbox\`, \`/tools system\`, \`/tools ssh\`, and \`/tool-help <id>\` inspect the backend tool catalog.
+- Chat starts a normal Lilly conversation.
+- \`/tools [category]\` and \`/tool-help <id>\` inspect the backend tool catalog.
 - \`/files\` and \`/open\` manage generated session files.
 
-Buddy stats: bond ${Math.round(personality.bond || 0)}%, sandbox runs ${personality.sandboxRuns || 0}, builds ${personality.buildRuns || 0}, tool runs ${personality.toolRuns || 0}.`);
+Buddy stats: bond ${Math.round(personality.bond || 0)}%, guided runs ${personality.buildRuns || 0}, tool runs ${personality.toolRuns || 0}.`);
     }
 
     printBuildDeck() {
@@ -2149,11 +2146,11 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
     
     renderMarkdown(text) {
         const codeBlocks = [];
-        let source = window.KimiBuiltModelOutputParser?.normalizeModelOutputMarkdown
-            ? window.KimiBuiltModelOutputParser.normalizeModelOutputMarkdown(text)
+        let source = window.LillyModelOutputParser?.normalizeModelOutputMarkdown
+            ? window.LillyModelOutputParser.normalizeModelOutputMarkdown(text)
             : String(text || '');
-        if (window.KimiBuiltModelOutputParser?.normalizePresentationMarkupMarkdown) {
-            source = window.KimiBuiltModelOutputParser.normalizePresentationMarkupMarkdown(source);
+        if (window.LillyModelOutputParser?.normalizePresentationMarkupMarkdown) {
+            source = window.LillyModelOutputParser.normalizePresentationMarkupMarkdown(source);
         }
         source = String(source || '').replace(/\r\n?/g, '\n');
         

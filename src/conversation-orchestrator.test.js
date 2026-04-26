@@ -4651,6 +4651,46 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
+    test('turns video podcast requests into podcast workflow calls with MP4 rendering enabled', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['podcast', 'web-search'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Make a 10 minute vertical video podcast about Kentville gym options with generated images.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            toolPolicy,
+        });
+
+        expect(directAction).toEqual({
+            tool: 'podcast',
+            reason: 'Explicit video podcast request should use the podcast workflow with MP4 rendering.',
+            params: {
+                topic: 'Kentville gym options',
+                durationMinutes: 10,
+                includeVideo: true,
+                videoAspectRatio: '9:16',
+                videoImageMode: 'generated',
+                videoGenerateImages: true,
+            },
+        });
+    });
+
     test('routes managed app create-and-deploy prompts directly to the managed-app tool', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {

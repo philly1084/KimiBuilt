@@ -102,6 +102,55 @@ function stripNullCharacters(value = '') {
     return String(value || '').replace(/\u0000/g, '');
 }
 
+function extractStreamText(value = null) {
+    if (typeof value === 'string') {
+        return stripNullCharacters(value);
+    }
+    if (Array.isArray(value)) {
+        return value.map((entry) => extractStreamText(entry)).join('');
+    }
+    return extractAssistantText(value);
+}
+
+function extractDisplayText(value = null) {
+    if (typeof value === 'string') {
+        return stripNullCharacters(value).replace(/\s+/g, ' ').trim();
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+        return String(value);
+    }
+    if (Array.isArray(value)) {
+        return value
+            .map((entry) => extractDisplayText(entry))
+            .filter(Boolean)
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+    if (!value || typeof value !== 'object') {
+        return '';
+    }
+
+    const assistantText = extractAssistantText(value);
+    if (assistantText) {
+        return assistantText.replace(/\s+/g, ' ').trim();
+    }
+
+    for (const key of ['summary', 'detail', 'message', 'text', 'content', 'title', 'label', 'reason', 'description']) {
+        const extracted = extractDisplayText(value[key]);
+        if (extracted) {
+            return extracted;
+        }
+    }
+
+    try {
+        const serialized = JSON.stringify(value);
+        return serialized && serialized !== '{}' ? serialized : '';
+    } catch (_error) {
+        return '';
+    }
+}
+
 function extractAssistantText(value) {
     if (typeof value === 'string') {
         const trimmed = stripNullCharacters(value).trim();
@@ -655,8 +704,8 @@ class OpenAIAPIClient extends EventTarget {
     buildStatusEvent(phase = 'thinking', detail = '') {
         return {
             type: 'status',
-            phase,
-            detail: String(detail || '').trim(),
+            phase: extractDisplayText(phase) || 'thinking',
+            detail: extractDisplayText(detail),
         };
     }
 
@@ -667,10 +716,10 @@ class OpenAIAPIClient extends EventTarget {
 
     getTextDeltaFromStreamPayload(parsed = {}) {
         if (parsed?.type === 'response.output_text.delta') {
-            return stripNullCharacters(parsed.delta ?? parsed.output_text_delta ?? '');
+            return extractStreamText(parsed.delta ?? parsed.output_text_delta ?? '');
         }
 
-        return stripNullCharacters(parsed?.choices?.[0]?.delta?.content || parsed?.output_text_delta || '');
+        return extractStreamText(parsed?.choices?.[0]?.delta?.content || parsed?.output_text_delta || '');
     }
 
     buildToolEventDetail(item = {}, eventType = '') {
@@ -729,8 +778,8 @@ class OpenAIAPIClient extends EventTarget {
             const progress = parsed.progress && typeof parsed.progress === 'object'
                 ? parsed.progress
                 : {};
-            const phase = String(progress.phase || parsed.phase || 'thinking').trim() || 'thinking';
-            const detail = String(progress.detail || parsed.detail || '').trim();
+            const phase = extractDisplayText(progress.phase || parsed.phase || 'thinking') || 'thinking';
+            const detail = extractDisplayText(progress.detail || parsed.detail || '');
             events.push(this.buildStatusEvent(phase, detail));
             events.push({
                 type: 'progress',
@@ -755,7 +804,7 @@ class OpenAIAPIClient extends EventTarget {
             || '',
         );
         if ((isReasoningDelta && (parsed.delta || parsed.reasoning_delta)) || streamedReasoning) {
-            const summary = String(parsed.summary || parsed.reasoningSummary || parsed.reasoning_summary || '').trim()
+            const summary = extractReasoningSummary(parsed.summary || parsed.reasoningSummary || parsed.reasoning_summary || '')
                 || streamedReasoning.trim();
             pendingDone.assistantMetadata = mergeAssistantMetadata(
                 pendingDone.assistantMetadata,
@@ -1086,7 +1135,7 @@ class OpenAIAPIClient extends EventTarget {
                             }
                             break;
                         case 'reasoning_delta': {
-                            const summary = String(event.summary || event.content || '').trim();
+                            const summary = extractReasoningSummary(event.summary || event.content || '');
                             pendingDone.assistantMetadata = mergeAssistantMetadata(
                                 pendingDone.assistantMetadata,
                                 {
@@ -1098,7 +1147,7 @@ class OpenAIAPIClient extends EventTarget {
                                 yield this.buildStatusEvent('reasoning', 'Working through the answer');
                                 yield {
                                     type: 'reasoning_summary_delta',
-                                    content: String(event.content || ''),
+                                    content: extractReasoningSummary(event.content || ''),
                                     summary,
                                 };
                             }
@@ -1124,8 +1173,8 @@ class OpenAIAPIClient extends EventTarget {
                             const progress = event.progress && typeof event.progress === 'object'
                                 ? event.progress
                                 : {};
-                            const phase = String(progress.phase || event.phase || 'thinking').trim() || 'thinking';
-                            const detail = String(progress.detail || event.detail || '').trim();
+                            const phase = extractDisplayText(progress.phase || event.phase || 'thinking') || 'thinking';
+                            const detail = extractDisplayText(progress.detail || event.detail || '');
                             yield this.buildStatusEvent(phase, detail);
                             yield {
                                 type: 'progress',

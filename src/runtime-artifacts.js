@@ -10,6 +10,8 @@ const ARTIFACT_RESULT_KEYS = [
     'documents',
     'generatedArtifact',
     'generatedArtifacts',
+    'video',
+    'videoArtifact',
 ];
 
 function normalizeDownloadUrl(value = '') {

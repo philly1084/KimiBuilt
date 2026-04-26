@@ -58,6 +58,8 @@ const {
 const {
     hasExplicitPodcastIntent,
     extractExplicitPodcastTopic,
+    hasExplicitPodcastVideoIntent,
+    inferPodcastVideoOptions,
 } = require('./podcast/podcast-intent');
 const {
     USER_CHECKPOINT_TOOL_ID,
@@ -488,8 +490,16 @@ function buildConversationProgressSnapshot({
     estimated = true,
     source = '',
 } = {}) {
-    let steps = buildProgressStepsFromProjectPlan(projectPlan);
-    let resolvedSource = 'project-plan';
+    const hasPlanSteps = Array.isArray(plan) && plan.length > 0;
+    const preferPlanSteps = normalizeInlineText(source).toLowerCase() === 'tool-plan' && hasPlanSteps;
+    let steps = preferPlanSteps
+        ? buildProgressStepsFromPlan(plan, {
+            activePlanIndex,
+            completedPlanSteps,
+            failedPlanStepIndex,
+        })
+        : buildProgressStepsFromProjectPlan(projectPlan);
+    let resolvedSource = preferPlanSteps ? 'tool-plan' : 'project-plan';
 
     if (steps.length === 0) {
         steps = buildProgressStepsFromWorkflow(workflow);
@@ -1869,8 +1879,44 @@ function extractFetchSummaryText(data = {}) {
     return normalizeInlineText(cleaned || rawText);
 }
 
-function normalizeInlineText(value = '') {
-    return String(value || '').replace(/\s+/g, ' ').trim();
+function normalizeInlineText(value = '', seen = null) {
+    if (typeof value === 'string') {
+        return value.replace(/\s+/g, ' ').trim();
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+        return String(value);
+    }
+    if (Array.isArray(value)) {
+        return value
+            .map((entry) => normalizeInlineText(entry, seen))
+            .filter(Boolean)
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+    if (!value || typeof value !== 'object') {
+        return '';
+    }
+
+    const visited = seen || new WeakSet();
+    if (visited.has(value)) {
+        return '';
+    }
+    visited.add(value);
+
+    for (const key of ['summary', 'detail', 'message', 'text', 'content', 'title', 'label', 'reason', 'description', 'name', 'value']) {
+        const extracted = normalizeInlineText(value[key], visited);
+        if (extracted) {
+            return extracted;
+        }
+    }
+
+    try {
+        const serialized = JSON.stringify(value);
+        return serialized && serialized !== '{}' ? serialized.replace(/\s+/g, ' ').trim() : '';
+    } catch (_error) {
+        return '';
+    }
 }
 
 function deriveSourceLabel(url = '', fallback = '') {
@@ -8918,6 +8964,9 @@ class ConversationOrchestrator extends EventEmitter {
         const podcastDurationMinutes = podcastTopic
             ? extractRequestedPodcastDurationMinutes(objective)
             : null;
+        const podcastVideoOptions = podcastTopic && hasExplicitPodcastVideoIntent(objective)
+            ? inferPodcastVideoOptions(objective)
+            : {};
         const shouldForcePlannerForMultiWorkload = toolPolicy.candidateToolIds.includes('agent-workload')
             && hasMultiWorkloadSchedulingIntent(objective);
         const hasActiveForegroundWorkflow = toolPolicy?.workflow?.status === 'active';
@@ -9015,10 +9064,13 @@ class ConversationOrchestrator extends EventEmitter {
         if (podcastTopic) {
             return finalizeAction({
                 tool: 'podcast',
-                reason: 'Explicit podcast request should start with the podcast workflow tool.',
+                reason: podcastVideoOptions.includeVideo
+                    ? 'Explicit video podcast request should use the podcast workflow with MP4 rendering.'
+                    : 'Explicit podcast request should start with the podcast workflow tool.',
                 params: {
                     topic: podcastTopic,
                     ...(podcastDurationMinutes ? { durationMinutes: podcastDurationMinutes } : {}),
+                    ...podcastVideoOptions,
                 },
             });
         }
@@ -9282,7 +9334,7 @@ class ConversationOrchestrator extends EventEmitter {
         }
 
         if (classification.groundingRequirement === 'required') {
-            if (![USER_CHECKPOINT_TOOL_ID, 'web-search', 'web-fetch', 'web-scrape', DOCUMENT_WORKFLOW_TOOL_ID].includes(step.tool)) {
+            if (![USER_CHECKPOINT_TOOL_ID, 'web-search', 'web-fetch', 'web-scrape', DOCUMENT_WORKFLOW_TOOL_ID, 'podcast'].includes(step.tool)) {
                 return false;
             }
 
@@ -10407,6 +10459,7 @@ class ConversationOrchestrator extends EventEmitter {
 
         if (allowedToolIds.includes('podcast')) {
             parts.push('Use `podcast` when the user wants a researched podcast episode, two-host script, voice synthesis, or final stitched podcast audio.');
+            parts.push('When the user asks for a video podcast, podcast video, MP4, visuals, or scene images, call `podcast` with `includeVideo: true`, `videoImageMode: "mixed"`, and `videoGenerateImages: true` unless the user explicitly declines generated images.');
             parts.push('Do not treat podcast generation as plain chat writing. Prefer the `podcast` tool over separate `web-search` plus ad hoc scripting when the user is asking for the actual podcast deliverable.');
         }
 
@@ -10437,7 +10490,7 @@ class ConversationOrchestrator extends EventEmitter {
                 const toolId = String(event?.result?.toolId || event?.toolCall?.function?.name || '').trim();
                 return toolId === 'podcast' && event?.result?.success !== false;
             })) {
-                parts.push('If the `podcast` tool already succeeded, do not draft a brand-new podcast script in chat. Confirm completion, summarize the generated episode, and point the user to the produced audio and script artifacts.');
+                parts.push('If the `podcast` tool already succeeded, do not draft a brand-new podcast script in chat. Confirm completion, summarize the generated episode, and point the user to the produced audio, script, and video artifacts returned by the tool.');
             }
         }
 

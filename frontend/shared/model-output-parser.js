@@ -450,5 +450,6 @@
         module.exports = api;
     }
 
+    ROOT.LillyModelOutputParser = api;
     ROOT.KimiBuiltModelOutputParser = api;
 })(typeof window !== 'undefined' ? window : globalThis);

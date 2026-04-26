@@ -98,6 +98,11 @@ function createToolManager() {
                     audience: { type: 'string' },
                     tone: { type: 'string' },
                     scriptTimeoutMs: { type: 'integer' },
+                    includeVideo: { type: 'boolean' },
+                    videoAspectRatio: { type: 'string' },
+                    videoImageMode: { type: 'string' },
+                    videoGenerateImages: { type: 'boolean' },
+                    videoSceneCount: { type: 'integer' },
                 },
             },
         }],
@@ -538,6 +543,16 @@ function createToolManager() {
                         script: {
                             artifactId: 'artifact-script-1',
                         },
+                        ...(params.includeVideo ? {
+                            video: {
+                                artifactId: 'artifact-video-1',
+                                filename: 'podcast-video.mp4',
+                                downloadUrl: '/api/artifacts/artifact-video-1/download',
+                            },
+                            storyboard: {
+                                scenes: [{ id: 'scene-01' }, { id: 'scene-02' }],
+                            },
+                        } : {}),
                     },
                 };
             }
@@ -1109,6 +1124,13 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(__testUtils.extractExplicitPodcastTopic('Make a podcast about battery storage.')).toBe('battery storage');
         expect(__testUtils.hasExplicitPodcastIntent('Use the podcast workflow to create podcasts about battery storage.')).toBe(true);
         expect(__testUtils.extractExplicitPodcastTopic('Use the podcast workflow to create podcasts about battery storage.')).toBe('battery storage');
+        expect(__testUtils.hasExplicitPodcastVideoIntent('Make a video podcast about battery storage.')).toBe(true);
+        expect(__testUtils.inferPodcastVideoOptions('Make a vertical video podcast about battery storage with generated images.')).toEqual({
+            includeVideo: true,
+            videoAspectRatio: '9:16',
+            videoImageMode: 'generated',
+            videoGenerateImages: true,
+        });
     });
 
     test('builds deterministic podcast preflight actions for explicit podcast prompts', () => {
@@ -1124,6 +1146,28 @@ describe('openai-client automatic tool orchestration helpers', () => {
                 toolId: 'podcast',
                 params: {
                     topic: 'battery storage',
+                },
+            },
+        ]);
+    });
+
+    test('builds deterministic video podcast preflight actions with MP4 rendering enabled', () => {
+        const actions = __testUtils.buildDeterministicPreflightActions(
+            [
+                { id: 'podcast' },
+            ],
+            'Make a vertical video podcast about battery storage with generated images.',
+        );
+
+        expect(actions).toEqual([
+            {
+                toolId: 'podcast',
+                params: {
+                    topic: 'battery storage',
+                    includeVideo: true,
+                    videoAspectRatio: '9:16',
+                    videoImageMode: 'generated',
+                    videoGenerateImages: true,
                 },
             },
         ]);
@@ -2186,6 +2230,42 @@ describe('openai-client automatic tool orchestration helpers', () => {
             'podcast',
             expect.objectContaining({
                 topic: 'battery storage',
+            }),
+            expect.any(Object),
+        );
+    });
+
+    test('runs video podcast requests directly with video rendering parameters', async () => {
+        const toolManager = createToolManager();
+        const prompt = 'Make a vertical video podcast about battery storage with generated images.';
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            prompt,
+        );
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            prompt,
+        );
+
+        const response = await __testUtils.runDirectRequiredToolAction({
+            toolManager,
+            requiredToolId: 'podcast',
+            selectedTools,
+            prompt,
+            toolContext: {},
+            model: 'gpt-4o',
+        });
+
+        expect(response.output[0].content[0].text).toContain('Video artifact: artifact-video-1');
+        expect(response.output[0].content[0].text).toContain('Storyboard scenes: 2');
+        expect(toolManager.executeTool).toHaveBeenCalledWith(
+            'podcast',
+            expect.objectContaining({
+                topic: 'battery storage',
+                includeVideo: true,
+                videoAspectRatio: '9:16',
+                videoImageMode: 'generated',
+                videoGenerateImages: true,
             }),
             expect.any(Object),
         );

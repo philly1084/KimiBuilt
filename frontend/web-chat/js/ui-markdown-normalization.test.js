@@ -85,4 +85,38 @@ Variations | Variation | What changes | |-----------|--------------| | Spicy | A
         expect(html).toContain('kb-callout__title">Check this</div>');
         expect(html).toContain('Review the deployment target.');
     });
+
+    test('renders progress as one live reasoning block with completed task styling', () => {
+        const helper = Object.create(loadUIHelpersPrototype());
+        const html = helper.buildAssistantRenderPlan({
+            role: 'assistant',
+            content: '',
+            isStreaming: true,
+            reasoningDisplaySource: 'generated',
+            reasoningDisplayText: { text: 'Checking the next useful step.' },
+            reasoningDisplayFullText: { text: 'Checking the next useful step.' },
+            reasoningDisplayTitle: 'Live reasoning',
+            reasoningDisplayIcon: 'sparkles',
+            progressState: {
+                phase: { label: 'executing' },
+                detail: { message: 'Running the task list.' },
+                completedSteps: 1,
+                activeStepIndex: 1,
+                steps: [
+                    { title: { text: 'Inspect the stream payload' } },
+                    { title: { text: 'Render the task list' } },
+                    { title: { text: 'Verify the update path' } },
+                ],
+            },
+        }, true).html;
+
+        expect(html).toContain('Live reasoning');
+        expect(html).toContain('Checking the next useful step.');
+        expect(html).toContain('assistant-progress-card__step--completed');
+        expect(html).toContain('assistant-progress-card__step--in_progress');
+        expect(html).toContain('Inspect the stream payload');
+        expect(html).not.toContain('[object Object]');
+        expect(html).not.toContain('assistant-reasoning-ribbon');
+        expect(html).not.toContain('Snapshot');
+    });
 });

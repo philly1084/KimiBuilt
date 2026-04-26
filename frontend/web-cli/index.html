@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>KimiBuilt Voxel Agent CLI</title>
+    <title>Lilly Voxel Agent CLI</title>
     <script src="https://cdn.tailwindcss.com"></script>
     
     <!-- Syntax Highlighting -->
@@ -874,7 +874,7 @@
         <!-- Header -->
         <header class="header">
             <div class="header-left">
-                <span class="header-title">KimiBuilt Voxel Agent</span>
+                <span class="header-title">Lilly Voxel Agent</span>
                 <div class="status-indicator">
                     <span id="statusDot" class="status-dot connecting"></span>
                     <span id="statusText">Connecting...</span>
@@ -919,7 +919,7 @@
                             type="text" 
                             id="commandInput" 
                             name="cli-command"
-                            placeholder="Ask the coding buddy, run /sandbox, or type /help..."
+                            placeholder="Ask Lilly, open /files, list /tools, or type /help..."
                             autocomplete="new-password"
                             autocorrect="off"
                             autocapitalize="off"
@@ -931,14 +931,6 @@
                         <button type="button" class="voxel-tool-chip active" data-tool="chat" onclick="app.useVoxelQuickTool('chat')" title="Chat with the coding buddy">
                             <span class="voxel-tool-icon" aria-hidden="true"></span>
                             <span>Chat</span>
-                        </button>
-                        <button type="button" class="voxel-tool-chip" data-tool="sandbox" onclick="app.useVoxelQuickTool('sandbox')" title="Prefill a code sandbox command">
-                            <span class="voxel-tool-icon" aria-hidden="true"></span>
-                            <span>Sandbox</span>
-                        </button>
-                        <button type="button" class="voxel-tool-chip" data-tool="build" onclick="app.useVoxelQuickTool('build')" title="Open build workflow prompts">
-                            <span class="voxel-tool-icon" aria-hidden="true"></span>
-                            <span>Build</span>
                         </button>
                         <button type="button" class="voxel-tool-chip" data-tool="tools" onclick="app.useVoxelQuickTool('tools')" title="List agent tools">
                             <span class="voxel-tool-icon" aria-hidden="true"></span>
@@ -1007,7 +999,7 @@
                                 <strong id="voxelFocusStat">0%</strong>
                             </div>
                             <div class="voxel-agent-stat">
-                                <span>Builds</span>
+                                <span>Runs</span>
                                 <strong id="voxelBuildStat">0</strong>
                             </div>
                             <div class="voxel-agent-stat">
@@ -1016,17 +1008,17 @@
                             </div>
                         </div>
                         <div class="voxel-agent-toolbox">
-                            <button class="voxel-tool-card" onclick="app.useVoxelQuickTool('sandbox')">
-                                <strong>Sandbox</strong>
-                                <span>Run small code safely with /sandbox</span>
-                            </button>
-                            <button class="voxel-tool-card" onclick="app.useVoxelQuickTool('build')">
-                                <strong>Build</strong>
-                                <span>Plan, implement, test, and ship</span>
+                            <button class="voxel-tool-card" onclick="app.useVoxelQuickTool('chat')">
+                                <strong>Chat</strong>
+                                <span>Ask Lilly directly</span>
                             </button>
                             <button class="voxel-tool-card" onclick="app.useVoxelQuickTool('tools')">
                                 <strong>Tools</strong>
-                                <span>Inspect sandbox, git, web, deploy tools</span>
+                                <span>Inspect available agent tools</span>
+                            </button>
+                            <button class="voxel-tool-card" onclick="app.useVoxelQuickTool('files')">
+                                <strong>Files</strong>
+                                <span>Open generated session files</span>
                             </button>
                         </div>
                         <div class="voxel-creator-label">AI voxel buddy request</div>

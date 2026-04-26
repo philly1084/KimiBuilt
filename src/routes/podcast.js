@@ -6,6 +6,12 @@ const { ensureRuntimeToolManager } = require('../runtime-tool-manager');
 const { ttsService } = require('../tts/tts-service');
 const { audioProcessingService } = require('../audio/audio-processing-service');
 const { podcastService } = require('../podcast/podcast-service');
+const {
+  hasExplicitPodcastIntent,
+  hasExplicitPodcastVideoIntent,
+  extractExplicitPodcastTopic,
+  inferPodcastVideoOptions,
+} = require('../podcast/podcast-intent');
 const { podcastVideoService } = require('../video/podcast-video-service');
 const { parseMultipartRequest } = require('../utils/multipart');
 const { config } = require('../config');
@@ -64,6 +70,9 @@ const generateSchema = {
   videoGenerateImages: { required: false, type: 'boolean' },
   videoSceneCount: { required: false, type: 'number' },
   videoVisualStyle: { required: false, type: 'string' },
+  videoImageModel: { required: false, type: 'string' },
+  videoModel: { required: false, type: 'string' },
+  videoReasoningEffort: { required: false, type: 'string' },
 };
 
 function parseJsonField(value, fallback = null) {
@@ -133,9 +142,25 @@ function normalizePodcastGenerateRequest(req, _res, next) {
   }
 
   if (typeof req.body.topic !== 'string' || !req.body.topic.trim()) {
-    const fallbackTopic = String(req.body.prompt || req.body.subject || '').trim();
+    const fallbackText = String(req.body.prompt || req.body.subject || '').trim();
+    const fallbackTopic = hasExplicitPodcastIntent(fallbackText)
+      ? extractExplicitPodcastTopic(fallbackText)
+      : fallbackText;
     if (fallbackTopic) {
       req.body.topic = fallbackTopic;
+    }
+  }
+
+  const requestText = [req.body.prompt, req.body.topic, req.body.subject]
+    .map((entry) => String(entry || '').trim())
+    .filter(Boolean)
+    .join(' ');
+  if (hasExplicitPodcastVideoIntent(requestText)) {
+    const inferredVideoOptions = inferPodcastVideoOptions(requestText);
+    for (const [key, value] of Object.entries(inferredVideoOptions)) {
+      if (req.body[key] == null) {
+        req.body[key] = value;
+      }
     }
   }
 

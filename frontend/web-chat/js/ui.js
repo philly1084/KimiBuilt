@@ -1328,6 +1328,111 @@ class UIHelpers {
         return String(text == null ? '' : text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
 
+    extractDisplayText(value = null, options = {}, seen = null) {
+        const separator = options.separator == null ? ' ' : String(options.separator);
+        const maxLength = Number.isFinite(Number(options.maxLength)) && Number(options.maxLength) > 0
+            ? Number(options.maxLength)
+            : 0;
+        const visited = seen || new WeakSet();
+        let normalized = '';
+
+        if (typeof value === 'string') {
+            normalized = value.replace(/\s+/g, ' ').trim();
+        } else if (typeof value === 'number' || typeof value === 'boolean') {
+            normalized = String(value);
+        } else if (Array.isArray(value)) {
+            normalized = value
+                .map((entry) => this.extractDisplayText(entry, { ...options, maxLength: 0 }, visited))
+                .filter(Boolean)
+                .join(separator)
+                .replace(/\s+/g, ' ')
+                .trim();
+        } else if (value && typeof value === 'object') {
+            if (visited.has(value)) {
+                return '';
+            }
+            visited.add(value);
+
+            const directKeys = [
+                'label',
+                'title',
+                'name',
+                'summary',
+                'summaryText',
+                'summary_text',
+                'detail',
+                'details',
+                'description',
+                'message',
+                'text',
+                'content',
+                'value',
+                'reason',
+                'status',
+                'output_text',
+                'outputText',
+                'result',
+                'response',
+            ];
+            for (const key of directKeys) {
+                if (!Object.prototype.hasOwnProperty.call(value, key)) {
+                    continue;
+                }
+                const extracted = this.extractDisplayText(value[key], { ...options, maxLength: 0 }, visited);
+                if (extracted) {
+                    normalized = extracted;
+                    break;
+                }
+            }
+
+            if (!normalized) {
+                const nestedKeys = ['data', 'payload', 'item'];
+                for (const key of nestedKeys) {
+                    const extracted = this.extractDisplayText(value[key], { ...options, maxLength: 0 }, visited);
+                    if (extracted) {
+                        normalized = extracted;
+                        break;
+                    }
+                }
+            }
+
+            if (!normalized) {
+                try {
+                    const serialized = JSON.stringify(value);
+                    normalized = serialized && serialized !== '{}' ? serialized : '';
+                } catch (_error) {
+                    normalized = '';
+                }
+            }
+        }
+
+        if (!normalized) {
+            return '';
+        }
+
+        const collapsed = normalized.replace(/\s+/g, ' ').trim();
+        if (!maxLength || collapsed.length <= maxLength) {
+            return collapsed;
+        }
+
+        return `${collapsed.slice(0, Math.max(1, maxLength - 1)).trimEnd()}...`;
+    }
+
+    extractMessageContentText(value = null) {
+        if (typeof value === 'string') {
+            return value.trim();
+        }
+        if (Array.isArray(value)) {
+            return value
+                .map((entry) => this.extractMessageContentText(entry))
+                .filter(Boolean)
+                .join('\n')
+                .trim();
+        }
+
+        return this.extractDisplayText(value);
+    }
+
     truncatePreviewText(text, maxLength = 180) {
         const normalized = String(text || '').replace(/\s+/g, ' ').trim();
         if (!normalized) {
@@ -2837,7 +2942,9 @@ class UIHelpers {
         const leafCandidates = [
             value.text,
             value.output_text,
+            value.outputText,
             value.summary_text,
+            value.summaryText,
             value.value,
         ];
         for (const candidate of leafCandidates) {
@@ -2873,6 +2980,8 @@ class UIHelpers {
             value.summary,
             value.summaryText,
             value.summary_text,
+            value.message,
+            value.content,
         ];
         for (const candidate of directCandidates) {
             const normalized = this.extractReasoningText(candidate);
@@ -2881,7 +2990,7 @@ class UIHelpers {
             }
         }
 
-        return '';
+        return this.extractDisplayText(value);
     }
 
     getMessageReasoningSummary(message = null) {
@@ -2903,10 +3012,10 @@ class UIHelpers {
     getMessageReasoningDisplayState(message = null, isStreaming = false) {
         const summary = this.getMessageReasoningSummary(message);
         const displaySource = String(message?.reasoningDisplaySource || '').trim();
-        const displayText = String(message?.reasoningDisplayText || '').trim();
-        const displayFullText = String(message?.reasoningDisplayFullText || '').trim();
-        const displayTitle = String(message?.reasoningDisplayTitle || '').trim();
-        const displayIcon = String(message?.reasoningDisplayIcon || '').trim();
+        const displayText = this.extractReasoningText(message?.reasoningDisplayText);
+        const displayFullText = this.extractReasoningText(message?.reasoningDisplayFullText);
+        const displayTitle = this.extractDisplayText(message?.reasoningDisplayTitle);
+        const displayIcon = this.extractDisplayText(message?.reasoningDisplayIcon);
         const displayAnimated = message?.reasoningDisplayAnimated === true;
         const hasManagedAppProgress = Boolean(
             message?.managedAppProgressState
@@ -2916,7 +3025,7 @@ class UIHelpers {
             ['Build progress', 'Build status'].includes(displayTitle)
             || ['activity', 'badge-check', 'triangle-alert'].includes(displayIcon)
         );
-        const visibleAssistantContent = String(message?.displayContent ?? message?.content ?? '').trim();
+        const visibleAssistantContent = this.extractMessageContentText(message?.displayContent ?? message?.content ?? '');
         const hasSurveyDisplay = Boolean(this.extractSurveyDefinitionFromContent(visibleAssistantContent, message?.id || ''));
 
         if (isLegacyManagedAppDisplay) {
@@ -2932,7 +3041,7 @@ class UIHelpers {
             const isGenerated = displaySource === 'generated';
             return {
                 source: isGenerated ? 'generated' : 'reasoning',
-                title: displayTitle || (isGenerated ? 'Generated reasoning' : 'Reasoning'),
+                title: displayTitle || (isGenerated ? 'Live reasoning' : 'Reasoning'),
                 icon: displayIcon || (isGenerated ? 'sparkles' : 'brain'),
                 previewText: isGenerated
                     ? displayText
@@ -2990,15 +3099,23 @@ class UIHelpers {
             return null;
         }
 
-        const steps = (Array.isArray(rawProgress.steps) ? rawProgress.steps : [])
+        let steps = (Array.isArray(rawProgress.steps) ? rawProgress.steps : [])
             .map((step, index) => {
-                const title = String(step?.title || '').trim();
+                const title = this.extractDisplayText(
+                    step?.title
+                    || step?.label
+                    || step?.summary
+                    || step?.reason
+                    || step?.text
+                    || step,
+                    { maxLength: 120 },
+                );
                 if (!title) {
                     return null;
                 }
 
                 return {
-                    id: String(step?.id || `progress-step-${index + 1}`).trim() || `progress-step-${index + 1}`,
+                    id: this.extractDisplayText(step?.id, { maxLength: 80 }) || `progress-step-${index + 1}`,
                     title,
                     status: this.normalizeAssistantProgressStepStatus(step?.status),
                 };
@@ -3009,19 +3126,47 @@ class UIHelpers {
         }
 
         const totalSteps = Number.isFinite(Number(rawProgress.totalSteps)) && Number(rawProgress.totalSteps) > 0
-            ? Number(rawProgress.totalSteps)
+            ? Math.max(steps.length, Number(rawProgress.totalSteps))
             : steps.length;
-        const completedSteps = Number.isFinite(Number(rawProgress.completedSteps)) && Number(rawProgress.completedSteps) >= 0
-            ? Math.min(totalSteps, Number(rawProgress.completedSteps))
-            : steps.filter((step) => ['completed', 'skipped'].includes(step.status)).length;
+        const completedHint = Number.isFinite(Number(rawProgress.completedSteps)) && Number(rawProgress.completedSteps) >= 0
+            ? Math.min(steps.length, Number(rawProgress.completedSteps))
+            : -1;
+        const activeStepId = this.extractDisplayText(rawProgress.activeStepId, { maxLength: 80 });
+        const activeStepIndexValue = Math.round(Number(rawProgress.activeStepIndex));
+        const activeIndexHint = Number.isFinite(Number(rawProgress.activeStepIndex)) && Number(rawProgress.activeStepIndex) >= 0
+            ? Math.min(steps.length - 1, activeStepIndexValue)
+            : steps.findIndex((step) => activeStepId && step.id === activeStepId);
+        steps = steps.map((step, index) => {
+            if (completedHint >= 0 && index < completedHint && !['failed', 'skipped'].includes(step.status)) {
+                return { ...step, status: 'completed' };
+            }
+
+            if (activeIndexHint === index && step.status === 'pending') {
+                return { ...step, status: 'in_progress' };
+            }
+
+            return step;
+        });
+        let completedSteps = steps.filter((step) => ['completed', 'skipped'].includes(step.status)).length;
+        if (completedHint > completedSteps) {
+            completedSteps = completedHint;
+        }
         let activeStepIndex = steps.findIndex((step) => step.status === 'in_progress');
         if (activeStepIndex < 0 && completedSteps < totalSteps) {
-            activeStepIndex = steps.findIndex((step) => step.status === 'pending');
+            activeStepIndex = steps.findIndex((step, index) => step.status === 'pending' && index >= completedSteps);
+            if (activeStepIndex < 0) {
+                activeStepIndex = steps.findIndex((step) => step.status === 'pending');
+            }
         }
-        const detail = String(rawProgress.detail || '').trim();
-        const phase = String(rawProgress.phase || '').trim().toLowerCase() || 'thinking';
+        if (activeStepIndex >= 0 && steps[activeStepIndex]?.status === 'pending') {
+            steps = steps.map((step, index) => index === activeStepIndex
+                ? { ...step, status: 'in_progress' }
+                : step);
+        }
+        const detail = this.extractDisplayText(rawProgress.detail, { maxLength: 240 });
+        const phase = this.extractDisplayText(rawProgress.phase, { maxLength: 80 }).toLowerCase() || 'thinking';
         const estimated = rawProgress.estimated !== false;
-        const summary = String(rawProgress.summary || '').trim()
+        const summary = this.extractDisplayText(rawProgress.summary, { maxLength: 160 })
             || `${completedSteps}/${totalSteps} steps complete`;
         const progressUnits = Math.min(totalSteps, completedSteps + (activeStepIndex >= 0 && completedSteps < totalSteps ? 0.45 : 0));
         const percent = totalSteps > 0
@@ -3051,13 +3196,21 @@ class UIHelpers {
 
         const steps = (Array.isArray(rawProgress.steps) ? rawProgress.steps : [])
             .map((step, index) => {
-                const title = String(step?.title || '').trim();
+                const title = this.extractDisplayText(
+                    step?.title
+                    || step?.label
+                    || step?.summary
+                    || step?.reason
+                    || step?.text
+                    || step,
+                    { maxLength: 120 },
+                );
                 if (!title) {
                     return null;
                 }
 
                 return {
-                    id: String(step?.id || `managed-app-step-${index + 1}`).trim() || `managed-app-step-${index + 1}`,
+                    id: this.extractDisplayText(step?.id, { maxLength: 80 }) || `managed-app-step-${index + 1}`,
                     title,
                     status: this.normalizeAssistantProgressStepStatus(step?.status),
                 };
@@ -3077,18 +3230,18 @@ class UIHelpers {
             activeStepIndex = steps.findIndex((step) => step.status === 'pending');
         }
 
-        const phase = String(rawProgress.phase || '').trim().toLowerCase() || 'updated';
-        const phaseLabel = String(rawProgress.phaseLabel || '').trim();
-        const summary = String(rawProgress.summary || '').trim() || 'Managed app status updated.';
-        const detail = String(rawProgress.detail || '').trim();
-        const nextStep = String(rawProgress.nextStep || '').trim();
-        const expectedHost = String(rawProgress.expectedHost || '').trim();
-        const ingressStatus = String(rawProgress.ingressStatus || '').trim();
-        const tlsStatus = String(rawProgress.tlsStatus || '').trim();
-        const httpsStatus = String(rawProgress.httpsStatus || '').trim();
-        const appProbeStatus = String(rawProgress.appProbeStatus || '').trim();
+        const phase = this.extractDisplayText(rawProgress.phase, { maxLength: 80 }).toLowerCase() || 'updated';
+        const phaseLabel = this.extractDisplayText(rawProgress.phaseLabel, { maxLength: 120 });
+        const summary = this.extractDisplayText(rawProgress.summary, { maxLength: 180 }) || 'Managed app status updated.';
+        const detail = this.extractDisplayText(rawProgress.detail, { maxLength: 240 });
+        const nextStep = this.extractDisplayText(rawProgress.nextStep, { maxLength: 180 });
+        const expectedHost = this.extractDisplayText(rawProgress.expectedHost, { maxLength: 120 });
+        const ingressStatus = this.extractDisplayText(rawProgress.ingressStatus, { maxLength: 120 });
+        const tlsStatus = this.extractDisplayText(rawProgress.tlsStatus, { maxLength: 120 });
+        const httpsStatus = this.extractDisplayText(rawProgress.httpsStatus, { maxLength: 120 });
+        const appProbeStatus = this.extractDisplayText(rawProgress.appProbeStatus, { maxLength: 120 });
         const openItems = (Array.isArray(rawProgress.openItems) ? rawProgress.openItems : [])
-            .map((item) => String(item || '').trim())
+            .map((item) => this.extractDisplayText(item, { maxLength: 160 }))
             .filter(Boolean)
             .slice(0, 3);
         const terminal = rawProgress.terminal === true;
@@ -3136,12 +3289,19 @@ class UIHelpers {
             return '';
         }
 
-        const liveBadge = isStreaming
-            ? '<span class="assistant-progress-card__badge assistant-progress-card__badge--live"><span class="assistant-progress-card__pulse" aria-hidden="true"></span>Live</span>'
-            : '<span class="assistant-progress-card__badge">Snapshot</span>';
-        const noteText = progressState.estimated
-            ? 'Estimated steps may adjust as the task changes.'
-            : 'Progress reflects the active execution plan.';
+        const reasoningState = this.getMessageReasoningDisplayState(message, isStreaming);
+        const phaseMeta = this.getLivePhaseMeta(progressState.phase || message?.liveState?.phase || 'thinking');
+        const reasoningText = this.extractDisplayText(
+            reasoningState?.bodyText
+            || reasoningState?.previewText
+            || progressState.detail
+            || message?.liveState?.detail
+            || phaseMeta.detail
+            || 'Working through the next step.',
+            { maxLength: isStreaming ? 260 : 180 },
+        );
+        const reasoningIcon = reasoningState?.icon || phaseMeta.icon || 'brain';
+        const reasoningAnimated = reasoningState?.animated === true && isStreaming;
         const stepsHtml = progressState.steps.map((step, index) => {
             const isActive = index === progressState.activeStepIndex;
             const stateLabel = ({
@@ -3156,27 +3316,24 @@ class UIHelpers {
                 <li class="assistant-progress-card__step assistant-progress-card__step--${step.status}${isActive ? ' is-active' : ''}">
                     <span class="assistant-progress-card__step-dot" aria-hidden="true"></span>
                     <span class="assistant-progress-card__step-title">${this.escapeHtml(step.title)}</span>
-                    <span class="assistant-progress-card__step-state">${this.escapeHtml(stateLabel)}</span>
+                    <span class="assistant-progress-card__step-state sr-only">${this.escapeHtml(stateLabel)}</span>
                 </li>
             `;
         }).join('');
 
         return `
-            <div class="assistant-progress-card${isStreaming ? ' is-live' : ''}">
+            <div class="assistant-progress-card assistant-progress-card--reasoning${isStreaming ? ' is-live' : ''}">
                 <div class="assistant-progress-card__surface" aria-live="polite">
-                    <div class="assistant-progress-card__header">
-                        <div class="assistant-progress-card__copy">
-                            <span class="assistant-progress-card__eyebrow">${progressState.estimated ? 'Estimated Steps' : 'Progress'}</span>
-                            <span class="assistant-progress-card__summary">${this.escapeHtml(progressState.summary)}</span>
-                        </div>
-                        ${liveBadge}
-                    </div>
-                    ${progressState.detail ? `<div class="assistant-progress-card__detail">${this.escapeHtml(progressState.detail)}</div>` : ''}
-                    <div class="assistant-progress-card__bar" aria-hidden="true">
-                        <span style="width:${progressState.percent}%"></span>
+                    <div class="assistant-progress-card__reasoning">
+                        <span class="assistant-progress-card__reasoning-icon" aria-hidden="true">
+                            <i data-lucide="${this.escapeHtmlAttr(reasoningIcon)}" class="w-3.5 h-3.5"></i>
+                        </span>
+                        <span class="assistant-progress-card__copy">
+                            <span class="assistant-progress-card__eyebrow">Live reasoning</span>
+                            <span class="assistant-progress-card__summary">${this.escapeHtml(reasoningText)}${reasoningAnimated ? '<span class="streaming-cursor" aria-hidden="true"></span>' : ''}</span>
+                        </span>
                     </div>
                     <ol class="assistant-progress-card__steps">${stepsHtml}</ol>
-                    <div class="assistant-progress-card__note">${this.escapeHtml(noteText)}</div>
                 </div>
             </div>
         `;
@@ -3328,7 +3485,7 @@ class UIHelpers {
     }
 
     buildReasoningSummaryPreview(summary = '', maxLength = 140) {
-        const normalized = String(summary || '').replace(/\s+/g, ' ').trim();
+        const normalized = this.extractDisplayText(summary).replace(/\s+/g, ' ').trim();
         if (!normalized) {
             return 'Reasoning data is available for this reply.';
         }
@@ -3381,7 +3538,7 @@ class UIHelpers {
 
     buildStreamingPlaceholderMarkup(message = null) {
         const meta = this.getLivePhaseMeta(message?.liveState?.phase || 'thinking');
-        const detail = String(message?.liveState?.detail || meta.detail || '').trim();
+        const detail = this.extractDisplayText(message?.liveState?.detail || meta.detail || '', { maxLength: 180 });
 
         return `
             <div class="assistant-stream-placeholder" aria-live="polite">
@@ -3411,7 +3568,9 @@ class UIHelpers {
         const content = this.resolveAssistantVisibleContent(message);
         const managedAppProgress = this.buildManagedAppProgressMarkup(message, effectiveStreaming);
         const progressTracker = this.buildProgressTrackerMarkup(message, effectiveStreaming);
-        const reasoningRibbon = this.buildReasoningRibbonMarkup(message, effectiveStreaming);
+        const reasoningRibbon = progressTracker
+            ? ''
+            : this.buildReasoningRibbonMarkup(message, effectiveStreaming);
         const isManagedAppProjectSummary = message?.metadata?.managedAppProjectSummary === true
             || message?.managedAppProjectSummary === true;
         const shouldShowStreamingPlaceholder = effectiveStreaming
@@ -5943,8 +6102,8 @@ class UIHelpers {
             return false;
         }
 
-        const displayContent = String(message.displayContent ?? '').trim();
-        const content = String(message.content ?? '').trim();
+        const displayContent = this.extractMessageContentText(message.displayContent);
+        const content = this.extractMessageContentText(message.content);
         if (!displayContent || !content || displayContent === content) {
             return false;
         }
@@ -5970,19 +6129,19 @@ class UIHelpers {
 
     resolveAssistantVisibleContent(message = null) {
         if (!message || message.role !== 'assistant') {
-            return String(message?.displayContent ?? message?.content ?? '').trim();
+            return this.extractMessageContentText(message?.displayContent ?? message?.content ?? '');
         }
 
         if (this.shouldPreferAssistantContentOverDisplayContent(message)) {
-            return String(message.content || '').trim();
+            return this.extractMessageContentText(message.content);
         }
 
-        const displayContent = String(message.displayContent ?? '').trim();
+        const displayContent = this.extractMessageContentText(message.displayContent);
         if (displayContent) {
             return displayContent;
         }
 
-        return String(message.content || '').trim();
+        return this.extractMessageContentText(message.content);
     }
 
     buildSpeakableMessageText(message = null) {

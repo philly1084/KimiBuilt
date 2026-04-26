@@ -232,6 +232,20 @@ const AMBIENT_REASONING_ENDINGS = [
     'so the real signal can get above the static',
     'until the durable answer clears its throat',
 ];
+const AMBIENT_REASONING_LINES = [
+    'Reading the conversation context and looking for the next useful step.',
+    'Checking the request against the available tools and recent messages.',
+    'Separating known facts from assumptions before drafting the answer.',
+    'Updating the working plan as new progress arrives.',
+    'Reviewing the active task list and keeping the next action in focus.',
+    'Waiting for real reasoning data; showing a local progress summary for now.',
+    'Scanning the current response path for missing details.',
+    'Condensing the live work into the clearest visible update.',
+    'Tracking completed steps while the final response comes together.',
+    'Preparing the answer structure before writing it into the thread.',
+    'Checking whether tool results changed the plan.',
+    'Keeping the visible progress aligned with the latest stream event.',
+];
 
 function shuffleArray(items = []) {
     const nextItems = Array.isArray(items) ? [...items] : [];
@@ -243,13 +257,61 @@ function shuffleArray(items = []) {
 }
 
 function buildAmbientReasoningLines() {
-    const lines = [];
-    AMBIENT_REASONING_STARTS.forEach((start) => {
-        AMBIENT_REASONING_ENDINGS.forEach((ending) => {
-            lines.push(`${start} ${ending}.`);
-        });
-    });
-    return shuffleArray(lines);
+    return shuffleArray(AMBIENT_REASONING_LINES);
+}
+
+function extractChatDisplayText(value = null, options = {}) {
+    if (typeof uiHelpers !== 'undefined' && typeof uiHelpers?.extractDisplayText === 'function') {
+        return uiHelpers.extractDisplayText(value, options);
+    }
+
+    if (typeof value === 'string') {
+        return value.replace(/\s+/g, ' ').trim();
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+        return String(value);
+    }
+    if (Array.isArray(value)) {
+        return value
+            .map((entry) => extractChatDisplayText(entry, options))
+            .filter(Boolean)
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+    if (value && typeof value === 'object') {
+        for (const key of ['summary', 'detail', 'message', 'text', 'content', 'title', 'label', 'reason']) {
+            const extracted = extractChatDisplayText(value[key], options);
+            if (extracted) {
+                return extracted;
+            }
+        }
+        try {
+            return JSON.stringify(value);
+        } catch (_error) {
+            return '';
+        }
+    }
+
+    return '';
+}
+
+function extractChatReasoningText(value = null) {
+    if (typeof uiHelpers !== 'undefined' && typeof uiHelpers?.extractReasoningText === 'function') {
+        return uiHelpers.extractReasoningText(value);
+    }
+
+    return extractChatDisplayText(value);
+}
+
+function extractChatStreamText(value = null) {
+    if (typeof value === 'string') {
+        return value;
+    }
+    if (Array.isArray(value)) {
+        return value.map((entry) => extractChatStreamText(entry)).join('');
+    }
+    return extractChatDisplayText(value);
 }
 
 class ChatApp {
@@ -2885,13 +2947,14 @@ class ChatApp {
                 prefix = '[fail]';
             }
 
-            return `${prefix} ${String(step?.summary || '').trim()}`;
+            const summary = extractChatDisplayText(step?.summary);
+            return summary ? `${prefix} ${summary}` : '';
         }).filter(Boolean).join('\n');
     }
 
     buildManagedAppProgressState(event = {}) {
         const phase = this.normalizeManagedAppPhase(event?.phase);
-        const summary = String(event?.summary || '').trim() || 'Managed app status updated.';
+        const summary = extractChatDisplayText(event?.summary, { maxLength: 180 }) || 'Managed app status updated.';
         const detail = this.buildManagedAppProgressDetail(event);
         const terminal = this.isManagedAppTerminalPhase(phase);
         const steps = [
@@ -2985,7 +3048,7 @@ class ChatApp {
         const meta = this.getManagedAppMessageMeta(message);
         return this.buildManagedAppProgressState({
             phase: meta.phase,
-            summary: String(message?.content || '').trim(),
+            summary: extractChatDisplayText(message?.content),
             app: {
                 id: meta.appId,
                 slug: meta.appSlug,
@@ -3180,7 +3243,7 @@ class ChatApp {
             return null;
         }
 
-        const summary = String(event?.summary || '').trim();
+        const summary = extractChatDisplayText(event?.summary, { maxLength: 180 });
         if (!summary) {
             return null;
         }
@@ -3226,7 +3289,7 @@ class ChatApp {
             ...this.clearLegacyManagedAppReasoningDisplay(existingMessage),
             id: messageId,
             role: 'assistant',
-            content: hostMessageId ? String(existingMessage.content || '') : '',
+            content: hostMessageId ? extractChatStreamText(existingMessage.content || '') : '',
             displayContent: hostMessageId ? existingMessage.displayContent : '',
             isStreaming: nextState.terminal !== true,
             managedAppProgressState: nextState.progressState,
@@ -3301,7 +3364,7 @@ class ChatApp {
             renderedMessage = this.applyManagedAppProgressEvent(sessionId, event);
         }
 
-        const summary = String(event?.summary || '').trim();
+        const summary = extractChatDisplayText(event?.summary, { maxLength: 180 });
         if (summary && !isCurrentSession) {
             const toastTitle = String(event?.phase || 'managed-app')
                 .trim()
@@ -6357,7 +6420,7 @@ curl -fsSIL --max-time 20 "https://$host"`;
 
         const nextLine = this.ambientReasoningDeck[this.ambientReasoningDeckIndex];
         this.ambientReasoningDeckIndex += 1;
-        return String(nextLine || 'Coaxing the thought machine back into rhythm.').trim();
+        return String(nextLine || 'Reading the conversation context and preparing the next step.').trim();
     }
 
     createAmbientReasoningCycle(now = Date.now()) {
@@ -6419,7 +6482,7 @@ curl -fsSIL --max-time 20 "https://$host"`;
                 return;
             }
 
-            const liveContent = String(message.displayContent ?? message.content ?? '').trim();
+            const liveContent = extractChatDisplayText(message.displayContent ?? message.content ?? '');
             if (liveContent) {
                 if (String(message.reasoningDisplaySource || '').trim() === 'generated') {
                     this.updateStreamingMessageState({
@@ -6478,8 +6541,8 @@ curl -fsSIL --max-time 20 "https://$host"`;
 
             const frame = this.getAmbientReasoningFrame(now);
             const needsUpdate = message.reasoningDisplaySource !== 'generated'
-                || String(message.reasoningDisplayText || '') !== frame.visibleText
-                || String(message.reasoningDisplayFullText || '') !== frame.fullText
+                || extractChatReasoningText(message.reasoningDisplayText) !== frame.visibleText
+                || extractChatReasoningText(message.reasoningDisplayFullText) !== frame.fullText
                 || Boolean(message.reasoningDisplayAnimated) !== frame.isTyping;
 
             if (needsUpdate) {
@@ -6487,7 +6550,7 @@ curl -fsSIL --max-time 20 "https://$host"`;
                     reasoningDisplaySource: 'generated',
                     reasoningDisplayText: frame.visibleText,
                     reasoningDisplayFullText: frame.fullText,
-                    reasoningDisplayTitle: 'Generated reasoning',
+                    reasoningDisplayTitle: 'Live reasoning',
                     reasoningDisplayIcon: 'sparkles',
                     reasoningDisplayAnimated: frame.isTyping,
                 }, {
@@ -6518,7 +6581,7 @@ curl -fsSIL --max-time 20 "https://$host"`;
         const initialAmbientFrame = this.getAmbientReasoningFrame(Date.now());
         this.liveResponseState = {
             phase: 'thinking',
-            detail: String(options.detail || 'Gathering context and preparing the reply.').trim(),
+            detail: extractChatDisplayText(options.detail || 'Gathering context and preparing the reply.', { maxLength: 180 }),
             reasoningSummary: '',
             hasRealReasoning: false,
         };
@@ -6539,7 +6602,7 @@ curl -fsSIL --max-time 20 "https://$host"`;
             reasoningDisplaySource: 'generated',
             reasoningDisplayText: initialAmbientFrame.visibleText,
             reasoningDisplayFullText: initialAmbientFrame.fullText,
-            reasoningDisplayTitle: 'Generated reasoning',
+            reasoningDisplayTitle: 'Live reasoning',
             reasoningDisplayIcon: 'sparkles',
             reasoningDisplayAnimated: initialAmbientFrame.isTyping,
             reasoningAvailable: false,
@@ -6560,8 +6623,8 @@ curl -fsSIL --max-time 20 "https://$host"`;
     }
 
     updateLiveResponsePhase(phase = 'thinking', detail = '') {
-        const normalizedPhase = String(phase || '').trim() || 'thinking';
-        const nextDetail = String(detail || '').trim();
+        const normalizedPhase = extractChatDisplayText(phase, { maxLength: 80 }) || 'thinking';
+        const nextDetail = extractChatDisplayText(detail, { maxLength: 220 });
         const streamSessionId = this.getStreamingMessageSessionId();
         const isVisibleStream = this.isVisibleSession(streamSessionId);
         this.liveResponseState = {
@@ -6608,8 +6671,8 @@ curl -fsSIL --max-time 20 "https://$host"`;
         const hasPatchedReasoningSummary = Object.prototype.hasOwnProperty.call(patch, 'reasoningSummary');
         const hasPatchedReasoningAvailable = Object.prototype.hasOwnProperty.call(patch, 'reasoningAvailable');
         const nextReasoningSummary = hasPatchedReasoningSummary
-            ? String(patch.reasoningSummary || '').trim()
-            : String(currentMessage.reasoningSummary || currentMessage.metadata?.reasoningSummary || '').trim();
+            ? extractChatReasoningText(patch.reasoningSummary)
+            : extractChatReasoningText(currentMessage.reasoningSummary || currentMessage.metadata?.reasoningSummary || '');
         const currentReasoningAvailable = currentMessage.reasoningAvailable === true
             || currentMessage.metadata?.reasoningAvailable === true;
         const nextReasoningAvailable = hasPatchedReasoningAvailable
@@ -6655,8 +6718,8 @@ curl -fsSIL --max-time 20 "https://$host"`;
     }
 
     handleStreamStatus(chunk = {}) {
-        const phase = String(chunk.phase || '').trim() || 'thinking';
-        const detail = String(chunk.detail || '').trim();
+        const phase = extractChatDisplayText(chunk.phase, { maxLength: 80 }) || 'thinking';
+        const detail = extractChatDisplayText(chunk.detail, { maxLength: 220 });
         this.updateLiveResponsePhase(phase, detail);
     }
 
@@ -6668,8 +6731,8 @@ curl -fsSIL --max-time 20 "https://$host"`;
         const progress = chunk.progress && typeof chunk.progress === 'object'
             ? chunk.progress
             : {};
-        const phase = String(progress.phase || chunk.phase || '').trim() || 'thinking';
-        const detail = String(progress.detail || chunk.detail || '').trim();
+        const phase = extractChatDisplayText(progress.phase || chunk.phase || '', { maxLength: 80 }) || 'thinking';
+        const detail = extractChatDisplayText(progress.detail || chunk.detail || '', { maxLength: 240 });
 
         this.updateLiveResponsePhase(phase, detail);
         this.updateStreamingMessageState({
@@ -6686,8 +6749,8 @@ curl -fsSIL --max-time 20 "https://$host"`;
     }
 
     handleReasoningSummaryDelta(chunk = {}) {
-        const delta = String(chunk.content || '');
-        const summary = String(chunk.summary || '').trim();
+        const delta = extractChatReasoningText(chunk.content);
+        const summary = extractChatReasoningText(chunk.summary);
         const currentSummary = String(this.liveResponseState.reasoningSummary || '').trim();
         const nextSummary = summary || `${currentSummary}${delta}`.trim();
         this.lastReasoningDeltaAt = Date.now();
@@ -6715,7 +6778,7 @@ curl -fsSIL --max-time 20 "https://$host"`;
     }
 
     handleToolEvent(chunk = {}) {
-        const detail = String(chunk.detail || '').trim() || 'Checking tool results';
+        const detail = extractChatDisplayText(chunk.detail, { maxLength: 220 }) || 'Checking tool results';
         this.updateLiveResponsePhase('checking-tools', detail);
     }
 
@@ -6728,7 +6791,7 @@ curl -fsSIL --max-time 20 "https://$host"`;
             return;
         }
 
-        const reasoningPatch = String(currentMessage.reasoningDisplaySource || '').trim() === 'synthetic'
+        const reasoningPatch = ['generated', 'synthetic'].includes(String(currentMessage.reasoningDisplaySource || '').trim())
             ? {
                 reasoningDisplaySource: '',
                 reasoningDisplayText: '',
@@ -6741,7 +6804,7 @@ curl -fsSIL --max-time 20 "https://$host"`;
 
         this.updateLiveResponsePhase('writing', 'Streaming the reply');
         this.updateStreamingMessageState({
-            content: `${currentMessage.content || ''}${content}`,
+            content: `${extractChatStreamText(currentMessage.content)}${extractChatStreamText(content)}`,
             ...reasoningPatch,
             isStreaming: true,
         }, {
@@ -6836,12 +6899,12 @@ curl -fsSIL --max-time 20 "https://$host"`;
         sessionManager.finalizeLastMessage(sessionId);
 
         let currentMessage = this.getSessionMessage(sessionId, parentMessageId);
-        const streamedReasoningSummary = String(
+        const streamedReasoningSummary = extractChatReasoningText(
             this.liveResponseState.reasoningSummary
             || currentMessage?.reasoningSummary
             || currentMessage?.metadata?.reasoningSummary
             || '',
-        ).trim();
+        );
         if (currentMessage && chunk.assistantMetadata && typeof chunk.assistantMetadata === 'object') {
             const updatedMessage = {
                 ...currentMessage,
@@ -8062,7 +8125,7 @@ curl -fsSIL --max-time 20 "https://$host"`;
                     reasoningDisplaySource: 'generated',
                     reasoningDisplayText: initialAmbientFrame.visibleText,
                     reasoningDisplayFullText: initialAmbientFrame.fullText,
-                    reasoningDisplayTitle: 'Generated reasoning',
+                    reasoningDisplayTitle: 'Live reasoning',
                     reasoningDisplayIcon: 'sparkles',
                     reasoningDisplayAnimated: initialAmbientFrame.isTyping,
                 }),

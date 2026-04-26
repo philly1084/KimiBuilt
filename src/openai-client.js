@@ -39,6 +39,8 @@ const {
 const {
     hasExplicitPodcastIntent,
     extractExplicitPodcastTopic,
+    hasExplicitPodcastVideoIntent,
+    inferPodcastVideoOptions,
 } = require('./podcast/podcast-intent');
 const { extractArtifactsFromToolEvents } = require('./runtime-artifacts');
 const DOCUMENT_WORKFLOW_TOOL_ID = 'document-workflow';
@@ -1777,6 +1779,7 @@ function buildDeterministicPreflightActions(automaticTools = [], prompt = '') {
             toolId: 'podcast',
             params: {
                 topic: podcastTopic,
+                ...(hasExplicitPodcastVideoIntent(prompt) ? inferPodcastVideoOptions(prompt) : {}),
             },
         });
     }
@@ -2883,6 +2886,12 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Do not create or edit host crontabs with `remote-command` unless the user explicitly asks to inspect or modify the server\'s own cron configuration.');
     }
 
+    if (automaticTools.some((entry) => entry.id === 'podcast')) {
+        guidance.push('- Use `podcast` when the user asks for a podcast deliverable. It can research, script, synthesize the episode, persist audio/script artifacts, and render an MP4 when requested.');
+        guidance.push('- For video podcast, podcast video, MP4, visual podcast, scene image, or cover-art requests, call `podcast` with `includeVideo: true`, `videoImageMode: "mixed"`, and `videoGenerateImages: true` unless the user explicitly asks not to generate images.');
+        guidance.push('- Do not answer that encoded video files cannot be generated when the `podcast` tool is attached; use the tool and report the returned audio, script, and video artifacts.');
+    }
+
     if (automaticTools.some((entry) => entry.id === USER_CHECKPOINT_TOOL_ID)) {
         guidance.push('- Use `user-checkpoint` for a high-impact decision before major work instead of asking a plain-text multiple-choice question.');
         guidance.push('- In this runtime, do not call or mention `request_user_input`. `user-checkpoint` is the correct questionnaire tool for web chat.');
@@ -3715,6 +3724,22 @@ function formatDirectToolResultMessage(toolEvent = {}) {
 
         if (data.script?.artifactId) {
             sections.push(`Script artifact: ${data.script.artifactId}`);
+        }
+
+        const videoArtifactId = data.video?.artifactId
+            || data.videoArtifact?.id
+            || data.videoArtifact?.artifactId
+            || (String(data.artifact?.mimeType || data.artifact?.format || '').toLowerCase().includes('video')
+                ? data.artifact?.id
+                : '')
+            || '';
+        if (videoArtifactId) {
+            sections.push(`Video artifact: ${videoArtifactId}`);
+        }
+
+        const sceneCount = Array.isArray(data.storyboard?.scenes) ? data.storyboard.scenes.length : 0;
+        if (sceneCount > 0) {
+            sections.push(`Storyboard scenes: ${sceneCount}`);
         }
 
         return sections.join('\n\n');
@@ -5354,7 +5379,9 @@ module.exports = {
         retryProviderWarmupRequest,
         promptHasExplicitSshIntent,
         hasExplicitPodcastIntent,
+        hasExplicitPodcastVideoIntent,
         extractExplicitPodcastTopic,
+        inferPodcastVideoOptions,
         hasExplicitUserCheckpointInteractionIntent,
         extractQuestionnaireCheckpointFromText,
         maybeRecoverUserCheckpointResponse,

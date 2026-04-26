@@ -244,6 +244,60 @@ describe('ToolManager image tools', () => {
     expect(result.data.audio).toEqual({ artifactId: 'artifact-podcast-1' });
   });
 
+  test('renders podcast video through the injected video service when requested', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const podcastWorkflowService = {
+      createPodcast: jest.fn(async () => ({
+        title: 'Test podcast',
+        audio: { artifactId: 'artifact-podcast-1' },
+        artifacts: [{ id: 'artifact-podcast-1', filename: 'test.wav' }],
+        script: {
+          transcript: 'Maya: Batteries store energy.',
+          turns: [{ speaker: 'Maya', text: 'Batteries store energy.' }],
+        },
+      })),
+    };
+    const videoWorkflowService = {
+      createVideoFromPodcast: jest.fn(async () => ({
+        video: { artifactId: 'artifact-video-1' },
+        artifact: { id: 'artifact-video-1', filename: 'test.mp4' },
+        storyboard: { scenes: [{ id: 'scene-01' }] },
+      })),
+    };
+
+    const result = await toolManager.executeTool('podcast', {
+      topic: 'How batteries work',
+      includeVideo: true,
+      videoAspectRatio: '9:16',
+      videoImageMode: 'generated',
+      videoGenerateImages: true,
+    }, {
+      sessionId: 'session-1',
+      podcastService: podcastWorkflowService,
+      podcastVideoService: videoWorkflowService,
+      clientSurface: 'chat',
+    });
+
+    expect(result.success).toBe(true);
+    expect(videoWorkflowService.createVideoFromPodcast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Test podcast',
+      }),
+      expect.objectContaining({
+        sessionId: 'session-1',
+        options: expect.objectContaining({
+          aspectRatio: '9:16',
+          imageMode: 'generated',
+          generateImages: true,
+        }),
+      }),
+    );
+    expect(result.data.video).toEqual({ artifactId: 'artifact-video-1' });
+    expect(result.data.artifactIds).toEqual(['artifact-podcast-1', 'artifact-video-1']);
+  });
+
   test('generates batch graph diagrams with native data, SVG, Mermaid, and persisted image artifacts', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();

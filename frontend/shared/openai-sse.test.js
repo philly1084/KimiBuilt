@@ -107,6 +107,25 @@ describe('openai-sse helpers', () => {
     expect(events[0].summary).toBe('Checking the request. Choosing the direct path.');
   });
 
+  test('normalizes object progress details without object string leaks', () => {
+    const events = normalizeGatewayEventPayload({
+      type: 'progress',
+      progress: {
+        phase: { label: 'executing' },
+        detail: { message: 'Running the second task' },
+        steps: [
+          { title: { text: 'Plan the work' }, status: 'completed' },
+          { title: { text: 'Run the next task' }, status: 'in_progress' },
+        ],
+      },
+    });
+
+    expect(events).toHaveLength(1);
+    expect(events[0].phase).toBe('executing');
+    expect(events[0].detail).toBe('Running the second task');
+    expect(events[0].detail).not.toContain('[object Object]');
+  });
+
   test('normalizes response chunk payloads', () => {
     const events = normalizeGatewayEventPayload({
       object: 'response.chunk',
