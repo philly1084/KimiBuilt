@@ -532,16 +532,16 @@ function extractTaskPromptFromScenario(scenario = '') {
         taskPrompt = taskPrompt.replace(pattern, '');
     });
     taskPrompt = taskPrompt.replace(
-        /^(?:please\s+)?(?:set(?:\s+(?:this|it))?\s+up|schedule(?:\s+(?:this|it))?|create|make|add|queue|save)\s+(?:(?:a|an)\s+)?(?:(?:daily|weekly|hourly|nightly|recurring|one[- ]time)\s+)?(?:(?:agent|assistant)\s+)?(?:workload|automation|follow-?up|task|job)\s*(?:to\s+)?/i,
+        /^(?:please\s+)?(?:set(?:\s+(?:this|it))?\s+up|schedule(?:\s+(?:this|it))?|create|make|add|queue|save)\s+(?:(?:a|an)\s+)?(?:(?:daily|weekly|hourly|nightly|recurring|one[- ]time)\s+)?(?:(?:agent|assistant)\s+)?(?:workloads?|automations?|follow-?ups?|tasks?|jobs?)\s*(?:to\s+|for\s+)?/i,
         '',
     );
     taskPrompt = taskPrompt.replace(/^(?:can|could|would)\s+you\s+/i, '');
     taskPrompt = taskPrompt.replace(
-        /^(?:please\s+)?(?:run|set(?:\s+(?:this|it))?\s+up|schedule(?:\s+(?:this|it))?|create|make|add|queue|save)\s+(?:(?:a|an)\s+)?cron\s*(?:later\s*)?(?:to\s+)?/i,
+        /^(?:please\s+)?(?:run|set(?:\s+(?:this|it))?\s+up|schedule(?:\s+(?:this|it))?|create|make|add|queue|save)\s+(?:(?:a|an)\s+)?cron(?:\s+jobs?)?\s*(?:later\s*)?(?:to\s+|for\s+)?/i,
         '',
     );
     taskPrompt = taskPrompt.replace(
-        /^(?:please\s+)?(?:run|set(?:\s+(?:this|it))?\s+up|schedule(?:\s+(?:this|it))?|create|make|add|queue|save)\s+(?:(?:a|an)\s+)?(?:(?:cron|scheduled?|deferred)\s+)?(?:(?:daily|weekly|hourly|nightly|recurring|one[- ]time)\s+)?(?:(?:agent|assistant)\s+)?(?:workload|automation|follow-?up|task|job|check)\s*(?:later\s*)?(?:to\s+)?/i,
+        /^(?:please\s+)?(?:run|set(?:\s+(?:this|it))?\s+up|schedule(?:\s+(?:this|it))?|create|make|add|queue|save)\s+(?:(?:a|an)\s+)?(?:(?:cron|scheduled?|deferred)\s+)?(?:(?:daily|weekly|hourly|nightly|recurring|one[- ]time)\s+)?(?:(?:agent|assistant)\s+)?(?:workloads?|automations?|follow-?ups?|tasks?|jobs?|checks?)\s*(?:later\s*)?(?:to\s+|for\s+)?/i,
         '',
     );
     taskPrompt = taskPrompt.replace(
@@ -637,7 +637,7 @@ function hasWorkloadIntent(text = '') {
     const scheduleIntentFragment = `(?:every|daily|hourly|weekdays?|tomorrow|later today|later|once|at\\s+(?:1[0-2]|0?\\d)(?::[0-5]\\d)?\\s*(?:am|pm)|at\\s+(?:[01]?\\d|2[0-3]):[0-5]\\d|(?:(?:in|after)\\s+${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)(?:\\s+from\\s+now)?|${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)\\s+from\\s+now))`;
 
     const hasExplicitWorkloadSetup = [
-        /\b(set up|setup|schedule|create|make|add|queue|save)\b[\s\S]{0,24}\b(?:an?\s+|the\s+)?(?:automation|workload|follow-?up|reminder|cron(?:\s+job)?|scheduled\s+job|scheduled\s+task|recurring\s+job|recurring\s+task)\b/,
+        /\b(set up|setup|schedule|create|make|add|queue|save)\b[\s\S]{0,24}\b(?:an?\s+|the\s+)?(?:automation|workloads?|follow-?ups?|reminders?|cron(?:\s+jobs?)?|scheduled\s+jobs?|scheduled\s+tasks?|recurring\s+jobs?|recurring\s+tasks?)\b/,
         new RegExp(`\\b(set up|setup|schedule|queue|save)\\b[\\s\\S]{0,60}\\b${scheduleIntentFragment}\\b`),
     ].some((pattern) => pattern.test(normalized));
 
@@ -675,7 +675,7 @@ function hasImplicitRecurringJobIntent(text = '') {
         return false;
     }
 
-    return /\b(set up|setup|schedule|create|make|add|queue|save)\b[\s\S]{0,24}\b(?:an?\s+|the\s+)?(?:automation|workload|follow-?up|reminder|cron(?:\s+job)?|scheduled\s+job|scheduled\s+task|recurring\s+job|recurring\s+task)\b/.test(normalized);
+    return /\b(set up|setup|schedule|create|make|add|queue|save)\b[\s\S]{0,24}\b(?:an?\s+|the\s+)?(?:automation|workloads?|follow-?ups?|reminders?|cron(?:\s+jobs?)?|scheduled\s+jobs?|scheduled\s+tasks?|recurring\s+jobs?|recurring\s+tasks?)\b/.test(normalized);
 }
 
 function inferDefaultRecurringTrigger(scenario = '', timezone = 'UTC') {

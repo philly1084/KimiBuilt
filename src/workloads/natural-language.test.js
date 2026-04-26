@@ -119,9 +119,24 @@ describe('workload natural language parsing', () => {
         expect(hasWorkloadIntent('Set up a daily agent workload to summarize blockers every day at 11:05 PM.')).toBe(true);
         expect(hasWorkloadIntent('Set this up every day at 11:05 PM to summarize blockers.')).toBe(true);
         expect(hasWorkloadIntent('Run `date` on the server in 5 minutes.')).toBe(true);
+        expect(hasWorkloadIntent('Set up cron jobs for security updates and security checks.')).toBe(true);
         expect(hasWorkloadIntent('Explain what a cron expression is.')).toBe(false);
         expect(hasWorkloadIntent('I keep getting cron calls too quickly and every message turns into a workload.')).toBe(false);
         expect(hasWorkloadIntent('I want a planning agent to decide when something should become a job.')).toBe(false);
+    });
+
+    test('infers a conservative recurring trigger from plural cron jobs', () => {
+        const result = parseWorkloadScenario('Set up cron jobs for security updates and security checks.', {
+            timezone: 'UTC',
+            now: new Date('2026-04-01T12:00:00.000Z'),
+        });
+
+        expect(result.trigger).toEqual({
+            type: 'cron',
+            expression: '0 2 * * 1',
+            timezone: 'UTC',
+        });
+        expect(result.prompt).toBe('security updates and security checks.');
     });
 
     test('infers remote-build policy for environment-building work', () => {

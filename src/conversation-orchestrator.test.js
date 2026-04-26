@@ -13,6 +13,7 @@ const {
     buildDeterministicRecoveryPlanFromFailure,
     classifyToolExecutionResult,
     filterRepeatedPlanStepsWithReport,
+    inferAgencyProfile,
 } = require('./conversation-orchestrator');
 
 function buildResponse(text, id = 'resp_test') {
@@ -447,6 +448,93 @@ describe('ConversationOrchestrator', () => {
 
         expect(toolPolicy.candidateToolIds).toContain('remote-command');
         expect(toolPolicy.candidateToolIds).not.toContain('user-checkpoint');
+    });
+
+    test('infers an agency profile for delegated, scheduled, and sustained work', () => {
+        expect(inferAgencyProfile({
+            objective: 'Use multiple agents in parallel to inspect the repo and propose fixes.',
+        })).toEqual(expect.objectContaining({
+            level: 'delegate',
+            delegation: 'explicit',
+            askPolicy: 'assume-and-proceed',
+        }));
+
+        expect(inferAgencyProfile({
+            objective: 'Set up cron jobs for security updates and security checks.',
+        })).toEqual(expect.objectContaining({
+            level: 'schedule-multiple',
+            scheduling: 'multi-workload',
+        }));
+
+        expect(inferAgencyProfile({
+            objective: 'Keep working through multiple steps until the goal is reached.',
+        })).toEqual(expect.objectContaining({
+            level: 'sustained',
+            contextPolicy: 'actively-gather-context',
+            maxRoundsHint: 4,
+        }));
+    });
+
+    test('routes plain multiple-agent language to the delegate tool', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['agent-delegate', 'web-search', 'file-search'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Use multiple agents to research the options and inspect the workspace in parallel.',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+
+        expect(toolPolicy.agencyProfile).toEqual(expect.objectContaining({
+            level: 'delegate',
+            delegation: 'explicit',
+        }));
+        expect(toolPolicy.candidateToolIds).toContain('agent-delegate');
+    });
+
+    test('forces multi-workload scheduling through the planner so jobs can be split', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    toolId === 'agent-workload'
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Set up cron jobs for security updates and security checks.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            toolPolicy,
+        });
+
+        expect(toolPolicy.agencyProfile).toEqual(expect.objectContaining({
+            level: 'schedule-multiple',
+            scheduling: 'multi-workload',
+        }));
+        expect(toolPolicy.candidateToolIds).toContain('agent-workload');
+        expect(directAction).toBeNull();
     });
 
     test('remote-build policy still allows checkpoints for explicit design decisions', () => {

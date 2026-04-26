@@ -686,6 +686,88 @@ function hasMultiWorkloadSchedulingIntent(text = '') {
     return hasSchedulingLanguage && hasMultiLanguage;
 }
 
+function hasLongRunningAgencyIntentText(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        /\b(work|run|keep going|continue|iterate|improve|investigate|research|debug|build)\b[\s\S]{0,60}\b(longer|for a while|over time|until (?:done|complete|finished)|as long as needed)\b/,
+        /\b(multiple|several|many|repeated|iterative)\b[\s\S]{0,40}\b(steps|passes|rounds|iterations|checks|runs)\b/,
+        /\b(ramp up|ramp down|scale up|scale down)\b/,
+        /\b(end[- ]to[- ]end|multi[- ]step|several steps|through completion|until the goal is reached)\b/,
+    ].some((pattern) => pattern.test(normalized));
+}
+
+function hasMultiAgentIntentText(text = '') {
+    const normalized = String(text || '').trim();
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        /\bsub[- ]agent(?:s)?\b/i,
+        /\bmultiple\s+(?:agents|workers|sub[- ]agents)\b/i,
+        /\bseveral\s+(?:agents|workers|sub[- ]agents)\b/i,
+        /\bmore than one\s+(?:agent|worker|sub[- ]agent)\b/i,
+        /\bdelegate\b[\s\S]{0,40}\b(task|tasks|worker|workers|agent|agents|job|jobs)\b/i,
+        /\bparallel\b[\s\S]{0,30}\b(task|tasks|worker|workers|agent|agents|workstreams?|streams?)\b/i,
+        /\bspawn\b[\s\S]{0,30}\b(worker|workers|agent|agents|sub[- ]agent)\b/i,
+    ].some((pattern) => pattern.test(normalized));
+}
+
+function inferAgencyProfile({
+    objective = '',
+    executionProfile = DEFAULT_EXECUTION_PROFILE,
+    classification = null,
+} = {}) {
+    const normalized = String(objective || '').trim().toLowerCase();
+    const workloadIntent = hasWorkloadIntent(normalized);
+    const multiWorkloadIntent = hasMultiWorkloadSchedulingIntent(normalized);
+    const multiAgentIntent = hasMultiAgentIntentText(normalized);
+    const longRunningIntent = hasLongRunningAgencyIntentText(normalized);
+    const substantialWorkIntent = hasSubstantialWorkIntentText(normalized);
+    const checkpointIntent = hasExplicitCheckpointRequestText(normalized)
+        || (!multiAgentIntent && hasDiscoveryPlanningIntentText(normalized))
+        || classification?.checkpointNeed === 'required';
+
+    let level = 'respond';
+    if (checkpointIntent && !multiAgentIntent) {
+        level = 'ask';
+    } else if (workloadIntent || multiWorkloadIntent) {
+        level = multiWorkloadIntent ? 'schedule-multiple' : 'schedule';
+    } else if (multiAgentIntent) {
+        level = 'delegate';
+    } else if (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE || longRunningIntent) {
+        level = 'sustained';
+    } else if (substantialWorkIntent || ['plan-first', 'workflow'].includes(classification?.preferredExecutionPath)) {
+        level = 'multi-step';
+    }
+
+    const canUseLongerGuardedLoop = ['sustained', 'delegate', 'schedule-multiple'].includes(level)
+        || (level === 'multi-step' && longRunningIntent);
+
+    return {
+        level,
+        askPolicy: checkpointIntent && !multiAgentIntent ? 'ask-first' : 'assume-and-proceed',
+        contextPolicy: canUseLongerGuardedLoop ? 'actively-gather-context' : 'use-available-context',
+        delegation: multiAgentIntent ? 'explicit' : 'none',
+        scheduling: workloadIntent || multiWorkloadIntent
+            ? (multiWorkloadIntent ? 'multi-workload' : 'single-workload')
+            : 'none',
+        longRunning: longRunningIntent || executionProfile === REMOTE_BUILD_EXECUTION_PROFILE,
+        maxRoundsHint: canUseLongerGuardedLoop ? 4 : (level === 'multi-step' ? 2 : 1),
+        maxToolCallsHint: canUseLongerGuardedLoop ? 8 : (level === 'multi-step' ? 5 : MAX_PLAN_STEPS),
+        reasons: [
+            ...(longRunningIntent ? ['The request asks the agent to keep working across multiple steps or passes.'] : []),
+            ...(multiAgentIntent ? ['The request explicitly mentions multiple agents, workers, delegation, or parallel work.'] : []),
+            ...(workloadIntent || multiWorkloadIntent ? ['The request includes future, recurring, cron, or workload language.'] : []),
+            ...(checkpointIntent && !multiAgentIntent ? ['The request asks for a decision gate or discovery before execution.'] : []),
+        ],
+    };
+}
+
 function normalizeExecutionProfile(value = '') {
     const normalized = String(value || '').trim().toLowerCase();
 
@@ -1145,6 +1227,7 @@ function buildScoredCandidateToolMap({
     hasSchemaIntent = false,
     hasMigrationChangeIntent = false,
     hasSecurityIntent = false,
+    agencyProfile = null,
 } = {}) {
     const scoreMap = Object.fromEntries(
         allowedToolIds.map((toolId) => [toolId, { score: 0, reasons: [] }]),
@@ -1213,6 +1296,24 @@ function buildScoredCandidateToolMap({
             break;
         default:
             break;
+        }
+    }
+
+    if (agencyProfile && typeof agencyProfile === 'object') {
+        if (agencyProfile.scheduling === 'multi-workload') {
+            adjustCandidateToolScore(scoreMap, 'agent-workload', !isDeferredWorkloadRun && allowDeferredWorkloadShortcut ? 1.65 : 0, 'The agency profile identified multiple scheduled workloads or cron jobs.');
+        } else if (agencyProfile.scheduling === 'single-workload') {
+            adjustCandidateToolScore(scoreMap, 'agent-workload', !isDeferredWorkloadRun && allowDeferredWorkloadShortcut ? 1.15 : 0, 'The agency profile identified a deferred or recurring workload.');
+        }
+
+        if (agencyProfile.delegation === 'explicit') {
+            adjustCandidateToolScore(scoreMap, 'agent-delegate', canUseSubAgents ? 1.55 : 0, 'The agency profile identified explicit multi-agent or delegated work.');
+        }
+
+        if (agencyProfile.level === 'sustained' || agencyProfile.longRunning) {
+            adjustCandidateToolScore(scoreMap, 'web-search', hasExplicitWebResearchIntent || classification?.groundingRequirement === 'required' ? 0.35 : 0, 'Longer-running work can gather context before synthesis.');
+            adjustCandidateToolScore(scoreMap, 'file-search', /\b(repo|repository|workspace|codebase|files?)\b/.test(normalizedPrompt) ? 0.5 : 0, 'Longer-running repository work should inspect local context.');
+            adjustCandidateToolScore(scoreMap, remoteToolId, executionProfile === REMOTE_BUILD_EXECUTION_PROFILE ? 0.45 : 0, 'Sustained remote-build work should keep the remote execution lane available.');
         }
     }
 
@@ -2850,17 +2951,7 @@ function normalizeAgentWorkloadPlanParams(step = {}, { objective = '', session =
 }
 
 function hasExplicitSubAgentIntentText(text = '') {
-    const normalized = String(text || '').trim();
-    if (!normalized) {
-        return false;
-    }
-
-    return [
-        /\bsub[- ]agent(?:s)?\b/i,
-        /\bdelegate\b[\s\S]{0,40}\b(task|tasks|worker|workers|agent|agents|job|jobs)\b/i,
-        /\bparallel\b[\s\S]{0,30}\b(task|tasks|worker|workers|agent|agents)\b/i,
-        /\bspawn\b[\s\S]{0,30}\b(worker|workers|agent|agents|sub[- ]agent)\b/i,
-    ].some((pattern) => pattern.test(normalized));
+    return hasMultiAgentIntentText(text);
 }
 
 function normalizeAgentDelegateTaskPlan(task = {}, index = 0) {
@@ -6888,6 +6979,11 @@ class ConversationOrchestrator extends EventEmitter {
                 session,
             })
             : null;
+        const agencyProfile = inferAgencyProfile({
+            objective,
+            executionProfile: resolvedProfile,
+            classification: requestClassification,
+        });
         const sessionControlState = getSessionControlState(session);
         const storedForegroundContinuationGate = normalizeForegroundContinuationGate(
             sessionControlState.foregroundContinuationGate,
@@ -6918,6 +7014,7 @@ class ConversationOrchestrator extends EventEmitter {
             recentMessages: resolvedRecentMessages,
             toolContext,
             classification: requestClassification,
+            agencyProfile,
             toolEvents: [],
         });
         let endToEndWorkflow = resolvedProfile === REMOTE_BUILD_EXECUTION_PROFILE
@@ -7028,15 +7125,23 @@ class ConversationOrchestrator extends EventEmitter {
         const deterministicFollowupRounds = allowsDeterministicResearchFollowup
             ? (hasDocumentWorkflowIntentText(objective) ? 3 : 2)
             : 1;
+        const guardedAgencyRounds = Math.max(
+            deterministicFollowupRounds,
+            Number(agencyProfile?.maxRoundsHint || 1),
+        );
+        const guardedAgencyToolCalls = Math.max(
+            MAX_PLAN_STEPS,
+            Number(agencyProfile?.maxToolCallsHint || MAX_PLAN_STEPS),
+        );
         const hasCustomToolBudget = Number.isFinite(Number(toolBudget?.maxDurationMs)) && Number(toolBudget.maxDurationMs) > 0;
         const budgetState = {
             maxRounds: normalizePositiveBudget(
                 toolBudget?.maxRounds,
-                autonomyApproved ? autonomyBudget.maxRounds : deterministicFollowupRounds,
+                autonomyApproved ? autonomyBudget.maxRounds : guardedAgencyRounds,
             ),
             maxToolCalls: normalizePositiveBudget(
                 toolBudget?.maxToolCalls,
-                autonomyApproved ? autonomyBudget.maxToolCalls : MAX_PLAN_STEPS,
+                autonomyApproved ? autonomyBudget.maxToolCalls : guardedAgencyToolCalls,
             ),
             autonomyDeadline: startedAt + normalizePositiveBudget(
                 toolBudget?.maxDurationMs,
@@ -7112,6 +7217,7 @@ class ConversationOrchestrator extends EventEmitter {
                         checkpointNeed: requestClassification.checkpointNeed,
                         confidence: requestClassification.confidence,
                         ambiguous: requestClassification.ambiguous,
+                        agencyProfile,
                         reasons: requestClassification.reasons || [],
                     },
                 }));
@@ -8652,6 +8758,7 @@ class ConversationOrchestrator extends EventEmitter {
         recentMessages = [],
         toolContext = {},
         classification = null,
+        agencyProfile = null,
         toolEvents = [],
     }) {
         const baseAllowedToolIds = (PROFILE_TOOL_ALLOWLISTS[executionProfile] || PROFILE_TOOL_ALLOWLISTS[DEFAULT_EXECUTION_PROFILE])
@@ -8664,6 +8771,11 @@ class ConversationOrchestrator extends EventEmitter {
             ? baseAllowedToolIds.filter((toolId) => requested.includes(toolId))
             : baseAllowedToolIds;
         const prompt = `${objective || ''}\n${instructions || ''}`.toLowerCase();
+        const effectiveAgencyProfile = agencyProfile || inferAgencyProfile({
+            objective,
+            executionProfile,
+            classification,
+        });
         const candidates = new Set();
         const remoteToolId = getPreferredRemoteToolId({ allowedToolIds });
         const sessionIsolation = isSessionIsolationEnabled({
@@ -8862,6 +8974,7 @@ class ConversationOrchestrator extends EventEmitter {
                 hasSchemaIntent,
                 hasMigrationChangeIntent,
                 hasSecurityIntent,
+                agencyProfile: effectiveAgencyProfile,
             })
             : null;
 
@@ -9147,6 +9260,7 @@ class ConversationOrchestrator extends EventEmitter {
             projectKey,
             activeTaskFrame,
             classification,
+            agencyProfile: effectiveAgencyProfile,
             workflow: effectiveWorkflowSeed,
             projectPlan: effectiveProjectPlanSeed,
             clusterRegistrySummary,
@@ -9774,6 +9888,13 @@ class ConversationOrchestrator extends EventEmitter {
                     toolPolicy.classification.groundingRequirement === 'required'
                         ? 'Grounding is required. Start with web-search, web-fetch, or web-scrape before any final document generation or synthesis step.'
                         : 'Grounding is optional unless the verified evidence shows the request is current-information sensitive.',
+                ]
+                : []),
+            ...(toolPolicy?.agencyProfile
+                ? [
+                    `Agency profile: ${JSON.stringify(toolPolicy.agencyProfile)}`,
+                    'Use the agency profile to scale effort: respond directly for respond, execute one safe workload for schedule, split distinct jobs for schedule-multiple, use agent-delegate only for explicit delegation, and keep gathering context across steps for sustained work until completion, blocker, or budget.',
+                    'Prefer proceeding with reasonable assumptions for routine context gathering, implementation, testing, and verification; ask only when missing input materially changes scope, credentials, destructive actions, or product/architecture direction.',
                 ]
                 : []),
             'Candidate tools:',
@@ -10843,6 +10964,7 @@ class ConversationOrchestrator extends EventEmitter {
             initiativeReview: intelligenceSummary.initiativeReview,
             activeTaskFrame,
             surfaceFinisher,
+            agencyProfile: toolPolicy?.agencyProfile || null,
             ...(harnessSummary ? { harness: harnessSummary } : {}),
             perceivedIntelligenceScores: intelligenceSummary.perceivedIntelligenceScores,
             failureTags: intelligenceSummary.failureTags,
@@ -10888,6 +11010,7 @@ class ConversationOrchestrator extends EventEmitter {
             executionProfile,
             runtimeMode,
             classification: toolPolicy?.classification || null,
+            agencyProfile: toolPolicy?.agencyProfile || null,
             projectKey: toolPolicy?.projectKey || null,
             candidateToolScores: toolPolicy?.candidateToolScores || null,
             replanReason: extractLatestReplanReason(executionTrace),
@@ -11225,6 +11348,7 @@ module.exports = {
     buildDeterministicRecoveryPlanFromFailure,
     classifyToolExecutionResult,
     filterRepeatedPlanStepsWithReport,
+    inferAgencyProfile,
     normalizeExecutionProfile,
     DEFAULT_EXECUTION_PROFILE,
     REMOTE_BUILD_EXECUTION_PROFILE,
