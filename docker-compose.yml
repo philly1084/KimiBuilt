@@ -15,6 +15,7 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-kimibuilt}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-kimibuilt}
       - DOCKER_HOST=tcp://docker-proxy:2375
+      - DOCKER_API_VERSION=1.52
       - KIMIBUILT_DATA_DIR=/home/kimibuilt/.kimibuilt
       - KIMIBUILT_STATE_DIR=/home/kimibuilt/.kimibuilt
     volumes:
@@ -79,7 +80,7 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:6333/healthz"]
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/6333'"]
       interval: 10s
       timeout: 5s
       retries: 5

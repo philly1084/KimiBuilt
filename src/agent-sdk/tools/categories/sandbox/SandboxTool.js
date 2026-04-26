@@ -473,7 +473,7 @@ class SandboxTool extends ToolBase {
       },
       rust: {
         image: 'rust:1.73-alpine',
-        command: (file) => ['rustc', file, '-o', 'main', '&&', './main']
+        command: (file) => ['sh', '-c', `rustc ${file} -o main && ./main`]
       }
     };
 
@@ -500,19 +500,19 @@ class SandboxTool extends ToolBase {
       let killReason = null;
       let stdout = '';
       let stderr = '';
+      let containerId = '';
 
-      // Build docker run command
+      // Build docker create command. The backend may itself be containerized and
+      // connected to a remote/socket-proxied Docker daemon, so host bind mounts
+      // are not reliable. Copy the prepared workspace into the container instead.
       const dockerArgs = [
-        'run',
-        '--rm',
+        'create',
         '--cpus', cpu,
         '--memory', memory,
         '--memory-swap', memory,
         '--pids-limit', '100',
         '--network', network ? 'bridge' : 'none',
-        '-v', `${workspacePath}:/workspace:ro`,
         '-w', '/workspace',
-        '--read-only',
         '--tmpfs', '/tmp:noexec,nosuid,size=100m'
       ];
 
@@ -524,61 +524,104 @@ class SandboxTool extends ToolBase {
       dockerArgs.push(image);
       dockerArgs.push(...command(codeFile));
 
-      const child = spawn('docker', dockerArgs, {
-        timeout: timeout + 5000 // Docker timeout + buffer
-      });
-
-      // Set up timeout
-      const timeoutId = setTimeout(() => {
-        killed = true;
-        killReason = 'timeout';
-        child.kill('SIGKILL');
-      }, timeout);
-
-      // Collect output with limit
-      child.stdout.on('data', (data) => {
-        if (stdout.length < maxOutput) {
-          stdout += data.toString();
-          if (stdout.length > maxOutput) {
-            stdout = stdout.substring(0, maxOutput) + '\n... (output truncated)';
-          }
+      const appendLimited = (target, chunk) => {
+        let next = target + chunk.toString();
+        if (next.length > maxOutput) {
+          next = next.substring(0, maxOutput) + '\n... (output truncated)';
         }
+        return next;
+      };
+
+      const runDocker = (args, options = {}) => new Promise((runResolve, runReject) => {
+        const child = spawn('docker', args, options);
+        let runStdout = '';
+        let runStderr = '';
+
+        child.stdout.on('data', (data) => {
+          runStdout = appendLimited(runStdout, data);
+        });
+
+        child.stderr.on('data', (data) => {
+          runStderr = appendLimited(runStderr, data);
+        });
+
+        child.on('close', (exitCode, signal) => {
+          runResolve({
+            stdout: runStdout,
+            stderr: runStderr,
+            exitCode: exitCode || 0,
+            signal
+          });
+        });
+
+        child.on('error', runReject);
       });
 
-      child.stderr.on('data', (data) => {
-        if (stderr.length < maxOutput) {
-          stderr += data.toString();
-          if (stderr.length > maxOutput) {
-            stderr = stderr.substring(0, maxOutput) + '\n... (output truncated)';
-          }
+      const cleanupContainer = async () => {
+        if (!containerId) return;
+        await runDocker(['rm', '-f', containerId]).catch(() => null);
+      };
+
+      try {
+        const created = await runDocker(dockerArgs);
+        if (created.exitCode !== 0) {
+          await cleanupContainer();
+          return resolve({
+            stdout: created.stdout,
+            stderr: created.stderr,
+            exitCode: created.exitCode,
+            executionTime: Date.now() - startTime,
+            memoryUsage: 0,
+            killed,
+            killReason
+          });
         }
-      });
 
-      child.on('close', (exitCode, signal) => {
+        containerId = created.stdout.trim();
+        const copied = await runDocker(['cp', `${workspacePath}${path.sep}.`, `${containerId}:/workspace`]);
+        if (copied.exitCode !== 0) {
+          await cleanupContainer();
+          return resolve({
+            stdout: copied.stdout,
+            stderr: copied.stderr,
+            exitCode: copied.exitCode,
+            executionTime: Date.now() - startTime,
+            memoryUsage: 0,
+            killed,
+            killReason
+          });
+        }
+
+        const timeoutId = setTimeout(() => {
+          killed = true;
+          killReason = 'timeout';
+          runDocker(['kill', containerId]).catch(() => null);
+        }, timeout);
+
+        await runDocker(['start', containerId]);
+        const waited = await runDocker(['wait', containerId]);
         clearTimeout(timeoutId);
 
-        const executionTime = Date.now() - startTime;
+        const logs = await runDocker(['logs', containerId]);
+        stdout = logs.stdout;
+        stderr = logs.stderr;
+        const exitCode = Number.parseInt(waited.stdout, 10);
 
-        if (signal === 'SIGKILL' && !killed) {
-          killed = true;
-          killReason = 'memory';
-        }
+        await cleanupContainer();
 
         resolve({
           stdout,
           stderr,
-          exitCode: exitCode || 0,
-          executionTime,
+          exitCode: Number.isFinite(exitCode) ? exitCode : waited.exitCode,
+          executionTime: Date.now() - startTime,
           memoryUsage: 0, // Would need cgroups for accurate measurement
           killed,
           killReason
         });
-      });
-
-      child.on('error', (error) => {
-        clearTimeout(timeoutId);
+      } catch (error) {
+        await cleanupContainer();
         reject(error);
-      });
+      }
     });
   }
 

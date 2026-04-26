@@ -3575,37 +3575,27 @@ class UIHelpers {
         if (!reasoningState) {
             return '';
         }
-
-        const visibleText = String(
-            reasoningState.animated
-                ? (reasoningState.previewText || reasoningState.bodyText || '')
-                : (reasoningState.bodyText || reasoningState.previewText || '')
-        ).trim();
-        const bodyHtml = `${this.escapeHtml(visibleText).replace(/\n/g, '<br>')}${reasoningState.animated ? '<span class="streaming-cursor" aria-hidden="true"></span>' : ''}`;
+        const previewHtml = `${this.escapeHtml(reasoningState.previewText || 'Reasoning data is available for this reply.')}${reasoningState.animated ? '<span class="streaming-cursor" aria-hidden="true"></span>' : ''}`;
 
         return `
-            <details class="assistant-reasoning-ribbon${isStreaming ? ' is-live' : ''}${reasoningState.source === 'generated' ? ' is-synthetic' : ''}" ${isStreaming ? 'open' : ''}>
-                <summary class="assistant-reasoning-ribbon__surface" aria-live="polite">
+            <div class="assistant-reasoning-ribbon${isStreaming ? ' is-live' : ''}${reasoningState.source === 'generated' ? ' is-synthetic' : ''}">
+                <div class="assistant-reasoning-ribbon__surface" aria-live="polite">
                     <span class="assistant-reasoning-ribbon__main">
                         <span class="assistant-reasoning-ribbon__icon" aria-hidden="true">
                             <i data-lucide="${reasoningState.icon}" class="w-3.5 h-3.5"></i>
                         </span>
                         <span class="assistant-reasoning-ribbon__copy">
                             <span class="assistant-reasoning-ribbon__title">${this.escapeHtml(reasoningState.title)}</span>
-                            <span class="assistant-reasoning-ribbon__preview${reasoningState.source === 'generated' ? ' assistant-reasoning-ribbon__preview--synthetic' : ''}">${this.escapeHtml(reasoningState.previewText || 'Reasoning data is available for this reply.')}</span>
+                            <span class="assistant-reasoning-ribbon__preview${reasoningState.source === 'generated' ? ' assistant-reasoning-ribbon__preview--synthetic' : ''}">${previewHtml}</span>
                         </span>
                     </span>
                     <span class="assistant-reasoning-ribbon__meta">
                         <span class="assistant-reasoning-ribbon__badge${reasoningState.live ? ' assistant-reasoning-ribbon__badge--live' : ''}">
                             ${reasoningState.live ? '<span class="assistant-reasoning-ribbon__pulse" aria-hidden="true"></span>Live' : 'History'}
                         </span>
-                        <span class="assistant-reasoning-ribbon__chevron" aria-hidden="true">
-                            <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
-                        </span>
                     </span>
-                </summary>
-                <div class="assistant-reasoning-ribbon__body${reasoningState.source === 'generated' ? ' assistant-reasoning-ribbon__body--synthetic' : ''}">${bodyHtml}</div>
-            </details>
+                </div>
+            </div>
         `;
     }
 

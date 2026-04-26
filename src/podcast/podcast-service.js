@@ -704,6 +704,7 @@ function buildResearchPrompt({
   durationMinutes,
   hosts,
   sources,
+  videoFormat = false,
 }) {
   const wordBudget = estimateWordBudget(durationMinutes);
   const turnCount = estimateTurnCount(durationMinutes);
@@ -739,6 +740,7 @@ Use only the sourced information below. Do not invent facts. If a point is uncer
 Write like a real podcast: light rapport, clean transitions, informative explanations, occasional reactions, but no filler overload.
 Keep each turn to one paragraph. No stage directions. No markdown. No URLs in spoken text.
 Open with a strong hook and end with a concise wrap-up.
+${videoFormat ? 'Structure the episode like a YouTube information show: cold open hook, quick setup, evidence beats, why-it-matters sections, and a concrete final takeaway. Keep it conversational, but make each segment feel intentional and paced for viewers.' : ''}
 Write for speech delivery, not for reading: use contractions, shorter sentences, and natural hand-offs.
 Avoid stacked statistics, semicolons, parenthetical asides, and phrasing that sounds like a report being read aloud.
 Spell out or rephrase awkward abbreviations and symbols so Piper can read them smoothly.
@@ -912,6 +914,7 @@ class PodcastService {
     models = [],
     reasoningEffort,
     requestTimeoutMs = DEFAULT_PODCAST_SCRIPT_REQUEST_TIMEOUT_MS,
+    videoFormat = false,
   }) {
     const modelCandidates = uniqueOrdered(Array.isArray(models) ? models : [models]);
     const prompt = buildResearchPrompt({
@@ -921,6 +924,7 @@ class PodcastService {
       durationMinutes,
       hosts,
       sources,
+      videoFormat,
     });
     const allowedSpeakers = new Set(hosts.map((host) => host.name));
     let lastError = null;
@@ -1233,6 +1237,7 @@ class PodcastService {
       models: resolvePodcastScriptModelCandidates(params, context),
       reasoningEffort: params.reasoningEffort || context.reasoningEffort || undefined,
       requestTimeoutMs: podcastScriptRequestTimeoutMs,
+      videoFormat: params.includeVideo === true,
     });
     const turnVoicePlan = resolveTurnVoicePlan(script.turns, hosts, {
       cycleHostVoices: params.cycleHostVoices === true,

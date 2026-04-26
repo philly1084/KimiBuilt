@@ -20,14 +20,26 @@ const WEB_CLI_TASK_TYPE = 'chat';
 const WEB_CLI_CLIENT_SURFACE = 'web-cli';
 const WEB_CLI_REMOTE_BUILD_AUTONOMY_APPROVED = true;
 const WEB_CLI_SESSION_ISOLATION = true;
+const WEB_CLI_ACTIVE_SESSION_KEY = 'codecli-active-session-id';
 
 class WebCLIAPI {
     constructor() {
-        this.sessionId = null;
+        this.sessionId = localStorage.getItem(WEB_CLI_ACTIVE_SESSION_KEY) || null;
         this.currentModel = null;
         this.models = [];
         this.connectionStatus = 'unknown';
         this.lastHealthCheck = null;
+    }
+
+    persistActiveSessionId(sessionId = null) {
+        const normalized = String(sessionId || '').trim();
+        this.sessionId = normalized || null;
+        if (this.sessionId) {
+            localStorage.setItem(WEB_CLI_ACTIVE_SESSION_KEY, this.sessionId);
+        } else {
+            localStorage.removeItem(WEB_CLI_ACTIVE_SESSION_KEY);
+        }
+        return this.sessionId;
     }
 
     async parseErrorResponse(response) {
@@ -361,7 +373,7 @@ class WebCLIAPI {
 
             const responseSessionId = response.headers.get('X-Session-Id');
             if (responseSessionId) {
-                this.sessionId = responseSessionId;
+                this.persistActiveSessionId(responseSessionId);
             }
 
             const reader = response.body.getReader();
@@ -400,7 +412,7 @@ class WebCLIAPI {
                             }
                             const content = this.extractStreamContent(parsed);
                             const streamSessionId = this.extractStreamSessionId(parsed);
-                            this.sessionId = streamSessionId || this.sessionId;
+                            this.persistActiveSessionId(streamSessionId || this.sessionId);
                             pendingDone.sessionId = this.sessionId || pendingDone.sessionId;
                             const completedToolEvents = this.extractCompletedToolEvents(parsed);
                             if (completedToolEvents.length > 0) {
@@ -520,7 +532,7 @@ class WebCLIAPI {
 
             const data = await response.json();
             if (data.sessionId) {
-                this.sessionId = data.sessionId;
+                this.persistActiveSessionId(data.sessionId);
             }
             return data;
         } catch (error) {
@@ -551,7 +563,7 @@ class WebCLIAPI {
 
             const data = await response.json();
             if (data.sessionId) {
-                this.sessionId = data.sessionId;
+                this.persistActiveSessionId(data.sessionId);
             }
             return data;
         } catch (error) {
@@ -596,7 +608,7 @@ class WebCLIAPI {
 
             const data = await response.json();
             if (data.sessionId) {
-                this.sessionId = data.sessionId;
+                this.persistActiveSessionId(data.sessionId);
             }
             return data;
         } catch (error) {
@@ -826,7 +838,7 @@ class WebCLIAPI {
         }
 
         const session = await response.json();
-        this.sessionId = session?.id || null;
+        this.persistActiveSessionId(session?.id || null);
         return session;
     }
 
@@ -859,8 +871,32 @@ class WebCLIAPI {
         }
 
         const data = await response.json();
-        this.sessionId = data.activeSessionId || null;
+        this.persistActiveSessionId(data.activeSessionId || sessionId || null);
         return data;
+    }
+
+    async deleteSession(sessionId = this.sessionId) {
+        const normalizedSessionId = String(sessionId || '').trim();
+        if (!normalizedSessionId) {
+            throw new Error('No session id provided');
+        }
+
+        const response = await this.fetchWithTimeout(
+            `${BASE_URL_WITHOUT_API}/api/sessions/${encodeURIComponent(normalizedSessionId)}`,
+            {
+                method: 'DELETE',
+                headers: { 'Accept': 'application/json' },
+            },
+            10000
+        );
+
+        if (!response.ok && response.status !== 204) {
+            throw new Error(`Failed to delete session: HTTP ${response.status}`);
+        }
+
+        if (this.sessionId === normalizedSessionId) {
+            this.persistActiveSessionId(null);
+        }
     }
 
     async getSessionMessages(sessionId = this.sessionId, limit = 100) {
@@ -912,7 +948,7 @@ class WebCLIAPI {
     }
 
     setSessionId(sessionId) {
-        this.sessionId = sessionId || null;
+        this.persistActiveSessionId(sessionId);
     }
 
     // Alias for checkHealth to match app expectations
@@ -921,7 +957,7 @@ class WebCLIAPI {
     }
 
     clearSession() {
-        this.sessionId = null;
+        this.persistActiveSessionId(null);
     }
 }
 

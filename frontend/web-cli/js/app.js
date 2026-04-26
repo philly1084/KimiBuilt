@@ -44,7 +44,7 @@ class CodeCLIApp {
         
         // Available commands for autocomplete
         this.commands = [
-            '/help', '/?', '/clear', '/cls', '/new', '/sessions', '/switch', '/models', '/model', '/theme', '/voxel',
+            '/help', '/?', '/clear', '/cls', '/new', '/sessions', '/switch', '/delete', '/models', '/model', '/theme', '/voxel',
             '/export', '/save', '/load', '/copy', '/image', '/image-models', '/unsplash', '/diagram',
             '/upload', '/session', '/history', '/artifacts', '/stats', '/shortcuts', '/keys', '/health', '/tools', '/tool', '/tool-help',
             '/files', '/ls', '/download', '/open', '/pet', '/spawn', '/agent', '/voxel-agent', '/random-agent', '/creator', '/voxel-creator',
@@ -1121,6 +1121,11 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
             case 'switch':
                 await this.switchSession(args[0]);
                 break;
+            case 'delete':
+            case 'del':
+            case 'rm':
+                await this.deleteSession(args[0]);
+                break;
             case 'models':
                 await this.listModels();
                 break;
@@ -1363,7 +1368,14 @@ Session Statistics:
     async restoreSharedSession() {
         try {
             const data = await api.getSessionState();
-            const activeSessionId = String(data.activeSessionId || '').trim();
+            const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+            const storedSessionId = String(api.sessionId || '').trim();
+            const activeSessionId = String(
+                data.activeSessionId
+                || (storedSessionId && sessions.some((session) => session.id === storedSessionId) ? storedSessionId : '')
+                || sessions[0]?.id
+                || '',
+            ).trim();
 
             if (!activeSessionId) {
                 this.updateSessionInfo();
@@ -1372,7 +1384,10 @@ Session Statistics:
 
             api.setSessionId(activeSessionId);
             this.updateSessionInfo();
-            this.printSystem(`Connected to isolated session ${activeSessionId.slice(0, 8)}...`);
+            await this.renderPersistedSessionHistory(activeSessionId, {
+                clear: false,
+                intro: `Connected to isolated session ${activeSessionId.slice(0, 8)}...`,
+            });
         } catch (error) {
             console.warn('Failed to restore isolated session:', error);
         }
@@ -1422,6 +1437,56 @@ Session Statistics:
         this.terminalOutput.appendChild(line);
         this.scrollToBottom();
         this.finishAIContentLine(line);
+    }
+
+    printHistoryMessage(message = {}) {
+        const role = String(message.role || '').toLowerCase();
+        const content = String(message.displayContent || message.content || '').trim();
+        if (!content) {
+            return;
+        }
+
+        if (role === 'user') {
+            this.printInput(content);
+            return;
+        }
+
+        if (role === 'system') {
+            this.printSystem(content);
+            return;
+        }
+
+        this.printAI(content);
+    }
+
+    async renderPersistedSessionHistory(sessionId = api.sessionId, options = {}) {
+        const normalizedSessionId = String(sessionId || '').trim();
+        if (!normalizedSessionId) {
+            return;
+        }
+
+        const {
+            clear = true,
+            intro = '',
+            limit = 200,
+        } = options;
+
+        if (clear) {
+            this.printWelcome();
+        }
+
+        if (intro) {
+            this.printSystem(intro);
+        }
+
+        const messages = await api.getSessionMessages(normalizedSessionId, limit);
+        if (!messages.length) {
+            this.printSystem('No persisted backend history for this session yet.');
+            return;
+        }
+
+        messages.forEach((message) => this.printHistoryMessage(message));
+        this.printSystem(`Loaded ${messages.length} persisted message${messages.length === 1 ? '' : 's'}.`);
     }
 
     finishAIContentLine(line) {
@@ -1560,6 +1625,7 @@ Session Statistics:
   /new [name]        Start a fresh isolated backend session
   /sessions          List isolated Voxel CLI sessions
   /switch <id>       Switch to a session by number, id, or id prefix
+  /delete <id>       Delete a session by number, id, or id prefix
   /theme [name]      Set voxel or a shared web-chat theme
   /theme list        Show available shared themes
   /voxel             Switch back to the voxel CLI theme
@@ -1602,6 +1668,7 @@ Session Statistics:
   /session new       Start a fresh isolated backend session
   /session list      List isolated Voxel CLI sessions
   /session switch    Switch to a session by number, id, or id prefix
+  /session delete    Delete a session by number, id, or id prefix
   /history           Show persisted isolated session history
   /artifacts         Show persisted isolated session artifacts
   /stats             Show session statistics
@@ -3203,7 +3270,12 @@ ${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${p
             return;
         }
 
-        this.printError('Usage: /session, /session new [name], /session list, or /session switch <id>');
+        if (['delete', 'del', 'rm'].includes(subcommand)) {
+            await this.deleteSession(args[1]);
+            return;
+        }
+
+        this.printError('Usage: /session, /session new [name], /session list, /session switch <id>, or /session delete <id>');
     }
 
     async startNewSession(name = '') {
@@ -3271,9 +3343,63 @@ ${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${p
             await api.setActiveSession(session.id);
             this.resetLocalSessionState();
             this.updateSessionInfo();
-            this.printSystem(`Switched to isolated session ${session.id.slice(0, 8)}... (${this.getSessionDisplayName(session)})`);
+            await this.renderPersistedSessionHistory(session.id, {
+                clear: true,
+                intro: `Switched to isolated session ${session.id.slice(0, 8)}... (${this.getSessionDisplayName(session)})`,
+            });
         } catch (error) {
             this.printError(`Failed to switch session: ${error.message}`);
+        }
+    }
+
+    async deleteSession(sessionRef = '') {
+        const ref = String(sessionRef || '').trim();
+        if (!ref) {
+            this.printError('Usage: /delete <number-or-session-id>');
+            return;
+        }
+
+        try {
+            const data = await api.getSessionState();
+            const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+            const numericIndex = Number(ref);
+            const session = Number.isInteger(numericIndex) && numericIndex >= 1
+                ? sessions[numericIndex - 1]
+                : sessions.find((candidate) => candidate.id === ref || candidate.id.startsWith(ref));
+
+            if (!session) {
+                this.printError(`Session not found: ${ref}`);
+                return;
+            }
+
+            const previousActiveSessionId = api.sessionId || data.activeSessionId || null;
+            await api.deleteSession(session.id);
+            this.printSystem(`Deleted isolated session ${session.id.slice(0, 8)}... (${this.getSessionDisplayName(session)})`);
+
+            const wasActive = session.id === previousActiveSessionId;
+            if (!wasActive) {
+                return;
+            }
+
+            const remaining = sessions.filter((candidate) => candidate.id !== session.id);
+            if (remaining[0]) {
+                await api.setActiveSession(remaining[0].id);
+                this.resetLocalSessionState();
+                this.updateSessionInfo();
+                await this.renderPersistedSessionHistory(remaining[0].id, {
+                    clear: true,
+                    intro: `Selected isolated session ${remaining[0].id.slice(0, 8)}... (${this.getSessionDisplayName(remaining[0])})`,
+                });
+                return;
+            }
+
+            api.clearSession();
+            this.resetLocalSessionState();
+            this.updateSessionInfo();
+            this.printWelcome();
+            this.printSystem('No Voxel CLI sessions remain. Use /new to start one.');
+        } catch (error) {
+            this.printError(`Failed to delete session: ${error.message}`);
         }
     }
     

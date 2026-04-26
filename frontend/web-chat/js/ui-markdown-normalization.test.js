@@ -155,4 +155,26 @@ Variations | Variation | What changes | |-----------|--------------| | Spicy | A
         expect(html).not.toContain('[truncated');
         expect(html).not.toContain('...');
     });
+
+    test('renders live reasoning as a header without a duplicate dropdown body', () => {
+        const helper = Object.create(loadUIHelpersPrototype());
+        const html = helper.buildAssistantRenderPlan({
+            role: 'assistant',
+            content: '',
+            isStreaming: true,
+            reasoningDisplaySource: 'generated',
+            reasoningDisplayText: { text: 'Checking the next useful step.' },
+            reasoningDisplayFullText: { text: 'Checking the next useful step.' },
+            reasoningDisplayTitle: 'Live reasoning',
+            reasoningDisplayIcon: 'sparkles',
+        }, true).html;
+
+        expect(html).toContain('assistant-reasoning-ribbon__surface');
+        expect(html).toContain('Live reasoning');
+        expect(html).toContain('Checking the next useful step.');
+        expect(html).not.toContain('<details');
+        expect(html).not.toContain('<summary');
+        expect(html).not.toContain('assistant-reasoning-ribbon__body');
+        expect(html).not.toContain('chevron-down');
+    });
 });

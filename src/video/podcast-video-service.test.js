@@ -30,6 +30,22 @@ describe('PodcastVideoService', () => {
     expect(scenes[2].end).toBeCloseTo(24);
   });
 
+  test('uses fourteen rotating visuals by default when scene count is not provided', async () => {
+    const service = new PodcastVideoService({
+      createResponse: jest.fn(),
+    });
+
+    const result = await service.planStoryboard({
+      title: 'Particle physics news',
+      transcript: 'A new result changes the discussion. Researchers explain what it means. The next experiment will narrow the uncertainty.',
+      durationSeconds: 280,
+      useModel: false,
+    });
+
+    expect(result.scenes).toHaveLength(14);
+    expect(service.getPublicConfig().defaults.sceneCount).toBe(14);
+  });
+
   test('uses local planning when model planning is disabled', async () => {
     const service = new PodcastVideoService({
       createResponse: jest.fn(),
@@ -78,6 +94,7 @@ describe('PodcastVideoService', () => {
       maxFfmpegTimeoutMs: 300000,
       x264Preset: 'ultrafast',
       x264Crf: 28,
+      renderMode: 'storyboard',
     });
 
     expect(result.buffer).toEqual(Buffer.from('mp4'));
@@ -94,6 +111,116 @@ describe('PodcastVideoService', () => {
     expect(ffmpegCalls[1].options).toEqual(expect.objectContaining({
       timeoutMs: 210000,
       stage: 'final mux',
+    }));
+  });
+
+  test('defaults to multiple stable H.264 AVC scene-card renders for compatibility', async () => {
+    const service = new PodcastVideoService({
+      audioProcessingService: {
+        assertConfigured: jest.fn(),
+        getEffectiveBinaryPath: () => 'ffmpeg',
+      },
+      isUnsplashConfigured: () => false,
+    });
+    const ffmpegCalls = [];
+    jest.spyOn(service, 'runFfmpeg').mockImplementation(async (args, options) => {
+      ffmpegCalls.push({ args, options });
+      await fs.writeFile(args[args.length - 1], Buffer.from('mp4'));
+      return { stdout: '', stderr: '' };
+    });
+
+    const result = await service.renderMp4({
+      audioBuffer: Buffer.from('audio'),
+      title: 'Particle physics news',
+      imageMode: 'fallback',
+      scenes: [
+        {
+          start: 0,
+          end: 30,
+          summary: 'Collider result update',
+          visualPrompt: 'particle detector show card',
+        },
+        {
+          start: 30,
+          end: 60,
+          summary: 'Why it matters',
+          visualPrompt: 'science news studio monitor wall',
+        },
+      ],
+      muxTimeoutMs: 100000,
+      maxFfmpegTimeoutMs: 300000,
+    });
+
+    expect(result.renderMode).toBe('storyboard');
+    expect(ffmpegCalls).toHaveLength(3);
+    expect(ffmpegCalls[0].args).toEqual(expect.arrayContaining([
+      '-loop', '1',
+      '-c:v', 'libx264',
+      '-profile:v', 'main',
+      '-level:v', '4.1',
+      '-pix_fmt', 'yuv420p',
+      '-tag:v', 'avc1',
+    ]));
+    expect(ffmpegCalls[0].args.join(' ')).not.toContain('zoompan');
+    expect(ffmpegCalls[0].args.join(' ')).not.toContain('fade=t');
+    expect(ffmpegCalls[2].args).toEqual(expect.arrayContaining([
+      '-f', 'concat',
+      '-c:v', 'libx264',
+      '-tag:v', 'avc1',
+      '-c:a', 'aac',
+      '-ac', '2',
+      '-ar', '48000',
+    ]));
+    expect(ffmpegCalls[0].options).toEqual(expect.objectContaining({
+      timeoutMs: 240000,
+      stage: 'scene 1/2',
+    }));
+    expect(result.scenes[0].image).toEqual(expect.objectContaining({
+      source: 'fallback',
+    }));
+  });
+
+  test('supports explicit single static-card mode when requested', async () => {
+    const service = new PodcastVideoService({
+      audioProcessingService: {
+        assertConfigured: jest.fn(),
+        getEffectiveBinaryPath: () => 'ffmpeg',
+      },
+      isUnsplashConfigured: () => false,
+    });
+    const ffmpegCalls = [];
+    jest.spyOn(service, 'runFfmpeg').mockImplementation(async (args, options) => {
+      ffmpegCalls.push({ args, options });
+      await fs.writeFile(args[args.length - 1], Buffer.from('mp4'));
+      return { stdout: '', stderr: '' };
+    });
+
+    const result = await service.renderMp4({
+      audioBuffer: Buffer.from('audio'),
+      title: 'Particle physics news',
+      imageMode: 'fallback',
+      scenes: [{
+        start: 0,
+        end: 60,
+        summary: 'Collider result update',
+        visualPrompt: 'particle detector show card',
+      }],
+      renderMode: 'static-card',
+      muxTimeoutMs: 100000,
+      maxFfmpegTimeoutMs: 300000,
+    });
+
+    expect(result.renderMode).toBe('static-card');
+    expect(ffmpegCalls).toHaveLength(1);
+    expect(ffmpegCalls[0].args).toEqual(expect.arrayContaining([
+      '-loop', '1',
+      '-c:v', 'libx264',
+      '-tag:v', 'avc1',
+      '-c:a', 'aac',
+    ]));
+    expect(ffmpegCalls[0].options).toEqual(expect.objectContaining({
+      timeoutMs: 180000,
+      stage: 'static show-card render',
     }));
   });
 

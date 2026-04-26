@@ -34,6 +34,7 @@ const DEFAULT_WIDTH = 1280;
 const DEFAULT_HEIGHT = 720;
 const DEFAULT_FPS = 30;
 const DEFAULT_SCENE_SECONDS = 8;
+const DEFAULT_STORYBOARD_SCENE_COUNT = 14;
 const MIN_SCENE_SECONDS = 4;
 const MAX_SCENES = 36;
 const DEFAULT_SEGMENT_TIMEOUT_MS = 240000;
@@ -41,6 +42,7 @@ const DEFAULT_MUX_TIMEOUT_MS = 900000;
 const DEFAULT_MAX_FFMPEG_TIMEOUT_MS = 1800000;
 const DEFAULT_X264_PRESET = 'veryfast';
 const DEFAULT_X264_CRF = 23;
+const DEFAULT_RENDER_MODE = 'storyboard';
 const X264_PRESETS = new Set([
   'ultrafast',
   'superfast',
@@ -52,6 +54,7 @@ const X264_PRESETS = new Set([
   'slower',
   'veryslow',
 ]);
+const RENDER_MODES = new Set(['static-card', 'storyboard']);
 
 function createServiceError(statusCode, message, code = 'podcast_video_error') {
   const error = new Error(message);
@@ -90,6 +93,32 @@ function normalizePositiveInteger(value, fallback) {
   return Math.floor(numeric);
 }
 
+function normalizeRenderMode(value = DEFAULT_RENDER_MODE) {
+  const normalized = String(value || DEFAULT_RENDER_MODE).trim().toLowerCase();
+  if (normalized === 'single-image' || normalized === 'single-picture' || normalized === 'static') {
+    return 'static-card';
+  }
+  if (normalized === 'scenes' || normalized === 'multi-scene') {
+    return 'storyboard';
+  }
+  return RENDER_MODES.has(normalized) ? normalized : DEFAULT_RENDER_MODE;
+}
+
+function resolveDefaultStoryboardSceneCount() {
+  return clampNumber(
+    config.podcastVideo?.defaultSceneCount,
+    1,
+    MAX_SCENES,
+    DEFAULT_STORYBOARD_SCENE_COUNT,
+  );
+}
+
+function resolveStoryboardSceneCount(sceneCount) {
+  return Number.isFinite(Number(sceneCount)) && Number(sceneCount) > 0
+    ? clampNumber(sceneCount, 1, MAX_SCENES, resolveDefaultStoryboardSceneCount())
+    : resolveDefaultStoryboardSceneCount();
+}
+
 function resolvePodcastVideoRuntimeOptions(options = {}) {
   const configured = config.podcastVideo || {};
   const maxFfmpegTimeoutMs = normalizePositiveInteger(
@@ -113,6 +142,10 @@ function resolvePodcastVideoRuntimeOptions(options = {}) {
       ? configuredPreset
       : DEFAULT_X264_PRESET;
   const x264Crf = clampNumber(options.x264Crf ?? configured.x264Crf, 18, 32, DEFAULT_X264_CRF);
+  const x264Profile = String(options.x264Profile || configured.x264Profile || 'main').trim().toLowerCase() || 'main';
+  const x264Level = String(options.x264Level || configured.x264Level || '4.1').trim() || '4.1';
+  const codecTag = String(options.codecTag || configured.codecTag || 'avc1').trim().toLowerCase() || 'avc1';
+  const renderMode = normalizeRenderMode(options.renderMode || configured.renderMode || DEFAULT_RENDER_MODE);
 
   return {
     maxFfmpegTimeoutMs,
@@ -120,6 +153,10 @@ function resolvePodcastVideoRuntimeOptions(options = {}) {
     muxTimeoutMs: Math.min(maxFfmpegTimeoutMs, muxTimeoutMs),
     x264Preset,
     x264Crf,
+    x264Profile,
+    x264Level,
+    codecTag,
+    renderMode,
   };
 }
 
@@ -134,6 +171,18 @@ function resolveAdaptiveFfmpegTimeoutMs(baseTimeoutMs, durationSeconds, {
     normalizePositiveInteger(maxTimeoutMs, DEFAULT_MAX_FFMPEG_TIMEOUT_MS),
     Math.max(normalizePositiveInteger(baseTimeoutMs, 1000), adaptiveTimeoutMs),
   );
+}
+
+function buildCompatibleH264VideoArgs(runtime = {}) {
+  return [
+    '-c:v', 'libx264',
+    '-preset', runtime.x264Preset || DEFAULT_X264_PRESET,
+    '-crf', String(runtime.x264Crf || DEFAULT_X264_CRF),
+    '-profile:v', runtime.x264Profile || 'main',
+    '-level:v', runtime.x264Level || '4.1',
+    '-pix_fmt', 'yuv420p',
+    '-tag:v', runtime.codecTag || 'avc1',
+  ];
 }
 
 function uniqueOrdered(items = []) {
@@ -237,7 +286,7 @@ function normalizeScene(scene = {}, index = 0) {
   };
 }
 
-function buildFallbackStoryboard({ title = '', transcript = '', turns = [], durationSeconds = 0, sceneCount = 0 } = {}) {
+function buildFallbackStoryboard({ title = '', transcript = '', turns = [], durationSeconds = 0, sceneCount = null } = {}) {
   const normalizedTurns = (Array.isArray(turns) ? turns : [])
     .map((turn) => ({
       speaker: sanitizeText(turn?.speaker || ''),
@@ -249,10 +298,10 @@ function buildFallbackStoryboard({ title = '', transcript = '', turns = [], dura
     : splitTranscriptSegments(transcript);
   const totalWords = Math.max(1, segments.reduce((sum, segment) => sum + wordCount(segment), 0));
   const desiredSceneCount = clampNumber(
-    sceneCount,
+    resolveStoryboardSceneCount(sceneCount),
     1,
     MAX_SCENES,
-    Math.max(1, Math.min(MAX_SCENES, Math.ceil((durationSeconds || segments.length * DEFAULT_SCENE_SECONDS) / DEFAULT_SCENE_SECONDS))),
+    DEFAULT_STORYBOARD_SCENE_COUNT,
   );
   const grouped = [];
 
@@ -260,10 +309,10 @@ function buildFallbackStoryboard({ title = '', transcript = '', turns = [], dura
     const words = segments.join(' ').split(/\s+/).filter(Boolean);
     const wordsPerScene = Math.max(1, Math.ceil(words.length / desiredSceneCount));
     for (let index = 0; index < desiredSceneCount; index += 1) {
-      const chunk = words.slice(index * wordsPerScene, (index + 1) * wordsPerScene).join(' ');
-      if (chunk) {
-        grouped.push([chunk]);
-      }
+      const fallbackStart = Math.max(0, words.length - wordsPerScene);
+      const start = Math.min(index * wordsPerScene, fallbackStart);
+      const chunk = words.slice(start, start + wordsPerScene).join(' ');
+      grouped[index] = [chunk || sanitizeText(title) || `Visual ${index + 1}`];
     }
   } else {
     let assignedWords = 0;
@@ -280,7 +329,14 @@ function buildFallbackStoryboard({ title = '', transcript = '', turns = [], dura
     }
   }
 
-  const compactGroups = grouped.filter((group) => Array.isArray(group) && group.length > 0);
+  const fallbackText = sanitizeText(segments.join(' ') || title) || 'Podcast episode';
+  for (let index = 0; index < desiredSceneCount; index += 1) {
+    if (!Array.isArray(grouped[index]) || grouped[index].length === 0) {
+      grouped[index] = [`${fallbackText} visual ${index + 1}`];
+    }
+  }
+
+  const compactGroups = grouped.slice(0, desiredSceneCount).filter((group) => Array.isArray(group) && group.length > 0);
   if (compactGroups.length === 0) {
     compactGroups.push([sanitizeText(title) || 'Podcast episode']);
   }
@@ -326,6 +382,47 @@ function buildFallbackStoryboard({ title = '', transcript = '', turns = [], dura
   });
 }
 
+function buildShowCardScene({
+  title = '',
+  transcript = '',
+  scenes = [],
+  durationSeconds = 0,
+} = {}) {
+  const normalizedTitle = sanitizeText(title) || 'Podcast video';
+  const sceneSummaries = (Array.isArray(scenes) ? scenes : [])
+    .map((scene) => sanitizeText(scene?.summary || scene?.caption || scene?.visualQuery || ''))
+    .filter(Boolean)
+    .slice(0, 5);
+  const transcriptSummary = splitTranscriptSegments(transcript)
+    .slice(0, 3)
+    .join(' ')
+    .slice(0, 240);
+  const showBeats = uniqueOrdered([
+    ...sceneSummaries,
+    transcriptSummary,
+  ]).join(' | ');
+  const firstScene = Array.isArray(scenes) ? scenes.find((scene) => scene?.imageUrl) : null;
+
+  return normalizeScene({
+    start: 0,
+    end: Math.max(MIN_SCENE_SECONDS, Number(durationSeconds) || DEFAULT_SCENE_SECONDS),
+    summary: normalizedTitle,
+    caption: sceneSummaries[0] || transcriptSummary || normalizedTitle,
+    visualQuery: `${normalizedTitle} science news explainer show studio`,
+    visualPrompt: [
+      'Single static key visual for a polished YouTube science news information show.',
+      'Modern editorial studio card, presenter desk, monitor wall, clean data graphics, cinematic lighting, high production value.',
+      'Use one stable composition suitable for a full podcast episode background.',
+      'No readable text, no logos, no watermarks, no distorted typography.',
+      `Topic: ${normalizedTitle}.`,
+      showBeats ? `Episode beats: ${showBeats}.` : '',
+    ].filter(Boolean).join(' '),
+    imageUrl: firstScene?.imageUrl || null,
+    imageSource: firstScene?.imageSource || null,
+    attribution: firstScene?.attribution || null,
+  }, 0);
+}
+
 function buildStoryboardPrompt({
   title = '',
   transcript = '',
@@ -335,10 +432,10 @@ function buildStoryboardPrompt({
   visualStyle = '',
 } = {}) {
   const targetSceneCount = clampNumber(
-    sceneCount,
+    resolveStoryboardSceneCount(sceneCount),
     1,
     MAX_SCENES,
-    Math.max(4, Math.min(MAX_SCENES, Math.ceil((durationSeconds || 60) / DEFAULT_SCENE_SECONDS))),
+    DEFAULT_STORYBOARD_SCENE_COUNT,
   );
   const turnTranscript = (Array.isArray(turns) ? turns : [])
     .map((turn) => `${sanitizeText(turn?.speaker)}: ${sanitizeText(turn?.text)}`)
@@ -346,17 +443,18 @@ function buildStoryboardPrompt({
     .join('\n');
 
   return [
-    'Create a timestamped visual storyboard for a podcast video.',
+    'Create a timestamped YouTube information-show rundown and visual storyboard for a podcast video.',
     `Title: ${sanitizeText(title) || 'Podcast episode'}`,
     `Duration seconds: ${Math.max(0, Number(durationSeconds) || 0) || 'unknown'}`,
     `Target scenes: ${targetSceneCount}`,
-    `Visual style: ${sanitizeText(visualStyle) || 'editorial documentary, polished, realistic, minimal on-screen text'}`,
+    `Visual style: ${sanitizeText(visualStyle) || 'YouTube science/news explainer show, polished editorial pacing, strong hook, evidence beats, viewer takeaway, minimal on-screen text'}`,
     '',
     'Return valid JSON only with this shape:',
     '{"scenes":[{"start":0,"end":8,"summary":"...","caption":"...","visualQuery":"...","visualPrompt":"..."}]}',
     '',
     'Rules:',
     '- Scene times must cover the whole episode in order without overlaps.',
+    '- Treat scenes as show segments: hook, context, evidence, stakes, implications, and takeaway.',
     '- visualQuery should be short and useful for Unsplash search.',
     '- visualPrompt should be specific enough for image generation and must request no text in the image.',
     '- Captions should be concise excerpts aligned to the audio segment.',
@@ -499,7 +597,9 @@ class PodcastVideoService {
         aspectRatio: '16:9',
         fps: DEFAULT_FPS,
         sceneSeconds: DEFAULT_SCENE_SECONDS,
+        sceneCount: resolveDefaultStoryboardSceneCount(),
         maxScenes: MAX_SCENES,
+        renderMode: runtime.renderMode,
       },
       timeouts: {
         segmentMs: runtime.segmentTimeoutMs,
@@ -507,9 +607,15 @@ class PodcastVideoService {
         maxFfmpegMs: runtime.maxFfmpegTimeoutMs,
       },
       encoder: {
-        videoCodec: 'libx264',
+        container: 'mp4',
+        videoCodec: 'h264-avc',
+        codecTag: runtime.codecTag,
+        profile: runtime.x264Profile,
+        level: runtime.x264Level,
         preset: runtime.x264Preset,
         crf: runtime.x264Crf,
+        pixelFormat: 'yuv420p',
+        audioCodec: 'aac',
       },
       diagnostics: diagnostics?.diagnostics || diagnostics,
     };
@@ -672,7 +778,9 @@ class PodcastVideoService {
         ? params.script.turns
         : [];
     const durationSeconds = Math.max(0, Number(params.durationSeconds || params.duration_seconds || 0) || 0);
-    const sceneCount = clampNumber(params.sceneCount, 0, MAX_SCENES, 0);
+    const sceneCount = Number.isFinite(Number(params.sceneCount)) && Number(params.sceneCount) > 0
+      ? clampNumber(params.sceneCount, 1, MAX_SCENES, resolveDefaultStoryboardSceneCount())
+      : undefined;
     const visualStyle = sanitizeText(params.visualStyle || params.style || '');
 
     if (!transcript && turns.length === 0) {
@@ -957,6 +1065,81 @@ class PodcastVideoService {
     return assets;
   }
 
+  async renderStaticCardMp4({
+    audioPath,
+    outputPath,
+    tempDir,
+    scenes = [],
+    title = 'Podcast video',
+    transcript = '',
+    durationSeconds = 0,
+    dimensions,
+    imageMode = 'mixed',
+    generateImages = false,
+    imageModel = null,
+    runtime,
+    toolManager = null,
+    toolContext = {},
+  } = {}) {
+    const showCardScene = buildShowCardScene({
+      title,
+      transcript,
+      scenes,
+      durationSeconds,
+    });
+    const image = await this.resolveSceneImage(showCardScene, {
+      tempDir,
+      width: dimensions.width,
+      height: dimensions.height,
+      orientation: dimensions.orientation,
+      imageMode,
+      generateImages,
+      imageModel,
+      toolManager,
+      toolContext,
+    });
+    const imagePath = path.join(tempDir, `show-card.${image.extension || 'png'}`);
+    await fs.writeFile(imagePath, image.buffer);
+
+    await this.runFfmpeg([
+      '-y',
+      '-loop', '1',
+      '-framerate', String(DEFAULT_FPS),
+      '-i', imagePath,
+      '-i', audioPath,
+      '-vf', [
+        `scale=${dimensions.width}:${dimensions.height}:force_original_aspect_ratio=increase`,
+        `crop=${dimensions.width}:${dimensions.height}`,
+        'format=yuv420p',
+      ].join(','),
+      '-map', '0:v:0',
+      '-map', '1:a:0',
+      '-shortest',
+      '-r', String(DEFAULT_FPS),
+      ...buildCompatibleH264VideoArgs(runtime),
+      '-c:a', 'aac',
+      '-b:a', '192k',
+      '-ac', '2',
+      '-ar', '48000',
+      '-movflags', '+faststart',
+      outputPath,
+    ], {
+      timeoutMs: resolveAdaptiveFfmpegTimeoutMs(runtime.muxTimeoutMs, durationSeconds, {
+        fixedMs: 120000,
+        perSecondMs: 1000,
+        maxTimeoutMs: runtime.maxFfmpegTimeoutMs,
+      }),
+      stage: 'static show-card render',
+    });
+
+    return {
+      source: image.source || 'fallback',
+      url: image.url || null,
+      attribution: image.attribution || null,
+      revisedPrompt: image.revisedPrompt || null,
+    };
+  }
+
   async renderMp4({
     audioBuffer,
     audioMimeType = 'audio/wav',
@@ -972,6 +1155,7 @@ class PodcastVideoService {
     maxFfmpegTimeoutMs = null,
     x264Preset = null,
     x264Crf = null,
+    renderMode = null,
     toolManager = null,
     toolContext = {},
   } = {}) {
@@ -993,6 +1177,7 @@ class PodcastVideoService {
       maxFfmpegTimeoutMs,
       x264Preset,
       x264Crf,
+      renderMode,
     });
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-podcast-video-'));
     const audioExtension = String(audioMimeType || '').toLowerCase().includes('mpeg') ? 'mp3' : 'wav';
@@ -1002,6 +1187,40 @@ class PodcastVideoService {
 
     try {
       await fs.writeFile(audioPath, audioBuffer);
+      const totalDurationSeconds = normalizedScenes.reduce(
+        (sum, scene) => sum + Math.max(MIN_SCENE_SECONDS, Number(scene.duration) || 0),
+        0,
+      );
+
+      if (runtime.renderMode === 'static-card') {
+        const image = await this.renderStaticCardMp4({
+          audioPath,
+          outputPath,
+          tempDir,
+          scenes: normalizedScenes,
+          title,
+          transcript: normalizedScenes.map((scene) => scene.narration || scene.caption || '').join(' '),
+          durationSeconds: totalDurationSeconds,
+          dimensions,
+          imageMode,
+          generateImages,
+          imageModel,
+          runtime,
+          toolManager,
+          toolContext,
+        });
+
+        return {
+          buffer: await fs.readFile(outputPath),
+          scenes: normalizedScenes.map((scene) => ({
+            ...scene,
+            image,
+          })),
+          dimensions,
+          renderMode: runtime.renderMode,
+        };
+      }
+
       const imageAssets = await this.prepareSceneImages(normalizedScenes, {
         tempDir,
         width: dimensions.width,
@@ -1019,10 +1238,6 @@ class PodcastVideoService {
         const asset = imageAssets[index];
         const segmentPath = path.join(tempDir, `segment-${String(index + 1).padStart(3, '0')}.mp4`);
         segmentPaths.push(segmentPath);
-        const fadeOutStart = Math.max(0, scene.duration - 0.35);
-        const panDirection = index % 2 === 0
-          ? "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
-          : "x='iw/2-(iw/zoom/2)+(iw-iw/zoom)*0.06':y='ih/2-(ih/zoom/2)'";
         await this.runFfmpeg([
           '-y',
           '-loop', '1',
@@ -1032,17 +1247,11 @@ class PodcastVideoService {
           '-vf', [
             `scale=${dimensions.width}:${dimensions.height}:force_original_aspect_ratio=increase`,
             `crop=${dimensions.width}:${dimensions.height}`,
-            `zoompan=z='min(zoom+0.0009,1.08)':${panDirection}:d=1:s=${dimensions.width}x${dimensions.height}:fps=${DEFAULT_FPS}`,
-            'fade=t=in:st=0:d=0.25',
-            `fade=t=out:st=${fadeOutStart.toFixed(3)}:d=0.35`,
             'format=yuv420p',
           ].join(','),
           '-r', String(DEFAULT_FPS),
           '-an',
-          '-c:v', 'libx264',
-          '-preset', runtime.x264Preset,
-          '-crf', String(runtime.x264Crf),
-          '-pix_fmt', 'yuv420p',
+          ...buildCompatibleH264VideoArgs(runtime),
           segmentPath,
         ], {
           timeoutMs: resolveAdaptiveFfmpegTimeoutMs(runtime.segmentTimeoutMs, scene.duration, {
@@ -1068,15 +1277,18 @@ class PodcastVideoService {
         '-map', '0:v:0',
         '-map', '1:a:0',
         '-shortest',
-        '-c:v', 'copy',
+        '-r', String(DEFAULT_FPS),
+        ...buildCompatibleH264VideoArgs(runtime),
         '-c:a', 'aac',
         '-b:a', '192k',
+        '-ac', '2',
+        '-ar', '48000',
         '-movflags', '+faststart',
         outputPath,
       ], {
         timeoutMs: resolveAdaptiveFfmpegTimeoutMs(
           runtime.muxTimeoutMs,
-          normalizedScenes.reduce((sum, scene) => sum + Math.max(MIN_SCENE_SECONDS, Number(scene.duration) || 0), 0),
+          totalDurationSeconds,
           {
             fixedMs: 120000,
             perSecondMs: 1000,
@@ -1098,6 +1310,7 @@ class PodcastVideoService {
           },
         })),
         dimensions,
+        renderMode: runtime.renderMode,
       };
     } finally {
       await fs.rm(tempDir, { recursive: true, force: true });
@@ -1226,6 +1439,7 @@ class PodcastVideoService {
       maxFfmpegTimeoutMs: options.maxFfmpegTimeoutMs || options.videoMaxFfmpegTimeoutMs || null,
       x264Preset: options.x264Preset || options.videoX264Preset || null,
       x264Crf: options.x264Crf || options.videoX264Crf || null,
+      renderMode: options.renderMode || options.videoRenderMode || null,
       toolManager: options.toolManager || null,
       toolContext: options.toolContext || {},
     });
@@ -1242,6 +1456,7 @@ class PodcastVideoService {
         topic: sanitizeText(options.topic || title),
         durationSeconds,
         dimensions: rendered.dimensions,
+        renderMode: rendered.renderMode,
         imageMode: normalizeImageMode(options.imageMode || 'mixed'),
         generatedImagesEnabled: options.generateImages === true,
       },

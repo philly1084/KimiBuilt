@@ -54,8 +54,8 @@ Notes:
 - Each host keeps a stable primary voice unless you set `cycleHostVoices: true`; when a Piper render fails, the tool now falls through to the next voice in that host's pool by default.
 - Source verification still uses bounded parallelism by default. Podcast TTS concurrency is conservative by default; only raise `ttsConcurrency` if you need speed more than render stability.
 - MP3 export and intro/outro/music-bed mixing require ffmpeg audio processing to be configured.
-- MP4 podcast video rendering also requires ffmpeg. The video pipeline plans timestamped scenes from the transcript, then tries direct/provided images, web-search page image extraction, Unsplash, generated images when allowed, and deterministic fallback frames.
-- Still images are rendered with slow pan/zoom treatment and fade transitions, then muxed to the actual podcast audio timeframe.
+- MP4 podcast video rendering also requires ffmpeg. The default video render mode is `storyboard`: 14 stable scene visuals with hard cuts, encoded as H.264/AVC MP4 (`avc1`, yuv420p) with AAC audio for broad PC/browser compatibility.
+- Use `videoRenderMode: "static-card"` only when the user explicitly wants one key visual for the full episode. The storyboard pipeline plans timestamped show segments from the transcript, tries direct/provided images, web-search page image extraction, Unsplash, generated images when allowed, and deterministic fallback frames.
 - Long video renders use adaptive ffmpeg budgets. Override with `videoFfmpegTimeoutMs`, `videoSegmentTimeoutMs`, or `videoMuxTimeoutMs` only when the host is known to need more time.
 - Only use music beds you are licensed to use. Provide a legal audio file path or upload; do not source copyrighted music without permission.
 - Check `/api/tts/voices` for the exact `hostA` / `hostB` voice IDs supported in your current deployment before passing custom `hostAVoiceIds` and `hostBVoiceIds`.

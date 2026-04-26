@@ -310,6 +310,15 @@ const normalizedPodcastVideoX264Crf = Math.max(
     18,
     Math.min(32, parseOptionalInteger(process.env.PODCAST_VIDEO_X264_CRF) ?? 23),
 );
+const normalizedPodcastVideoDefaultSceneCount = Math.max(
+    1,
+    Math.min(36, parseOptionalInteger(process.env.PODCAST_VIDEO_DEFAULT_SCENE_COUNT) ?? 14),
+);
+const allowedPodcastVideoRenderModes = new Set(['static-card', 'storyboard']);
+const requestedPodcastVideoRenderMode = String(process.env.PODCAST_VIDEO_RENDER_MODE || '').trim().toLowerCase();
+const normalizedPodcastVideoRenderMode = allowedPodcastVideoRenderModes.has(requestedPodcastVideoRenderMode)
+    ? requestedPodcastVideoRenderMode
+    : 'storyboard';
 
 const config = {
     // Server
@@ -452,6 +461,11 @@ const config = {
         maxFfmpegTimeoutMs: normalizedPodcastVideoMaxFfmpegTimeoutMs,
         x264Preset: normalizedPodcastVideoX264Preset,
         x264Crf: normalizedPodcastVideoX264Crf,
+        x264Profile: 'main',
+        x264Level: '4.1',
+        codecTag: 'avc1',
+        renderMode: normalizedPodcastVideoRenderMode,
+        defaultSceneCount: normalizedPodcastVideoDefaultSceneCount,
     },
 
     auth: {

@@ -5206,14 +5206,6 @@ body.layout-minimal #input-meta-row {
     padding: 0.2rem 0.25rem 0;
 }
 
-.assistant-reasoning-ribbon > summary {
-    list-style: none;
-}
-
-.assistant-reasoning-ribbon > summary::-webkit-details-marker {
-    display: none;
-}
-
 .assistant-reasoning-ribbon__surface {
     display: flex;
     align-items: center;
@@ -5224,15 +5216,7 @@ body.layout-minimal #input-meta-row {
     border: 1px solid rgba(88, 166, 255, 0.16);
     border-radius: 0.95rem;
     background: rgba(88, 166, 255, 0.08);
-    cursor: pointer;
-    transition: border-color var(--transition-fast), background-color var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
-}
-
-.assistant-reasoning-ribbon__surface:hover {
-    transform: translateY(-1px);
-    border-color: rgba(88, 166, 255, 0.28);
-    background: rgba(88, 166, 255, 0.1);
-    box-shadow: 0 14px 28px rgba(5, 10, 18, 0.16);
+    cursor: default;
 }
 
 .assistant-reasoning-ribbon__toggle {
