@@ -1663,6 +1663,7 @@ class DocumentService {
     const heading = section.heading ? `<h${level + 1}>${this.escapeHtml(section.heading)}</h${level + 1}>` : '';
     const chromeLabel = sectionPlan.layout || 'narrative';
     const blocks = [
+      this.renderSectionImageHtml(section),
       this.renderRichTextBlocks(String(section.content || '')),
       this.renderBulletListHtml(section.bullets),
       this.renderCalloutHtml(section.callout),
@@ -1681,6 +1682,22 @@ class DocumentService {
           ${blocks}
         </div>
       </section>
+    `.trim();
+  }
+
+  renderSectionImageHtml(section = {}) {
+    const imageUrl = String(section.imageUrl || section.image_url || '').trim();
+    if (!/^https?:\/\//i.test(imageUrl) && !/^\/api\/artifacts\/[^/]+\/download/i.test(imageUrl)) {
+      return '';
+    }
+
+    const alt = section.imageAlt || section.image_alt || section.heading || 'Document image';
+    const caption = section.imageCaption || section.image_caption || section.caption || '';
+    return `
+      <figure class="document-image">
+        <img src="${this.escapeHtml(imageUrl)}" alt="${this.escapeHtml(alt)}" loading="lazy" />
+        ${caption ? `<figcaption>${this.escapeHtml(caption)}</figcaption>` : ''}
+      </figure>
     `.trim();
   }
 
@@ -2554,6 +2571,9 @@ class DocumentService {
         .section-chrome { display: flex; flex-direction: column; gap: 8px; }
         .section-number { font-size: 2rem; line-height: 1; font-weight: 800; color: var(--doc-accent); }
         .section-content h2, .section-content h3, .section-content h4, .section-content h5, .section-content h6 { color: var(--doc-text); margin-top: 0; }
+        .document-image { margin: 0 0 20px; }
+        .document-image img { width: 100%; max-height: 360px; object-fit: cover; display: block; border-radius: 18px; border: 1px solid var(--doc-border); box-shadow: 0 18px 42px rgba(15, 23, 42, 0.12); }
+        .document-image figcaption { color: var(--doc-muted); font-size: 0.9rem; margin-top: 8px; }
         p { line-height: 1.75; }
         ul, ol { padding-left: 1.25rem; }
         .document-callout { border-left: 4px solid var(--doc-accent); background: var(--doc-panel); padding: 16px 18px; margin: 18px 0; border-radius: 0 16px 16px 0; }

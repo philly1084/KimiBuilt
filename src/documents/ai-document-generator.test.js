@@ -70,6 +70,36 @@ describe('AIDocumentGenerator', () => {
     expect(prompt).toContain('Use concrete, request-specific section headings');
   });
 
+  test('scrubs tool diagnostics from visible document sections', async () => {
+    const generator = new AIDocumentGenerator({
+      createResponse: jest.fn(async () => buildResponse(JSON.stringify({
+        title: 'Safety Brief',
+        sections: [{
+          heading: 'Research Notes',
+          content: [
+            'The web-fetch step failed with this exact error: Missing required parameter: url.',
+            'USPA reports a long-term decline in fatality rates.',
+          ].join('\n'),
+          bullets: [
+            'I used the verified web-search results instead.',
+            'Use current SIM requirements as the source of truth.',
+          ],
+        }],
+      }))),
+    });
+
+    const result = await generator.generate('Create a skydiving safety brief', {
+      format: 'html',
+    });
+
+    expect(result.sections[0].content).not.toContain('web-fetch');
+    expect(result.sections[0].content).not.toContain('Missing required parameter');
+    expect(result.sections[0].content).toContain('USPA reports');
+    expect(result.sections[0].bullets).toEqual([
+      'Use current SIM requirements as the source of truth.',
+    ]);
+  });
+
   test('presentation prompt includes template-gallery guidance and treats templates as examples', async () => {
     const createResponse = jest.fn(async () => buildResponse(
       JSON.stringify({

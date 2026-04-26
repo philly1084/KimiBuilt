@@ -843,6 +843,90 @@ describe('ToolManager image tools', () => {
     }));
   });
 
+  test('persists document-workflow documents as session artifacts when session context is available', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const documentService = {
+      recommendDocumentWorkflow: jest.fn(() => ({
+        inferredType: 'document',
+        recommendedFormat: 'html',
+        blueprint: { label: 'Executive Brief' },
+      })),
+      buildDocumentPlan: jest.fn(),
+      aiGenerate: jest.fn(async () => ({
+        id: 'doc-1',
+        filename: 'safety-brief.html',
+        mimeType: 'text/html',
+        content: '<!DOCTYPE html><html><body><h1>Safety Brief</h1></body></html>',
+        contentBuffer: Buffer.from('<!DOCTYPE html><html><body><h1>Safety Brief</h1></body></html>'),
+        metadata: { format: 'html' },
+        downloadUrl: '/api/documents/doc-1/download',
+      })),
+      assemble: jest.fn(),
+      generatePresentation: jest.fn(),
+    };
+
+    artifactService.createStoredArtifact.mockResolvedValue({
+      id: 'artifact-doc-1',
+      sessionId: 'session-1',
+      filename: 'safety-brief.html',
+      extension: 'html',
+      mimeType: 'text/html',
+      sizeBytes: 64,
+      previewHtml: '<!DOCTYPE html><html><body><h1>Safety Brief</h1></body></html>',
+      metadata: { format: 'html' },
+    });
+    artifactService.serializeArtifact.mockReturnValue({
+      id: 'artifact-doc-1',
+      sessionId: 'session-1',
+      filename: 'safety-brief.html',
+      format: 'html',
+      mimeType: 'text/html',
+      sizeBytes: 64,
+      downloadUrl: '/api/artifacts/artifact-doc-1/download',
+      previewUrl: '/api/artifacts/artifact-doc-1/preview',
+      preview: {
+        type: 'html',
+        content: '<!DOCTYPE html><html><body><h1>Safety Brief</h1></body></html>',
+      },
+      metadata: { format: 'html' },
+    });
+
+    const result = await toolManager.executeTool('document-workflow', {
+      action: 'generate',
+      prompt: 'Create a safety brief.',
+      format: 'html',
+      includeContent: true,
+    }, {
+      documentService,
+      sessionId: 'session-1',
+      session: { id: 'session-1', metadata: {} },
+      clientSurface: 'web-chat',
+    });
+
+    expect(result.success).toBe(true);
+    expect(artifactService.createStoredArtifact).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-1',
+      filename: 'safety-brief.html',
+      extension: 'html',
+      metadata: expect.objectContaining({
+        persistedFrom: 'document-workflow',
+        originalDocumentId: 'doc-1',
+      }),
+    }));
+    expect(result.data.document).toEqual(expect.objectContaining({
+      id: 'artifact-doc-1',
+      downloadUrl: '/api/artifacts/artifact-doc-1/download',
+      artifact: expect.objectContaining({
+        id: 'artifact-doc-1',
+      }),
+      artifacts: expect.arrayContaining([
+        expect.objectContaining({ id: 'artifact-doc-1' }),
+      ]),
+    }));
+  });
+
   test('generates presentations from structured slide payloads through document-workflow', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();

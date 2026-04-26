@@ -606,9 +606,33 @@ function normalizeDocumentSources(sources = []) {
     .slice(0, MAX_DOCUMENT_SOURCES);
 }
 
+function normalizeDocumentWorkflowImages(images = []) {
+  return (Array.isArray(images) ? images : [])
+    .map((image) => {
+      if (!image || typeof image !== 'object') {
+        return null;
+      }
+
+      const url = String(image.url || image.imageUrl || image.downloadUrl || image.normalizedUrl || '').trim();
+      if (!url) {
+        return null;
+      }
+
+      return {
+        url,
+        title: normalizeWhitespace(image.title || image.alt || image.prompt || image.caption || 'Document image'),
+        alt: normalizeWhitespace(image.alt || image.imageAlt || image.title || image.prompt || 'Document image'),
+        source: normalizeWhitespace(image.source || image.sourceKind || image.attribution || ''),
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
 function buildGroundedDocumentPrompt(prompt = '', sources = [], preferences = {}) {
   const normalizedPrompt = String(prompt || '').trim();
   const normalizedSources = normalizeDocumentSources(sources);
+  const normalizedImages = normalizeDocumentWorkflowImages(preferences.images || []);
   const sections = [];
 
   if (normalizedPrompt) {
@@ -634,15 +658,28 @@ function buildGroundedDocumentPrompt(prompt = '', sources = [], preferences = {}
     sections.push([
       'The source URLs were already discovered from verified research results.',
       'Do not ask the user to supply website lists or source URLs unless they explicitly want to constrain the source set.',
-      'If more grounding is needed, continue with Perplexity-backed search, verify the strongest public pages with `web-fetch` first, and use `web-scrape` only when a page needs rendered or structured extraction before drafting.',
       'Use the verified source material below as working facts and source context.',
       'Preserve concrete numbers, names, links, dates, and pricing details unless the source material conflicts.',
+      'Do not mention internal tool names, failed tool calls, web-search/web-fetch workflow steps, or source-gathering process notes in the visible document.',
       normalizedSources.map((source, index) => [
         `[Source ${index + 1}] ${source.title || source.sourceLabel || source.kind || source.id}`,
         source.sourceLabel ? `Label: ${source.sourceLabel}` : '',
         source.sourceUrl ? `URL: ${source.sourceUrl}` : '',
         source.kind ? `Kind: ${source.kind}` : '',
         `Content:\n${source.content}`,
+      ].filter(Boolean).join('\n')).join('\n\n'),
+    ].join('\n\n'));
+  }
+
+  if (normalizedImages.length > 0) {
+    sections.push([
+      '[Verified image references]',
+      'Use these real image URLs with imageUrl/imageAlt/imageCaption fields when they improve the document. Do not describe missing images or image-search process.',
+      normalizedImages.map((image, index) => [
+        `Image ${index + 1}: ${image.title}`,
+        `URL: ${image.url}`,
+        image.alt ? `Alt: ${image.alt}` : '',
+        image.source ? `Source: ${image.source}` : '',
       ].filter(Boolean).join('\n')).join('\n\n'),
     ].join('\n\n'));
   }
@@ -683,6 +720,129 @@ function buildDocumentWorkflowResult(document = null, { includeContent = false }
       ? {
         contentPreview: textualContent.slice(0, 4000),
         ...(includeContent ? { content: textualContent } : {}),
+      }
+      : {}),
+  };
+}
+
+function normalizeWorkflowDocumentBuffer(document = null) {
+  if (Buffer.isBuffer(document?.contentBuffer)) {
+    return document.contentBuffer;
+  }
+
+  if (Buffer.isBuffer(document?.content)) {
+    return document.content;
+  }
+
+  if (typeof document?.content === 'string') {
+    return Buffer.from(document.content, 'utf8');
+  }
+
+  if (typeof document?.preview?.content === 'string' && document.preview.content.trim()) {
+    return Buffer.from(document.preview.content, 'utf8');
+  }
+
+  return null;
+}
+
+function resolveWorkflowDocumentPreviewHtml(document = null) {
+  if (typeof document?.previewHtml === 'string' && document.previewHtml.trim()) {
+    return document.previewHtml;
+  }
+
+  if (document?.preview?.type === 'html' && typeof document.preview.content === 'string' && document.preview.content.trim()) {
+    return document.preview.content;
+  }
+
+  if (isTextualDocumentMimeType(document?.mimeType, document?.filename)
+    && /\.html?$/i.test(String(document?.filename || ''))
+    && typeof document?.content === 'string') {
+    return document.content;
+  }
+
+  return '';
+}
+
+async function persistWorkflowDocumentArtifact(document = null, context = {}, options = {}) {
+  if (!document || !context?.sessionId || typeof artifactService?.createStoredArtifact !== 'function') {
+    return null;
+  }
+
+  const buffer = normalizeWorkflowDocumentBuffer(document);
+  if (!buffer) {
+    return null;
+  }
+
+  const format = normalizeDocumentWorkflowFormat(
+    document?.metadata?.format
+    || document?.format
+    || document?.extension
+    || '',
+  ) || inferFileWriteArtifactExtension(document?.filename || 'document.html');
+  const previewHtml = resolveWorkflowDocumentPreviewHtml(document);
+  const extractedText = String(document?.extractedText || '').trim()
+    || (previewHtml ? stripHtml(previewHtml) : '')
+    || (isTextualDocumentMimeType(document?.mimeType, document?.filename) ? buffer.toString('utf8').slice(0, 12000) : '');
+
+  try {
+    const stored = await artifactService.createStoredArtifact({
+      sessionId: context.sessionId,
+      session: context.session || null,
+      direction: 'generated',
+      sourceMode: context.clientSurface || 'chat',
+      filename: document.filename || `document.${format || 'html'}`,
+      extension: format || inferFileWriteArtifactExtension(document?.filename || 'document.html'),
+      mimeType: document.mimeType || inferFileWriteArtifactMimeType(format || 'html'),
+      buffer,
+      extractedText,
+      previewHtml,
+      metadata: {
+        ...(document?.metadata || {}),
+        originalDocumentId: document?.id || null,
+        originalDownloadUrl: document?.downloadUrl || null,
+        persistedFrom: 'document-workflow',
+        toolId: DOCUMENT_WORKFLOW_TOOL_ID,
+      },
+      vectorize: Boolean(extractedText),
+    });
+    const serialized = typeof artifactService.serializeArtifact === 'function'
+      ? artifactService.serializeArtifact(stored)
+      : null;
+    return serialized || null;
+  } catch (error) {
+    if (options.log !== false) {
+      console.warn(`[document-workflow] Failed to persist workflow document artifact: ${error.message}`);
+    }
+    return null;
+  }
+}
+
+async function buildPersistedDocumentWorkflowResult(document = null, context = {}, options = {}) {
+  const persistedArtifact = await persistWorkflowDocumentArtifact(document, context);
+  if (!persistedArtifact) {
+    return buildDocumentWorkflowResult(document, options);
+  }
+
+  const content = isTextualDocumentMimeType(persistedArtifact.mimeType, persistedArtifact.filename)
+    ? String(document?.contentBuffer || document?.content || document?.preview?.content || '')
+    : '';
+
+  return {
+    id: persistedArtifact.id,
+    filename: persistedArtifact.filename,
+    mimeType: persistedArtifact.mimeType,
+    size: persistedArtifact.sizeBytes || persistedArtifact.size || 0,
+    metadata: persistedArtifact.metadata || {},
+    preview: persistedArtifact.preview || null,
+    downloadUrl: persistedArtifact.downloadUrl || null,
+    ...(persistedArtifact.previewUrl ? { previewUrl: persistedArtifact.previewUrl } : {}),
+    ...(persistedArtifact.bundleDownloadUrl ? { bundleDownloadUrl: persistedArtifact.bundleDownloadUrl } : {}),
+    artifact: persistedArtifact,
+    artifacts: [persistedArtifact],
+    ...(content
+      ? {
+        contentPreview: content.slice(0, 4000),
+        ...(options.includeContent ? { content } : {}),
       }
       : {}),
   };
@@ -2187,6 +2347,7 @@ class ToolManager {
             const useSandboxBuild = params.useSandbox === true || ['sandbox', 'scripted', 'code'].includes(buildMode);
             const pageTarget = normalizeDocumentPageTarget(params.pageTarget || params.maxPages || params.pages, null);
             const sources = normalizeDocumentSources(params.sources || []);
+            const imageAssets = normalizeDocumentWorkflowImages(params.images || params.imageAssets || params.assets || []);
             const limit = Number.isFinite(Number(params.limit))
               ? Math.max(1, Math.min(Number(params.limit), 8))
               : 4;
@@ -2220,6 +2381,7 @@ class ToolManager {
                     format: resolvedFormat,
                     documentType: resolvedDocumentType,
                     pageTarget,
+                    images: imageAssets,
                   }),
                   documentType: resolvedDocumentType,
                   format: resolvedFormat,
@@ -2252,7 +2414,7 @@ class ToolManager {
               return {
                 action,
                 sourceCount: sources.length,
-                document: buildDocumentWorkflowResult(document, {
+                document: await buildPersistedDocumentWorkflowResult(document, context, {
                   includeContent: params.includeContent === true,
                 }),
               };
@@ -2273,6 +2435,7 @@ class ToolManager {
                 format: resolvedFormat,
                 documentType: resolvedDocumentType,
                 pageTarget,
+                images: imageAssets,
               });
               if (!groundedPrompt && !structuredPresentation) {
                 throw new Error('document-workflow generate requires a prompt or grounded source material.');
@@ -2296,7 +2459,7 @@ class ToolManager {
                   action,
                   recommendation,
                   sourceCount: sources.length,
-                  document: buildDocumentWorkflowResult(document, {
+                  document: await buildPersistedDocumentWorkflowResult(document, context, {
                     includeContent: params.includeContent === true,
                   }),
                 };
@@ -2352,7 +2515,7 @@ class ToolManager {
                 action,
                 recommendation,
                 sourceCount: sources.length,
-                document: buildDocumentWorkflowResult(document, {
+                document: await buildPersistedDocumentWorkflowResult(document, context, {
                   includeContent: params.includeContent === true,
                 }),
               };
@@ -2368,6 +2531,7 @@ class ToolManager {
                 format: requestedFormats.join(', '),
                 documentType: resolvedDocumentType,
                 pageTarget,
+                images: imageAssets,
               });
               if (!groundedPrompt) {
                 throw new Error('document-workflow generate-suite requires a prompt or grounded source material.');
@@ -2433,7 +2597,7 @@ class ToolManager {
                 documents.push({
                   format: suiteFormat,
                   documentType: suiteDocumentType,
-                  document: buildDocumentWorkflowResult(document, {
+                  document: await buildPersistedDocumentWorkflowResult(document, context, {
                     includeContent: params.includeContent === true || useSandboxBuild,
                   }),
                 });

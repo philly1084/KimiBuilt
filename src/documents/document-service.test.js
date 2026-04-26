@@ -499,6 +499,33 @@ describe('DocumentService', () => {
     }));
   });
 
+  test('renders verified section image urls in html documents', async () => {
+    const service = new DocumentService({
+      responses: {
+        create: jest.fn(),
+      },
+    });
+
+    const document = await service.renderDocument({
+      format: 'html',
+      title: 'Safety Brief',
+      content: {
+        title: 'Safety Brief',
+        sections: [{
+          heading: 'Training Conditions',
+          content: 'Weather, currency, and instructor review shape safe operations.',
+          imageUrl: 'https://images.example.com/drop-zone.jpg',
+          imageAlt: 'Skydiving landing area',
+          imageCaption: 'Landing areas should be reviewed before jumping.',
+        }],
+      },
+    });
+
+    expect(String(document.content)).toContain('<figure class="document-image">');
+    expect(String(document.content)).toContain('https://images.example.com/drop-zone.jpg');
+    expect(String(document.content)).toContain('Skydiving landing area');
+  });
+
   test('treats scaffold-like existing content as structure rather than final copy in production plans', () => {
     const service = new DocumentService({
       responses: {

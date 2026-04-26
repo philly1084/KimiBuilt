@@ -11,6 +11,36 @@ const {
   renderDocumentLayoutPromptContext,
 } = require('./document-layout-catalog');
 
+const TOOL_PROCESS_TEXT_PATTERNS = [
+  /\b(?:web-search|web-fetch|web-scrape|document-workflow|tool call|tool step|function call)\b/i,
+  /\bMissing required parameter:\s*[a-z0-9_-]+\b/i,
+  /\b(?:failed|succeeded|completed)\s+with\s+(?:this\s+)?(?:exact\s+)?(?:error|tool result)\b/i,
+  /\bI used the verified\b/i,
+  /\bverified web-search results?\b/i,
+  /\bverified research results instead\b/i,
+];
+
+function sanitizeVisibleDocumentText(value = '') {
+  const source = String(value || '');
+  if (!source) {
+    return '';
+  }
+
+  return source
+    .split(/\r?\n/)
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        return true;
+      }
+
+      return !TOOL_PROCESS_TEXT_PATTERNS.some((pattern) => pattern.test(trimmed));
+    })
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 const PRESENTATION_TEMPLATE_CATALOG = [
   {
     id: 'editorial-opener',
@@ -701,7 +731,10 @@ Return JSON:
       '        "series": [',
       '          { "label": "Series label", "value": 42 }',
       '        ]',
-      '      }',
+      '      },',
+      '      "imageUrl": "Optional direct image URL from verified image references",',
+      '      "imageAlt": "Optional alt text for the image",',
+      '      "imageCaption": "Optional concise caption for the image"',
       '    }',
       '  ],',
       '  "metadata": {',
@@ -716,10 +749,12 @@ Return JSON:
       '- Create comprehensive, well-structured content with concrete detail.',
       '- Use paragraphs for explanation and structured fields for scan speed.',
       '- When a section benefits from metrics, tables, or a chart, populate the matching structured field instead of burying everything in prose.',
+      '- When verified image references are provided and the section benefits from a visual, use imageUrl/imageAlt/imageCaption fields rather than describing missing images in prose.',
       '- Only include bullets, stats, tables, charts, or callouts when they strengthen the document.',
       '- Convert abstract coverage beats into natural, request-specific headings and prose.',
       '- Do not let the output read like a template, rubric, or plan for a future document.',
       pageTarget ? `- Keep metadata.estimatedPages at or below ${pageTarget}.` : null,
+      '- Never mention internal tool names, failed tool calls, exact tool errors, web-search/web-fetch workflow steps, or process notes in visible document text.',
       '- Do not output markdown fences, commentary, or any text outside the JSON object.',
       '</rules>',
     ].filter(Boolean).join('\n');
@@ -926,8 +961,8 @@ Return JSON:
   normalizeDocumentStructure(content) {
     // Ensure required fields exist
     const normalized = {
-      title: content.title || 'Untitled Document',
-      subtitle: content.subtitle || '',
+      title: sanitizeVisibleDocumentText(content.title || 'Untitled Document') || 'Untitled Document',
+      subtitle: sanitizeVisibleDocumentText(content.subtitle || ''),
       theme: content.theme || 'editorial',
       sections: [],
       metadata: {
@@ -971,20 +1006,33 @@ Return JSON:
   normalizeDocumentSection(section = {}, index = 0) {
     const normalizedTable = this.normalizeTable(section.table);
     const normalizedChart = this.normalizeChart(section.chart);
+    const normalizedStats = this.normalizeStats(section.stats || section.metrics || section.highlights)
+      .map((stat) => ({
+        ...stat,
+        label: sanitizeVisibleDocumentText(stat.label),
+        value: sanitizeVisibleDocumentText(stat.value),
+        detail: sanitizeVisibleDocumentText(stat.detail),
+      }))
+      .filter((stat) => stat.label || stat.value || stat.detail);
 
     return {
-      heading: section.heading || section.title || `Section ${index + 1}`,
+      heading: sanitizeVisibleDocumentText(section.heading || section.title || `Section ${index + 1}`) || `Section ${index + 1}`,
       content: typeof section.content === 'string'
-        ? section.content
+        ? sanitizeVisibleDocumentText(section.content)
         : Array.isArray(section.content)
-          ? section.content.filter(Boolean).join('\n')
+          ? sanitizeVisibleDocumentText(section.content.filter(Boolean).join('\n'))
           : '',
       level: Number(section.level) || 1,
-      bullets: this.normalizeStringList(section.bullets || section.points || section.keyPoints),
+      bullets: this.normalizeStringList(section.bullets || section.points || section.keyPoints)
+        .map((entry) => sanitizeVisibleDocumentText(entry))
+        .filter(Boolean),
       callout: this.normalizeCallout(section.callout || section.highlight || section.note),
-      stats: this.normalizeStats(section.stats || section.metrics || section.highlights),
+      stats: normalizedStats,
       table: normalizedTable,
       chart: normalizedChart,
+      imageUrl: section.imageUrl || section.image_url || '',
+      imageAlt: section.imageAlt || section.image_alt || '',
+      imageCaption: sanitizeVisibleDocumentText(section.imageCaption || section.image_caption || section.caption || ''),
     };
   }
 
@@ -1200,14 +1248,14 @@ Return JSON:
     if (typeof callout === 'string') {
       return {
         title: '',
-        body: callout,
+        body: sanitizeVisibleDocumentText(callout),
         tone: 'note',
       };
     }
 
     return {
-      title: callout.title || '',
-      body: callout.body || callout.content || callout.text || '',
+      title: sanitizeVisibleDocumentText(callout.title || ''),
+      body: sanitizeVisibleDocumentText(callout.body || callout.content || callout.text || ''),
       tone: callout.tone || 'note',
     };
   }
@@ -1217,9 +1265,13 @@ Return JSON:
       return null;
     }
 
-    const headers = Array.isArray(table.headers) ? table.headers.map((entry) => String(entry || '')) : [];
+    const headers = Array.isArray(table.headers)
+      ? table.headers.map((entry) => sanitizeVisibleDocumentText(entry)).filter(Boolean)
+      : [];
     const rows = Array.isArray(table.rows)
-      ? table.rows.map((row) => Array.isArray(row) ? row.map((cell) => String(cell ?? '')) : [])
+      ? table.rows
+        .map((row) => Array.isArray(row) ? row.map((cell) => sanitizeVisibleDocumentText(cell)) : [])
+        .filter((row) => row.some(Boolean))
       : [];
 
     if (headers.length === 0 && rows.length === 0) {
@@ -1227,7 +1279,7 @@ Return JSON:
     }
 
     return {
-      caption: table.caption || '',
+      caption: sanitizeVisibleDocumentText(table.caption || ''),
       headers,
       rows,
     };
@@ -1246,7 +1298,7 @@ Return JSON:
           }
 
           return {
-            label: point.label || point.name || '',
+            label: sanitizeVisibleDocumentText(point.label || point.name || ''),
             value: point.value != null ? point.value : '',
           };
         })
@@ -1258,9 +1310,9 @@ Return JSON:
     }
 
     return {
-      title: chart.title || '',
+      title: sanitizeVisibleDocumentText(chart.title || ''),
       type: chart.type || 'bar',
-      summary: chart.summary || '',
+      summary: sanitizeVisibleDocumentText(chart.summary || ''),
       series,
     };
   }
