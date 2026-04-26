@@ -101,7 +101,13 @@ If you prefer Rancher's cluster shell, this performs the same reset without rely
 
 ```sh
 NS=kimibuilt
-NEW_PG_PASSWORD="$(openssl rand -hex 24)"
+NEW_PG_PASSWORD='PASTE_A_NEW_LONG_LETTERS_AND_NUMBERS_PASSWORD_HERE'
+
+if [ -z "$NEW_PG_PASSWORD" ] || [ "$NEW_PG_PASSWORD" = 'PASTE_A_NEW_LONG_LETTERS_AND_NUMBERS_PASSWORD_HERE' ]; then
+  echo "Set NEW_PG_PASSWORD before continuing"
+  exit 1
+fi
+
 ENCODED="$(printf '%s' "$NEW_PG_PASSWORD" | base64 | tr -d '\n')"
 
 kubectl -n "$NS" patch secret kimibuilt-secrets \
@@ -121,3 +127,10 @@ echo "$NEW_PG_PASSWORD"
 ```
 
 Save the printed password in the normal secret/password store.
+
+If Rancher's shell has `/proc/sys/kernel/random/uuid`, you can generate a letters-and-numbers password with:
+
+```sh
+NEW_PG_PASSWORD="$(cat /proc/sys/kernel/random/uuid | tr -d '-')$(cat /proc/sys/kernel/random/uuid | tr -d '-' | cut -c1-16)"
+echo "$NEW_PG_PASSWORD"
+```
