@@ -1033,12 +1033,14 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
     // ==================== Command Processing ====================
     
     async sendCommand() {
+        const input = this.commandInput.value.trim();
+        if (!input) return;
+        this.commandInput.value = '';
+        this.hideAutocomplete();
+
         if (this.sessionRestorePromise) {
             await this.sessionRestorePromise;
         }
-
-        const input = this.commandInput.value.trim();
-        if (!input) return;
         
         // Add to history
         this.history.push(input);
@@ -1050,8 +1052,6 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
         this.roamVoxelPet(input.startsWith('/') ? 'edge-left' : 'prompt', input.startsWith('/') ? 'guard' : 'scout', 1800, {
             thought: input.startsWith('/') ? 'command seen' : 'on it',
         });
-        this.commandInput.value = '';
-        this.hideAutocomplete();
         
         // If currently processing, queue the command
         if (this.isProcessing) {
