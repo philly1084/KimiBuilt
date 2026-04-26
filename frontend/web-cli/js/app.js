@@ -21,6 +21,11 @@ class CodeCLIApp {
         this.activePetAction = 'idle';
         this.lastVoxelTypingReaction = 0;
         this.lastVoxelAmbientMove = Date.now();
+        this.lastVoxelRoamPlacement = 'prompt';
+        this.voxelRoamHoldUntil = 0;
+        this.pixelStreamBuffer = '';
+        this.pixelStreamTimer = null;
+        this.pixelStreamWaiters = [];
         this.voxelPersonality = this.loadVoxelPersonality();
         this.activeVoxelTool = 'chat';
         
@@ -413,16 +418,18 @@ class CodeCLIApp {
 
     scheduleVoxelAmbientMove() {
         window.clearTimeout(this.voxelAmbientTimer);
-        const delay = 9000 + Math.floor(Math.random() * 10000);
+        const delay = 4200 + Math.floor(Math.random() * 6200);
         this.voxelAmbientTimer = window.setTimeout(() => {
             if (!this.voxelPetHidden && !this.isProcessing && document.hasFocus()) {
-                const actions = ['idle', 'scout', 'sleep', 'dance'];
+                const actions = ['idle', 'scout', 'guard', 'sleep', 'dance'];
                 const action = actions[Math.floor(Math.random() * actions.length)];
                 const thought = this.getVoxelAmbientThought(action);
                 if (action === 'idle') {
                     this.renderVoxelPet('idle');
                 } else {
-                    this.roamVoxelPet(action === 'sleep' ? 'prompt' : 'stream', action, 1800, { thought });
+                    const placement = this.getVoxelRoamPlacement(action);
+                    const duration = placement.startsWith('corner') ? 6200 : 2600;
+                    this.roamVoxelPet(placement, action, duration, { thought, linger: placement.startsWith('corner') });
                 }
                 this.lastVoxelAmbientMove = Date.now();
             }
@@ -435,7 +442,7 @@ class CodeCLIApp {
         localStorage.setItem('codecli-voxel-pet-hidden', String(this.voxelPetHidden));
         if (this.voxelPetHidden) {
             this.closeVoxelCreator();
-            this.voxelRoamer?.classList.remove('is-visible', 'is-prompt', 'is-stream', 'is-alert');
+            this.clearVoxelRoamerPlacementClasses();
         }
         this.renderVoxelPet(this.voxelPetHidden ? 'idle' : 'scout');
     }
@@ -444,14 +451,50 @@ class CodeCLIApp {
         this.voxelDock?.classList.add('hidden');
     }
 
+    getVoxelRoamPlacement(action = 'scout') {
+        const normalized = String(action || 'scout').toLowerCase();
+        const placements = normalized === 'sleep'
+            ? ['corner-bl', 'corner-br', 'prompt']
+            : ['prompt', 'stream', 'edge-left', 'edge-right', 'corner-tl', 'corner-tr', 'corner-bl', 'corner-br'];
+        const recent = this.lastVoxelRoamPlacement;
+        const available = placements.filter((placement) => placement !== recent);
+        const chosen = available[Math.floor(Math.random() * available.length)] || placements[0];
+        this.lastVoxelRoamPlacement = chosen;
+        return chosen;
+    }
+
+    clearVoxelRoamerPlacementClasses() {
+        this.voxelRoamer?.classList.remove(
+            'is-visible',
+            'is-prompt',
+            'is-stream',
+            'is-alert',
+            'is-edge-left',
+            'is-edge-right',
+            'is-corner-tl',
+            'is-corner-tr',
+            'is-corner-bl',
+            'is-corner-br',
+            'is-lingering',
+        );
+        this.voxelRoamHoldUntil = 0;
+    }
+
     roamVoxelPet(placement = 'prompt', action = 'scout', duration = 1200, options = {}) {
         if (this.voxelPetHidden || !this.voxelRoamer || !this.voxelRoamerStage || !this.voxel || !this.voxelPet) {
             return;
         }
 
+        const now = Date.now();
+        const isHeldInCorner = this.voxelRoamer.classList.contains('is-lingering') && now < this.voxelRoamHoldUntil;
+        const isUrgent = placement === 'alert' || ['jump', 'guard'].includes(String(action || '').toLowerCase());
+        if (isHeldInCorner && !options.force && !isUrgent) {
+            return;
+        }
+
         const isTravelAction = ['scout', 'guard', 'idle', 'dance'].includes(String(action || '').toLowerCase());
         const renderedAction = isTravelAction ? 'roam' : action;
-        const directionYaw = placement === 'stream' ? 18 : -18;
+        const directionYaw = /right|stream|tr|br/.test(placement) ? 18 : -18;
         const nodes = [this.voxel.renderElement(this.voxelPet, {
             action: renderedAction,
             variant: 'peek',
@@ -466,12 +509,15 @@ class CodeCLIApp {
             nodes.push(bubble);
         }
         this.voxelRoamerStage.replaceChildren(...nodes);
-        this.voxelRoamer.classList.remove('hidden', 'is-prompt', 'is-stream', 'is-alert');
+        this.clearVoxelRoamerPlacementClasses();
+        this.voxelRoamer.classList.remove('hidden');
         this.voxelRoamer.classList.add(`is-${placement}`, 'is-visible');
+        this.voxelRoamer.classList.toggle('is-lingering', Boolean(options.linger));
+        this.voxelRoamHoldUntil = options.linger ? now + Math.min(duration, 7000) : 0;
 
         window.clearTimeout(this.voxelRoamTimer);
         this.voxelRoamTimer = window.setTimeout(() => {
-            this.voxelRoamer?.classList.remove('is-visible', 'is-prompt', 'is-stream', 'is-alert');
+            this.clearVoxelRoamerPlacementClasses();
         }, duration);
     }
 
@@ -484,13 +530,17 @@ class CodeCLIApp {
         this.voxelTypingTimer = window.setTimeout(() => {
             const now = Date.now();
             const typed = this.commandInput?.value.trim() || '';
-            if (typed.length < 8 || now - this.lastVoxelTypingReaction < 4800) {
+            if (typed.length < 4 || now - this.lastVoxelTypingReaction < 2200) {
                 return;
             }
             this.lastVoxelTypingReaction = now;
             this.renderVoxelPet('scout');
-            this.roamVoxelPet('prompt', 'scout', 1150, { thought: this.getVoxelTypingThought() });
-        }, 900);
+            const placement = typed.length > 42 ? 'corner-bl' : 'prompt';
+            this.roamVoxelPet(placement, 'scout', placement.startsWith('corner') ? 5000 : 1900, {
+                thought: this.getVoxelTypingThought(),
+                linger: placement.startsWith('corner'),
+            });
+        }, 520);
     }
 
     recordVoxelInteraction(input = '', response = '') {
@@ -676,12 +726,17 @@ class CodeCLIApp {
 
     pulseVoxelStreaming() {
         const now = Date.now();
-        if (this.voxelPetHidden || now - (this.lastVoxelStreamPulse || 0) < 900) {
+        if (this.voxelPetHidden || now - (this.lastVoxelStreamPulse || 0) < 650) {
             return;
         }
 
         this.lastVoxelStreamPulse = now;
-        this.roamVoxelPet('stream', 'scout', 950);
+        const placements = ['stream', 'edge-right', 'corner-tr', 'corner-br'];
+        const placement = placements[Math.floor((now / 650) % placements.length)];
+        this.roamVoxelPet(placement, 'scout', placement.startsWith('corner') ? 5200 : 2200, {
+            thought: Math.random() < 0.28 ? 'pixeling...' : '',
+            linger: placement.startsWith('corner'),
+        });
     }
 
     generateVoxelPet(prompt) {
@@ -984,6 +1039,9 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
         
         // Print input
         this.printInput(input);
+        this.roamVoxelPet(input.startsWith('/') ? 'edge-left' : 'prompt', input.startsWith('/') ? 'guard' : 'scout', 1800, {
+            thought: input.startsWith('/') ? 'command seen' : 'on it',
+        });
         this.commandInput.value = '';
         this.hideAutocomplete();
         
@@ -1208,7 +1266,6 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
         this.reactVoxelPet(input, 'think');
         
         try {
-            const startTime = Date.now();
             const chatOptions = this.buildVoxelChatOptions(input);
             
             const response = await api.sendMessage(input, (chunk) => {
@@ -1226,19 +1283,14 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
                 }
             }, null, chatOptions);
             
-            const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-            
-            // Finalize streaming output - remove streaming line and print full response
-            this.finalizeStreamingOutput();
+            // Finalize streaming output after the pixel reveal buffer catches up.
+            await this.finalizeStreamingOutput(response.content || 'No response');
             this.finalizeProgressLine();
-            
-            // Print response
-            this.printAI(response.content || 'No response');
-            
+
             // Update status and session info
             this.setStatus('ready');
             this.reactVoxelPet(input, 'proud');
-            this.roamVoxelPet('prompt', 'jump', 1000);
+            this.roamVoxelPet('corner-br', 'jump', 5200, { thought: 'done', linger: true });
             this.updateSessionInfo();
             
             // Add to conversation
@@ -1360,8 +1412,14 @@ Session Statistics:
         line.innerHTML = this.renderAIContent(text);
         this.terminalOutput.appendChild(line);
         this.scrollToBottom();
-        
-        // Highlight code blocks
+        this.finishAIContentLine(line);
+    }
+
+    finishAIContentLine(line) {
+        if (!line) {
+            return;
+        }
+
         if (typeof hljs !== 'undefined') {
             line.querySelectorAll('pre code').forEach((block) => {
                 if (block.classList.contains('language-mermaid') || block.classList.contains('nohighlight')) {
@@ -1370,8 +1428,7 @@ Session Statistics:
                 hljs.highlightElement(block);
             });
         }
-        
-        // Render any mermaid diagrams
+
         this.renderMermaidDiagrams(line);
     }
 
@@ -3604,16 +3661,108 @@ ${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${p
     
     // ==================== Streaming Helpers ====================
     
+    getStreamingLine() {
+        const lines = this.terminalOutput.querySelectorAll('.line-output.ai');
+        const lastLine = lines[lines.length - 1] || null;
+        return lastLine?.classList.contains('streaming') ? lastLine : null;
+    }
+
+    ensureStreamingLine() {
+        const existing = this.getStreamingLine();
+        if (existing) {
+            return existing;
+        }
+
+        const line = document.createElement('div');
+        line.className = 'line line-output ai streaming pixel-streaming';
+        line.innerHTML = this.renderAIContent('', {
+            title: 'Streaming',
+            meta: `${api.currentModel || 'default'} | ${this.voxelPet?.name || 'voxel companion'}`,
+        });
+        this.terminalOutput.appendChild(line);
+        return line;
+    }
+
+    updateStreamingLine(text, options = {}) {
+        const line = this.ensureStreamingLine();
+        line.innerHTML = this.renderAIContent(text, {
+            title: options.title || 'Streaming',
+            meta: `${api.currentModel || 'default'} | ${this.voxelPet?.name || 'voxel companion'}`,
+        });
+        this.scrollToBottom();
+        return line;
+    }
+
+    getPixelStreamStep() {
+        const backlog = this.pixelStreamBuffer.length;
+        if (backlog > 2400) return 18;
+        if (backlog > 900) return 10;
+        if (backlog > 240) return 6;
+        return 2;
+    }
+
+    startPixelStreamDrain() {
+        if (this.pixelStreamTimer) {
+            return;
+        }
+
+        const tick = () => {
+            if (!this.pixelStreamBuffer) {
+                this.pixelStreamTimer = null;
+                const waiters = this.pixelStreamWaiters.splice(0);
+                waiters.forEach((resolve) => resolve());
+                return;
+            }
+
+            const step = this.getPixelStreamStep();
+            const next = this.pixelStreamBuffer.slice(0, step);
+            this.pixelStreamBuffer = this.pixelStreamBuffer.slice(step);
+            this.currentOutput += next;
+            this.updateStreamingLine(this.currentOutput);
+
+            if (!this.voxelPetHidden && this.currentOutput.length % 96 < step) {
+                this.roamVoxelPet(this.getVoxelRoamPlacement('scout'), 'scout', 2800);
+            }
+
+            const delay = this.pixelStreamBuffer.length > 900 ? 12 : 28;
+            this.pixelStreamTimer = window.setTimeout(tick, delay);
+        };
+
+        this.pixelStreamTimer = window.setTimeout(tick, 18);
+    }
+
+    waitForPixelStreamDrain() {
+        if (!this.pixelStreamBuffer && !this.pixelStreamTimer) {
+            return Promise.resolve();
+        }
+
+        return new Promise((resolve) => {
+            this.pixelStreamWaiters.push(resolve);
+        });
+    }
+
     appendToCurrentOutput(text) {
+        const chunk = String(text || '');
+        if (!chunk) {
+            return;
+        }
+
+        if (this.theme === 'voxel') {
+            this.ensureStreamingLine();
+            this.pixelStreamBuffer += chunk;
+            this.startPixelStreamDrain();
+            return;
+        }
+
         // For streaming responses - update the last AI output line
         const lines = this.terminalOutput.querySelectorAll('.line-output.ai');
         const lastLine = lines[lines.length - 1];
         if (lastLine && lastLine.classList.contains('streaming')) {
-            lastLine.innerHTML = this.renderAIContent(this.currentOutput + text, {
+            lastLine.innerHTML = this.renderAIContent(this.currentOutput + chunk, {
                 title: 'Streaming',
                 meta: `${api.currentModel || 'default'} | ${this.voxelPet?.name || 'voxel companion'}`,
             });
-            this.currentOutput += text;
+            this.currentOutput += chunk;
             if (typeof hljs !== 'undefined') {
                 lastLine.querySelectorAll('pre code').forEach((block) => {
                     if (block.classList.contains('language-mermaid') || block.classList.contains('nohighlight')) {
@@ -3623,10 +3772,10 @@ ${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${p
                 });
             }
         } else {
-            this.currentOutput = text;
+            this.currentOutput = chunk;
             const line = document.createElement('div');
             line.className = 'line line-output ai streaming';
-            line.innerHTML = this.renderAIContent(text, {
+            line.innerHTML = this.renderAIContent(chunk, {
                 title: 'Streaming',
                 meta: `${api.currentModel || 'default'} | ${this.voxelPet?.name || 'voxel companion'}`,
             });
@@ -3645,7 +3794,42 @@ ${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${p
     /**
      * Remove streaming line before printing final response
      */
-    finalizeStreamingOutput() {
+    async finalizeStreamingOutput(finalText = '') {
+        const expected = String(finalText || '');
+        if (this.theme === 'voxel') {
+            const pending = this.currentOutput + this.pixelStreamBuffer;
+            if (expected && expected !== pending) {
+                if (expected.startsWith(pending)) {
+                    this.pixelStreamBuffer += expected.slice(pending.length);
+                } else {
+                    this.currentOutput = '';
+                    this.pixelStreamBuffer = expected;
+                }
+            } else if (expected && !pending) {
+                this.pixelStreamBuffer = expected;
+            }
+
+            if (this.pixelStreamBuffer) {
+                this.ensureStreamingLine();
+                this.startPixelStreamDrain();
+                await this.waitForPixelStreamDrain();
+            }
+
+            const streamingLine = this.getStreamingLine();
+            if (streamingLine) {
+                streamingLine.classList.remove('streaming', 'pixel-streaming');
+                streamingLine.innerHTML = this.renderAIContent(expected || this.currentOutput);
+                this.finishAIContentLine(streamingLine);
+                this.scrollToBottom();
+                return;
+            }
+
+            if (expected) {
+                this.printAI(expected);
+            }
+            return;
+        }
+
         const streamingLine = this.terminalOutput.querySelector('.line-output.ai.streaming');
         if (streamingLine) {
             streamingLine.remove();

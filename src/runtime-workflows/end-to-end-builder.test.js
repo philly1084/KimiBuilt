@@ -82,6 +82,26 @@ describe('end-to-end builder workflow', () => {
         }));
     });
 
+    test('classifies remote CLI dashboard create-and-deploy requests into a repo-then-deploy lane', () => {
+        const workflow = inferEndToEndBuilderWorkflow({
+            objective: 'Can you make a dashboard on the remote server with the cli tool and have it take live data on satellite locations and overlay it on a 3d world, then deploy it with k3s routing for world.demoserver2.buzz.',
+            workspacePath: '/workspace/app',
+            repositoryPath: '/workspace/app',
+            remoteTarget: {
+                host: '10.0.0.5',
+                username: 'ubuntu',
+                port: 22,
+            },
+        });
+
+        expect(workflow).toEqual(expect.objectContaining({
+            kind: END_TO_END_WORKFLOW_KIND,
+            lane: 'repo-then-deploy',
+            stage: 'implementing',
+            status: 'active',
+        }));
+    });
+
     test('classifies make-code-and-deploy requests into a repo-then-deploy lane', () => {
         const workflow = inferEndToEndBuilderWorkflow({
             objective: 'next.js, I have kimibuilt.secdevsolutions.help and you need to do the tls with traefik, acme, and lets encrypt. We should be able to use remote CLI to make the code and push to github.',

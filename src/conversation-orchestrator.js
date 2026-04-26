@@ -1111,6 +1111,7 @@ function buildScoredCandidateToolMap({
     hasDocumentWorkflowIntent = false,
     hasSubAgentIntent = false,
     hasManagedAppIntent = false,
+    hasRemoteCliAgentAuthoringRequest = false,
     explicitGitIntent = false,
     explicitK3sDeployIntent = false,
     hasWorkloadSetupIntent = false,
@@ -1205,6 +1206,10 @@ function buildScoredCandidateToolMap({
     }
     if (remoteToolId && executionProfile === REMOTE_BUILD_EXECUTION_PROFILE) {
         adjustCandidateToolScore(scoreMap, remoteToolId, 0.55, 'Remote-build profile keeps the remote tool available.');
+    }
+    if (hasRemoteCliAgentAuthoringRequest) {
+        adjustCandidateToolScore(scoreMap, 'remote-cli-agent', 1.35, 'The request explicitly asks an assisted remote CLI agent to own a coding/build/deploy task.');
+        adjustCandidateToolScore(scoreMap, remoteToolId, -0.2, 'The assisted remote CLI agent is a better fit than one-shot remote commands for this authoring loop.');
     }
     if (hasExplicitWebResearchIntent) {
         adjustCandidateToolScore(scoreMap, 'web-search', 1.0, 'Explicit research language favors search.');
@@ -4072,6 +4077,25 @@ function hasRepositoryImplementationIntent(text = '') {
         && !repoContext;
 
     return repoContext && codeWorkIntent && !infraOnlyIntent && remoteWorkspaceCue;
+}
+
+function hasRemoteCliAgentAuthoringIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized || hasDiscoveryPlanningIntentText(normalized)) {
+        return false;
+    }
+
+    const explicitAssistedCli = /\b(remote cli agent|remote coding agent|remote code run|remote_code_run|agents sdk remote cli|assisted cli|cli tool)\b/.test(normalized);
+    if (!explicitAssistedCli) {
+        return false;
+    }
+
+    const authoringIntent = /\b(create|make|build|generate|implement|develop|write|update|fix|deploy|publish|launch|ship)\b/.test(normalized);
+    const softwareTarget = /\b(app|application|site|website|web app|web page|webpage|frontend|dashboard|visualization|visualisation|viewer|map|globe|world|service)\b/.test(normalized);
+    const remoteTarget = /\b(remote|server|host|k3s|k8s|kubernetes|cluster|dns|domain|ingress|traefik|tls|deploy|deployment|live)\b/.test(normalized)
+        || /\b[a-z0-9-]+(?:\.[a-z0-9-]+){1,}\b/.test(normalized);
+
+    return authoringIntent && softwareTarget && remoteTarget;
 }
 
 function hasManagedAppIntentText(text = '') {
@@ -8419,6 +8443,7 @@ class ConversationOrchestrator extends EventEmitter {
         const hasManagedAppAuthoringRequest = hasManagedAppAuthoringIntent(prompt, {
             executionProfile,
         });
+        const hasRemoteCliAgentAuthoringRequest = hasRemoteCliAgentAuthoringIntent(prompt);
         const hasManagedAppContinuationRecovery = (
             isLikelyTranscriptDependentTurn(objective)
             || /\b(?:go ahead|continue|proceed|from there|those steps|next step|next steps|get it online|get it live|get it deployed)\b/i.test(objective)
@@ -8481,8 +8506,11 @@ class ConversationOrchestrator extends EventEmitter {
         ).trim();
         const shouldBypassEndToEndWorkflow = allowedToolIds.includes('managed-app')
             && (hasManagedAppIntent || hasManagedAppAuthoringRequest || hasManagedAppContinuationRecovery);
+        const shouldUseRemoteCliAgentAuthoring = allowedToolIds.includes('remote-cli-agent')
+            && hasRemoteCliAgentAuthoringRequest;
         const inferredWorkflowSeed = executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
             && !shouldBypassEndToEndWorkflow
+            && !shouldUseRemoteCliAgentAuthoring
             ? inferEndToEndBuilderWorkflow({
                 objective,
                 session,
@@ -8550,6 +8578,7 @@ class ConversationOrchestrator extends EventEmitter {
                 hasDocumentWorkflowIntent,
                 hasSubAgentIntent,
                 hasManagedAppIntent: hasManagedAppIntent || hasManagedAppAuthoringRequest,
+                hasRemoteCliAgentAuthoringRequest,
                 explicitGitIntent,
                 explicitK3sDeployIntent,
                 hasWorkloadSetupIntent,
@@ -8602,6 +8631,9 @@ class ConversationOrchestrator extends EventEmitter {
             }
             if ((hasManagedAppIntent || hasManagedAppAuthoringRequest || hasManagedAppContinuationRecovery) && allowedToolIds.includes('managed-app')) {
                 candidates.add('managed-app');
+            }
+            if (hasRemoteCliAgentAuthoringRequest && allowedToolIds.includes('remote-cli-agent')) {
+                candidates.add('remote-cli-agent');
             }
             if ((explicitK3sDeployIntent || workflowNeedsDeployLane) && allowedToolIds.includes('k3s-deploy')) {
                 candidates.add('k3s-deploy');
@@ -8765,6 +8797,9 @@ class ConversationOrchestrator extends EventEmitter {
             }
             if ((hasManagedAppIntent || hasManagedAppAuthoringRequest || hasManagedAppContinuationRecovery) && allowedToolIds.includes('managed-app')) {
                 candidates.add('managed-app');
+            }
+            if (hasRemoteCliAgentAuthoringRequest && allowedToolIds.includes('remote-cli-agent')) {
+                candidates.add('remote-cli-agent');
             }
             if (/\b(git|github)\b[\s\S]{0,80}\b(status|diff|branch|stage|add|commit|push|save and push|save-and-push)\b/.test(prompt)
                 && allowedToolIds.includes('git-safe')) {
@@ -9018,6 +9053,23 @@ class ConversationOrchestrator extends EventEmitter {
             }));
         }
 
+        if (toolPolicy.candidateToolIds.includes('remote-cli-agent')
+            && hasRemoteCliAgentAuthoringIntent(objective)) {
+            const cwd = resolvePreferredRemoteCliWorkspacePath({
+                session,
+                toolContext,
+            });
+            return finalizeAction({
+                tool: 'remote-cli-agent',
+                reason: 'The request asks an assisted remote CLI agent to own the coding, build, deploy, and verification loop.',
+                params: {
+                    task: objective,
+                    waitMs: 30000,
+                    ...(cwd ? { cwd } : {}),
+                },
+            });
+        }
+
         if (toolPolicy.workflow) {
             const workflowPlan = buildEndToEndWorkflowPlan({
                 workflow: toolPolicy.workflow,
@@ -9103,8 +9155,9 @@ class ConversationOrchestrator extends EventEmitter {
     }
 
     normalizePlannedStep(step = {}, { objective = '', session = null, executionProfile = DEFAULT_EXECUTION_PROFILE, recentMessages = [], toolContext = {} } = {}) {
+        const rawTool = typeof step?.tool === 'string' ? step.tool.trim() : '';
         const normalizedStep = {
-            tool: canonicalizeRemoteToolId(typeof step?.tool === 'string' ? step.tool.trim() : ''),
+            tool: rawTool === 'remote-cli-agent' ? rawTool : canonicalizeRemoteToolId(rawTool),
             reason: typeof step?.reason === 'string' ? step.reason.trim() : '',
             params: step?.params && typeof step.params === 'object' ? { ...step.params } : {},
         };
@@ -9149,6 +9202,25 @@ class ConversationOrchestrator extends EventEmitter {
 
         if (normalizedStep.tool === 'architecture-design') {
             normalizedStep.params = normalizeArchitectureDesignPlanParams(step, { objective });
+            return normalizedStep;
+        }
+
+        if (normalizedStep.tool === 'remote-cli-agent') {
+            const cwd = String(
+                normalizedStep.params.cwd
+                || resolvePreferredRemoteCliWorkspacePath({
+                    session,
+                    toolContext,
+                })
+                || '',
+            ).trim();
+            normalizedStep.params = {
+                ...normalizedStep.params,
+                task: String(normalizedStep.params.task || objective || '').trim(),
+                waitMs: Number(normalizedStep.params.waitMs || normalizedStep.params.wait_ms || 30000) || 30000,
+                ...(cwd ? { cwd } : {}),
+            };
+            delete normalizedStep.params.wait_ms;
             return normalizedStep;
         }
 

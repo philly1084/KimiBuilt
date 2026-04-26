@@ -334,6 +334,33 @@ body[data-theme="voxel"] .line-output.error {
     line-height: 1.65;
 }
 
+.pixel-streaming .voxel-response-body {
+    background:
+        linear-gradient(90deg, rgba(73, 211, 167, 0.055) 1px, transparent 1px),
+        linear-gradient(0deg, rgba(244, 201, 93, 0.04) 1px, transparent 1px);
+    background-size: 8px 8px;
+}
+
+.pixel-streaming .markdown-content {
+    text-shadow:
+        1px 0 0 rgba(73, 211, 167, 0.18),
+        0 1px 0 rgba(244, 201, 93, 0.12);
+}
+
+.pixel-streaming .voxel-response-body::after {
+    content: "";
+    display: inline-block;
+    width: 9px;
+    height: 14px;
+    margin-left: 4px;
+    vertical-align: -2px;
+    background: var(--voxel-pet-secondary);
+    box-shadow:
+        4px 0 0 var(--voxel-pet-primary),
+        0 4px 0 rgba(255, 255, 255, 0.24);
+    animation: voxelBlink 650ms steps(2, start) infinite;
+}
+
 .markdown-content {
     color: var(--text-primary);
 }
@@ -639,7 +666,7 @@ body[data-theme="voxel"] .voxel-icon-btn {
     pointer-events: none;
     opacity: 0;
     transform: translateY(24px) scale(0.92);
-    transition: opacity 180ms ease, transform 260ms ease, left 360ms ease, right 360ms ease, bottom 260ms ease;
+    transition: opacity 180ms ease, transform 340ms steps(4, end), left 520ms steps(6, end), right 520ms steps(6, end), top 520ms steps(6, end), bottom 520ms steps(6, end);
 }
 
 .voxel-roamer.is-visible {
@@ -647,21 +674,72 @@ body[data-theme="voxel"] .voxel-icon-btn {
     transform: translateY(0) scale(1);
 }
 
+.voxel-roamer.is-lingering {
+    opacity: 1;
+}
+
 .voxel-roamer.is-prompt {
     left: 16px;
+    right: auto;
+    top: auto;
     bottom: 92px;
 }
 
 .voxel-roamer.is-stream {
     left: auto;
     right: 28px;
+    top: auto;
     bottom: 120px;
 }
 
 .voxel-roamer.is-alert {
     left: 50%;
+    right: auto;
+    top: auto;
     bottom: 118px;
     transform: translateX(-50%) translateY(0) scale(1);
+}
+
+.voxel-roamer.is-edge-left {
+    left: 18px;
+    right: auto;
+    top: 42%;
+    bottom: auto;
+}
+
+.voxel-roamer.is-edge-right {
+    left: auto;
+    right: 24px;
+    top: 38%;
+    bottom: auto;
+}
+
+.voxel-roamer.is-corner-tl {
+    left: 18px;
+    right: auto;
+    top: 20px;
+    bottom: auto;
+}
+
+.voxel-roamer.is-corner-tr {
+    left: auto;
+    right: 24px;
+    top: 22px;
+    bottom: auto;
+}
+
+.voxel-roamer.is-corner-bl {
+    left: 18px;
+    right: auto;
+    top: auto;
+    bottom: 112px;
+}
+
+.voxel-roamer.is-corner-br {
+    left: auto;
+    right: 24px;
+    top: auto;
+    bottom: 118px;
 }
 
 .voxel-roamer-stage {
@@ -689,6 +767,14 @@ body[data-theme="voxel"] .voxel-icon-btn {
     white-space: nowrap;
 }
 
+.voxel-roamer.is-corner-tr .voxel-roamer-bubble,
+.voxel-roamer.is-corner-br .voxel-roamer-bubble,
+.voxel-roamer.is-edge-right .voxel-roamer-bubble,
+.voxel-roamer.is-stream .voxel-roamer-bubble {
+    left: auto;
+    right: 58px;
+}
+
 .voxel-roamer-bubble::before {
     content: "";
     position: absolute;
@@ -698,6 +784,15 @@ body[data-theme="voxel"] .voxel-icon-btn {
     height: 6px;
     background: var(--voxel-pet-secondary);
     box-shadow: -5px 5px 0 rgba(6, 16, 19, 0.94);
+}
+
+.voxel-roamer.is-corner-tr .voxel-roamer-bubble::before,
+.voxel-roamer.is-corner-br .voxel-roamer-bubble::before,
+.voxel-roamer.is-edge-right .voxel-roamer-bubble::before,
+.voxel-roamer.is-stream .voxel-roamer-bubble::before {
+    left: auto;
+    right: -6px;
+    box-shadow: 5px 5px 0 rgba(6, 16, 19, 0.94);
 }
 
 .voxel-pet.action-jump {
@@ -1132,6 +1227,7 @@ body[data-theme="voxel"] .autocomplete-item.selected {
     .voxel-pet.action-sleep,
     .voxel-roamer,
     .voxel-cube.spark,
+    .pixel-streaming .voxel-response-body::after,
     body[data-theme="voxel"] .streaming .voxel-response-head::after {
         animation: none;
         transition: none;
