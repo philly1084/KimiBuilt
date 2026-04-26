@@ -286,7 +286,9 @@ const config = {
         apiMode: process.env.OPENAI_API_MODE || 'auto',
         model: process.env.OPENAI_MODEL || 'gpt-4o',
         reasoningEffort: process.env.OPENAI_REASONING_EFFORT || '',
-        imageModel: process.env.OPENAI_IMAGE_MODEL || '',
+        imageModel: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2',
+        imageAllowOfficialFallback: process.env.OPENAI_IMAGE_ALLOW_OFFICIAL_FALLBACK === 'true',
+        imageBatchConcurrency: Math.min(Math.max(parseOptionalInteger(process.env.OPENAI_IMAGE_BATCH_CONCURRENCY) || 4, 1), 5),
     },
 
     // Official OpenAI media endpoints for video generation and image fallback

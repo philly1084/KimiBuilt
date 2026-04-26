@@ -4921,6 +4921,56 @@ curl -fsSIL --max-time 20 "https://$host"`;
         uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
     }
 
+    selectAllGeneratedImages(messageId) {
+        const sessionId = sessionManager.currentSessionId;
+        if (!sessionId) return;
+
+        const message = this.getSessionMessage(sessionId, messageId);
+        const results = Array.isArray(message?.results) ? message.results : [];
+        const nextMessages = results
+            .filter((image) => image?.imageUrl)
+            .map((image) => {
+                const sourceKind = image.source || message.sourceKind || 'generated';
+                const isArtifact = sourceKind === 'artifact';
+
+                return {
+                    id: uiHelpers.generateMessageId(),
+                    role: 'assistant',
+                    type: 'image',
+                    content: image.alt || image.prompt || message.prompt || (isArtifact ? 'Captured image' : 'Generated image'),
+                    imageUrl: image.imageUrl,
+                    thumbnailUrl: image.thumbnailUrl || image.imageUrl,
+                    prompt: image.alt || image.prompt || message.prompt || (isArtifact ? 'Captured image' : 'Generated image'),
+                    revisedPrompt: image.revisedPrompt || '',
+                    model: isArtifact ? '' : (image.model || message.model || ''),
+                    source: isArtifact ? 'artifact' : 'generated',
+                    downloadUrl: image.downloadUrl || '',
+                    artifactId: image.artifactId || '',
+                    filename: image.filename || '',
+                    sourceHost: image.sourceHost || message.sourceHost || '',
+                    clientOnly: true,
+                    excludeFromTranscript: true,
+                    timestamp: new Date().toISOString()
+                };
+            });
+
+        if (nextMessages.length === 0) {
+            return;
+        }
+
+        nextMessages.forEach((imageMessage) => {
+            const savedImageMessage = sessionManager.addMessage(sessionId, imageMessage);
+            this.messagesContainer.appendChild(uiHelpers.renderImageMessage(savedImageMessage));
+            uiHelpers.reinitializeIcons(this.messagesContainer.lastElementChild);
+        });
+
+        uiHelpers.scrollToBottom();
+        void sessionManager.syncMessagesToBackend(sessionId, nextMessages);
+        uiHelpers.showToast(`${nextMessages.length} images added to conversation`, 'success');
+        this.updateSessionInfo();
+        uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
+    }
+
     async loadUnsplashPage(messageId, page) {
         const sessionId = sessionManager.currentSessionId;
         if (!sessionId || !Number.isFinite(page) || page < 1) return;

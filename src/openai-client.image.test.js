@@ -42,6 +42,7 @@ describe('openai-client image generation', () => {
         global.fetch = originalFetch;
         delete process.env.OPENAI_MEDIA_API_KEY;
         delete process.env.OPENAI_MEDIA_IMAGE_MODEL;
+        delete process.env.OPENAI_IMAGE_ALLOW_OFFICIAL_FALLBACK;
     });
 
     test('uses the current OpenAI image generation request shape for official media calls', async () => {
@@ -119,7 +120,7 @@ describe('openai-client image generation', () => {
         ]);
     });
 
-    test('falls back to the official media provider when the gateway image endpoint fails', async () => {
+    test('keeps gateway/router image requests on the configured OpenAI endpoint by default', async () => {
         process.env.OPENAI_BASE_URL = 'https://gateway.example/v1';
         process.env.OPENAI_IMAGE_MODEL = 'gpt-image-2';
         process.env.OPENAI_MEDIA_IMAGE_MODEL = 'gpt-image-2';
@@ -141,14 +142,41 @@ describe('openai-client image generation', () => {
                         message: 'not found',
                     },
                 }),
+            });
+
+        const { generateImage } = require('./openai-client');
+        await expect(generateImage({
+            prompt: 'Generate a hero image',
+            model: 'gpt-image-2',
+        })).rejects.toThrow('not found');
+
+        expect(global.fetch.mock.calls.map((call) => call[0])).toEqual([
+            'https://gateway.example/v1/images/generations',
+            'https://gateway.example/images/generations',
+        ]);
+    });
+
+    test('can opt in to official media fallback after the router endpoint fails', async () => {
+        process.env.OPENAI_BASE_URL = 'https://gateway.example/v1';
+        process.env.OPENAI_IMAGE_MODEL = 'gpt-image-2';
+        process.env.OPENAI_MEDIA_IMAGE_MODEL = 'gpt-image-2';
+        process.env.OPENAI_IMAGE_ALLOW_OFFICIAL_FALLBACK = 'true';
+        global.fetch = jest.fn()
+            .mockResolvedValueOnce({
+                ok: false,
+                status: 404,
+                text: async () => JSON.stringify({ error: { message: 'not found' } }),
+            })
+            .mockResolvedValueOnce({
+                ok: false,
+                status: 404,
+                text: async () => JSON.stringify({ error: { message: 'not found' } }),
             })
             .mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({
                     created: 123,
-                    data: [{
-                        b64_json: 'aGVsbG8=',
-                    }],
+                    data: [{ b64_json: 'aGVsbG8=' }],
                 }),
             });
 
@@ -174,6 +202,52 @@ describe('openai-client image generation', () => {
         }));
     });
 
+    test('can generate multiple image options with bounded parallel calls', async () => {
+        process.env.OPENAI_BASE_URL = 'https://gateway.example/v1';
+        process.env.OPENAI_IMAGE_MODEL = 'gpt-image-2';
+        global.fetch = jest.fn(async (_url, init = {}) => {
+            const body = JSON.parse(init.body);
+            return {
+                ok: true,
+                json: async () => ({
+                    created: body.prompt.includes('second') ? 124 : 123,
+                    data: [{
+                        url: `https://images.example.com/${encodeURIComponent(body.prompt)}.png`,
+                    }],
+                }),
+            };
+        });
+
+        const { generateImageBatch } = require('./openai-client');
+        const result = await generateImageBatch({
+            prompt: 'hero set',
+            prompts: ['first concept', 'second concept'],
+            model: 'gpt-image-2',
+            batchMode: 'parallel',
+            concurrency: 2,
+        });
+
+        expect(global.fetch).toHaveBeenCalledTimes(2);
+        expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual(expect.objectContaining({
+            prompt: 'first concept',
+            n: 1,
+            model: 'gpt-image-2',
+        }));
+        expect(JSON.parse(global.fetch.mock.calls[1][1].body)).toEqual(expect.objectContaining({
+            prompt: 'second concept',
+            n: 1,
+            model: 'gpt-image-2',
+        }));
+        expect(result.batch).toEqual(expect.objectContaining({
+            mode: 'parallel',
+            requestedCount: 2,
+        }));
+        expect(result.data).toHaveLength(2);
+        expect(result.data[1]).toEqual(expect.objectContaining({
+            prompt: 'second concept',
+        }));
+    });
+
     test('ignores a stale Gemini model request when the provider is official OpenAI', async () => {
         global.fetch = jest.fn(async (_url, init = {}) => ({
             ok: true,
@@ -192,7 +266,10 @@ describe('openai-client image generation', () => {
         });
 
         expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual(expect.objectContaining({
-            model: 'gpt-image-1',
+            model: 'gpt-image-2',
+            size: 'auto',
+            quality: 'auto',
+            background: 'auto',
         }));
         expect(JSON.parse(global.fetch.mock.calls[0][1].body)).not.toHaveProperty('response_format');
     });

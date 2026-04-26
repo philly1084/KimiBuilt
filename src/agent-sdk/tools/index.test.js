@@ -140,6 +140,44 @@ describe('ToolManager image tools', () => {
     ]));
   });
 
+  test('registers and executes the curated design resource search tool', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const tool = toolManager.getTool('design-resource-search');
+    const skill = toolManager.registry.getSkill('design-resource-search');
+
+    expect(tool).toBeTruthy();
+    expect(skill.triggerPatterns).toEqual(expect.arrayContaining([
+      'safe design libraries',
+      'find backgrounds',
+      'find fonts',
+    ]));
+
+    const searchResult = await toolManager.executeTool('design-resource-search', {
+      query: 'website icons',
+      category: 'icons',
+    });
+
+    expect(searchResult.success).toBe(true);
+    expect(searchResult.data.results).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'lucide',
+        fetchPlan: expect.objectContaining({
+          tool: 'web-fetch',
+        }),
+      }),
+    ]));
+
+    const fetchPlan = await toolManager.executeTool('design-resource-search', {
+      action: 'fetch_plan',
+      resourceId: 'google-fonts',
+    });
+
+    expect(fetchPlan.success).toBe(true);
+    expect(fetchPlan.data.fetchPlan.params.url).toContain('fonts.googleapis.com');
+  });
+
   test('routes podcast through the injected podcast service', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();

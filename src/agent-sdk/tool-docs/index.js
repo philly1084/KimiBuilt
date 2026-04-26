@@ -95,6 +95,7 @@ const TOOL_SUPPORT = {
   'uml-generate': { status: 'stable', notes: ['Mermaid/PlantUML output generator.'] },
   'api-design': { status: 'stable', notes: ['API contract/design output generator.'] },
   'graph-diagram': { status: 'stable', notes: ['Batch graph/diagram utility with native graph JSON, Mermaid, DOT, SVG, HTML, and persisted SVG image artifacts.', 'When GPT-5.5 or newer is the caller model, prefer direct SVG output for custom document visuals.'] },
+  'design-resource-search': { status: 'stable', notes: ['Curated safe design-resource index for backgrounds, fonts, CSS styling, icons, and website/document creation assets.', 'Returns web-fetch-ready fetch plans and approved source domains.'] },
   'ssh-execute': { status: 'requires_setup', notes: ['Requires SSH target credentials or cluster secret configuration.'] },
   'remote-command': { status: 'requires_setup', notes: ['Requires SSH target credentials or cluster secret configuration.', 'Optimized for Ubuntu/Linux host and k3s cluster operations in this project.'] },
   'remote-cli-agent': { status: 'requires_setup', notes: ['Server-side OpenAI Agents SDK integration for the remote-cli Streamable HTTP MCP gateway.', 'Requires REMOTE_CLI_MCP_URL or GATEWAY_URL plus REMOTE_CLI_MCP_BEARER_TOKEN or N8N_API_KEY in the trusted backend runtime.'] },

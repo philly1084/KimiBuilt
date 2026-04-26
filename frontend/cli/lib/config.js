@@ -17,6 +17,12 @@ const DEFAULT_CONFIG = {
   confirmQuit: false,
   highlightCode: true,
   imageOutputDir: './images',
+  workbenchTarget: 'remote',
+  remoteCwd: '',
+  remoteDefaultCwd: '',
+  lastRepoRoot: '',
+  lastCommandResult: null,
+  confirmDangerousRemoteCommands: true,
 };
 
 const VALID_MODES = ['chat', 'canvas', 'notation'];
@@ -58,6 +64,10 @@ function validate(config) {
 
   if (config.maxHistory !== undefined && (typeof config.maxHistory !== 'number' || config.maxHistory < 1)) {
     errors.push('maxHistory must be a positive number');
+  }
+
+  if (config.workbenchTarget && !['remote'].includes(config.workbenchTarget)) {
+    errors.push('workbenchTarget must be remote');
   }
 
   return { valid: errors.length === 0, errors };

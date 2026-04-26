@@ -16,6 +16,7 @@ const TerminalRenderer = MarkedTerminal.default || MarkedTerminal;
 const config = require('./lib/config');
 const session = require('./lib/session');
 const api = require('./lib/api');
+const workbench = require('./lib/workbench');
 
 // CLI metadata
 const CLI_VERSION = '2.2.0';
@@ -42,6 +43,7 @@ let activeProviderSession = null;
 let providerStreamAbortController = null;
 let providerStreamTask = null;
 let readlineInterface = null;
+let remoteToolContext = null;
 
 // Command definitions for auto-completion
 const COMMANDS = [
@@ -107,6 +109,7 @@ function printBanner() {
   console.log(chalk.gray(`  Version: ${CLI_VERSION}`));
   console.log(chalk.gray(`  API: ${config.getApiBaseUrl()}`));
   console.log(chalk.gray(`  Mode: ${chalk.cyan(currentMode)}`));
+  console.log(chalk.gray(`  Workbench: ${chalk.cyan(config.get('workbenchTarget', 'remote'))} ${chalk.white(config.get('remoteCwd', '') || config.get('remoteDefaultCwd', '') || '/workspace')}`));
   if (currentModel) {
     console.log(chalk.gray(`  Model: ${chalk.cyan(currentModel)}`));
   }
@@ -168,6 +171,12 @@ function printHelp() {
   });
   
   console.log(chalk.cyan.bold('└───────────────────────────────────────┘\n'));
+  console.log(chalk.cyan.bold('Workbench Commands'));
+  console.log(chalk.gray('  pwd, cd <dir>, ls [path], tree [path], cat <file>, open <file>'));
+  console.log(chalk.gray('  repo, files [path], search <pattern> [path], changes, git status, git diff'));
+  console.log(chalk.gray('  install, test, build, run <cmd>'));
+  console.log(chalk.cyan.bold('\nDeploy Commands'));
+  console.log(chalk.gray('  deploy, rollout, logs, verify [host], status\n'));
   console.log(chalk.gray('Attached backend CLI sessions pass input through verbatim.'));
   console.log(chalk.gray('Use /.help for local escape commands while attached.\n'));
 }
@@ -1385,19 +1394,14 @@ function completer(line) {
 }
 
 async function loadRemoteToolCatalog() {
-  const params = new URLSearchParams({
+  const response = await api.getAvailableTools({
     category: 'ssh',
     taskType: 'chat',
     clientSurface: 'cli',
     executionProfile: REMOTE_BUILD_EXECUTION_PROFILE,
-  });
-
-  if (currentSessionId && !String(currentSessionId).startsWith('local_')) {
-    params.set('sessionId', currentSessionId);
-  }
-
-  const response = await api.request(`/api/tools/available?${params.toString()}`, {
-    method: 'GET',
+    sessionId: currentSessionId && !String(currentSessionId).startsWith('local_')
+      ? currentSessionId
+      : null,
     timeout: 10000,
   });
   const tools = response.data || [];
@@ -1410,6 +1414,33 @@ async function loadRemoteToolCatalog() {
     remoteTool,
     catalog: remoteTool?.runtime?.commandCatalog || [],
   };
+}
+
+async function loadWorkbenchToolContext(forceReload = false) {
+  if (!forceReload && remoteToolContext) {
+    return remoteToolContext;
+  }
+
+  remoteToolContext = await loadRemoteToolCatalog();
+  const defaultCwd = workbench.resolveDefaultRemoteCwd(remoteToolContext, {
+    remoteDefaultCwd: config.get('remoteDefaultCwd', ''),
+  });
+
+  if (defaultCwd && defaultCwd !== config.get('remoteDefaultCwd', '')) {
+    config.set('remoteDefaultCwd', defaultCwd);
+  }
+  if (!config.get('remoteCwd', '')) {
+    config.set('remoteCwd', defaultCwd);
+  }
+
+  return remoteToolContext;
+}
+
+function getWorkbenchCwd(toolContext = remoteToolContext) {
+  return workbench.resolveActiveRemoteCwd(toolContext || {}, {
+    remoteCwd: config.get('remoteCwd', ''),
+    remoteDefaultCwd: config.get('remoteDefaultCwd', ''),
+  });
 }
 
 function printRemotePlan() {
@@ -1451,23 +1482,18 @@ function printRemoteResult(result = {}) {
 }
 
 async function invokeRemoteCommand(command, options = {}) {
-  const response = await api.request('/api/tools/invoke', {
-    method: 'POST',
+  const response = await api.runRemoteCommand(command, {
+    profile: options.profile || 'build',
+    workflowAction: options.workflowAction || 'remote-cli-manual-run',
     timeout: options.timeout || 120000,
-    body: {
-      tool: 'remote-command',
-      params: {
-        command,
-        profile: options.profile || 'build',
-        workflowAction: options.workflowAction || 'remote-cli-manual-run',
-        timeout: options.timeout || 120000,
-      },
-      sessionId: currentSessionId,
-      taskType: 'chat',
-      clientSurface: 'cli',
-      executionProfile: REMOTE_BUILD_EXECUTION_PROFILE,
-      model: currentModel || null,
-    },
+    workingDirectory: options.workingDirectory || getWorkbenchCwd(),
+    environment: options.environment,
+    approval: options.approval,
+    sessionId: currentSessionId,
+    taskType: 'chat',
+    clientSurface: 'cli',
+    executionProfile: REMOTE_BUILD_EXECUTION_PROFILE,
+    model: currentModel || null,
   });
 
   if (response.sessionId) {
@@ -1488,6 +1514,155 @@ function buildHttpsVerifyCommand(host) {
   return `host=${JSON.stringify(normalized)}
 getent ahosts "$host" || true
 curl -fsSIL --max-time 20 "https://$host"`;
+}
+
+function unwrapToolResponse(response = {}) {
+  const envelope = response.data || {};
+  return envelope.data || envelope.result || envelope;
+}
+
+function rememberWorkbenchResult(result = {}, cwd = '') {
+  config.set('lastCommandResult', {
+    exitCode: Number.isFinite(Number(result.exitCode)) ? Number(result.exitCode) : null,
+    cwd: cwd || result.cwd || result.workspacePath || '',
+    duration: Number.isFinite(Number(result.duration)) ? Number(result.duration) : null,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+function updateSessionFromToolResponse(response = {}) {
+  if (response.sessionId) {
+    currentSessionId = response.sessionId;
+    session.setCurrent(currentSessionId);
+  }
+}
+
+function maybeRememberRepoRoot(result = {}) {
+  const lines = String(result.stdout || result.output || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const taggedRoot = lines.find((line) => line.startsWith('repoRoot: '));
+  const repoRoot = taggedRoot
+    ? taggedRoot.replace(/^repoRoot:\s*/, '').trim()
+    : lines.find((line) => /^(?:[A-Za-z]:[\\/]|\/).+/.test(line));
+  if (repoRoot) {
+    config.set('lastRepoRoot', repoRoot);
+  }
+}
+
+function printWorkbenchStatus(toolContext = {}) {
+  const runtime = toolContext.runtime || {};
+  const runner = runtime.remoteRunner || {};
+  const deploy = runtime.deployDefaults || {};
+  console.log(chalk.cyan.bold('\nWorkbench Status'));
+  console.log(chalk.gray(`Target: remote`));
+  console.log(chalk.gray(`CWD: ${getWorkbenchCwd(toolContext)}`));
+  console.log(chalk.gray(`Runner: ${runner.healthy ? 'healthy' : 'not healthy'}${runner.defaultRunnerId ? ` (${runner.defaultRunnerId})` : ''}`));
+  console.log(chalk.gray(`Shell: ${runner.shell || 'unknown'}`));
+  console.log(chalk.gray(`Tools: ${(runner.availableCliTools || []).join(', ') || 'unknown'}`));
+  console.log(chalk.gray(`Deploy: namespace=${deploy.namespace || 'unset'}, deployment=${deploy.deployment || 'unset'}, domain=${deploy.publicDomain || 'unset'}`));
+  console.log(chalk.gray(`Last repo root: ${config.get('lastRepoRoot', '') || 'none'}\n`));
+}
+
+async function runK3sDeployStep(step = {}) {
+  const response = await api.runK3sDeploy(step.params || {}, {
+    sessionId: currentSessionId,
+    taskType: 'chat',
+    clientSurface: 'cli',
+    executionProfile: REMOTE_BUILD_EXECUTION_PROFILE,
+    model: currentModel || null,
+    timeout: step.timeout || 180000,
+  });
+  updateSessionFromToolResponse(response);
+  return unwrapToolResponse(response);
+}
+
+async function handleWorkbenchAlias(input = '') {
+  const alias = workbench.parseWorkbenchAlias(input);
+  if (!alias) {
+    return false;
+  }
+
+  const toolContext = await loadWorkbenchToolContext();
+  if (alias.command === 'status') {
+    printWorkbenchStatus(toolContext);
+    return true;
+  }
+
+  if (alias.command === 'deploy') {
+    const steps = workbench.buildDeploySequence(toolContext);
+    for (const step of steps) {
+      const spinner = createSpinner(`Deploy ${step.label}...`);
+      spinner.start();
+      try {
+        let result;
+        if (step.type === 'k3s-deploy') {
+          result = await runK3sDeployStep(step);
+        } else {
+          result = await invokeRemoteCommand(step.command, {
+            profile: step.profile,
+            workflowAction: step.workflowAction,
+            timeout: step.timeout,
+            workingDirectory: getWorkbenchCwd(toolContext),
+          });
+        }
+        spinner.stop();
+        printRemoteResult(result);
+        rememberWorkbenchResult(result, getWorkbenchCwd(toolContext));
+      } catch (err) {
+        spinner.fail(chalk.red(`Deploy ${step.label} failed: ${err.message}`));
+        return true;
+      }
+    }
+    return true;
+  }
+
+  let remoteCommand;
+  try {
+    remoteCommand = workbench.buildRemoteWorkbenchCommand(alias, toolContext);
+  } catch (err) {
+    console.log(chalk.yellow(err.message));
+    return true;
+  }
+  if (!remoteCommand) {
+    return false;
+  }
+
+  const spinner = createSpinner(`${alias.command}...`);
+  spinner.start();
+  try {
+    const cwd = getWorkbenchCwd(toolContext);
+    const result = await invokeRemoteCommand(remoteCommand.command, {
+      profile: remoteCommand.profile,
+      workflowAction: remoteCommand.workflowAction,
+      timeout: remoteCommand.timeout || 120000,
+      workingDirectory: cwd,
+    });
+    spinner.stop();
+
+    if (remoteCommand.updateCwdFromStdout) {
+      const nextCwd = String(result.stdout || result.output || '')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .pop();
+      if (nextCwd) {
+        config.set('remoteCwd', nextCwd);
+      }
+    }
+
+    if (alias.command === 'repo') {
+      maybeRememberRepoRoot(result);
+    }
+
+    printRemoteResult(result);
+    rememberWorkbenchResult(result, getWorkbenchCwd(toolContext));
+  } catch (err) {
+    spinner.fail(chalk.red(`${alias.command} failed: ${err.message}`));
+  }
+
+  return true;
 }
 
 function resolveCatalogEntry(catalog = [], subcommand = '') {
@@ -1724,6 +1899,10 @@ async function processInput(input) {
         console.error(chalk.red(`❌ Unknown command: /${command}. Type /help for available commands.`));
         return true;
     }
+  }
+
+  if (await handleWorkbenchAlias(trimmed)) {
+    return true;
   }
   
   // Handle messages based on mode

@@ -3966,6 +3966,13 @@ class UIHelpers {
                         <span class="meta">${isArtifact ? (sourceHost || `${results.length} options`) : (model || `${results.length} options`)}</span>
                     </div>
                     ${prompt ? `<p class="selection-panel-query">"${this.escapeHtml(prompt)}"</p>` : ''}
+                    ${results.length > 1 ? `
+                        <div class="selection-panel-actions">
+                            <button type="button" class="selection-action-btn" onclick="app.selectAllGeneratedImages('${messageId}')">
+                                Add All To Chat
+                            </button>
+                        </div>
+                    ` : ''}
                     ${contentHtml}
                 </div>
             </div>
@@ -4485,10 +4492,12 @@ class UIHelpers {
         const promptInput = document.getElementById('image-prompt-input');
         const modelSelect = document.getElementById('image-model-select');
         const sizeSelect = document.getElementById('image-size-select');
+        const countSelect = document.getElementById('image-count-select');
         
         if (promptInput) promptInput.value = '';
         if (modelSelect) modelSelect.value = this.getPreferredImageModelId();
         if (sizeSelect) sizeSelect.value = '';
+        if (countSelect) countSelect.value = '1';
         
         this.imageGenerationState.quality = null;
         this.imageGenerationState.style = null;
@@ -4650,6 +4659,8 @@ class UIHelpers {
         const modelSelect = document.getElementById('image-model-select');
         const promptInput = document.getElementById('image-prompt-input');
         const sizeSelect = document.getElementById('image-size-select');
+        const countSelect = document.getElementById('image-count-select');
+        const requestedCount = Math.min(Math.max(Number(countSelect?.value) || 1, 1), 5);
         
         const selectedModel = this.availableImageModels.find((entry) => entry.id === modelSelect?.value)
             || this.availableImageModels.find((entry) => entry.id === this.getPreferredImageModelId())
@@ -4660,6 +4671,8 @@ class UIHelpers {
             prompt: promptInput?.value?.trim() || '',
             model: model,
             size: sizeSelect?.value || selectedModel.sizes?.[0] || 'auto',
+            n: requestedCount,
+            batchMode: requestedCount > 1 ? 'auto' : undefined,
             source: this.imageGenerationState.source
         };
         

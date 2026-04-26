@@ -200,12 +200,14 @@ function buildGeneratedImageFilename(prompt = '', index = 0, extension = 'png') 
 
 function normalizeGeneratedImageRecord(image = {}, storedArtifact = null) {
     const revisedPrompt = image?.revised_prompt || image?.revisedPrompt || null;
+    const prompt = String(image?.prompt || '').trim() || null;
     if (!storedArtifact?.id) {
         return {
             url: image?.url || null,
             b64_json: image?.b64_json || null,
             revised_prompt: revisedPrompt,
             revisedPrompt,
+            prompt,
             artifactId: null,
             downloadUrl: null,
             inlinePath: null,
@@ -222,6 +224,7 @@ function normalizeGeneratedImageRecord(image = {}, storedArtifact = null) {
         b64_json: null,
         revised_prompt: revisedPrompt,
         revisedPrompt,
+        prompt,
         artifactId: storedArtifact.id,
         downloadUrl,
         inlinePath,
@@ -264,6 +267,7 @@ async function persistGeneratedImages({
 
     for (let index = 0; index < (Array.isArray(images) ? images : []).length; index += 1) {
         const image = images[index] || {};
+        const imagePrompt = String(image?.prompt || prompt || '').trim();
         let storedArtifact = null;
         const decoded = decodeGeneratedImage(image)
             || await readGeneratedImageFromLocalPath(image)
@@ -275,7 +279,7 @@ async function persistGeneratedImages({
                     sessionId,
                     direction: 'generated',
                     sourceMode,
-                    filename: buildGeneratedImageFilename(prompt, index, decoded.extension),
+                    filename: buildGeneratedImageFilename(imagePrompt, index, decoded.extension),
                     extension: decoded.extension,
                     mimeType: decoded.mimeType,
                     buffer: decoded.buffer,
@@ -285,9 +289,9 @@ async function persistGeneratedImages({
                         generatedBy: 'image-generate',
                         imageIndex: index + 1,
                         model: model || null,
-                        title: image?.revised_prompt || image?.revisedPrompt || prompt || '',
-                        altText: image?.revised_prompt || image?.revisedPrompt || prompt || '',
-                        sourcePrompt: prompt,
+                        title: image?.revised_prompt || image?.revisedPrompt || imagePrompt || '',
+                        altText: image?.revised_prompt || image?.revisedPrompt || imagePrompt || '',
+                        sourcePrompt: imagePrompt,
                         revisedPrompt: image?.revised_prompt || image?.revisedPrompt || '',
                     },
                     vectorize: false,

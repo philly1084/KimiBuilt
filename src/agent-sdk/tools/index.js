@@ -6,7 +6,7 @@
 const { getUnifiedRegistry } = require('../registry/UnifiedRegistry');
 const { getAgentBus } = require('../agents/AgentBus');
 const { readToolDoc, getToolDocMetadata } = require('../tool-docs');
-const { generateImage } = require('../../openai-client');
+const { generateImageBatch } = require('../../openai-client');
 const { searchImages, isConfigured: isUnsplashConfigured } = require('../../unsplash-client');
 const { persistGeneratedImages } = require('../../generated-image-artifacts');
 const { persistGeneratedAudio } = require('../../generated-audio-artifacts');
@@ -2818,17 +2818,26 @@ class ToolManager {
         id: 'image-generate',
         name: 'Image Generator',
         category: 'system',
-        description: 'Generate a single image by default, or up to 5 when the caller explicitly requests multiple distinct outputs, and return reusable hosted image URLs',
+        description: 'Generate a single image by default, or up to 5 selectable image options using one OpenAI-compatible n request or bounded parallel calls, and return reusable hosted image URLs',
         backend: {
           handler: async (params, context = {}) => {
-            const requestedCount = Math.min(Math.max(Number(params.n) || 1, 1), 5);
-            const response = await generateImage({
+            const prompts = Array.isArray(params.prompts)
+              ? params.prompts.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 5)
+              : [];
+            const requestedCount = prompts.length > 0
+              ? prompts.length
+              : Math.min(Math.max(Number(params.n) || 1, 1), 5);
+            const response = await generateImageBatch({
               prompt: params.prompt,
+              prompts,
               model: params.model || null,
-              size: params.size || '1536x1024',
-              quality: params.quality || 'standard',
-              style: params.style || 'vivid',
+              size: params.size || 'auto',
+              quality: params.quality || 'auto',
+              style: params.style || null,
+              background: params.background || 'auto',
               n: requestedCount,
+              batchMode: params.batchMode || (prompts.length > 1 ? 'parallel' : 'auto'),
+              concurrency: params.concurrency,
             });
             const persistedImages = await persistGeneratedImages({
               sessionId: context?.sessionId || '',
@@ -2874,11 +2883,28 @@ class ToolManager {
           required: ['prompt'],
           properties: {
             prompt: { type: 'string' },
+            prompts: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Optional list of distinct image prompts. When supplied, the tool generates one image per prompt with bounded parallel calls.',
+            },
             alt: { type: 'string' },
             model: { type: 'string' },
             size: { type: 'string' },
             quality: { type: 'string' },
             style: { type: 'string' },
+            background: { type: 'string' },
+            batchMode: {
+              type: 'string',
+              enum: ['auto', 'single', 'parallel'],
+              description: 'Use auto/single for one OpenAI-compatible n request, or parallel for multiple one-image requests.',
+            },
+            concurrency: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 5,
+              description: 'Maximum number of parallel image calls when batchMode is parallel.',
+            },
             n: {
               type: 'integer',
               minimum: 1,

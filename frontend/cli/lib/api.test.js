@@ -237,4 +237,134 @@ describe('OpenAIClient provider sessions', () => {
     );
     expect(global.fetch).not.toHaveBeenCalled();
   });
+
+  test('getAvailableTools calls the guarded tools catalog with workbench query params', async () => {
+    global.fetch.mockResolvedValue({
+      ok: true,
+      headers: {
+        get: jest.fn(() => 'application/json'),
+      },
+      json: jest.fn(async () => ({
+        success: true,
+        data: [],
+        meta: { executionProfile: 'remote-build' },
+      })),
+    });
+
+    const client = new OpenAIClient();
+    await client.getAvailableTools({
+      category: 'ssh',
+      sessionId: 'session-1',
+      taskType: 'chat',
+      clientSurface: 'cli',
+      executionProfile: 'remote-build',
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://localhost:8080/api/tools/available?category=ssh&sessionId=session-1&taskType=chat&clientSurface=cli&executionProfile=remote-build',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          Accept: 'application/json',
+          Authorization: 'Bearer config-front-key',
+        }),
+      }),
+    );
+  });
+
+  test('runRemoteCommand sends workingDirectory through the tool invoke API', async () => {
+    global.fetch.mockResolvedValue({
+      ok: true,
+      headers: {
+        get: jest.fn(() => 'application/json'),
+      },
+      json: jest.fn(async () => ({
+        success: true,
+        sessionId: 'session-2',
+        data: {
+          stdout: '/workspace/app',
+          stderr: '',
+          exitCode: 0,
+        },
+      })),
+    });
+
+    const client = new OpenAIClient();
+    await client.runRemoteCommand('pwd', {
+      workingDirectory: '/workspace/app',
+      profile: 'inspect',
+      workflowAction: 'cli-workbench-pwd',
+      sessionId: 'session-1',
+      executionProfile: 'remote-build',
+      model: 'gpt-5.4-mini',
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://localhost:8080/api/tools/invoke',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer config-front-key',
+        }),
+        body: JSON.stringify({
+          tool: 'remote-command',
+          params: {
+            command: 'pwd',
+            profile: 'inspect',
+            workflowAction: 'cli-workbench-pwd',
+            timeout: 120000,
+            workingDirectory: '/workspace/app',
+          },
+          sessionId: 'session-1',
+          taskType: 'chat',
+          clientSurface: 'cli',
+          executionProfile: 'remote-build',
+          model: 'gpt-5.4-mini',
+          metadata: {
+            clientSurface: 'cli',
+            requestedModel: 'gpt-5.4-mini',
+          },
+        }),
+      }),
+    );
+  });
+
+  test('runK3sDeploy invokes k3s-deploy with action params', async () => {
+    global.fetch.mockResolvedValue({
+      ok: true,
+      headers: {
+        get: jest.fn(() => 'application/json'),
+      },
+      json: jest.fn(async () => ({
+        success: true,
+        data: { action: 'sync-and-apply' },
+      })),
+    });
+
+    const client = new OpenAIClient();
+    await client.runK3sDeploy({
+      action: 'sync-and-apply',
+      namespace: 'kimibuilt',
+    }, {
+      sessionId: 'session-1',
+      executionProfile: 'remote-build',
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://localhost:8080/api/tools/invoke',
+      expect.objectContaining({
+        method: 'POST',
+      }),
+    );
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual(expect.objectContaining({
+      tool: 'k3s-deploy',
+      params: {
+        action: 'sync-and-apply',
+        namespace: 'kimibuilt',
+      },
+      sessionId: 'session-1',
+      executionProfile: 'remote-build',
+    }));
+  });
 });

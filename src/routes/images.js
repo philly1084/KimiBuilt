@@ -1,7 +1,7 @@
 const { Router } = require('express');
 const { validate } = require('../middleware/validate');
 const { sessionStore } = require('../session-store');
-const { generateImage, listImageModels } = require('../openai-client');
+const { generateImageBatch, listImageModels } = require('../openai-client');
 const { searchImages, isConfigured: isUnsplashConfigured } = require('../unsplash-client');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 const { persistGeneratedImages } = require('../generated-image-artifacts');
@@ -46,7 +46,9 @@ const imageSchema = {
     size: { required: false, type: 'string' },
     quality: { required: false, type: 'string' },
     style: { required: false, type: 'string' },
+    background: { required: false, type: 'string' },
     n: { required: false, type: 'number' },
+    batchMode: { required: false, type: 'string', enum: ['auto', 'single', 'parallel'] },
 };
 
 router.post('/', validate(imageSchema), async (req, res, next) => {
@@ -55,9 +57,11 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
             prompt,
             model = null,
             size = 'auto',
-            quality = null,
+            quality = 'auto',
             style = null,
+            background = 'auto',
             n = 1,
+            batchMode = 'auto',
         } = req.body;
         const requestedCount = Math.min(Math.max(Number(n) || 1, 1), 5);
         let { sessionId } = req.body;
@@ -86,13 +90,15 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
 
         console.log(`[Images] Generating image with ${model || 'gateway-default'}: "${prompt.substring(0, 50)}..."`);
 
-        const response = await generateImage({
+        const response = await generateImageBatch({
             prompt,
             model,
             size,
             quality,
             style,
+            background,
             n: requestedCount,
+            batchMode,
         });
         const persistedImages = await persistGeneratedImages({
             sessionId,
@@ -138,6 +144,8 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
             size: normalizedResponse.size,
             quality: normalizedResponse.quality,
             style: normalizedResponse.style,
+            background: normalizedResponse.background,
+            batch: normalizedResponse.batch,
         });
     } catch (err) {
         console.error('[Images] Error:', err.message);

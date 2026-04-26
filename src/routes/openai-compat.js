@@ -2,7 +2,7 @@ const { Router } = require('express');
 const { config } = require('../config');
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
-const { generateImage, listModels } = require('../openai-client');
+const { generateImageBatch, listModels } = require('../openai-client');
 const { ensureRuntimeToolManager } = require('../runtime-tool-manager');
 const { executeConversationRuntime, resolveConversationExecutorFlag, inferExecutionProfile } = require('../runtime-execution');
 const {
@@ -2320,6 +2320,9 @@ router.post('/images/generations', async (req, res, next) => {
             size = 'auto',
             quality = 'auto',
             style = null,
+            background = 'auto',
+            batch_mode = 'auto',
+            batchMode = batch_mode,
         } = req.body;
         const requestedCount = Math.min(Math.max(Number(n) || 1, 1), 5);
 
@@ -2347,13 +2350,15 @@ router.post('/images/generations', async (req, res, next) => {
             });
         }
 
-        const response = await generateImage({
+        const response = await generateImageBatch({
             prompt,
             model,
             size,
             quality,
             style,
+            background,
             n: requestedCount,
+            batchMode,
         });
         const persistedImages = await persistGeneratedImages({
             sessionId,

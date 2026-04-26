@@ -1648,6 +1648,7 @@ class OpenAIAPIClient extends EventTarget {
             quality = null,
             style = null,
             n = 1,
+            batchMode = null,
             sessionId = null
         } = options;
 
@@ -1667,6 +1668,9 @@ class OpenAIAPIClient extends EventTarget {
         }
         if (style != null) {
             params.style = style;
+        }
+        if (batchMode != null) {
+            params.batchMode = batchMode;
         }
 
         if (sessionId || this.currentSessionId) {

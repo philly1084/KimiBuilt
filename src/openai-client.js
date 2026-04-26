@@ -285,9 +285,13 @@ function isSameImageProvider(left = {}, right = {}) {
 }
 
 function getImageProviderCandidates() {
-    const candidates = [getImageProviderConfig()];
+    const primaryProvider = getImageProviderConfig();
+    const candidates = [primaryProvider];
 
-    if (hasDedicatedMediaConfig()) {
+    if (
+        hasDedicatedMediaConfig()
+        && (config.openai.imageAllowOfficialFallback || primaryProvider.source !== 'gateway')
+    ) {
         const mediaProvider = {
             apiKey: config.media.apiKey,
             baseURL: config.media.baseURL,
@@ -450,6 +454,7 @@ function getImageModelMetadata(modelId, ownedBy = 'openai') {
             owned_by: ownedBy,
             sizes: ['auto', '1024x1024', '1536x1024', '1024x1536'],
             qualities: ['auto', 'low', 'medium', 'high'],
+            backgrounds: ['auto', 'transparent', 'opaque'],
             styles: [],
             maxImages: 5,
         };
@@ -462,6 +467,7 @@ function getImageModelMetadata(modelId, ownedBy = 'openai') {
         owned_by: ownedBy,
         sizes: ['1024x1024'],
         qualities: [],
+        backgrounds: [],
         styles: [],
         maxImages: 5,
     };
@@ -2746,8 +2752,9 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
 
     if (automaticTools.some((entry) => entry.id === 'image-generate')) {
         guidance.push('- Use `image-generate` only when the user explicitly wants new generated artwork or synthetic visuals that direct URLs, prior artifacts, or Unsplash cannot satisfy.');
-        guidance.push('- Default `image-generate` to one image. Only request more than one image when the user explicitly asks for multiple distinct outputs, and keep image batches to 5 or fewer.');
-        guidance.push('- When `image-generate` uses `n > 1`, write the prompt for one image, not a collage, contact sheet, storyboard, or multi-panel layout unless the user explicitly wants that composition.');
+        guidance.push('- Default `image-generate` to one image. When the user asks for image options, website/document design variants, or a research-paper-style visual set, request multiple selectable outputs and keep image batches to 5 or fewer.');
+        guidance.push('- For multiple versions of the same image, use `n` with `batchMode: "auto"` so the router can use one OpenAI-compatible image request. For distinct prompt variants, pass `prompts[]` with `batchMode: "parallel"` so the router can run bounded parallel calls.');
+        guidance.push('- Use GPT Image defaults with `size: "auto"`, `quality: "auto"`, and `background: "auto"` unless the user or target layout requires a specific format. Write each prompt for one image, not a collage, contact sheet, storyboard, or multi-panel layout unless the user explicitly wants that composition.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'image-search-unsplash')) {
@@ -5016,20 +5023,49 @@ async function transcribeAudio({
     };
 }
 
-async function generateImage({
-    prompt,
-    model = null,
-    size = 'auto',
-    quality = null,
-    style = null,
-    n = 1,
-}) {
-    const { modelId, availableModels } = await resolveImageModel(model);
-    const selectedModel = availableModels.find((entry) => entry.id === modelId) || getImageModelMetadata(modelId);
+async function mapWithConcurrency(items = [], concurrency = 1, worker = async () => null) {
+    const results = new Array(items.length);
+    let nextIndex = 0;
+    const workerCount = Math.min(Math.max(Number(concurrency) || 1, 1), Math.max(items.length, 1));
 
+    await Promise.all(Array.from({ length: workerCount }, async () => {
+        while (nextIndex < items.length) {
+            const index = nextIndex;
+            nextIndex += 1;
+            results[index] = await worker(items[index], index);
+        }
+    }));
+
+    return results;
+}
+
+function normalizeImagePromptList({ prompt = '', prompts = [], n = 1 } = {}) {
+    const normalizedPrompts = Array.isArray(prompts)
+        ? prompts.map((entry) => String(entry || '').trim()).filter(Boolean)
+        : [];
+    if (normalizedPrompts.length > 0) {
+        return normalizedPrompts.slice(0, 5);
+    }
+
+    const normalizedPrompt = String(prompt || '').trim();
+    const count = Math.min(Math.max(Number(n) || 1, 1), 5);
+    return Array.from({ length: count }, () => normalizedPrompt).filter(Boolean);
+}
+
+function buildImageParamsFromSelection({
+    prompt,
+    modelId,
+    selectedModel = {},
+    size = 'auto',
+    quality = 'auto',
+    style = null,
+    background = 'auto',
+    n = 1,
+} = {}) {
     const supportedSizes = Array.isArray(selectedModel.sizes) ? selectedModel.sizes : [];
     const supportedQualities = Array.isArray(selectedModel.qualities) ? selectedModel.qualities : [];
     const supportedStyles = Array.isArray(selectedModel.styles) ? selectedModel.styles : [];
+    const supportedBackgrounds = Array.isArray(selectedModel.backgrounds) ? selectedModel.backgrounds : [];
 
     const params = {
         prompt,
@@ -5049,6 +5085,44 @@ async function generateImage({
         params.style = style;
     }
 
+    if (background && supportedBackgrounds.includes(background)) {
+        params.background = background;
+    }
+
+    return params;
+}
+
+async function resolveImageGenerationSelection(model = null) {
+    const { modelId, availableModels } = await resolveImageModel(model);
+    const selectedModel = availableModels.find((entry) => entry.id === modelId) || getImageModelMetadata(modelId);
+
+    return {
+        modelId,
+        selectedModel,
+    };
+}
+
+async function generateImageWithSelection({
+    prompt,
+    modelId,
+    selectedModel,
+    size = 'auto',
+    quality = 'auto',
+    style = null,
+    background = 'auto',
+    n = 1,
+} = {}) {
+    const params = buildImageParamsFromSelection({
+        prompt,
+        modelId,
+        selectedModel,
+        size,
+        quality,
+        style,
+        background,
+        n,
+    });
+
     console.log(`[OpenAI] Generating image with provider=${getImageProviderConfig().source}, model=${params.model}, size=${params.size}, n=${params.n}`);
 
     const response = await postImageGeneration(params);
@@ -5059,11 +5133,123 @@ async function generateImage({
         size: params.size,
         quality: params.quality || null,
         style: params.style || null,
+        background: params.background || null,
         data: (response.data || []).map((image) => ({
             url: toImageUrl(image),
             b64_json: image.b64_json,
             revised_prompt: image.revised_prompt,
         })),
+    };
+}
+
+async function generateImage({
+    prompt,
+    model = null,
+    size = 'auto',
+    quality = 'auto',
+    style = null,
+    background = 'auto',
+    n = 1,
+}) {
+    const { modelId, selectedModel } = await resolveImageGenerationSelection(model);
+    return generateImageWithSelection({
+        prompt,
+        modelId,
+        selectedModel,
+        size,
+        quality,
+        style,
+        background,
+        n,
+    });
+}
+
+async function generateImageBatch({
+    prompt,
+    prompts = [],
+    model = null,
+    size = 'auto',
+    quality = 'auto',
+    style = null,
+    background = 'auto',
+    n = 1,
+    batchMode = 'auto',
+    concurrency = config.openai.imageBatchConcurrency,
+} = {}) {
+    const promptList = normalizeImagePromptList({ prompt, prompts, n });
+    const requestedCount = promptList.length;
+    if (requestedCount === 0) {
+        const error = new Error('Image generation requires at least one prompt.');
+        error.status = 400;
+        throw error;
+    }
+    const normalizedBatchMode = String(batchMode || 'auto').trim().toLowerCase();
+    const useSingleRequest = normalizedBatchMode !== 'parallel'
+        && promptList.length > 0
+        && promptList.every((entry) => entry === promptList[0]);
+    const { modelId, selectedModel } = await resolveImageGenerationSelection(model);
+
+    if (useSingleRequest) {
+        const response = await generateImageWithSelection({
+            prompt: promptList[0],
+            modelId,
+            selectedModel,
+            size,
+            quality,
+            style,
+            background,
+            n: requestedCount,
+        });
+
+        return {
+            ...response,
+            batch: {
+                mode: 'single-request',
+                requestedCount,
+                prompts: [promptList[0]],
+            },
+        };
+    }
+
+    const responses = await mapWithConcurrency(
+        promptList,
+        concurrency,
+        (entry) => generateImageWithSelection({
+            prompt: entry,
+            modelId,
+            selectedModel,
+            size,
+            quality,
+            style,
+            background,
+            n: 1,
+        }),
+    );
+    const data = responses.flatMap((response, responseIndex) => (
+        (response.data || []).map((image) => ({
+            ...image,
+            prompt: promptList[responseIndex],
+            option_index: responseIndex,
+        }))
+    ));
+    const firstResponse = responses[0] || {};
+
+    const responseCreatedTimes = responses.map((response) => Number(response.created) || 0).filter(Boolean);
+
+    return {
+        created: responseCreatedTimes.length > 0 ? Math.max(...responseCreatedTimes) : firstResponse.created,
+        model: firstResponse.model || modelId,
+        size: firstResponse.size || size,
+        quality: firstResponse.quality || null,
+        style: firstResponse.style || null,
+        background: firstResponse.background || null,
+        data,
+        batch: {
+            mode: 'parallel',
+            concurrency: Math.min(Math.max(Number(concurrency) || 1, 1), Math.max(promptList.length, 1)),
+            requestedCount,
+            prompts: promptList,
+        },
     };
 }
 
@@ -5074,6 +5260,7 @@ module.exports = {
     createResponse,
     transcribeAudio,
     generateImage,
+    generateImageBatch,
     __testUtils: {
         buildMessages,
         buildAutomaticToolDefinitions,

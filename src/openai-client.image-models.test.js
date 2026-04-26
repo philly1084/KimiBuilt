@@ -31,6 +31,7 @@ describe('openai-client image model selection', () => {
         process.env.OPENAI_API_KEY = 'test-key';
         process.env.OPENAI_BASE_URL = 'https://api.openai.com/v1';
         delete process.env.OPENAI_IMAGE_MODEL;
+        delete process.env.OPENAI_IMAGE_ALLOW_OFFICIAL_FALLBACK;
         delete process.env.OPENAI_MEDIA_API_KEY;
         delete process.env.OPENAI_MEDIA_IMAGE_MODEL;
     });
@@ -39,6 +40,7 @@ describe('openai-client image model selection', () => {
         delete process.env.OPENAI_API_KEY;
         delete process.env.OPENAI_BASE_URL;
         delete process.env.OPENAI_IMAGE_MODEL;
+        delete process.env.OPENAI_IMAGE_ALLOW_OFFICIAL_FALLBACK;
         delete process.env.OPENAI_MEDIA_API_KEY;
         delete process.env.OPENAI_MEDIA_IMAGE_MODEL;
     });

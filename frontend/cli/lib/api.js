@@ -162,6 +162,49 @@ class OpenAIClient {
     }
   }
 
+  async apiRequest(routePath, options = {}) {
+    this.refreshClient();
+
+    const method = options.method || 'GET';
+    const headers = this.buildApiHeaders({
+      Accept: 'application/json',
+      ...(options.headers || {}),
+    });
+    const requestInit = {
+      method,
+      headers,
+      timeout: options.timeout || DEFAULT_TIMEOUT,
+    };
+
+    if (options.body !== undefined) {
+      requestInit.body = JSON.stringify(options.body);
+      if (!Object.keys(headers).some((key) => key.toLowerCase() === 'content-type')) {
+        requestInit.headers['Content-Type'] = 'application/json';
+      }
+    }
+
+    try {
+      const response = await fetch(`${this.getGatewayBaseUrl()}${routePath}`, requestInit);
+      if (!response.ok) {
+        const responseBody = await this._parseFetchResponseBody(response);
+        const errorMessage = responseBody?.error?.message
+          || responseBody?.message
+          || `HTTP ${response.status}`;
+        throw new APIError(errorMessage, response.status, responseBody);
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        return response.json();
+      }
+
+      const text = await response.text();
+      return text ? { message: text } : {};
+    } catch (err) {
+      throw this._handleError(err);
+    }
+  }
+
   /**
    * Send a chat message with streaming support.
    * @param {string} message - Message to send
@@ -599,6 +642,94 @@ class OpenAIClient {
     return Array.isArray(response?.data) ? response.data : [];
   }
 
+  async getAvailableTools(options = {}) {
+    const params = new URLSearchParams();
+    if (options.category) {
+      params.set('category', options.category);
+    }
+    if (options.sessionId) {
+      params.set('sessionId', options.sessionId);
+    }
+    if (options.taskType) {
+      params.set('taskType', options.taskType);
+    }
+    if (options.clientSurface) {
+      params.set('clientSurface', options.clientSurface);
+    }
+    if (options.executionProfile) {
+      params.set('executionProfile', options.executionProfile);
+    }
+    if (options.includeAll) {
+      params.set('includeAll', 'true');
+    }
+
+    const query = params.toString();
+    return this.apiRequest(`/api/tools/available${query ? `?${query}` : ''}`, {
+      method: 'GET',
+      timeout: options.timeout || 10000,
+    });
+  }
+
+  async getToolDetails(toolId, options = {}) {
+    return this.apiRequest(`/api/tools/${encodeURIComponent(toolId)}`, {
+      method: 'GET',
+      timeout: options.timeout || 10000,
+    });
+  }
+
+  async invokeTool(toolId, params = {}, options = {}) {
+    return this.apiRequest('/api/tools/invoke', {
+      method: 'POST',
+      timeout: options.timeout || params.timeout || DEFAULT_TIMEOUT,
+      body: {
+        tool: toolId,
+        params,
+        sessionId: options.sessionId || null,
+        taskType: options.taskType || CLI_TASK_TYPE,
+        clientSurface: options.clientSurface || CLI_CLIENT_SURFACE,
+        executionProfile: options.executionProfile || options.clientSurface || 'tool-invoke',
+        model: options.model || null,
+        metadata: {
+          ...(options.metadata || {}),
+          clientSurface: options.clientSurface || CLI_CLIENT_SURFACE,
+          requestedModel: options.model || null,
+        },
+      },
+    });
+  }
+
+  async runRemoteCommand(command, options = {}) {
+    return this.invokeTool('remote-command', {
+      command,
+      profile: options.profile || 'inspect',
+      workflowAction: options.workflowAction || 'cli-workbench-command',
+      timeout: options.timeout || 120000,
+      ...(options.workingDirectory ? { workingDirectory: options.workingDirectory } : {}),
+      ...(options.environment ? { environment: options.environment } : {}),
+      ...(options.approval ? { approval: options.approval } : {}),
+    }, {
+      sessionId: options.sessionId,
+      taskType: options.taskType || CLI_TASK_TYPE,
+      clientSurface: options.clientSurface || CLI_CLIENT_SURFACE,
+      executionProfile: options.executionProfile || 'remote-build',
+      model: options.model,
+      timeout: options.timeout || 120000,
+      metadata: options.metadata,
+    });
+  }
+
+  async runK3sDeploy(params = {}, options = {}) {
+    return this.invokeTool('k3s-deploy', params, {
+      sessionId: options.sessionId,
+      taskType: options.taskType || CLI_TASK_TYPE,
+      clientSurface: options.clientSurface || CLI_CLIENT_SURFACE,
+      executionProfile: options.executionProfile || 'remote-build',
+      model: options.model,
+      timeout: options.timeout || params.timeout || 180000,
+      metadata: options.metadata,
+    });
+  }
+
   async createProviderSession(options = {}) {
     const body = {
       providerId: options.providerId,
@@ -1026,6 +1157,7 @@ function downloadImage(imageUrl, outputPath) {
 module.exports = {
   APIError,
   request: (path, options) => client._legacyRequest(path, options),
+  apiRequest: (path, options) => client.apiRequest(path, options),
   chat: (message, sessionId, onDelta, onDone, model, outputFormat, onReasoning) => client.chat(message, sessionId, onDelta, onDone, model, outputFormat, onReasoning),
   chatNonStreaming: (message, sessionId, model) => client.chatNonStreaming(message, sessionId, model),
   canvas: (message, sessionId, canvasType, existingContent, model) => 
@@ -1040,6 +1172,11 @@ module.exports = {
   getModels: () => client.getModels(),
   getImageModels: () => client.getImageModels(),
   generateImage: (prompt, options) => client.generateImage(prompt, options),
+  getAvailableTools: (options) => client.getAvailableTools(options),
+  getToolDetails: (toolId, options) => client.getToolDetails(toolId, options),
+  invokeTool: (toolId, params, options) => client.invokeTool(toolId, params, options),
+  runRemoteCommand: (command, options) => client.runRemoteCommand(command, options),
+  runK3sDeploy: (params, options) => client.runK3sDeploy(params, options),
   uploadArtifact,
   listArtifacts,
   generateArtifact,

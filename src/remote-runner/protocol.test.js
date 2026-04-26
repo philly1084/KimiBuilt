@@ -44,6 +44,18 @@ describe('remote runner protocol', () => {
     expect(() => normalizeCommandJob({})).toThrow('job.command is required');
   });
 
+  test('maps remote command workingDirectory to runner cwd', () => {
+    expect(normalizeCommandJob({
+      command: 'pwd',
+      workingDirectory: '/workspace/app',
+      profile: 'inspect',
+    })).toEqual(expect.objectContaining({
+      command: 'pwd',
+      cwd: '/workspace/app',
+      profile: 'inspect',
+    }));
+  });
+
   test('flags privileged commands for approval gating', () => {
     expect(isDangerousCommand('sudo systemctl restart k3s')).toBe(true);
     expect(isDangerousCommand('kubectl get pods -A -o wide')).toBe(false);
