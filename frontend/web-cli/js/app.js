@@ -98,7 +98,7 @@ class CodeCLIApp {
         this.checkConnection();
         this.loadModels();
         this.printWelcome();
-        this.restoreSharedSession();
+        this.sessionRestorePromise = this.restoreSharedSession();
         this.scheduleVoxelAmbientMove();
     }
     
@@ -1033,6 +1033,10 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
     // ==================== Command Processing ====================
     
     async sendCommand() {
+        if (this.sessionRestorePromise) {
+            await this.sessionRestorePromise;
+        }
+
         const input = this.commandInput.value.trim();
         if (!input) return;
         
@@ -4306,7 +4310,15 @@ ${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${p
 
         const streamingLine = this.terminalOutput.querySelector('.line-output.ai.streaming');
         if (streamingLine) {
-            streamingLine.remove();
+            streamingLine.classList.remove('streaming');
+            streamingLine.innerHTML = this.renderAIContent(expected || this.currentOutput);
+            this.finishAIContentLine(streamingLine);
+            this.scrollToBottom();
+            return;
+        }
+
+        if (expected) {
+            this.printAI(expected);
         }
     }
 }
