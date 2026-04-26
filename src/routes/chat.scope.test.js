@@ -152,6 +152,7 @@ describe('/api/chat scope wiring', () => {
             expect.objectContaining({
                 clientSurface: 'web-chat',
                 memoryScope: 'web-chat',
+                sessionIsolation: true,
             }),
             null,
         );
@@ -163,12 +164,13 @@ describe('/api/chat scope wiring', () => {
                 metadata: expect.objectContaining({
                     clientSurface: 'web-chat',
                     memoryScope: 'web-chat',
+                    sessionIsolation: true,
                 }),
             }),
         );
     });
 
-    test('forwards memoryKeywords to the runtime metadata without changing scope isolation', async () => {
+    test('forwards memoryKeywords while keeping web-chat memory session isolated', async () => {
         const app = express();
         app.use(express.json());
         app.use('/api/chat', chatRouter);
@@ -193,9 +195,11 @@ describe('/api/chat scope wiring', () => {
                 metadata: expect.objectContaining({
                     clientSurface: 'web-chat',
                     memoryScope: 'web-chat',
+                    sessionIsolation: true,
                     memoryKeywords: ['html', 'section-3'],
                 }),
                 toolContext: expect.objectContaining({
+                    sessionIsolation: true,
                     memoryKeywords: ['html', 'section-3'],
                 }),
             }),

@@ -108,7 +108,8 @@ function resolveSessionIsolation(value = {}, session = null, fallback = null) {
 }
 
 function isSessionIsolationEnabled(value = {}, session = null) {
-  return resolveSessionIsolation(value, session, false) === true;
+  const defaultIsolation = resolveClientSurface(value, session) === 'web-chat';
+  return resolveSessionIsolation(value, session, defaultIsolation) === true;
 }
 
 function hasSessionScopeHints(value = {}) {
@@ -341,7 +342,12 @@ function defaultShareAcrossSurfaces(memoryClass = DEFAULT_MEMORY_CLASS) {
 function resolveMemoryNamespace(value = {}, session = null, fallback = '') {
   const source = getPlainObject(value);
   const nested = getPlainObject(source.metadata);
-  const sessionIsolation = resolveSessionIsolation(source, session, false);
+  const clientSurface = resolveClientSurface(source, session, source.sourceSurface || source.source_surface || '');
+  const sessionIsolation = resolveSessionIsolation(
+    source,
+    session,
+    clientSurface === 'web-chat',
+  );
   const memoryClass = normalizeMemoryClass(
     source.memoryClass
     || source.memory_class
@@ -384,7 +390,11 @@ function buildScopedMemoryMetadata(metadata = {}, session = null) {
   const projectKey = resolveProjectKey(source, session);
   const memoryClass = normalizeMemoryClass(source.memoryClass || source.memory_class);
   const shareAcrossSurfaces = resolveBooleanValue(source.shareAcrossSurfaces || source.share_across_surfaces);
-  const sessionIsolation = resolveSessionIsolation(source, session, false);
+  const sessionIsolation = resolveSessionIsolation(
+    source,
+    session,
+    clientSurface === 'web-chat',
+  );
   const sourceSurface = firstNormalizedValue([
     source.sourceSurface,
     source.source_surface,
@@ -418,7 +428,7 @@ function buildScopedSessionMetadata(metadata = {}, session = null) {
   const sessionIsolation = resolveSessionIsolation(
     source,
     session,
-    false,
+    clientSurface === 'web-chat',
   );
   const projectKey = resolveProjectKey(source, session);
 

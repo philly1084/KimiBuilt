@@ -42,6 +42,12 @@ const DEFAULT_PODCAST_TTS_CONCURRENCY = Math.max(
 const MAX_PODCAST_RESEARCH_CONCURRENCY = 12;
 const MAX_PODCAST_TTS_CONCURRENCY = 24;
 const PODCAST_HIGH_QUALITY_VOICE_IDS = Object.freeze([
+  'lessac-high',
+  'lessac-bright',
+  'ljspeech-high',
+  'ryan-high',
+  'ryan-direct',
+  'cori-high',
   'hfc-female-rich',
   'hfc-female-medium',
   'kathleen-low',
@@ -51,20 +57,64 @@ const PODCAST_HIGH_QUALITY_VOICE_IDS = Object.freeze([
 ]);
 const DEFAULT_MAX_VOICE_FALLBACK_ATTEMPTS = 2;
 const MAX_PODCAST_TTS_SPLIT_DEPTH = 3;
-const DEFAULT_HOSTS = Object.freeze([
+const DEFAULT_HOST_ROSTER = Object.freeze([
   {
     key: 'hostA',
     name: 'Maya',
     role: 'Lead host',
     persona: 'Warm, curious, and good at guiding the listener through the big picture.',
-    preferredVoiceIds: ['hfc-female-rich', 'hfc-female-medium', 'kathleen-low'],
+    preferredVoiceIds: ['lessac-high', 'lessac-bright', 'ljspeech-high', 'hfc-female-rich'],
+  },
+  {
+    key: 'hostB',
+    name: 'Ryan',
+    role: 'Co-host',
+    persona: 'Grounded, calm, and precise when unpacking details, tradeoffs, and practical consequences.',
+    preferredVoiceIds: ['ryan-high', 'ryan-direct', 'cori-high'],
+  },
+  {
+    key: 'hostC',
+    name: 'June',
+    role: 'Co-host',
+    persona: 'Sharper, more analytical, and slightly playful when unpacking details and tradeoffs.',
+    preferredVoiceIds: ['cori-high', 'lessac-bright', 'amy-broadcast'],
+  },
+  {
+    key: 'hostD',
+    name: 'Elliot',
+    role: 'Lead host',
+    persona: 'Measured, thoughtful, and good at turning technical material into clear narrative beats.',
+    preferredVoiceIds: ['ryan-direct', 'ryan-high', 'ljspeech-high'],
+  },
+  {
+    key: 'hostE',
+    name: 'Nora',
+    role: 'Lead host',
+    persona: 'Polished, editorial, and relaxed, with an emphasis on listener trust and clean pacing.',
+    preferredVoiceIds: ['ljspeech-high', 'lessac-high', 'kathleen-low'],
+  },
+  {
+    key: 'hostF',
+    name: 'Cori',
+    role: 'Co-host',
+    persona: 'Concise, documentary-style, and comfortable adding perspective without overexplaining.',
+    preferredVoiceIds: ['cori-high', 'lessac-high', 'ryan-high'],
+  },
+]);
+const LEGACY_DEFAULT_HOSTS = Object.freeze([
+  {
+    key: 'hostA',
+    name: 'Maya',
+    role: 'Lead host',
+    persona: 'Warm, curious, and good at guiding the listener through the big picture.',
+    preferredVoiceIds: ['lessac-high', 'lessac-bright', 'ljspeech-high', 'hfc-female-rich'],
   },
   {
     key: 'hostB',
     name: 'June',
     role: 'Co-host',
     persona: 'Sharper, more analytical, and slightly playful when unpacking details and tradeoffs.',
-    preferredVoiceIds: ['amy-expressive', 'amy-broadcast', 'amy-medium'],
+    preferredVoiceIds: ['cori-high', 'lessac-bright', 'amy-broadcast'],
   },
 ]);
 
@@ -183,6 +233,51 @@ function uniqueOrdered(items = []) {
       seen.add(id);
       return true;
     });
+}
+
+function stableIndexFromText(value = '', modulo = 1) {
+  const limit = Math.max(1, Number(modulo) || 1);
+  const input = String(value || '');
+  let hash = 0;
+  for (let index = 0; index < input.length; index += 1) {
+    hash = ((hash * 31) + input.charCodeAt(index)) >>> 0;
+  }
+  return hash % limit;
+}
+
+function hasExplicitHostConfig(params = {}) {
+  return ['A', 'B'].some((suffix) => (
+    String(params[`host${suffix}Name`] || '').trim()
+    || String(params[`host${suffix}Role`] || '').trim()
+    || String(params[`host${suffix}Persona`] || '').trim()
+    || String(params[`host${suffix}VoiceId`] || '').trim()
+    || normalizeStringList(params[`host${suffix}VoiceIds`]).length > 0
+  ));
+}
+
+function selectDefaultHostTemplates(params = {}) {
+  if (hasExplicitHostConfig(params)) {
+    return LEGACY_DEFAULT_HOSTS;
+  }
+
+  const leadHosts = DEFAULT_HOST_ROSTER.filter((host) => host.role === 'Lead host');
+  const coHosts = DEFAULT_HOST_ROSTER.filter((host) => host.role !== 'Lead host');
+  if (leadHosts.length === 0 || coHosts.length === 0) {
+    return DEFAULT_HOST_ROSTER.slice(0, 2);
+  }
+
+  const seed = [
+    params.topic,
+    params.prompt,
+    params.subject,
+    params.audience,
+    params.tone,
+    Date.now(),
+  ].filter(Boolean).join('|');
+  const firstIndex = stableIndexFromText(seed, leadHosts.length);
+  const secondIndex = stableIndexFromText(`${seed}|cohost`, coHosts.length);
+
+  return [leadHosts[firstIndex], coHosts[secondIndex]];
 }
 
 function buildHostVoicePool(availableVoices = [], preferredVoiceIds = [], explicitVoiceIds = [], forcedVoiceId = '') {
@@ -331,6 +426,7 @@ function requestedMixing(params = {}) {
   return params.includeIntro === true
     || params.includeOutro === true
     || params.includeMusicBed === true
+    || params.includeVideo === true
     || Boolean(String(params.introPath || '').trim())
     || Boolean(String(params.outroPath || '').trim())
     || Boolean(String(params.musicBedPath || '').trim());
@@ -517,14 +613,17 @@ function buildTranscript(turns = []) {
     .trim();
 }
 
-function normalizeTurn(turn = {}, allowedSpeakers = new Set()) {
+function normalizeTurn(turn = {}, allowedSpeakers = new Set(), speakerAliases = new Map()) {
   const speaker = sanitizePodcastText(turn?.speaker || '');
   const text = sanitizePodcastText(turn?.text || '', { preserveNewlines: true });
-  if (!speaker || !text || !allowedSpeakers.has(speaker)) {
+  const resolvedSpeaker = allowedSpeakers.has(speaker)
+    ? speaker
+    : speakerAliases.get(speaker);
+  if (!resolvedSpeaker || !text || !allowedSpeakers.has(resolvedSpeaker)) {
     return null;
   }
 
-  return { speaker, text };
+  return { speaker: resolvedSpeaker, text };
 }
 
 function pickPrimaryHostVoice(voiceIds = [], usedVoiceIds = new Set()) {
@@ -592,6 +691,7 @@ function resolveTurnVoicePlan(turns = [], hosts = [], options = {}) {
 function resolveHosts(params = {}, voiceConfig = {}) {
   const availableVoices = Array.isArray(voiceConfig?.voices) ? voiceConfig.voices : [];
   const usedVoiceIds = new Set();
+  const hostTemplates = selectDefaultHostTemplates(params);
   const explicitARequested = Boolean(
     String(params.hostAVoiceId || '').trim() || params.hostAVoiceIds?.length,
   );
@@ -599,7 +699,7 @@ function resolveHosts(params = {}, voiceConfig = {}) {
     String(params.hostBVoiceId || '').trim() || params.hostBVoiceIds?.length,
   );
 
-  const hosts = DEFAULT_HOSTS.map((defaultHost, index) => {
+  const hosts = hostTemplates.slice(0, 2).map((defaultHost, index) => {
     const suffix = index === 0 ? 'A' : 'B';
     const providedVoiceId = String(params[`host${suffix}VoiceId`] || '').trim();
     const requestedVoiceIds = normalizeStringList(params[`host${suffix}VoiceIds`]);
@@ -927,6 +1027,12 @@ class PodcastService {
       videoFormat,
     });
     const allowedSpeakers = new Set(hosts.map((host) => host.name));
+    const speakerAliases = new Map([
+      ['Maya', hosts[0]?.name],
+      ['June', hosts[1]?.name],
+      ['Host 1', hosts[0]?.name],
+      ['Host 2', hosts[1]?.name],
+    ].filter(([, mapped]) => allowedSpeakers.has(mapped)));
     let lastError = null;
 
     for (const modelCandidate of (modelCandidates.length > 0 ? modelCandidates : [''])) {
@@ -947,7 +1053,7 @@ class PodcastService {
 
         const parsed = parseLenientJson(getResponseText(response));
         const turns = (Array.isArray(parsed?.turns) ? parsed.turns : [])
-          .map((turn) => normalizeTurn(turn, allowedSpeakers))
+          .map((turn) => normalizeTurn(turn, allowedSpeakers, speakerAliases))
           .filter(Boolean);
         const representedSpeakers = new Set(turns.map((turn) => turn.speaker));
 
@@ -1273,7 +1379,7 @@ class PodcastService {
           speechWavBuffer,
           includeIntro: params.includeIntro === true,
           includeOutro: params.includeOutro === true,
-          includeMusicBed: params.includeMusicBed === true,
+          includeMusicBed: params.includeMusicBed === true || params.includeVideo === true,
           enhanceSpeech: wantsEnhancement,
           introPath: params.introPath || '',
           outroPath: params.outroPath || '',

@@ -3278,7 +3278,7 @@ ${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${p
         this.printError('Usage: /session, /session new [name], /session list, /session switch <id>, or /session delete <id>');
     }
 
-    async startNewSession(name = '') {
+    async startNewSession(name = '', options = {}) {
         try {
             const sessionName = String(name || '').trim();
             const session = await api.createSession({
@@ -3286,6 +3286,9 @@ ${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${p
             });
             this.resetLocalSessionState();
             this.updateSessionInfo();
+            if (options.clear === true) {
+                this.printWelcome();
+            }
             this.printSystem(`Started isolated session ${session.id.slice(0, 8)}...${sessionName ? ` (${sessionName})` : ''}`);
         } catch (error) {
             this.printError(`Failed to start new session: ${error.message}`);

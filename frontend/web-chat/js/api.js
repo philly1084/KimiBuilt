@@ -979,6 +979,7 @@ class OpenAIAPIClient extends EventTarget {
             clientSurface: WEB_CHAT_API_CLIENT_SURFACE,
             metadata: buildWorkspaceAwareMetadata({
                 clientSurface: WEB_CHAT_API_CLIENT_SURFACE,
+                sessionIsolation: true,
                 enableConversationExecutor: true,
                 ...buildClientClockMetadata(),
                 ...(requestOptions?.metadata && typeof requestOptions.metadata === 'object'
@@ -1419,6 +1420,7 @@ class OpenAIAPIClient extends EventTarget {
             clientSurface: WEB_CHAT_API_CLIENT_SURFACE,
             metadata: {
                 clientSurface: WEB_CHAT_API_CLIENT_SURFACE,
+                sessionIsolation: true,
                 enableConversationExecutor: true,
                 ...buildClientClockMetadata(),
                 ...(requestOptions?.metadata && typeof requestOptions.metadata === 'object'
@@ -2058,6 +2060,7 @@ class OpenAIAPIClient extends EventTarget {
                 ...(options.executionProfile ? { executionProfile: options.executionProfile } : {}),
                 metadata: buildWorkspaceAwareMetadata({
                     clientSurface: WEB_CHAT_API_CLIENT_SURFACE,
+                    sessionIsolation: true,
                     ...buildClientClockMetadata(),
                     ...(options.metadata && typeof options.metadata === 'object'
                         ? options.metadata

@@ -275,6 +275,29 @@ class AudioProcessingService {
     }
   }
 
+  async generateCalmMusicBed({ outputPath, durationSeconds = 0, sampleRate = 22050, channelLayout = 'mono' } = {}) {
+    const duration = Math.max(1, Number(durationSeconds) || 1);
+    const fadeOutStart = Math.max(0, duration - 3);
+    await this.runFfmpeg([
+      '-y',
+      '-f', 'lavfi',
+      '-i', `sine=frequency=220:sample_rate=${sampleRate}:duration=${duration.toFixed(3)}`,
+      '-f', 'lavfi',
+      '-i', `sine=frequency=277:sample_rate=${sampleRate}:duration=${duration.toFixed(3)}`,
+      '-filter_complex', [
+        '[0:a]volume=0.32[a0]',
+        '[1:a]volume=0.18[a1]',
+        '[a0][a1]amix=inputs=2:duration=longest:dropout_transition=0',
+        'lowpass=f=1800',
+        'afade=t=in:st=0:d=2',
+        `afade=t=out:st=${fadeOutStart.toFixed(3)}:d=3`,
+        `aformat=sample_fmts=s16:channel_layouts=${channelLayout}`,
+      ].join(','),
+      '-c:a', 'pcm_s16le',
+      outputPath,
+    ], 'audio_bed_generate_failed', 'ffmpeg failed to generate the podcast music bed.');
+  }
+
   async composePodcastAudio({
     speechWavBuffer,
     includeIntro = false,
@@ -323,18 +346,35 @@ class AudioProcessingService {
     const resolvedOutroPath = (includeOutro || Boolean(String(outroPath || '').trim()))
       ? this.resolveAssetPath(outroPath, this.audioProcessingConfig.podcastOutroPath, 'Podcast outro audio')
       : '';
-    const resolvedBedPath = (includeMusicBed || Boolean(String(musicBedPath || '').trim()))
-      ? this.resolveAssetPath(musicBedPath, this.audioProcessingConfig.podcastMusicBedPath, 'Podcast music bed audio')
-      : '';
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-podcast-compose-'));
     const speechPath = path.join(tempDir, 'speech.wav');
     const mixedSpeechPath = path.join(tempDir, 'speech-mixed.wav');
     const finalPath = path.join(tempDir, 'podcast-final.wav');
     const masteredPath = path.join(tempDir, 'podcast-mastered.wav');
+    const generatedBedPath = path.join(tempDir, 'calm-music-bed.wav');
 
     try {
       await fs.writeFile(speechPath, speechWavBuffer);
       let currentPath = speechPath;
+      let resolvedBedPath = '';
+      if (includeMusicBed || Boolean(String(musicBedPath || '').trim())) {
+        resolvedBedPath = this.resolveAssetPath(
+          musicBedPath,
+          this.audioProcessingConfig.podcastMusicBedPath,
+          'Podcast music bed audio',
+        );
+        if (!resolvedBedPath) {
+          const bytesPerSample = Math.max(1, Math.floor(format.bitsPerSample / 8));
+          const durationSeconds = format.data.length / Math.max(1, sampleRate * format.numChannels * bytesPerSample);
+          await this.generateCalmMusicBed({
+            outputPath: generatedBedPath,
+            durationSeconds,
+            sampleRate,
+            channelLayout,
+          });
+          resolvedBedPath = generatedBedPath;
+        }
+      }
 
       if (resolvedBedPath) {
         const filter = [

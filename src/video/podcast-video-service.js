@@ -536,12 +536,16 @@ function extractImageUrlsFromHtml(html = '', baseUrl = '') {
 
 function buildPlaceholderFrameBuffer(width = DEFAULT_WIDTH, height = DEFAULT_HEIGHT, seed = '') {
   const hash = Buffer.from(String(seed || 'podcast-video'));
-  const r1 = 32 + (hash[0] || 0) % 90;
-  const g1 = 42 + (hash[1] || 0) % 90;
-  const b1 = 60 + (hash[2] || 0) % 110;
-  const r2 = 120 + (hash[3] || 0) % 90;
-  const g2 = 80 + (hash[4] || 0) % 100;
-  const b2 = 70 + (hash[5] || 0) % 120;
+  const palettes = [
+    [[18, 42, 56], [86, 132, 128]],
+    [[22, 46, 38], [112, 142, 94]],
+    [[30, 43, 58], [122, 137, 151]],
+    [[44, 52, 42], [139, 128, 92]],
+    [[16, 55, 70], [80, 146, 154]],
+  ];
+  const [startColor, endColor] = palettes[(hash[0] || 0) % palettes.length];
+  const [r1, g1, b1] = startColor;
+  const [r2, g2, b2] = endColor;
   const header = Buffer.from(`P6\n${width} ${height}\n255\n`, 'ascii');
   const pixels = Buffer.alloc(width * height * 3);
 

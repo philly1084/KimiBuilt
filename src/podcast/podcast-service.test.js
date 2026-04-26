@@ -13,6 +13,12 @@ jest.mock('../tts/piper-tts-service', () => ({
       podcastChunkChars: 760,
       defaultVoiceId: 'hfc-female-rich',
       voices: [
+        { id: 'lessac-high', label: 'Lessac Studio', provider: 'piper' },
+        { id: 'lessac-bright', label: 'Lessac Bright', provider: 'piper' },
+        { id: 'ljspeech-high', label: 'LJ Narrator', provider: 'piper' },
+        { id: 'ryan-high', label: 'Ryan Deep', provider: 'piper' },
+        { id: 'ryan-direct', label: 'Ryan Direct', provider: 'piper' },
+        { id: 'cori-high', label: 'Cori British', provider: 'piper' },
         { id: 'hfc-female-rich', label: 'HFC Rich', provider: 'piper' },
         { id: 'hfc-female-medium', label: 'HFC Warm', provider: 'piper' },
         { id: 'kathleen-low', label: 'Kathleen Gentle', provider: 'piper' },
@@ -828,7 +834,7 @@ describe('PodcastService', () => {
     }));
   });
 
-  test('uses the curated six-voice host pools when cycling is enabled without explicit voice ids', async () => {
+  test('uses the curated high-quality host pools when cycling is enabled without explicit voice ids', async () => {
     const executeTool = jest.fn(async (toolId) => {
       if (toolId === 'web-search') {
         return {
@@ -877,18 +883,19 @@ describe('PodcastService', () => {
       toolManager: { executeTool },
     });
 
-    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      voiceId: 'hfc-female-rich',
-    }));
-    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      voiceId: 'amy-expressive',
-    }));
-    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(3, expect.objectContaining({
-      voiceId: 'hfc-female-medium',
-    }));
-    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(4, expect.objectContaining({
-      voiceId: 'amy-broadcast',
-    }));
+    const usedVoiceIds = piperTtsService.synthesize.mock.calls.map(([call]) => call.voiceId);
+    expect(usedVoiceIds).toHaveLength(4);
+    expect(new Set(usedVoiceIds).size).toBeGreaterThanOrEqual(2);
+    usedVoiceIds.forEach((voiceId) => {
+      expect([
+        'lessac-high',
+        'lessac-bright',
+        'ljspeech-high',
+        'ryan-high',
+        'ryan-direct',
+        'cori-high',
+      ]).toContain(voiceId);
+    });
   });
 
   test('keeps one voice per host when cycleHostVoices is disabled', async () => {

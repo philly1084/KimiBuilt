@@ -1012,6 +1012,7 @@ class MemoryService {
                 sessionId: shouldLockToCurrentSession ? sessionId : null,
                 ownerId: shouldLockToCurrentSession ? null : ownerId,
                 memoryScope,
+                sessionIsolation: routing.sessionIsolation === true,
                 memoryKeywords,
                 sourceSurface: routing.sourceSurface || null,
                 projectKey: routing.projectKey || null,

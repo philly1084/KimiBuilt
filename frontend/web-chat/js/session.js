@@ -1232,6 +1232,7 @@ class SessionManager extends EventTarget {
                         mode,
                         taskType: SESSION_MANAGER_TASK_TYPE,
                         clientSurface: SESSION_MANAGER_CLIENT_SURFACE,
+                        sessionIsolation: true,
                     }),
                 }),
             });
@@ -1258,6 +1259,7 @@ class SessionManager extends EventTarget {
                 mode,
                 taskType: SESSION_MANAGER_TASK_TYPE,
                 clientSurface: SESSION_MANAGER_CLIENT_SURFACE,
+                sessionIsolation: true,
             }),
             scopeKey: backendSession?.scopeKey || backendSession?.scope_key || this.workspaceContext.scopeKey,
             controlState: backendSession?.controlState

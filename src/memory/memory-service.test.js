@@ -57,13 +57,14 @@ describe('MemoryService recall profiles', () => {
             memoryClass: 'conversation',
             memoryNamespace: 'session_local',
             shareAcrossSurfaces: false,
-            sessionIsolation: false,
+            sessionIsolation: true,
             sourceSurface: 'web-chat',
         });
         expect(recallSpy).toHaveBeenCalledWith('hello world', expect.objectContaining({
             sessionId: 'session-1',
             ownerId: null,
             memoryScope: 'web-chat',
+            sessionIsolation: true,
             profile: DEFAULT_RECALL_PROFILE,
         }));
     });

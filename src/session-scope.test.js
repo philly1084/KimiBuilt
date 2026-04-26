@@ -1,5 +1,6 @@
 const {
   buildScopedMemoryMetadata,
+  buildScopedSessionMetadata,
   PROJECT_SHARED_MEMORY_NAMESPACE,
   resolveProjectKey,
   SESSION_LOCAL_MEMORY_NAMESPACE,
@@ -29,6 +30,7 @@ describe('session scope memory routing', () => {
       memoryScope: 'acme-platform',
       sourceSurface: 'web-chat',
       memoryClass: 'artifact',
+      sessionIsolation: false,
     })).toEqual(expect.objectContaining({
       projectKey: 'acme-platform',
       memoryNamespace: PROJECT_SHARED_MEMORY_NAMESPACE,
@@ -62,6 +64,31 @@ describe('session scope memory routing', () => {
       memoryNamespace: SURFACE_LOCAL_MEMORY_NAMESPACE,
       shareAcrossSurfaces: false,
       sessionIsolation: false,
+    }));
+  });
+
+  test('defaults web-chat memory to session-local isolation', () => {
+    expect(buildScopedMemoryMetadata({
+      ownerId: 'phill',
+      memoryScope: 'web-chat-workspace-3',
+      sourceSurface: 'web-chat',
+      clientSurface: 'web-chat',
+      memoryClass: 'conversation',
+    })).toEqual(expect.objectContaining({
+      memoryScope: 'web-chat-workspace-3',
+      projectKey: 'web-chat-workspace-3',
+      memoryNamespace: SESSION_LOCAL_MEMORY_NAMESPACE,
+      sessionIsolation: true,
+    }));
+  });
+
+  test('defaults web-chat session metadata to isolated chat memory', () => {
+    expect(buildScopedSessionMetadata({
+      clientSurface: 'web-chat',
+      memoryScope: 'web-chat-workspace-3',
+    })).toEqual(expect.objectContaining({
+      memoryScope: 'web-chat-workspace-3',
+      sessionIsolation: true,
     }));
   });
 

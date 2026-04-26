@@ -570,6 +570,19 @@
             border-color: var(--text-muted);
         }
 
+        .btn-primary {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: var(--bg-primary);
+            font-weight: 600;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+            border-color: var(--accent-hover);
+            color: var(--bg-primary);
+        }
+
         .btn:active {
             transform: translateY(1px);
         }
@@ -775,6 +788,10 @@
                 display: none;
             }
 
+            .btn[data-short]::before {
+                content: attr(data-short);
+            }
+
             .terminal-output {
                 padding: 12px;
             }
@@ -961,6 +978,12 @@
                 <select id="modelSelect" style="padding: 6px 10px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); font-family: inherit; font-size: 12px;">
                     <option>Loading models...</option>
                 </select>
+                <button class="btn btn-sm btn-primary" data-short="New" onclick="app.startNewSession('', { clear: true })" title="Start a new isolated chat session" aria-label="Start new isolated chat session">
+                    <span>New Chat</span>
+                </button>
+                <button class="btn btn-sm" data-short="Sess" onclick="app.listSessions()" title="List isolated chat sessions" aria-label="List isolated chat sessions">
+                    <span>Sessions</span>
+                </button>
                 <button class="btn btn-sm" data-short="Clr" onclick="app.clearOutput()" title="Clear (Ctrl+L)" aria-label="Clear terminal">
                     <span>Clear</span>
                 </button>
