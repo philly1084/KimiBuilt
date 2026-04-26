@@ -39,6 +39,8 @@ const {
   normalizeCheckpointRequest,
   buildUserCheckpointMessage,
 } = require('../../user-checkpoints');
+const { buildToolContract } = require('../../orchestration/tool-contracts');
+const { validatePlanStep } = require('../../orchestration/plan-validator');
 const { getHostnameFromUrl, normalizeDomainList } = require('./categories/web/research-site-policy');
 
 const MAX_VERIFIED_REFERENCE_IMAGES = 20;
@@ -4561,6 +4563,25 @@ class ToolManager {
     return this.loadedTools.get(id) || this.registry.getTool(id);
   }
 
+  getToolContract(id) {
+    const tool = this.getTool(id);
+    return tool ? buildToolContract(id, tool) : null;
+  }
+
+  validateToolCall(id, params = {}, options = {}) {
+    return validatePlanStep({
+      tool: id,
+      params,
+    }, {
+      toolManager: this,
+      contracts: {
+        [id]: this.getToolContract(id),
+      },
+      allowUnsupportedManagedApp: true,
+      ...options,
+    });
+  }
+
   /**
    * Execute a tool
    */
@@ -4583,6 +4604,15 @@ class ToolManager {
     const effectiveContext = context?.toolManager
       ? context
       : { ...context, toolManager: this };
+    if (effectiveContext.validateToolPlan === true || process.env.ORCHESTRATION_REWRITE_ENABLED === 'true') {
+      const validation = this.validateToolCall(id, normalizedParams);
+      if (!validation.ok) {
+        const error = new Error(`Invalid tool call for ${id}: ${validation.rejections.map((rejection) => rejection.message).join('; ')}`);
+        error.code = 'INVALID_TOOL_CALL';
+        error.validation = validation;
+        throw error;
+      }
+    }
 
     // Execute either a ToolBase instance or a registry definition.
     let result;

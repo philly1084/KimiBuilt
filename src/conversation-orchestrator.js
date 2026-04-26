@@ -93,6 +93,13 @@ const { formatProjectExecutionContext } = require('./workloads/project-plans');
 const { hasWorkloadIntent } = require('./workloads/natural-language');
 const { buildCanonicalWorkloadAction } = require('./workloads/request-builder');
 const {
+    applyRewritePolicyOverlay,
+    isOrchestrationRewriteEnabled,
+} = require('./orchestration/tool-policy');
+const { buildAgencyProfile: buildRewriteAgencyProfile, inferTaskIntent } = require('./orchestration/intent-classifier');
+const { buildDeterministicRoute } = require('./orchestration/plan-router');
+const { validatePlan } = require('./orchestration/plan-validator');
+const {
     inferSurfaceFinisher,
     scorePerceivedIntelligence,
 } = require('./perceived-intelligence-harness');
@@ -3899,42 +3906,6 @@ function buildDeterministicRecoveryPlanFromFailure({
         failedEvent?.result?.data?.stderr || '',
     ].join('\n');
 
-    if (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
-        && toolId === 'managed-app'
-        && toolPolicy?.candidateToolIds?.includes('managed-app')
-        && MANAGED_APP_RECOVERABLE_ERROR_PATTERNS.some((pattern) => pattern.test(errorText))) {
-        const reference = extractManagedAppReference(objective)
-            || extractManagedAppReferenceFromRecentMessages(recentMessages);
-        const recoveryMessages = [
-            ...(Array.isArray(recentMessages) ? recentMessages : []),
-            { role: 'assistant', content: errorText },
-        ];
-        const recoveryAction = buildManagedAppDirectAction(
-            reference
-                ? `continue with managed app ${reference}`
-                : 'continue with the managed app',
-            {
-                executionProfile,
-                recentMessages: recoveryMessages,
-                workflow: toolPolicy.workflow,
-            },
-        );
-
-        if (recoveryAction?.tool === 'managed-app') {
-            return [{
-                ...recoveryAction,
-                reason: 'Recover the missing managed app catalog entry by creating or reconciling the identified app instead of pausing.',
-                params: {
-                    ...recoveryAction.params,
-                    prompt: objective || recoveryAction.params?.prompt,
-                    sourcePrompt: objective || recoveryAction.params?.sourcePrompt,
-                    requestedAction: inferManagedAppRequestedAction(objective),
-                    ...(reference ? { name: titleizeManagedAppReference(reference) } : {}),
-                },
-            }];
-        }
-    }
-
     const remoteToolId = getPreferredRemoteToolId(toolPolicy);
     if (executionProfile !== REMOTE_BUILD_EXECUTION_PROFILE || !remoteToolId || !isRemoteCommandToolId(toolId)) {
         return [];
@@ -5087,17 +5058,6 @@ function classifyToolFailure(event = {}, executionProfile = DEFAULT_EXECUTION_PR
     const isRemoteFailure = isRemoteCommandToolId(toolId);
 
     if (!isRemoteFailure) {
-        if (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
-            && toolId === 'managed-app'
-            && MANAGED_APP_RECOVERABLE_ERROR_PATTERNS.some((pattern) => pattern.test(error))) {
-            return {
-                toolId,
-                error,
-                blocking: false,
-                category: 'managed-app-recoverable',
-            };
-        }
-
         if (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
             && toolId === 'file-read'
             && /\b(enoent|no such file or directory)\b/i.test(error)) {
@@ -6979,11 +6939,23 @@ class ConversationOrchestrator extends EventEmitter {
                 session,
             })
             : null;
-        const agencyProfile = inferAgencyProfile({
+        const rewriteIntent = inferTaskIntent({
             objective,
+            instructions: effectiveInstructions,
             executionProfile: resolvedProfile,
             classification: requestClassification,
         });
+        const agencyProfile = isOrchestrationRewriteEnabled()
+            ? buildRewriteAgencyProfile({
+                intent: rewriteIntent,
+                objective,
+                executionProfile: resolvedProfile,
+            })
+            : inferAgencyProfile({
+                objective,
+                executionProfile: resolvedProfile,
+                classification: requestClassification,
+            });
         const sessionControlState = getSessionControlState(session);
         const storedForegroundContinuationGate = normalizeForegroundContinuationGate(
             sessionControlState.foregroundContinuationGate,
@@ -7359,6 +7331,7 @@ class ConversationOrchestrator extends EventEmitter {
                     toolManager: runtimeToolManager,
                     sessionId,
                     executionProfile: resolvedProfile,
+                    toolPolicy,
                     toolContext,
                     objective,
                     session,
@@ -7881,6 +7854,7 @@ class ConversationOrchestrator extends EventEmitter {
                     toolManager: runtimeToolManager,
                     sessionId,
                     executionProfile: resolvedProfile,
+                    toolPolicy,
                     toolContext,
                     objective,
                     session,
@@ -8601,6 +8575,7 @@ class ConversationOrchestrator extends EventEmitter {
                         toolManager: runtimeToolManager,
                         sessionId,
                         executionProfile: resolvedProfile,
+                        toolPolicy,
                         toolContext,
                         objective,
                         session,
@@ -8819,17 +8794,14 @@ class ConversationOrchestrator extends EventEmitter {
         const hasResearchBucketIntent = hasResearchBucketIntentText(prompt);
         const hasPublicSourceIndexIntent = hasPublicSourceIndexIntentText(prompt);
         const hasSubAgentIntent = hasExplicitSubAgentIntentText(prompt);
-        const hasManagedAppIntent = hasManagedAppIntentText(prompt);
-        const hasManagedAppAuthoringRequest = hasManagedAppAuthoringIntent(prompt, {
-            executionProfile,
-        });
+        const hasManagedAppIntent = false;
+        const hasManagedAppAuthoringRequest = false;
         const hasRemoteCliAgentAuthoringRequest = hasRemoteCliAgentAuthoringIntent(prompt);
         const hasManagedAppContinuationRecovery = (
             isLikelyTranscriptDependentTurn(objective)
             || /\b(?:go ahead|continue|proceed|from there|those steps|next step|next steps|get it online|get it live|get it deployed)\b/i.test(objective)
         )
-            && Boolean(inferManagedAppRecoveryActionFromRecentMessages(recentMessages))
-            && Boolean(extractManagedAppReferenceFromRecentMessages(recentMessages));
+            && false;
         const explicitGitIntent = /\b(git|github)\b[\s\S]{0,80}\b(status|diff|branch|stage|add|commit|push|save and push|save-and-push)\b/.test(prompt);
         const explicitK3sDeployIntent = /\b(deploy|rollout|apply|set image|update image|sync)\b[\s\S]{0,60}\b(k3s|k8s|kubernetes|kubectl|manifest|deployment|helm)\b/.test(prompt)
             || /\b(add|install|put)\b[\s\S]{0,40}\b(to|on|into|in)\b[\s\S]{0,20}\b(k3s|k8s|kubernetes|cluster)\b/.test(prompt);
@@ -8884,8 +8856,7 @@ class ConversationOrchestrator extends EventEmitter {
             || config.deploy.defaultRepositoryPath
             || '',
         ).trim();
-        const shouldBypassEndToEndWorkflow = allowedToolIds.includes('managed-app')
-            && (hasManagedAppIntent || hasManagedAppAuthoringRequest || hasManagedAppContinuationRecovery);
+        const shouldBypassEndToEndWorkflow = false;
         const shouldUseRemoteCliAgentAuthoring = allowedToolIds.includes('remote-cli-agent')
             && hasRemoteCliAgentAuthoringRequest;
         const inferredWorkflowSeed = executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
@@ -8907,7 +8878,6 @@ class ConversationOrchestrator extends EventEmitter {
             && (
                 !['repo-only', 'repo-then-deploy'].includes(String(inferredWorkflowSeed.lane || '').trim())
                 || allowedToolIds.includes(remoteToolId)
-                || allowedToolIds.includes('managed-app')
             )
             ? inferredWorkflowSeed
             : null;
@@ -9009,9 +8979,6 @@ class ConversationOrchestrator extends EventEmitter {
             }
             if ((explicitGitIntent || workflowNeedsDeployLane) && allowedToolIds.includes('git-safe')) {
                 candidates.add('git-safe');
-            }
-            if ((hasManagedAppIntent || hasManagedAppAuthoringRequest || hasManagedAppContinuationRecovery) && allowedToolIds.includes('managed-app')) {
-                candidates.add('managed-app');
             }
             if (hasRemoteCliAgentAuthoringRequest && allowedToolIds.includes('remote-cli-agent')) {
                 candidates.add('remote-cli-agent');
@@ -9176,9 +9143,6 @@ class ConversationOrchestrator extends EventEmitter {
             if (!sessionIsolation && allowedToolIds.includes('agent-notes-write') && isAgentNotesAutoWriteEnabled()) {
                 candidates.add('agent-notes-write');
             }
-            if ((hasManagedAppIntent || hasManagedAppAuthoringRequest || hasManagedAppContinuationRecovery) && allowedToolIds.includes('managed-app')) {
-                candidates.add('managed-app');
-            }
             if (hasRemoteCliAgentAuthoringRequest && allowedToolIds.includes('remote-cli-agent')) {
                 candidates.add('remote-cli-agent');
             }
@@ -9241,7 +9205,7 @@ class ConversationOrchestrator extends EventEmitter {
             candidateToolIds.unshift(USER_CHECKPOINT_TOOL_ID);
         }
 
-        return {
+        const legacyPolicy = {
             executionProfile,
             allowedToolIds,
             candidateToolIds,
@@ -9275,9 +9239,34 @@ class ConversationOrchestrator extends EventEmitter {
                 ]),
             ),
         };
+
+        return applyRewritePolicyOverlay({
+            legacyPolicy,
+            objective,
+            instructions,
+            executionProfile,
+            classification,
+            agencyProfile: effectiveAgencyProfile,
+            toolManager,
+        });
     }
 
     buildDirectAction({ objective = '', session = null, recentMessages = [], toolPolicy = {}, toolContext = {}, toolEvents = [] }) {
+        if (isOrchestrationRewriteEnabled()) {
+            const rewriteRoute = buildDeterministicRoute({
+                objective,
+                agencyProfile: toolPolicy?.orchestrationRewrite?.agencyProfile || toolPolicy?.agencyProfile,
+                toolPolicy,
+                timezone: toolContext?.timezone
+                    || session?.metadata?.timezone
+                    || session?.metadata?.timeZone
+                    || getDefaultWorkloadTimezone(),
+            });
+            if (rewriteRoute && shouldAllowDirectAction(rewriteRoute, { toolPolicy, toolEvents })) {
+                return rewriteRoute;
+            }
+        }
+
         const researchQuery = extractExplicitWebResearchQuery(objective);
         const currentInfoQuery = !researchQuery ? extractImplicitCurrentInfoQuery(objective) : null;
         const searchQuery = researchQuery || currentInfoQuery;
@@ -9409,36 +9398,6 @@ class ConversationOrchestrator extends EventEmitter {
                     ...podcastVideoOptions,
                 },
             });
-        }
-
-        const shouldUseManagedAppAuthoringAction = toolPolicy.candidateToolIds.includes('managed-app')
-            && (
-                hasManagedAppIntentText(objective)
-                || hasManagedAppAuthoringIntent(objective, {
-                    executionProfile: toolPolicy.executionProfile,
-                })
-                || (
-                    (
-                        isLikelyTranscriptDependentTurn(objective)
-                        || /\b(?:go ahead|continue|proceed|from there|those steps|next step|next steps|get it online|get it live|get it deployed)\b/i.test(objective)
-                    )
-                    && inferManagedAppRecoveryActionFromRecentMessages(recentMessages)
-                    && extractManagedAppReferenceFromRecentMessages(recentMessages)
-                )
-                || (
-                    toolPolicy.executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
-                    && ['repo-only', 'repo-then-deploy'].includes(String(toolPolicy.workflow?.lane || '').trim())
-                    && hasManagedAppAuthoringIntent(objective, {
-                        executionProfile: toolPolicy.executionProfile,
-                    })
-                )
-            );
-        if (shouldUseManagedAppAuthoringAction) {
-            return finalizeAction(buildManagedAppDirectAction(objective, {
-                executionProfile: toolPolicy.executionProfile,
-                workflow: toolPolicy.workflow,
-                recentMessages,
-            }));
         }
 
         if (toolPolicy.candidateToolIds.includes('remote-cli-agent')
@@ -9577,14 +9536,6 @@ class ConversationOrchestrator extends EventEmitter {
 
         if (normalizedStep.tool === USER_CHECKPOINT_TOOL_ID) {
             normalizedStep.params = normalizeUserCheckpointPlanParams(step);
-            return normalizedStep;
-        }
-
-        if (normalizedStep.tool === 'managed-app') {
-            normalizedStep.params = applyManagedAppDeploymentTargetDefaults(normalizedStep.params, {
-                objective,
-                executionProfile,
-            });
             return normalizedStep;
         }
 
@@ -9964,7 +9915,6 @@ class ConversationOrchestrator extends EventEmitter {
             'Treat "remote CLI", "direct CLI", and "remote command" as aliases for `remote-command`; do not route those phrases to a local shell or code sandbox.',
             'For remote server, SSH, host, k3s, Kubernetes, and kubectl work, use `remote-command` as the primary remote CLI lane. Do not choose legacy raw SSH tooling when `remote-command` is available.',
             'When remote CLI runtime inventory is present, prefer commands and fallbacks that match the actual CLI tools reported by the online remote runner.',
-            '`managed-app` is disabled. Use `remote-command` for direct remote CLI work, `git-safe` for repository save/push work, and `k3s-deploy` when deployment is the planned next step.',
             'Keep `remote-command` for kubectl, host inspection, package installs, logs, restarts, deployments, DNS, TLS, and other infrastructure operations.',
             'For Kubernetes deployment creation from `remote-command`, prefer repo manifests or `kubectl create ... --dry-run=client -o yaml | kubectl apply -f -` generators over hand-authored manifest heredocs inside a shell command.',
             'Before applying hand-authored Kubernetes YAML from a remote shell, run `kubectl apply --dry-run=server -f <file>` or `kubectl apply --dry-run=client -f <file>` and fix decoding or YAML parse errors before a live apply.',
@@ -9996,8 +9946,8 @@ class ConversationOrchestrator extends EventEmitter {
             'Use `user-checkpoint` when one high-impact user decision would materially change the plan, implementation scope, architecture, or final output before major work.',
             'Do not use `user-checkpoint` for routine autonomous build steps such as inspecting files, reading logs, applying edits, running tests, redeploying, restarting, or verifying output.',
             'For implementation, remote-build, deployment, and debugging work, proceed with the next obvious tool step unless the next step is a design/product/architecture choice, requires missing secrets, is destructive, or follows repeated hard failures without a recovery path.',
-            'On web-chat, treat `user-checkpoint` as the primary quick way to involve the user when one concise decision or direction check would help.',
-            'On web-chat, prefer `user-checkpoint` over asking a blocking multiple-choice question in plain assistant text because it renders as an inline survey card with clickable options.',
+            'Use `user-checkpoint` only when the active runtime exposes it and one concise decision or direction check would help.',
+            'Prefer one short checkpoint over stopping for a long plain-text intake.',
             'Do not mention checkpoint quotas, budgets, remaining counts, or internal runtime policy to the user.',
             'Keep `user-checkpoint` to one card with one visible step at a time. Prefer 1 question by default, or a short 2 to 4 step questionnaire when the user explicitly wants structured intake.',
             'Supported step types are choice, multi-choice, text, date, time, and datetime. For choice steps, use mutually exclusive, actionable options and leave the free-text field enabled when helpful.',
@@ -10131,14 +10081,26 @@ class ConversationOrchestrator extends EventEmitter {
             }));
 
         if (requestedSteps.length > 0) {
-            return requestedSteps;
+            const validated = validatePlan(requestedSteps, {
+                candidateToolIds: toolPolicy.candidateToolIds,
+                contracts: toolPolicy.toolContracts || {},
+            });
+            if (validated.rejected.length > 0 && toolPolicy.orchestrationRewrite?.enabled) {
+                console.warn('[ConversationOrchestrator] Planner returned rejected tool steps:', validated.rejected.map((entry) => ({
+                    tool: entry.step?.tool,
+                    rejections: entry.rejections,
+                })));
+            }
+            if (validated.steps.length > 0) {
+                return validated.steps;
+            }
         }
 
         if (plannerReturnedSteps && Array.isArray(parsed?.steps) && parsed.steps.length === 0) {
             return [];
         }
 
-        return this.buildFallbackPlan({
+        const fallbackPlan = this.buildFallbackPlan({
             objective,
             session,
             recentMessages,
@@ -10147,6 +10109,10 @@ class ConversationOrchestrator extends EventEmitter {
             toolPolicy,
             toolEvents,
         }).slice(0, MAX_PLAN_STEPS);
+        return validatePlan(fallbackPlan, {
+            candidateToolIds: toolPolicy.candidateToolIds,
+            contracts: toolPolicy.toolContracts || {},
+        }).steps;
     }
 
     async executePlan({
@@ -10154,6 +10120,7 @@ class ConversationOrchestrator extends EventEmitter {
         toolManager = null,
         sessionId = 'default',
         executionProfile = DEFAULT_EXECUTION_PROFILE,
+        toolPolicy = {},
         toolContext = {},
         objective = '',
         session = null,
@@ -10212,6 +10179,7 @@ class ConversationOrchestrator extends EventEmitter {
                     sessionId,
                     executionProfile,
                     toolManager,
+                    validateToolPlan: toolPolicy?.orchestrationRewrite?.enabled === true,
                     tools: {
                         get: (toolId) => toolManager.getTool(toolId),
                     },

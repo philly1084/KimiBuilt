@@ -48,6 +48,21 @@ describe('/api/artifacts route', () => {
     function buildApp() {
         const app = express();
         app.use(express.json());
+        app.locals.managedAppService = {
+            isAvailable: jest.fn(() => true),
+            createApp: jest.fn(async (input) => ({
+                app: {
+                    id: 'managed-app-1',
+                    appName: input.appName,
+                    slug: 'newsroom',
+                },
+                buildRun: {
+                    id: 'build-1',
+                    buildStatus: 'queued',
+                },
+                committedPaths: input.files.map((file) => file.path),
+            })),
+        };
         app.use((req, _res, next) => {
             req.user = { username: 'phill' };
             next();
@@ -436,5 +451,78 @@ describe('/api/artifacts route', () => {
         expect(response.headers['content-type']).toMatch(/application\/zip/);
         expect(response.headers['content-disposition']).toContain('newsroom.zip');
         expect(Number(response.headers['content-length'] || 0)).toBeGreaterThan(0);
+    });
+
+    test('exports a site bundle artifact to the managed app build lane', async () => {
+        artifactService.getArtifact.mockResolvedValue({
+            id: 'artifact-site-zip-1',
+            sessionId: 'session-1',
+            filename: 'newsroom-preview.zip',
+            extension: 'zip',
+            mimeType: 'application/zip',
+            contentBuffer: createFrontendBundleArchive({
+                entry: 'index.html',
+                files: [
+                    {
+                        path: 'index.html',
+                        language: 'html',
+                        purpose: 'Home',
+                        content: '<!DOCTYPE html><html><head><link rel="stylesheet" href="./styles.css"></head><body><h1>Front Page</h1></body></html>',
+                    },
+                    {
+                        path: 'styles.css',
+                        language: 'css',
+                        purpose: 'Styles',
+                        content: 'body { color: #111; }',
+                    },
+                    {
+                        path: 'src/main.jsx',
+                        language: 'javascript',
+                        purpose: 'Vite handoff',
+                        content: 'console.log("handoff");',
+                    },
+                ],
+            }),
+            metadata: {
+                title: 'Newsroom Preview',
+                sourcePrompt: 'Build a newsroom website.',
+                siteBundle: {
+                    entry: 'index.html',
+                    fileCount: 3,
+                    files: [
+                        { path: 'index.html' },
+                        { path: 'styles.css' },
+                        { path: 'src/main.jsx' },
+                    ],
+                },
+            },
+        });
+        sessionStore.getOwned.mockResolvedValue({
+            id: 'session-1',
+            metadata: { ownerId: 'phill' },
+        });
+
+        const app = buildApp();
+        const response = await request(app)
+            .post('/api/artifacts/artifact-site-zip-1/managed-app')
+            .send({ requestedAction: 'deploy', deployRequested: true });
+
+        expect(response.status).toBe(202);
+        expect(response.body.fileCount).toBe(3);
+        expect(response.body.files).toEqual(['public/index.html', 'public/styles.css', 'src/main.jsx']);
+        expect(app.locals.managedAppService.createApp).toHaveBeenCalledWith(
+            expect.objectContaining({
+                appName: 'Newsroom Preview',
+                requestedAction: 'deploy',
+                deployRequested: true,
+                files: expect.arrayContaining([
+                    expect.objectContaining({ path: 'public/index.html' }),
+                    expect.objectContaining({ path: 'public/styles.css' }),
+                    expect.objectContaining({ path: 'src/main.jsx' }),
+                ]),
+            }),
+            'phill',
+            expect.objectContaining({ sessionId: 'session-1' }),
+        );
     });
 });

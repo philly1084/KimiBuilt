@@ -246,6 +246,65 @@
                 border: none;
                 background: #ffffff;
             }
+
+            .site-preview-modal {
+                position: fixed;
+                inset: 0;
+                z-index: 1000;
+                display: grid;
+                grid-template-rows: 52px minmax(0, 1fr);
+                background: #0b1020;
+            }
+
+            .site-preview-modal[hidden] {
+                display: none;
+            }
+
+            .site-preview-toolbar {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 8px 10px;
+                border-bottom: 1px solid rgba(148, 163, 184, 0.26);
+                background: rgba(15, 23, 42, 0.96);
+                color: #e5e7eb;
+            }
+
+            .site-preview-toolbar button {
+                width: 36px;
+                height: 36px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                border: 1px solid rgba(148, 163, 184, 0.32);
+                border-radius: 8px;
+                background: rgba(30, 41, 59, 0.86);
+                color: #e5e7eb;
+                cursor: pointer;
+            }
+
+            .site-preview-toolbar button:hover {
+                border-color: rgba(56, 189, 248, 0.7);
+                color: #ffffff;
+            }
+
+            .site-preview-title {
+                min-width: 0;
+                flex: 1;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                font-size: 13px;
+                font-weight: 650;
+            }
+
+            .site-preview-modal iframe {
+                display: block;
+                width: 100%;
+                height: 100%;
+                border: 0;
+                background: #ffffff;
+            }
             
             .artifact-generated-card .file-actions {
                 display: flex;
@@ -714,6 +773,14 @@
                 </button>
             `
             : '';
+        const deployActions = artifact?.bundleDownloadUrl
+            ? `
+                <button onclick="artifactManager.exportSiteToManagedApp('${artifact.id}')">
+                    <i data-lucide="rocket" class="w-4 h-4"></i>
+                    Push to Web
+                </button>
+            `
+            : '';
         const downloadLabel = artifact?.bundleDownloadUrl ? 'Bundle Zip' : 'Download';
 
         return `
@@ -734,6 +801,7 @@
                     </button>
                     ${mermaidActions}
                     ${htmlActions}
+                    ${deployActions}
                     <button onclick="artifactManager.addToContext('${artifact.id}')">
                         <i data-lucide="plus" class="w-4 h-4"></i>
                         Add to Context
@@ -1151,6 +1219,93 @@
             URL.revokeObjectURL(url);
         }, 60 * 1000);
     }
+
+    function ensureSitePreviewModal() {
+        let modal = document.getElementById('site-preview-modal');
+        if (modal) {
+            return modal;
+        }
+
+        modal = document.createElement('div');
+        modal.id = 'site-preview-modal';
+        modal.className = 'site-preview-modal';
+        modal.hidden = true;
+        modal.innerHTML = `
+            <div class="site-preview-toolbar">
+                <button type="button" data-action="close" title="Back to chat" aria-label="Back to chat">
+                    <i data-lucide="arrow-left" class="w-4 h-4"></i>
+                </button>
+                <button type="button" data-action="back" title="Back" aria-label="Back">
+                    <i data-lucide="chevron-left" class="w-4 h-4"></i>
+                </button>
+                <button type="button" data-action="forward" title="Forward" aria-label="Forward">
+                    <i data-lucide="chevron-right" class="w-4 h-4"></i>
+                </button>
+                <button type="button" data-action="refresh" title="Refresh" aria-label="Refresh">
+                    <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                </button>
+                <div class="site-preview-title"></div>
+                <button type="button" data-action="external" title="Open in new tab" aria-label="Open in new tab">
+                    <i data-lucide="external-link" class="w-4 h-4"></i>
+                </button>
+            </div>
+            <iframe
+                title="Website artifact preview"
+                loading="eager"
+                referrerpolicy="no-referrer"
+                sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads"
+            ></iframe>
+        `;
+        document.body.appendChild(modal);
+        modal.addEventListener('click', (event) => {
+            const button = event.target.closest('button[data-action]');
+            if (!button) return;
+            const action = button.dataset.action;
+            const iframe = modal.querySelector('iframe');
+            const src = iframe?.dataset.previewSrc || iframe?.src || '';
+
+            if (action === 'close') {
+                modal.hidden = true;
+                document.body.classList.remove('site-preview-open');
+                return;
+            }
+            if (action === 'external' && src) {
+                window.open(src, '_blank', 'noopener');
+                return;
+            }
+            try {
+                if (action === 'back') iframe.contentWindow.history.back();
+                if (action === 'forward') iframe.contentWindow.history.forward();
+                if (action === 'refresh') iframe.contentWindow.location.reload();
+            } catch (_error) {
+                if (action === 'refresh' && src) {
+                    iframe.src = src;
+                }
+            }
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && !modal.hidden) {
+                modal.hidden = true;
+                document.body.classList.remove('site-preview-open');
+            }
+        });
+        if (typeof lucide !== 'undefined') {
+            lucide.createIcons();
+        }
+        return modal;
+    }
+
+    function openSitePreviewModal(artifact, previewUrl) {
+        const modal = ensureSitePreviewModal();
+        const iframe = modal.querySelector('iframe');
+        const title = modal.querySelector('.site-preview-title');
+        const absolutePreviewUrl = resolveApiUrl(previewUrl, { absolute: true });
+        title.textContent = artifact?.filename || 'Website preview';
+        iframe.dataset.previewSrc = absolutePreviewUrl;
+        iframe.src = absolutePreviewUrl;
+        modal.hidden = false;
+        document.body.classList.add('site-preview-open');
+    }
     
     // Create global artifact manager for external access
     window.artifactManager = {
@@ -1202,7 +1357,45 @@
                 return;
             }
 
-            window.open(previewUrl, '_blank', 'noopener');
+            openSitePreviewModal(artifact, previewUrl);
+        },
+
+        exportSiteToManagedApp: async (id) => {
+            const artifact = state.artifacts.find((entry) => entry.id === id) || state.lastDone?.artifacts?.find((entry) => entry.id === id);
+            if (!artifact?.bundleDownloadUrl) {
+                if (window.uiHelpers?.showToast) {
+                    uiHelpers.showToast('Only website bundle artifacts can be pushed to the web build lane.', 'warning');
+                }
+                return;
+            }
+
+            try {
+                await ensureSession();
+                if (window.uiHelpers?.showToast) {
+                    uiHelpers.showToast('Sending site bundle to the remote build lane...', 'info');
+                }
+                const response = await fetch(resolveApiUrl(`/api/artifacts/${encodeURIComponent(id)}/managed-app`, { absolute: true }), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sessionId: getCurrentSessionId(),
+                        requestedAction: 'deploy',
+                        deployRequested: true,
+                    }),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.error?.message || `Remote build export failed (${response.status})`);
+                }
+                if (window.uiHelpers?.showToast) {
+                    const appName = data.app?.appName || data.app?.slug || 'site';
+                    uiHelpers.showToast(`Queued ${appName} for remote build.`, 'success');
+                }
+            } catch (error) {
+                if (window.uiHelpers?.showToast) {
+                    uiHelpers.showToast(error.message, 'error');
+                }
+            }
         },
         
         addToContext: (id) => {

@@ -59,6 +59,12 @@ function serializeLocalGeneratedArtifact(record = {}) {
 
     const extension = normalizeExtension(record.extension, record.filename);
     const hasPreview = extension === 'html' || Boolean(record.previewHtml);
+    const metadata = record.metadata || {};
+    const siteBundle = metadata.siteBundle || metadata.bundle || null;
+    const siteBundleFileCount = Array.isArray(siteBundle?.files)
+        ? siteBundle.files.length
+        : Number(siteBundle?.fileCount || 0);
+    const hasSiteBundle = siteBundleFileCount > 1;
 
     return {
         id: record.id,
@@ -74,13 +80,22 @@ function serializeLocalGeneratedArtifact(record = {}) {
         sha256: record.sha256 || '',
         extractedText: record.extractedText || '',
         previewHtml: record.previewHtml || '',
-        metadata: record.metadata || {},
+        metadata,
         vectorizedAt: null,
         createdAt: record.createdAt || null,
         updatedAt: record.updatedAt || record.createdAt || null,
         downloadUrl: buildArtifactDownloadPath(record.id),
         previewUrl: hasPreview ? `/api/artifacts/${record.id}/preview` : null,
         sandboxUrl: hasPreview ? `/api/artifacts/${record.id}/sandbox` : null,
+        bundleDownloadUrl: hasSiteBundle ? `/api/artifacts/${record.id}/bundle` : null,
+        preview: hasSiteBundle
+            ? {
+                type: 'site',
+                entry: siteBundle.entry,
+                fileCount: siteBundleFileCount,
+                url: hasPreview ? `/api/artifacts/${record.id}/sandbox` : null,
+            }
+            : null,
     };
 }
 

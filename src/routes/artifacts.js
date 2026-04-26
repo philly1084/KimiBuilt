@@ -21,6 +21,8 @@ const {
     hasFrontendBundleArchive,
     hasExplicitFrontendBundle,
     injectBundleBaseHref,
+    normalizeBundlePath,
+    readFrontendBundleArchive,
     resolveArtifactFrontendBundleFile,
     resolveFrontendBundleContentType,
     rewriteRootRelativeFrontendPaths,
@@ -32,6 +34,22 @@ const {
 } = require('../session-scope');
 
 const router = Router();
+const DEPLOYABLE_TEXT_EXTENSIONS = new Set([
+    '.css',
+    '.csv',
+    '.html',
+    '.htm',
+    '.js',
+    '.jsx',
+    '.json',
+    '.md',
+    '.mjs',
+    '.svg',
+    '.txt',
+    '.ts',
+    '.tsx',
+    '.xml',
+]);
 
 function applyPreviewResponseHeaders(res) {
     res.setHeader('Cache-Control', 'no-store');
@@ -219,6 +237,92 @@ function resolveMetadataBundlePreviewFile(artifact, requestedPath = '') {
         contentType: resolveFrontendBundleContentType(file.path),
         contentBuffer: buildPreviewContentBuffer(artifact.id, file),
     };
+}
+
+function normalizeManagedAppPublicPath(filePath = '') {
+    const normalized = normalizeBundlePath(filePath);
+    if (!normalized) {
+        return '';
+    }
+
+    if (normalized.startsWith('public/')) {
+        return normalized;
+    }
+
+    if (normalized === 'package.json' || normalized === 'vite.config.js' || normalized.startsWith('src/')) {
+        return normalized;
+    }
+
+    return `public/${normalized}`;
+}
+
+function isDeployableTextFile(filePath = '') {
+    const extension = path.extname(String(filePath || '').toLowerCase());
+    return DEPLOYABLE_TEXT_EXTENSIONS.has(extension)
+        || String(filePath || '').startsWith('.gitea/workflows/');
+}
+
+function extractArtifactSiteFilesForManagedApp(artifact = {}) {
+    const files = new Map();
+
+    try {
+        const entries = readFrontendBundleArchive(artifact.contentBuffer || Buffer.alloc(0));
+        entries.forEach((buffer, filePath) => {
+            const sourcePath = normalizeBundlePath(filePath);
+            const targetPath = normalizeManagedAppPublicPath(sourcePath);
+            if (!sourcePath || !targetPath || !isDeployableTextFile(sourcePath)) {
+                return;
+            }
+            files.set(targetPath, {
+                path: targetPath,
+                content: buffer.toString('utf8'),
+            });
+        });
+    } catch (_error) {
+        // Non-zip HTML artifacts are handled from metadata or previewHtml below.
+    }
+
+    const bundle = getArtifactFrontendBundle(artifact);
+    if (Array.isArray(bundle?.files)) {
+        bundle.files.forEach((file) => {
+            const sourcePath = normalizeBundlePath(file?.path || '');
+            const targetPath = normalizeManagedAppPublicPath(sourcePath);
+            if (!sourcePath || !targetPath || !isDeployableTextFile(sourcePath)) {
+                return;
+            }
+
+            const content = typeof file.content === 'string'
+                ? file.content
+                : (Buffer.isBuffer(file.contentBuffer) ? file.contentBuffer.toString('utf8') : '');
+            if (content.trim()) {
+                files.set(targetPath, { path: targetPath, content });
+            }
+        });
+    }
+
+    if (files.size === 0 && String(artifact.previewHtml || '').trim()) {
+        files.set('public/index.html', {
+            path: 'public/index.html',
+            content: artifact.previewHtml,
+        });
+    }
+
+    return Array.from(files.values()).sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function buildManagedAppNameFromArtifact(artifact = {}, fallback = 'Website Artifact') {
+    return String(
+        artifact?.metadata?.title
+        || artifact?.metadata?.siteBundle?.title
+        || artifact?.metadata?.bundle?.title
+        || artifact?.filename
+        || fallback
+    )
+        .replace(/\.[a-z0-9]+$/i, '')
+        .replace(/[-_]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 80) || fallback;
 }
 
 router.post('/upload', async (req, res, next) => {
@@ -475,6 +579,70 @@ router.get('/:id/bundle', async (req, res, next) => {
         res.setHeader('Content-Type', 'application/zip');
         res.setHeader('Content-Disposition', `attachment; filename="${baseName}.zip"`);
         res.send(zipBuffer);
+    } catch (err) {
+        next(err);
+    }
+});
+
+router.post('/:id/managed-app', async (req, res, next) => {
+    try {
+        const artifact = await getOwnedArtifact(req, req.params.id, { includeContent: true });
+        if (!artifact) {
+            return res.status(404).json({ error: { message: 'Artifact not found' } });
+        }
+
+        const service = req.app.locals.managedAppService;
+        if (!service?.isAvailable || !service.isAvailable()) {
+            return res.status(503).json({
+                error: {
+                    message: 'Managed app export requires the managed app control plane to be available.',
+                },
+            });
+        }
+
+        const files = extractArtifactSiteFilesForManagedApp(artifact);
+        if (files.length === 0) {
+            return res.status(400).json({
+                error: {
+                    message: 'This artifact does not contain deployable website files.',
+                },
+            });
+        }
+
+        const requestedAction = String(req.body?.requestedAction || req.body?.action || '').trim()
+            || (req.body?.deployRequested === true ? 'deploy' : 'build');
+        const appName = String(req.body?.appName || req.body?.name || '').trim()
+            || buildManagedAppNameFromArtifact(artifact);
+        const result = await service.createApp({
+            ...(req.body && typeof req.body === 'object' ? req.body : {}),
+            appName,
+            sourcePrompt: String(
+                req.body?.sourcePrompt
+                || artifact?.metadata?.sourcePrompt
+                || `Exported from web-chat artifact ${artifact.filename || artifact.id}.`
+            ).trim(),
+            requestedAction,
+            deployRequested: req.body?.deployRequested === true || ['deploy', 'publish', 'launch', 'live'].includes(requestedAction),
+            files,
+            metadata: {
+                ...(req.body?.metadata && typeof req.body.metadata === 'object' ? req.body.metadata : {}),
+                sourceArtifact: {
+                    id: artifact.id,
+                    filename: artifact.filename,
+                    format: artifact.extension || artifact.format,
+                },
+            },
+        }, getRequestOwnerId(req), {
+            sessionId: artifact.sessionId,
+            model: req.body?.model || null,
+        });
+
+        res.status(202).json({
+            artifactId: artifact.id,
+            fileCount: files.length,
+            files: files.map((file) => file.path),
+            ...result,
+        });
     } catch (err) {
         next(err);
     }

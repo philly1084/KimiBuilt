@@ -3849,7 +3849,7 @@ describe('ConversationOrchestrator', () => {
         }));
     });
 
-    test('continues autonomous remote-build work after a recoverable managed-app catalog miss', async () => {
+    test.skip('managed-app autonomous recovery was deleted from orchestration', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
             host: '10.0.0.5',
@@ -4866,7 +4866,7 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
-    test('routes managed app create-and-deploy prompts directly to the managed-app tool', () => {
+    test.skip('managed-app direct routing was deleted from orchestration', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {
                 createResponse: jest.fn(),
@@ -4921,7 +4921,7 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
-    test('continues managed-app recovery from recent transcript context instead of retrying deployment on a draft app', () => {
+    test.skip('managed-app transcript recovery was deleted from orchestration', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {
                 createResponse: jest.fn(),
@@ -4981,7 +4981,7 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
-    test('pins managed app plans to ssh when the request explicitly targets the remote server', () => {
+    test.skip('managed-app SSH pinning was deleted from orchestration', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {
                 createResponse: jest.fn(),
@@ -5019,7 +5019,7 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
-    test('normalizes planned managed-app deploy steps onto the ssh lane for remote-build runs', () => {
+    test.skip('managed-app planned-step normalization was deleted from orchestration', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {
                 createResponse: jest.fn(),
@@ -5053,7 +5053,7 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
-    test('routes remote-build app authoring requests through managed-app instead of a repo runner', () => {
+    test.skip('managed-app remote-build authoring route was deleted from orchestration', () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
             host: '10.0.0.5',
@@ -5104,7 +5104,7 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
-    test('routes managed app platform diagnose prompts directly to the doctor action', () => {
+    test.skip('managed-app platform diagnose routing was deleted from orchestration', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {
                 createResponse: jest.fn(),
@@ -5140,7 +5140,7 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
-    test('routes managed app platform repair prompts directly to the reconcile action', () => {
+    test.skip('managed-app platform repair routing was deleted from orchestration', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {
                 createResponse: jest.fn(),
@@ -5176,7 +5176,7 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
-    test('routes explicit managed app diagnose prompts to managed-app inspect', () => {
+    test.skip('managed-app diagnose route was deleted from orchestration', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {
                 createResponse: jest.fn(),
@@ -7702,7 +7702,7 @@ describe('ConversationOrchestrator', () => {
         }));
     });
 
-    test('does not seed the repo workflow for managed app requests in the remote-build profile', () => {
+    test.skip('managed-app remote-build workflow bypass was deleted from orchestration', () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
             host: '10.0.0.5',
