@@ -453,6 +453,10 @@ class NotesAPIClient {
             params.output_format = requestOptions.outputFormat;
         }
 
+        if (requestOptions.reasoningEffort || requestOptions.reasoning_effort) {
+            params.reasoningEffort = requestOptions.reasoningEffort || requestOptions.reasoning_effort;
+        }
+
         if (Array.isArray(requestOptions.artifactIds) && requestOptions.artifactIds.length > 0) {
             params.artifact_ids = requestOptions.artifactIds;
         }
@@ -724,6 +728,10 @@ class NotesAPIClient {
 
         if (requestOptions.outputFormat) {
             params.output_format = requestOptions.outputFormat;
+        }
+
+        if (requestOptions.reasoningEffort || requestOptions.reasoning_effort) {
+            params.reasoningEffort = requestOptions.reasoningEffort || requestOptions.reasoning_effort;
         }
 
         if (Array.isArray(requestOptions.artifactIds) && requestOptions.artifactIds.length > 0) {

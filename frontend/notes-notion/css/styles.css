@@ -2660,7 +2660,7 @@ body {
     padding: 4px;
     display: flex;
     gap: 2px;
-    z-index: 100;
+    z-index: 10020;
     animation: fadeIn 0.1s ease;
 }
 
@@ -2694,6 +2694,22 @@ body {
     background: var(--border-color);
     margin: 4px 4px;
 }
+
+.inline-highlight {
+    border-radius: 3px;
+    padding: 0 2px;
+    background: #fef08a;
+    color: inherit;
+}
+
+.inline-highlight-yellow { background: #fef08a; }
+.inline-highlight-green { background: #bbf7d0; }
+.inline-highlight-blue { background: #bfdbfe; }
+.inline-highlight-purple { background: #ddd6fe; }
+.inline-highlight-pink { background: #fbcfe8; }
+.inline-highlight-red { background: #fecaca; }
+.inline-highlight-orange { background: #fed7aa; }
+.inline-highlight-gray { background: #e5e7eb; }
 
 /* ===== @ Mentions ===== */
 .mention-popup {

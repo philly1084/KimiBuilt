@@ -2902,6 +2902,23 @@ const Blocks = (function() {
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;');
         
+        if (formatting.highlights && Array.isArray(formatting.highlights)) {
+            formatting.highlights.forEach((highlight) => {
+                const needle = typeof highlight === 'string' ? highlight : highlight?.text;
+                if (!needle) return;
+
+                const escapedNeedle = String(needle)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;');
+                if (!escapedNeedle) return;
+
+                const color = String(highlight?.color || 'yellow').replace(/[^a-z0-9_-]/gi, '') || 'yellow';
+                const pattern = new RegExp(escapedNeedle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+                html = html.replace(pattern, `<mark class="inline-highlight inline-highlight-${color}">${escapedNeedle}</mark>`);
+            });
+        }
+
         // Apply formatting
         if (formatting.bold) {
             html = `<strong>${html}</strong>`;
@@ -3029,4 +3046,3 @@ const Blocks = (function() {
 })();
 
 window.Blocks = Blocks;
-

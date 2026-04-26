@@ -488,6 +488,53 @@ Approved page plan:
         jest.useRealTimers();
     });
 
+    test('applies exact text replacement and highlight actions without rebuilding a whole page', () => {
+        jest.useFakeTimers();
+        const blocks = {
+            block_a: {
+                id: 'block_a',
+                type: 'text',
+                content: 'The launch date is Monday. Keep this line important.',
+                children: [],
+                formatting: {},
+            },
+        };
+        const editor = {
+            getBlock: jest.fn((blockId) => blocks[blockId]),
+            replaceBlockWithBlocks: jest.fn((blockId, replacements) => {
+                blocks[blockId] = replacements[0];
+                return replacements;
+            }),
+            savePage: jest.fn(),
+            focusBlock: jest.fn(),
+        };
+        const agent = loadAgent({ Editor: editor });
+
+        const result = agent._applyNotesActions([
+            {
+                op: 'replace_text',
+                blockId: 'block_a',
+                findText: 'Monday',
+                replaceWith: 'Tuesday',
+            },
+            {
+                op: 'highlight_text',
+                blockId: 'block_a',
+                text: 'important',
+                color: 'yellow',
+            },
+        ]);
+
+        expect(result.appliedCount).toBe(2);
+        expect(blocks.block_a.content).toBe('The launch date is Tuesday. Keep this line important.');
+        expect(blocks.block_a.formatting.highlights).toEqual(expect.arrayContaining([
+            expect.objectContaining({ text: 'important', color: 'yellow' }),
+        ]));
+        expect(editor.replaceBlockWithBlocks).toHaveBeenCalledTimes(2);
+        jest.runOnlyPendingTimers();
+        jest.useRealTimers();
+    });
+
     test('uses multi-pass drafting for research-backed notes pages instead of treating "research" as a non-page task', () => {
         const agent = loadAgent();
 

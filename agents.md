@@ -276,6 +276,8 @@ Below are the specifications for each of the four frontend interaction modes. Th
 - For **Diagram:** Mermaid.js rendering
 - AI suggestions panel below the canvas
 - "Apply" button to update canvas with AI output
+- Notes/canvas agents must support exact text-range edits: highlight selected or named text and replace specific words, phrases, sentences, or small parts of any text-like block without requiring a full block/page rewrite.
+- Chat should surface available reasoning summaries, and visible page updates should be staged over a few seconds for section moves/replacements so the user can see the agent working through steps.
 - Version history / undo stack for canvas content
 - Export: copy to clipboard, download as file
 

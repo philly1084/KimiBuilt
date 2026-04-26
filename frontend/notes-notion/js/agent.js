@@ -2978,6 +2978,8 @@ When the user asks you to edit, create, delete, or reorganize content, respond w
   "actions": [
     { "op": "update_page", "title": "Research Brief", "icon": "🔎" },
     { "op": "update_block", "blockId": "block_abc123", "type": "text", "content": "New content here" },
+    { "op": "replace_text", "blockId": "block_abc123", "findText": "old phrase", "replaceWith": "new phrase", "replaceAll": false },
+    { "op": "highlight_text", "blockId": "block_abc123", "text": "important phrase", "color": "yellow" },
     { "op": "replace_block", "blockId": "block_abc123", "blocks": [{ "type": "heading_2", "content": "New Section" }, { "type": "text", "content": "Fresh opening" }] },
     { "op": "replace_section", "headingBlockId": "block_heading123", "blocks": [{ "type": "heading_2", "content": "Rebuilt Section" }, { "type": "text", "content": "Only this section changed." }] },
     { "op": "move_block", "blockId": "block_abc123", "targetBlockId": "block_xyz789", "position": "before" },
@@ -2995,6 +2997,8 @@ When the user asks you to edit, create, delete, or reorganize content, respond w
 VALID OPERATIONS:
 - update_page: Update page-level metadata like title, icon, cover, properties, or page default model
 - update_block: Change content of an existing block and optionally change its type in place (requires blockId; may include type and content)
+- replace_text: Replace a specific phrase inside an existing block without rewriting the whole block (requires blockId, findText or oldText, replaceWith or newText; optional replaceAll and caseSensitive)
+- highlight_text: Highlight a specific phrase inside an existing text-like block (requires blockId and text; optional color)
 - replace_block: Replace block with new block(s) (requires blockId, blocks array)
 - move_block: Reorder an existing block relative to another block (requires blockId, targetBlockId, optional position "before"|"after")
 - replace_section: Replace a heading and all following blocks until the next same-or-higher heading (requires headingBlockId or blockId, blocks array)
@@ -3049,6 +3053,8 @@ GUIDELINES:
 - Work section by section. Decide the role of each section before writing it, and treat the lead cluster as its own designed editing job.
 - For large pages, make an explicit design pass first, then break the page into heading-based chunks that could be handed to independent section agents. Use section-level operations to apply each chunk from its heading down instead of repeatedly rewriting the whole page.
 - When editing an existing section, target the heading ID with replace_section, insert_after_section, move_section, or delete_section so the edit covers the heading and every block beneath it up to the next same-or-higher heading.
+- When the user asks to change a specific word, sentence, phrase, number, name, or small part of a block, prefer replace_text over rewriting the entire block.
+- When the user asks to highlight, mark, call out, emphasize, or visually tag specific text, use highlight_text on the smallest exact phrase inside the relevant block.
 - Choose a best-fit page template from the template guidance above and adapt it to the user's request instead of inventing the page layout from scratch every time.
 - Also choose a matching visual recipe from the recipe guidance above so the page has a clear opening cluster, body rhythm, and support cluster.
 - Also choose a dominant design scheme from the scheme guidance above so the page has a coherent palette and header treatment.
@@ -3152,6 +3158,8 @@ When the user asks you to edit, create, delete, or reorganize content, respond w
 VALID OPERATIONS:
 - update_page: Update page-level metadata like title, icon, cover, properties, or page default model
 - update_block: Change content of an existing block and optionally change its type in place (requires blockId; may include type and content)
+- replace_text: Replace a specific phrase inside an existing block without rewriting the whole block (requires blockId, findText or oldText, replaceWith or newText; optional replaceAll and caseSensitive)
+- highlight_text: Highlight a specific phrase inside an existing text-like block (requires blockId and text; optional color)
 - replace_block: Replace block with new block(s) (requires blockId, blocks array)
 - move_block: Reorder an existing block relative to another block (requires blockId, targetBlockId, optional position "before"|"after")
 - insert_after: Add new block(s) after specified block (requires blockId, blocks array)
@@ -3211,6 +3219,8 @@ GUIDELINES:
 - When the user is brainstorming or asking for layout help, offer 2-3 template directions by name, explain the block structure briefly, and then adapt the chosen direction on the page.
 - Only switch to standalone HTML/file/artifact output when the user explicitly asks for an export, download, link, attachment, or standalone file.
 - You are free to change block types, replace weak sections, move blocks, delete redundant content, and rebuild the page structure when that produces a better result.
+- When the user asks to change a specific word, sentence, phrase, number, name, or small part of a block, prefer replace_text over rewriting the entire block.
+- When the user asks to highlight, mark, call out, emphasize, or visually tag specific text, use highlight_text on the smallest exact phrase inside the relevant block.
 - In this notes interface, "page" means the current notes document unless the user explicitly says web page, site page, route, component, repo file, or server page.
 - If the user says "put this on the page", "add this to the page", "insert this into the page", or similar, treat that as a request to edit the current notes page using notes-actions, not a request to inspect a remote server or codebase.
 - Never satisfy a notes-page edit by writing a local repo/runtime file or by mentioning /app or filesystem write failures. Use notes-actions unless the user explicitly asks for an export, download, or file.
@@ -6626,6 +6636,112 @@ Silently verify the lead cluster, section order, and final polish before returni
         return blocks.length ? blocks[blocks.length - 1].id : null;
     }
 
+    function getBlockTextContent(block = null) {
+        if (!block) return '';
+        if (typeof block.content === 'string') return block.content;
+        if (block.content && typeof block.content === 'object') {
+            if (typeof block.content.text === 'string') return block.content.text;
+            if (typeof block.content.caption === 'string') return block.content.caption;
+            if (typeof block.content.title === 'string') return block.content.title;
+            if (typeof block.content.description === 'string') return block.content.description;
+            if (typeof block.content.prompt === 'string') return block.content.prompt;
+        }
+        return '';
+    }
+
+    function setBlockTextContent(block = null, nextText = '') {
+        if (!block) return block;
+        const value = String(nextText == null ? '' : nextText);
+        const nextBlock = JSON.parse(JSON.stringify(block));
+
+        if (typeof nextBlock.content === 'string' || nextBlock.content == null) {
+            nextBlock.content = value;
+            return nextBlock;
+        }
+
+        if (nextBlock.content && typeof nextBlock.content === 'object') {
+            if (Object.prototype.hasOwnProperty.call(nextBlock.content, 'text')) {
+                nextBlock.content.text = value;
+            } else if (Object.prototype.hasOwnProperty.call(nextBlock.content, 'caption')) {
+                nextBlock.content.caption = value;
+            } else if (Object.prototype.hasOwnProperty.call(nextBlock.content, 'title')) {
+                nextBlock.content.title = value;
+            } else if (Object.prototype.hasOwnProperty.call(nextBlock.content, 'description')) {
+                nextBlock.content.description = value;
+            } else if (Object.prototype.hasOwnProperty.call(nextBlock.content, 'prompt')) {
+                nextBlock.content.prompt = value;
+            } else {
+                nextBlock.content.text = value;
+            }
+        }
+
+        return nextBlock;
+    }
+
+    function replaceSpecificBlockText(block = null, action = {}) {
+        const originalText = getBlockTextContent(block);
+        const findText = String(action.findText || action.oldText || action.targetText || action.text || '').trim();
+        const replacementText = String(action.replaceWith ?? action.newText ?? action.content ?? '');
+
+        if (!block || !findText || !originalText) {
+            return null;
+        }
+
+        const flags = action.caseSensitive ? 'g' : 'gi';
+        const escaped = findText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const pattern = new RegExp(escaped, action.replaceAll === false ? (action.caseSensitive ? '' : 'i') : flags);
+        const nextText = originalText.replace(pattern, replacementText);
+
+        if (nextText === originalText) {
+            return null;
+        }
+
+        return setBlockTextContent(block, nextText);
+    }
+
+    function addBlockTextHighlight(block = null, action = {}) {
+        const highlightText = String(action.text || action.targetText || action.findText || '').trim();
+        if (!block || !highlightText) {
+            return null;
+        }
+
+        const blockText = getBlockTextContent(block);
+        const haystack = action.caseSensitive ? blockText : blockText.toLowerCase();
+        const needle = action.caseSensitive ? highlightText : highlightText.toLowerCase();
+        if (!haystack.includes(needle)) {
+            return null;
+        }
+
+        const nextBlock = JSON.parse(JSON.stringify(block));
+        nextBlock.formatting = {
+            ...(nextBlock.formatting || {}),
+            highlights: [
+                ...((Array.isArray(nextBlock.formatting?.highlights) ? nextBlock.formatting.highlights : [])),
+                {
+                    text: highlightText,
+                    color: String(action.color || 'yellow')
+                }
+            ]
+        };
+        return nextBlock;
+    }
+
+    function shouldStageNotesActions(actions = []) {
+        if (typeof window === 'undefined' || typeof window.setTimeout !== 'function') {
+            return false;
+        }
+        if (typeof window.requestAnimationFrame !== 'function' || typeof document === 'undefined' || !document.body) {
+            return false;
+        }
+        return actions.some((action) => /^(replace_section|move_section|replace_block|move_block|reorder_block|move|rebuild_page|replace_page|replace_text|highlight_text)$/.test(String(action?.op || '').toLowerCase()));
+    }
+
+    function getActionStageDelay(action = {}, index = 0) {
+        const op = String(action?.op || '').toLowerCase();
+        const base = /section|rebuild|replace_page/.test(op) ? 850 : 520;
+        return 260 + (index * base);
+    }
+
     function applyNotesActions(actions = []) {
         const editor = window.Editor;
         if (!editor || !Array.isArray(actions) || actions.length === 0) {
@@ -6648,7 +6764,7 @@ Silently verify the lead cluster, section order, and final polish before returni
             highlightBlock(blockId, actionType);
         });
 
-        actions.forEach((rawAction) => {
+        const applySingleAction = (rawAction) => {
             if (!rawAction || typeof rawAction !== 'object') return;
 
             const op = String(rawAction.op || '').toLowerCase();
@@ -6696,6 +6812,28 @@ Silently verify the lead cluster, section order, and final polish before returni
                         }, { defaultType: nextType });
                         editor.replaceBlockWithBlocks?.(targetBlockId, [replacement]);
                         focusBlockId = replacement.id;
+                        appliedCount++;
+                        break;
+                    }
+                    case 'replace_text': {
+                        if (!targetBlockId) return;
+                        const existing = editor.getBlock?.(targetBlockId);
+                        if (!existing) return;
+                        const replacement = replaceSpecificBlockText(existing, rawAction);
+                        if (!replacement) return;
+                        editor.replaceBlockWithBlocks?.(targetBlockId, [replacement]);
+                        focusBlockId = targetBlockId;
+                        appliedCount++;
+                        break;
+                    }
+                    case 'highlight_text': {
+                        if (!targetBlockId) return;
+                        const existing = editor.getBlock?.(targetBlockId);
+                        if (!existing) return;
+                        const replacement = addBlockTextHighlight(existing, rawAction);
+                        if (!replacement) return;
+                        editor.replaceBlockWithBlocks?.(targetBlockId, [replacement]);
+                        focusBlockId = targetBlockId;
                         appliedCount++;
                         break;
                     }
@@ -6925,23 +7063,40 @@ Silently verify the lead cluster, section order, and final polish before returni
             } catch (error) {
                 console.error(`Failed to apply notes action "${op}":`, error);
             }
-        });
+        };
 
-        if (appliedCount > 0) {
+        const finalizeAppliedActions = () => {
+            if (appliedCount <= 0) {
+                unhighlightAllBlocks();
+                return;
+            }
             editor.savePage?.();
             if (focusBlockId) {
                 editor.focusBlock?.(focusBlockId);
             }
             showActionToast(appliedCount);
-            
+
             // Remove highlights after a delay
             setTimeout(() => {
                 unhighlightAllBlocks();
             }, 2000);
-        } else {
-            // Remove highlights immediately if no actions were applied
-            unhighlightAllBlocks();
+        };
+
+        if (shouldStageNotesActions(actions)) {
+            actions.forEach((rawAction, index) => {
+                window.setTimeout(() => {
+                    applySingleAction(rawAction);
+                    if (index === actions.length - 1) {
+                        finalizeAppliedActions();
+                    }
+                }, getActionStageDelay(rawAction, index));
+            });
+
+            return { appliedCount: actions.length, focusBlockId, staged: true };
         }
+
+        actions.forEach(applySingleAction);
+        finalizeAppliedActions();
 
         return { appliedCount, focusBlockId };
     }
@@ -8751,9 +8906,10 @@ Silently verify the lead cluster, section order, and final polish before returni
         if (shouldSuppressRequestedArtifactFormat(question, context, requestedArtifactFormat)) {
             requestedArtifactFormat = null;
         }
-        const requestOptions = requestedArtifactFormat
-            ? { outputFormat: requestedArtifactFormat }
-            : {};
+        const requestOptions = {
+            ...(requestedArtifactFormat ? { outputFormat: requestedArtifactFormat } : {}),
+            reasoningEffort: 'medium'
+        };
         
         // Build messages array with enhanced system prompt
         const systemPrompt = buildSystemPrompt(context || {

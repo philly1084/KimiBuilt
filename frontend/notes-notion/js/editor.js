@@ -758,6 +758,13 @@ const Editor = (function() {
                     <line x1="4" y1="11" x2="20" y2="11"></line>
                 </svg>
             </button>
+            <button class="inline-toolbar-btn" data-cmd="hiliteColor" data-value="#fef08a" title="Highlight">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="m9 11-6 6v3h3l6-6"></path>
+                    <path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0L7.4 9.4a2 2 0 0 1 0-2.8L12 2"></path>
+                    <path d="m14 4 6 6"></path>
+                </svg>
+            </button>
             <div class="inline-toolbar-divider"></div>
             <button class="inline-toolbar-btn" data-cmd="createLink" title="Link (Ctrl+K)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -801,7 +808,7 @@ const Editor = (function() {
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 const cmd = btn.dataset.cmd;
-                applyInlineFormat(cmd);
+                applyInlineFormat(cmd, btn.dataset.value || null);
             });
         });
         
@@ -822,8 +829,11 @@ const Editor = (function() {
     /**
      * Apply inline formatting
      */
-    function applyInlineFormat(cmd) {
-        document.execCommand(cmd, false, null);
+    function applyInlineFormat(cmd, value = null) {
+        if (cmd === 'hiliteColor') {
+            document.execCommand('styleWithCSS', false, false);
+        }
+        document.execCommand(cmd, false, value);
         
         // Update button states
         if (inlineToolbar) {
