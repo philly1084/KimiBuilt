@@ -89,6 +89,16 @@ class SSHExecuteTool extends ToolBase {
             type: 'string',
             description: 'Relative directory under the remote working directory for staged context files. Defaults to .kimibuilt/context.'
           },
+          preferRunner: {
+            type: 'boolean',
+            default: false,
+            description: 'Prefer the online remote runner even when SSH target settings are configured.'
+          },
+          requireRunner: {
+            type: 'boolean',
+            default: false,
+            description: 'Require an online remote runner and do not fall back to SSH.'
+          },
           sudo: {
             type: 'boolean',
             default: false,
@@ -140,6 +150,8 @@ class SSHExecuteTool extends ToolBase {
           contextFiles,
           contextDirectory,
           sudo,
+          preferRunner: params.preferRunner === true,
+          requireRunner: params.requireRunner === true,
           profile: 'deploy',
           approval: params.approval || {},
         },

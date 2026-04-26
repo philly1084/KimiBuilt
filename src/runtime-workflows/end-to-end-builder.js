@@ -1179,6 +1179,7 @@ function buildEndToEndWorkflowPlan({
             params: {
                 command: buildRemoteCliImplementationCommand(currentWorkflow),
                 workflowAction: 'implement-remote-workspace',
+                preferRunner: true,
                 timeout: REMOTE_VERIFICATION_TIMEOUT_MS,
                 ...(currentWorkflow.workspacePath ? { workingDirectory: currentWorkflow.workspacePath } : {}),
             },
@@ -1203,6 +1204,7 @@ function buildEndToEndWorkflowPlan({
                 ...(currentWorkflow.workspacePath ? { workingDirectory: currentWorkflow.workspacePath } : {}),
                 timeout: REMOTE_WORKSPACE_DEPLOY_TIMEOUT_MS,
                 workflowAction: 'build-and-deploy-remote-workspace',
+                preferRunner: true,
                 command: buildRemoteWorkspaceDeployCommand(currentWorkflow),
             },
         }];

@@ -23,6 +23,9 @@ function getPreferredRemoteTransport() {
 }
 
 function shouldPreferRunner(params = {}) {
+  if (params.preferRunner === true || params.requireRunner === true) {
+    return true;
+  }
   if (config.remoteRunner?.preferred === false) {
     return false;
   }
@@ -119,6 +122,12 @@ async function executeWithRunnerPreference({
         error: error.message,
       });
     }
+  }
+
+  if (params.requireRunner === true) {
+    const error = new Error('No healthy remote runner is online for the requested runner-only command');
+    error.statusCode = 503;
+    throw error;
   }
 
   if (typeof fallback !== 'function') {
