@@ -83,6 +83,27 @@ const DOCUMENT_LAYOUT_CATALOG = {
       'Prefer checklists and callouts over decorative panels.',
     ],
   },
+  'learning-path': {
+    id: 'learning-path',
+    label: 'Learning Path',
+    summary: 'Instructional shell with module sequencing, checkpoints, practice blocks, and job-aid framing.',
+    bestFor: 'Training manuals, learner guides, facilitator packs, onboarding material, and course handouts.',
+    layout: 'Outcome-led hero, module map rail, lesson sections, practice/checkpoint callouts, and reusable reference blocks.',
+    defaultTheme: 'executive',
+    showOutline: true,
+    navigationLabel: 'Training path',
+    navigationTitle: 'Modules',
+    minorIdeas: [
+      'Open each major section with what the learner should be able to do afterward.',
+      'Pair explanations with a practice prompt, scenario, or validation checklist.',
+      'Use job-aid language for anything the learner should reuse after the session.',
+    ],
+    guardrails: [
+      'Do not let visual polish replace learning outcomes and checks.',
+      'Avoid lecture-only sections without practice or assessment.',
+      'Keep facilitator-only notes visually distinct from learner-facing instructions.',
+    ],
+  },
   'casefile-panels': {
     id: 'casefile-panels',
     label: 'Casefile Panels',
@@ -152,6 +173,7 @@ const { resolveDocumentBlueprint } = require('./document-design-blueprints');
 
 const DEFAULT_LAYOUT_ORDER = [
   'editorial-rhythm',
+  'learning-path',
   'briefing-grid',
   'chapter-bands',
   'field-guide-rail',
@@ -181,6 +203,7 @@ const BLUEPRINT_LAYOUT_MAP = {
   'pdf-whitepaper': ['casefile-panels', 'editorial-rhythm', 'briefing-grid'],
   'pdf-audit-report': ['briefing-grid', 'field-guide-rail', 'casefile-panels'],
   'pdf-executive-brief': ['briefing-grid', 'chapter-bands', 'field-guide-rail'],
+  'training-manual': ['learning-path', 'field-guide-rail', 'briefing-grid'],
 };
 
 const DIRECTION_LAYOUT_MAP = {
@@ -267,7 +290,7 @@ function getDocumentLayoutOptions({
     ])
     : new Map();
 
-  const scores = mergeScores(defaultScores, blueprintScores, directionScores, selectedScores, formatScores);
+  const scores = mergeScores(defaultScores, blueprintScores, preferredLayoutScores, directionScores, selectedScores, formatScores);
 
   return Object.values(DOCUMENT_LAYOUT_CATALOG)
     .map((layout) => ({

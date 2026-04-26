@@ -104,6 +104,13 @@ const TOOL_SUPPORT = {
   'code-sandbox': { status: 'requires_setup', notes: ['Execute mode requires Docker image pull/run capability in the backend runtime.', 'Project mode can persist previewable frontend bundles without Docker.'] },
   'git-safe': { status: 'requires_setup', notes: ['Requires a git repository in the backend-accessible filesystem and working git credentials for push.'] },
   'tool-doc-read': { status: 'stable', notes: ['Reads detailed tool documentation from the backend docs directory on demand.'] },
+  'document-workflow': {
+    status: 'stable',
+    notes: [
+      'Recommends, plans, generates, assembles, and bundles document outputs.',
+      'Supports training/manual packages through the training-manual blueprint and PDF/HTML/XLSX/Markdown suite generation.',
+    ],
+  },
   'research-bucket-list': { status: 'stable', notes: ['Lists metadata from the shared durable research bucket without loading full file contents.'] },
   'research-bucket-search': { status: 'stable', notes: ['Searches bucket metadata and supported text files with grep-style matching.'] },
   'research-bucket-read': { status: 'stable', notes: ['Reads selected bucket files with byte limits; binary files require explicit base64 mode.'] },

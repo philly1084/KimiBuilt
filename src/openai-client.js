@@ -2378,10 +2378,10 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
     const hasMigrationIntent = /\b(create migration|generate migration|schema migration|database change|schema diff|migration)\b/i.test(normalizedPrompt);
     const hasPodcastIntent = hasExplicitPodcastIntent(prompt);
     const hasDocumentWorkflowIntent = (
-        /\b(document|doc|report|brief|proposal|guide|summary|one-pager|whitepaper|slides|presentation|deck|pptx|docx|pdf|html page|html document|web page)\b/i.test(normalizedPrompt)
+        /\b(document|doc|report|brief|proposal|guide|manual|training|workbook|curriculum|lesson plan|job aid|summary|one-pager|whitepaper|slides|presentation|deck|pptx|docx|pdf|xlsx|html page|html document|web page)\b/i.test(normalizedPrompt)
         && /\b(create|make|generate|build|prepare|draft|write|assemble|compile|organize|inject|turn|convert|export)\b/i.test(normalizedPrompt)
     ) || (
-        /\b(slides|presentation|deck|pptx|docx|pdf|html document|research brief)\b/i.test(normalizedPrompt)
+        /\b(slides|presentation|deck|pptx|docx|pdf|xlsx|html document|research brief|training manual|learner guide|workbook)\b/i.test(normalizedPrompt)
         && (hasWebResearchIntent || hasExplicitScrapeIntent || hasUrl)
     );
     const hasDeepResearchDeckIntent = hasDeepResearchPresentationIntent(prompt);
@@ -2821,6 +2821,14 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Prefer `deep-research-presentation` over manually chaining `web-search`, `image-search-unsplash`, and `document-workflow` when the user explicitly asks for deep research plus a presentation deliverable.');
     }
 
+    if (automaticTools.some((entry) => entry.id === DOCUMENT_WORKFLOW_TOOL_ID)) {
+        guidance.push('- Use `document-workflow` for training/manual deliverables such as manuals, learner guides, facilitator guides, job aids, workbooks, HTML training pages, and multi-format PDF/HTML/XLSX packages.');
+        guidance.push('- For training/manual packages, prefer documentType `training-manual`, action `plan` before generation when the request is broad, and action `generate-suite` when the user asks for multiple outputs such as PDF, XLSX, and HTML together.');
+        guidance.push('- Training/manual work should ask for high-impact design choices when audience, delivery mode, format mix, duration, visual style, assessment depth, or research scope is unclear. Keep intake concise and then proceed.');
+        guidance.push('- When the training subject depends on facts, procedures, standards, or current guidance, ground the package in vector memory and verified research before generating final materials.');
+        guidance.push('- When the user explicitly asks for parallel workers or multiple agents on a training package, split work by output surface or package part: manual, workbook, HTML, podcast script, video-podcast storyboard, source research, and QA.');
+    }
+
     if (automaticTools.some((entry) => entry.id === 'asset-search')) {
         guidance.push(sessionIsolation
             ? '- Use `asset-search` only for current-session assets unless the user explicitly asks to search across sessions.'
@@ -2889,6 +2897,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
     if (automaticTools.some((entry) => entry.id === 'podcast')) {
         guidance.push('- Use `podcast` when the user asks for a podcast deliverable. It can research, script, synthesize the episode, persist audio/script artifacts, and render an MP4 when requested.');
         guidance.push('- For video podcast, podcast video, MP4, visual podcast, scene image, or cover-art requests, call `podcast` with `includeVideo: true`, `videoImageMode: "mixed"`, and `videoGenerateImages: true` unless the user explicitly asks not to generate images.');
+        guidance.push('- For training or manual podcast requests, treat the episode as instructional: clarify or infer learner audience, learning objectives, segment pacing, practice prompts, and assessment/checkpoint moments; use sources and vector context when the topic requires grounding.');
         guidance.push('- Do not answer that encoded video files cannot be generated when the `podcast` tool is attached; use the tool and report the returned audio, script, and video artifacts.');
     }
 

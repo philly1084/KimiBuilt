@@ -1,0 +1,40 @@
+{
+  "id": "training-manual-package",
+  "name": "Training and Manuals Package",
+  "category": "training-manuals",
+  "description": "Cornerstone instructional package template for manuals, learner guides, facilitator notes, and reusable training material.",
+  "icon": "book-open",
+  "tags": ["training", "manual", "learner guide", "facilitator guide", "job aid", "assessment"],
+  "blueprint": "training-manual",
+  "intent": "training",
+  "packId": "training-manuals",
+  "recommendedFormats": ["pdf", "html", "xlsx"],
+  "useCases": ["training manual", "learning package", "facilitator guide", "course manual", "job aid"],
+  "formats": ["pdf", "html", "xlsx", "md"],
+  "productionProfile": {
+    "workflow": "question-first",
+    "strengths": ["learning objectives", "module pacing", "practice activities", "assessment checkpoints", "facilitator notes"],
+    "bestFor": ["training programs", "SOP manuals", "onboarding packages", "teaching material"],
+    "qualityBar": "Resolve audience, duration, format mix, visual direction, research depth, and assessment expectations before final generation."
+  },
+  "variables": {
+    "title": { "type": "text", "label": "Training Title", "required": true },
+    "audience": { "type": "text", "label": "Learner Audience", "required": true },
+    "delivery_mode": {
+      "type": "select",
+      "label": "Delivery Mode",
+      "required": false,
+      "options": ["Self-paced", "Instructor-led", "Workshop", "Hybrid", "Podcast-supported"]
+    },
+    "duration": { "type": "text", "label": "Target Duration", "required": false },
+    "prerequisites": { "type": "textarea", "label": "Prerequisites", "required": false },
+    "learning_objectives": { "type": "textarea", "label": "Learning Objectives", "required": true },
+    "module_plan": { "type": "textarea", "label": "Module Path", "required": true },
+    "practice_activities": { "type": "textarea", "label": "Practice Activities", "required": false },
+    "assessment": { "type": "textarea", "label": "Assessment Plan", "required": false },
+    "checklist": { "type": "textarea", "label": "Completion Checklist", "required": false },
+    "facilitator_notes": { "type": "textarea", "label": "Facilitator Notes", "required": false },
+    "job_aids": { "type": "textarea", "label": "Reusable Job Aids", "required": false },
+    "design_notes": { "type": "textarea", "label": "Design Notes", "required": false }
+  }
+}

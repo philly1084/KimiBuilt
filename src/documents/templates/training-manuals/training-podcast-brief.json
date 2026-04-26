@@ -1,0 +1,30 @@
+{
+  "id": "training-podcast-brief",
+  "name": "Training Podcast and Video Podcast Brief",
+  "category": "training-manuals",
+  "description": "Planning brief for turning a training subject into a researched audio or video podcast with learning objectives, segment pacing, and scene guidance.",
+  "icon": "podcast",
+  "tags": ["training", "podcast", "video podcast", "audio training", "script", "scene plan"],
+  "blueprint": "training-manual",
+  "intent": "training",
+  "packId": "training-manuals",
+  "recommendedFormats": ["html", "pdf", "md"],
+  "useCases": ["training podcast", "video podcast", "audio lesson", "script planning", "scene storyboard"],
+  "formats": ["html", "pdf", "md"],
+  "productionProfile": {
+    "workflow": "podcast-brief-first",
+    "strengths": ["episode learning goals", "segment map", "host notes", "visual scene prompts"],
+    "bestFor": ["training podcasts", "video podcast scripts", "audio-supported manuals"]
+  },
+  "variables": {
+    "title": { "type": "text", "label": "Episode or Series Title", "required": true },
+    "audience": { "type": "text", "label": "Learner Audience", "required": true },
+    "duration": { "type": "text", "label": "Target Runtime", "required": false },
+    "learning_objectives": { "type": "textarea", "label": "Episode Learning Objectives", "required": true },
+    "module_plan": { "type": "textarea", "label": "Segment Plan", "required": true },
+    "practice_activities": { "type": "textarea", "label": "Listener Prompts or Exercises", "required": false },
+    "assessment": { "type": "textarea", "label": "Knowledge Check", "required": false },
+    "facilitator_notes": { "type": "textarea", "label": "Host or Facilitator Notes", "required": false },
+    "design_notes": { "type": "textarea", "label": "Video Scene and Visual Direction", "required": false }
+  }
+}

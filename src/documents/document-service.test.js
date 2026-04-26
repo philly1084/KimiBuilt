@@ -344,6 +344,9 @@ describe('DocumentService', () => {
       'board-update-deck',
       'product-roadmap-deck',
       'training-workshop-deck',
+      'training-manual-package',
+      'training-curriculum-workbook',
+      'training-podcast-brief',
       'case-study-deck',
       'conference-keynote-deck',
       'campaign-storyboard-deck',
@@ -366,6 +369,63 @@ describe('DocumentService', () => {
     expect(recommendation.pipeline).toBe('presentation');
     expect(recommendation.recommendedFormat).toBe('pptx');
     expect(recommendation.recommendedTemplates.map((template) => template.id)).toContain('pitch-deck-story');
+  });
+
+  test('recommends training and manuals workflow across package formats', () => {
+    const service = new DocumentService({
+      responses: {
+        create: jest.fn(),
+      },
+    });
+
+    const recommendation = service.recommendDocumentWorkflow({
+      prompt: 'Create a training manual and workbook for onboarding technicians',
+      format: 'xlsx',
+      limit: 6,
+    });
+
+    expect(recommendation.inferredType).toBe('training-manual');
+    expect(recommendation.packId).toBe('training-manuals');
+    expect(recommendation.recommendedFormat).toBe('xlsx');
+    expect(recommendation.recommendedTemplates.map((template) => template.id)).toEqual(expect.arrayContaining([
+      'training-manual-package',
+      'training-curriculum-workbook',
+    ]));
+    expect(recommendation.selectedDesignOption).toEqual(expect.objectContaining({
+      id: 'learning-path',
+    }));
+  });
+
+  test('renders training manual templates as learner-centered html', async () => {
+    const service = new DocumentService({
+      responses: {
+        create: jest.fn(),
+      },
+    });
+
+    const document = await service.generateFromTemplate('training-manual-package', {
+      title: 'Technician Onboarding',
+      audience: 'New field technicians',
+      delivery_mode: 'Instructor-led',
+      duration: 'Half day',
+      prerequisites: 'Basic safety orientation',
+      learning_objectives: 'Perform startup checks\nEscalate unsafe conditions',
+      module_plan: 'Module 1: Equipment overview\nModule 2: Startup workflow',
+      practice_activities: 'Run a mock startup with a partner.',
+      assessment: 'Demonstrate checklist completion without prompts.',
+      checklist: 'Identify hazards\nComplete startup log',
+      facilitator_notes: 'Pause after each module for questions.',
+      design_notes: 'Use practical field examples and clear checkpoints.',
+    }, 'html');
+
+    expect(document.mimeType).toBe('text/html');
+    expect(String(document.content)).toContain('Learning Path');
+    expect(String(document.content)).toContain('Learning Objectives');
+    expect(String(document.content)).toContain('New field technicians');
+    expect(document.metadata.design).toEqual(expect.objectContaining({
+      blueprint: 'training-manual',
+      layout: 'learning-path',
+    }));
   });
 
   test('keeps html-capable storyboard templates in recommendations for website slides', () => {

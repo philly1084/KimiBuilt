@@ -1,0 +1,30 @@
+{
+  "id": "training-curriculum-workbook",
+  "name": "Training Curriculum Workbook",
+  "category": "training-manuals",
+  "description": "Workbook-oriented training template for XLSX trackers, exercises, lesson planning, and validation rubrics.",
+  "icon": "table",
+  "tags": ["training", "workbook", "xlsx", "curriculum", "lesson plan", "rubric", "tracker"],
+  "blueprint": "training-manual",
+  "intent": "training",
+  "packId": "training-manuals",
+  "recommendedFormats": ["xlsx", "html", "pdf"],
+  "useCases": ["training workbook", "curriculum planner", "lesson tracker", "assessment rubric"],
+  "formats": ["xlsx", "html", "pdf", "md"],
+  "productionProfile": {
+    "workflow": "workbook-first",
+    "strengths": ["module tracker", "activity planning", "rubric fields", "completion checks"],
+    "bestFor": ["Excel training planners", "course operations", "assessment matrices", "learner progress trackers"]
+  },
+  "variables": {
+    "title": { "type": "text", "label": "Workbook Title", "required": true },
+    "audience": { "type": "text", "label": "Audience", "required": true },
+    "learning_objectives": { "type": "textarea", "label": "Objectives", "required": true },
+    "module_plan": { "type": "textarea", "label": "Modules and Lessons", "required": true },
+    "practice_activities": { "type": "textarea", "label": "Exercises", "required": false },
+    "assessment": { "type": "textarea", "label": "Rubric or Assessment", "required": false },
+    "checklist": { "type": "textarea", "label": "Completion Tracker Items", "required": false },
+    "facilitator_notes": { "type": "textarea", "label": "Instructor Notes", "required": false },
+    "design_notes": { "type": "textarea", "label": "Workbook Design Notes", "required": false }
+  }
+}

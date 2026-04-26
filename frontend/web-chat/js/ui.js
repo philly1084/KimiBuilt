@@ -5770,11 +5770,10 @@ class UIHelpers {
             }
 
             this.lastSoundCueWarningAt = now;
-            this.showToast(
-                'Sound cues are currently blocked by browser audio permissions. Click in the page and try again.',
-                'warning',
-                'Sound cues',
-            );
+            console.warn('[WebChat] Sound cue playback was blocked by browser audio permissions.', {
+                kind,
+                preview: options?.preview === true,
+            });
         }
     }
 
@@ -5807,16 +5806,6 @@ class UIHelpers {
         this.soundManager?.setSoundProfile?.(value);
         this.updateSoundProfileUI();
 
-        const profiles = this.getAvailableSoundProfiles();
-        const profile = profiles.find((entry) => entry.id === this.getCurrentSoundProfileId());
-        if (profile) {
-            this.showToast(
-                `${profile.label} sound theme selected`,
-                'success',
-                'Sound theme',
-            );
-        }
-
         this.previewSoundCue('response');
     }
 
@@ -5837,11 +5826,6 @@ class UIHelpers {
     toggleSoundCues() {
         const nextValue = !this.isSoundCuesEnabled();
         this.setSoundCuesEnabled(nextValue);
-        this.showToast(
-            nextValue ? 'Robot sound cues enabled' : 'Robot sound cues disabled',
-            'success',
-            'Sound cues',
-        );
 
         if (nextValue) {
             this.previewSoundCue('response');
@@ -5851,11 +5835,6 @@ class UIHelpers {
     toggleMenuSounds() {
         const nextValue = !this.isMenuSoundsEnabled();
         this.setMenuSoundsEnabled(nextValue);
-        this.showToast(
-            nextValue ? 'Menu sounds enabled' : 'Menu sounds disabled',
-            'success',
-            'Menu sounds',
-        );
 
         if (nextValue) {
             this.previewSoundCue('menu-open');
@@ -8365,7 +8344,8 @@ class UIHelpers {
     // ============================================
 
     shouldSuppressToast(message = '', type = 'info', title = '') {
-        if (['success', 'error'].includes(String(type || '').trim().toLowerCase())) {
+        const normalizedType = String(type || '').trim().toLowerCase();
+        if (['success', 'error'].includes(normalizedType)) {
             return true;
         }
 
@@ -8378,10 +8358,22 @@ class UIHelpers {
         }
 
         return [
+            /\bsound cues?\b/,
+            /\bmenu sounds?\b/,
+            /\bsound theme\b/,
+            /\bmodel changed\b/,
+            /\bswitched to\b/,
+            /\btheme applied\b/,
+            /\bmode\b.*\b(applied|changed|enabled|disabled|switched)\b/,
+            /\b(message queued|processing queued message)\b/,
             /\btask completed\b/,
             /\btask failed\b/,
+            /\btask started\b/,
+            /\btask queued\b/,
             /\bworkload completed\b/,
             /\bworkload failed\b/,
+            /\bworkload started\b/,
+            /\bworkload queued\b/,
             /\bworkload action failed\b/,
             /^workload (updated|created|queued|paused|resumed|deleted)\b/,
         ].some((pattern) => pattern.test(combined));

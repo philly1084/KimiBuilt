@@ -660,6 +660,42 @@ const BLUEPRINTS = {
       'vague owner assignments',
     ],
   },
+  'training-manual': {
+    id: 'training-manual',
+    label: 'training and manuals package',
+    goal: 'Create instructional material that can become a manual, training workbook, facilitator guide, podcast script, or learner-facing package.',
+    narrative: 'Start with learner context and outcomes, build the material in teachable modules, add practice and assessment, then close with job aids and next-step reinforcement.',
+    outputIntent: 'training',
+    requiredElements: [
+      'Learner audience and prerequisite assumptions',
+      'Learning objectives and success criteria',
+      'Module-by-module instruction path',
+      'Practice activities or examples',
+      'Assessment, checklist, or validation steps',
+      'Facilitator notes or reusable job aids',
+    ],
+    sectionArchetypes: ['audience', 'objectives', 'modules', 'practice', 'assessment', 'job-aids'],
+    structurePatterns: [
+      'Ask for design choices when audience, tone, format, duration, or visual style are unclear',
+      'Use module pacing, examples, and checkpoints instead of report-style narrative',
+      'Ground factual material in vector memory and verified research when the user asks for a subject-specific package',
+      'Split large packages into parallel workstreams for manual, workbook, podcast, video podcast, and HTML surfaces',
+    ],
+    styleConstraints: {
+      spacingScale: 1.12,
+      headingLadder: ['Module', 'Lesson', 'Activity', 'Checkpoint'],
+      enforceCheckpoints: true,
+      tableDensity: 'moderate',
+      printFriendly: true,
+    },
+    preferredLayouts: ['learning-path', 'field-guide-rail', 'briefing-grid'],
+    suitableCreativeProfiles: ['field-guide', 'systems-minimal', 'editorial-feature'],
+    avoid: [
+      'generic overview material with no learner task',
+      'long explanations without practice or validation',
+      'publishing a final package before resolving key design choices',
+    ],
+  },
 };
 
 const TYPE_ALIASES = {
@@ -703,6 +739,16 @@ const TYPE_ALIASES = {
   'pdf audit': 'pdf-audit-report',
   'pdf executive brief': 'pdf-executive-brief',
   'executive pdf brief': 'pdf-executive-brief',
+  training: 'training-manual',
+  manual: 'training-manual',
+  manuals: 'training-manual',
+  'training manual': 'training-manual',
+  'training manuals': 'training-manual',
+  'training and manuals': 'training-manual',
+  'training package': 'training-manual',
+  'learning guide': 'training-manual',
+  'facilitator guide': 'training-manual',
+  workbook: 'training-manual',
 };
 
 function normalizeDocumentType(documentType = '') {

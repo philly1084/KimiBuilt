@@ -60,6 +60,14 @@ const TEMPLATE_PACK_CATALOG = {
     formats: ['pdf'],
     rationale: 'Print-safe whitepaper-grade outputs with structured sections and references.',
   },
+  'training-manuals': {
+    id: 'training-manuals',
+    label: 'Training and Manuals',
+    intent: 'training',
+    useCase: 'training',
+    formats: ['pdf', 'html', 'xlsx', 'md'],
+    rationale: 'Instructional packages with learning objectives, module pacing, practice, assessment, and reusable job aids.',
+  },
 };
 
 const BLUEPRINT_TO_PACK_MAP = {
@@ -76,6 +84,7 @@ const BLUEPRINT_TO_PACK_MAP = {
   'pdf-whitepaper': 'pdf-publication',
   'pdf-audit-report': 'pdf-publication',
   'pdf-executive-brief': 'pdf-publication',
+  'training-manual': 'training-manuals',
 };
 
 function normalizeTemplateFormatList(value = []) {
@@ -147,6 +156,10 @@ function blueprintIdIntentHints(documentType = '') {
 
   if (normalized.startsWith('pdf-')) {
     return 'pdf';
+  }
+
+  if (normalized === 'training-manual') {
+    return 'training';
   }
 
   return '';
@@ -749,6 +762,10 @@ class DocumentService {
       return ['pdf', 'html'];
     }
 
+    if (intent === 'training') {
+      return ['pdf', 'html', 'xlsx', 'md'];
+    }
+
     if (normalizedType === 'presentation' || normalizedType === 'pitch-deck') {
       return ['pptx', 'html'];
     }
@@ -820,6 +837,10 @@ class DocumentService {
 
     if (requestedIntent === 'pdf') {
       return 'pdf-whitepaper';
+    }
+
+    if (requestedIntent === 'training') {
+      return 'training-manual';
     }
 
     return normalizeDocumentType(requestedIntent);
@@ -919,7 +940,7 @@ class DocumentService {
     }
 
     const normalizedType = normalizeDocumentType(normalized);
-    if (normalizedType !== 'document') {
+    if (normalizedType !== 'document' && BLUEPRINTS[normalizedType]) {
       return normalizedType;
     }
 
@@ -930,6 +951,10 @@ class DocumentService {
 
     if (/\b(research|investigate|literature|methodology|evidence|bibliography)\b/.test(normalized)) {
       return 'research-note';
+    }
+
+    if (/\b(training|manual|learner guide|facilitator guide|workbook|course|curriculum|lesson plan|job aid|standard operating procedure|sop)\b/.test(normalized)) {
+      return 'training-manual';
     }
 
     if (/\b(dashboard|kpi|funnel|operational|conversion)\b/.test(normalized)) {
@@ -1059,6 +1084,10 @@ class DocumentService {
 
     if (blueprintId === 'executive-brief' && /(executive|brief|board|summary)/.test(haystack)) {
       score += 14;
+    }
+
+    if (blueprintId === 'training-manual' && /(training|manual|learner|facilitator|workbook|course|curriculum|lesson|module|job aid|assessment|checklist)/.test(haystack)) {
+      score += 18;
     }
 
     if (normalizedPrompt) {
@@ -2170,6 +2199,61 @@ class DocumentService {
             bullets: this.parseLineList(values.recommendations),
           },
         ].filter((section) => section.content || section.chart || section.bullets?.length),
+      };
+    }
+
+    if (blueprintId === 'training-manual') {
+      return {
+        title: values.title || template?.name || 'Training and Manuals',
+        subtitle: [values.audience, values.duration, values.delivery_mode].filter(Boolean).join(' | '),
+        theme: options.theme || 'executive',
+        documentType: blueprintId,
+        sections: [
+          {
+            heading: 'Learner Profile',
+            content: [
+              values.audience ? `Audience: ${values.audience}` : '',
+              values.prerequisites ? `Prerequisites: ${values.prerequisites}` : '',
+              values.delivery_mode ? `Delivery mode: ${values.delivery_mode}` : '',
+              values.duration ? `Duration: ${values.duration}` : '',
+            ].filter(Boolean).join('\n'),
+            level: 1,
+            callout: values.design_notes
+              ? {
+                title: 'Design Direction',
+                body: String(values.design_notes),
+                tone: 'highlight',
+              }
+              : null,
+          },
+          {
+            heading: 'Learning Objectives',
+            content: '',
+            level: 1,
+            bullets: this.parseLineList(values.learning_objectives),
+          },
+          {
+            heading: 'Module Path',
+            content: String(values.module_plan || ''),
+            level: 1,
+          },
+          {
+            heading: 'Practice Activities',
+            content: String(values.practice_activities || ''),
+            level: 1,
+          },
+          {
+            heading: 'Assessment and Validation',
+            content: String(values.assessment || ''),
+            level: 1,
+            bullets: this.parseLineList(values.checklist),
+          },
+          {
+            heading: 'Facilitator Notes and Job Aids',
+            content: String(values.facilitator_notes || values.job_aids || ''),
+            level: 1,
+          },
+        ].filter((section) => section.content || section.bullets?.length || section.callout),
       };
     }
 

@@ -1220,6 +1220,20 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(__testUtils.inferRequiredAutomaticToolId(prompt, automaticTools.map((tool) => tool.id))).toBe('podcast');
     });
 
+    test('selects document-workflow for training manual package prompts', () => {
+        const toolManager = createToolManager();
+        const prompt = 'Create a training manual package with PDF, XLSX workbook, and HTML learner guide.';
+        const options = {
+            toolContext: {
+                documentService: {},
+            },
+        };
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(toolManager, prompt, options);
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(automaticTools, prompt, options);
+
+        expect(selectedTools.map((tool) => tool.id)).toContain('document-workflow');
+    });
+
     test('offers user-checkpoint alongside normal tools for web-chat when checkpoint budget remains', () => {
         const toolManager = createToolManager();
         const prompt = 'Build a web chat survey flow before doing the larger implementation.';

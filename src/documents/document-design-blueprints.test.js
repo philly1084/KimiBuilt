@@ -10,6 +10,8 @@ describe('document design blueprints', () => {
     expect(normalizeDocumentType('website slides')).toBe('website-slides');
     expect(normalizeDocumentType('analytics report')).toBe('data-story');
     expect(normalizeDocumentType('board brief')).toBe('executive-brief');
+    expect(normalizeDocumentType('training and manuals')).toBe('training-manual');
+    expect(normalizeDocumentType('facilitator guide')).toBe('training-manual');
   });
 
   test('resolves data-story and website-slide blueprints with narrative guidance', () => {
@@ -32,5 +34,17 @@ describe('document design blueprints', () => {
     expect(prompt).toContain('<required_elements>');
     expect(prompt).toContain('Problem or market tension');
     expect(prompt).toContain('<avoid>');
+  });
+
+  test('resolves training manual blueprint with instructional requirements', () => {
+    const blueprint = resolveDocumentBlueprint('training manual');
+
+    expect(blueprint.id).toBe('training-manual');
+    expect(blueprint.requiredElements).toEqual(expect.arrayContaining([
+      'Learning objectives and success criteria',
+      'Practice activities or examples',
+      'Assessment, checklist, or validation steps',
+    ]));
+    expect(renderBlueprintPrompt(blueprint)).toContain('<design_blueprint id="training-manual">');
   });
 });

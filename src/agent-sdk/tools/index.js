@@ -2401,7 +2401,7 @@ class ToolManager {
         id: DOCUMENT_WORKFLOW_TOOL_ID,
         name: 'Document Workflow',
         category: 'system',
-        description: 'Recommend, plan, and generate documents or slide decks, optionally grounded in verified research and scrape results.',
+        description: 'Recommend, plan, and generate documents, slide decks, training/manual packages, and multi-format document suites, optionally grounded in verified research and scrape results.',
         backend: {
           handler: async (params = {}, context = {}) => {
             const documentService = resolveDocumentService(context);
@@ -2829,6 +2829,10 @@ class ToolManager {
             'document workflow',
             'research brief',
             'html document',
+            'training manual',
+            'training package',
+            'learner guide',
+            'workbook',
           ],
           requiresConfirmation: false
         },
