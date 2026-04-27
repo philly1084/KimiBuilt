@@ -392,6 +392,7 @@ function inferRequestedOutputFormat(text = '') {
         /\b(website|web page|webpage|landing page|homepage|microsite|marketing site|frontend demo|front-end demo|site mockup|site prototype)\b/.test(normalized)
         || isDashboardRequest(normalized)
     );
+    const hasSandboxPreviewCue = /\b(sandbox|preview|browser preview|live preview|full screen preview|fullscreen preview)\b/.test(normalized);
     const hasPrototypeHtmlCue = /\b(demo|prototype|mockup|mock-up|wireframe|microsite)\b/.test(normalized);
     const hasExplicitHtmlCue = /\bhtml\b/.test(normalized);
     const hasLongFormDocumentSubject = /\b(research paper|research report|research brief|whitepaper|white paper|case study|dossier|long[-\s]?form|large[-\s]?form|article|paper)\b/.test(normalized);
@@ -436,6 +437,7 @@ function inferRequestedOutputFormat(text = '') {
         hasExplicitStandaloneHtmlIntent(normalized)
         || (hasExplicitHtmlCue && hasBuildIntent)
         || (hasPrototypeHtmlCue && hasBuildIntent)
+        || (hasSandboxPreviewCue && hasBuildIntent)
     )) {
         return 'html';
     }

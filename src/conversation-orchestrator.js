@@ -10632,6 +10632,8 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('On web-chat, fenced `html` code blocks render as live sandboxed previews inside the message.');
             parts.push('On web-chat, generated HTML artifacts render inline and remain downloadable.');
             parts.push('When the user asks to create, build, generate, or produce HTML, prefer an HTML artifact instead of pasting the full page into chat prose.');
+            parts.push('For web-chat website, web page, sandbox preview, or full-site requests, create a previewable HTML/site artifact first. Do not use remote-command or SSH just to create the web-chat sandbox preview.');
+            parts.push('If the user later asks to publish a generated site artifact, use the managed-app/export path when available; do not invent an ad hoc SSH deployment from the chat answer.');
             parts.push('Use inline ```html``` only for short snippets, examples, or when the user explicitly wants the markup directly in the conversation.');
         }
 

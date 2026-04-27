@@ -120,6 +120,39 @@ describe('openai-client image generation', () => {
         ]);
     });
 
+    test('normalizes nested provider image response shapes', async () => {
+        process.env.OPENAI_BASE_URL = 'https://gateway.example/v1';
+        process.env.OPENAI_IMAGE_MODEL = 'gateway-image-model';
+        global.fetch = jest.fn(async () => ({
+            ok: true,
+            json: async () => ({
+                created: 123,
+                images: [{
+                    inline_data: {
+                        mime_type: 'image/webp',
+                        data: 'aGVsbG8=',
+                    },
+                    prompt: 'A refined prompt',
+                }],
+            }),
+        }));
+
+        const { generateImage } = require('./openai-client');
+        const result = await generateImage({
+            prompt: 'Generate a hero image',
+            model: 'gateway-image-model',
+        });
+
+        expect(result.data).toEqual([
+            expect.objectContaining({
+                url: 'data:image/webp;base64,aGVsbG8=',
+                b64_json: 'aGVsbG8=',
+                mimeType: 'image/webp',
+                revised_prompt: 'A refined prompt',
+            }),
+        ]);
+    });
+
     test('keeps gateway/router image requests on the configured OpenAI endpoint by default', async () => {
         process.env.OPENAI_BASE_URL = 'https://gateway.example/v1';
         process.env.OPENAI_IMAGE_MODEL = 'gpt-image-2';

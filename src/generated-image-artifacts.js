@@ -50,30 +50,79 @@ function extensionForMimeType(mimeType = '') {
     return 'png';
 }
 
+function normalizeBase64Payload(value = '') {
+    const normalized = String(value || '').trim();
+    if (!normalized) {
+        return '';
+    }
+
+    const dataUrl = decodeDataUrl(normalized);
+    if (dataUrl?.buffer?.length) {
+        return normalized;
+    }
+
+    return normalized.replace(/\s+/g, '');
+}
+
 function decodeDataUrl(url = '') {
     const normalized = String(url || '').trim();
-    const match = normalized.match(/^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=]+)$/i);
+    const match = normalized.match(/^data:(image\/[a-z0-9.+-]+);base64,([\s\S]+)$/i);
     if (!match?.[1] || !match?.[2]) {
+        return null;
+    }
+
+    const base64 = String(match[2] || '').replace(/\s+/g, '');
+    if (!base64) {
         return null;
     }
 
     return {
         mimeType: match[1].toLowerCase(),
         extension: extensionForMimeType(match[1]),
-        buffer: Buffer.from(match[2], 'base64'),
+        buffer: Buffer.from(base64, 'base64'),
     };
 }
 
 function decodeGeneratedImage(image = {}) {
-    if (typeof image?.b64_json === 'string' && image.b64_json.trim()) {
+    const base64Value = [
+        image?.b64_json,
+        image?.b64,
+        image?.base64,
+        image?.image_base64,
+        image?.imageBase64,
+        image?.data,
+        image?.inline_data?.data,
+        image?.inlineData?.data,
+    ].find((value) => typeof value === 'string' && value.trim());
+
+    if (typeof base64Value === 'string' && base64Value.trim()) {
+        const dataUrl = decodeDataUrl(base64Value);
+        if (dataUrl) {
+            return dataUrl;
+        }
+
+        const mimeType = String(
+            image?.mimeType
+            || image?.mime_type
+            || image?.inline_data?.mime_type
+            || image?.inlineData?.mimeType
+            || 'image/png',
+        ).trim().toLowerCase();
         return {
-            mimeType: 'image/png',
-            extension: 'png',
-            buffer: Buffer.from(image.b64_json.trim(), 'base64'),
+            mimeType,
+            extension: extensionForMimeType(mimeType),
+            buffer: Buffer.from(normalizeBase64Payload(base64Value), 'base64'),
         };
     }
 
-    return decodeDataUrl(image?.url || '');
+    return decodeDataUrl(
+        image?.url
+        || image?.image_url
+        || image?.imageUrl
+        || image?.file_uri
+        || image?.fileUri
+        || '',
+    );
 }
 
 function resolveGeneratedImageLocalPath(url = '') {
@@ -111,7 +160,16 @@ function resolveGeneratedImageLocalPath(url = '') {
 }
 
 async function readGeneratedImageFromLocalPath(image = {}) {
-    const filePath = resolveGeneratedImageLocalPath(image?.url || '');
+    const filePath = resolveGeneratedImageLocalPath(
+        image?.url
+        || image?.path
+        || image?.file
+        || image?.file_path
+        || image?.filePath
+        || image?.file_uri
+        || image?.fileUri
+        || '',
+    );
     if (!filePath) {
         return null;
     }
@@ -144,7 +202,14 @@ function inferMimeTypeFromUrl(url = '') {
 }
 
 async function downloadGeneratedImage(image = {}) {
-    const imageUrl = String(image?.url || '').trim();
+    const imageUrl = String(
+        image?.url
+        || image?.image_url
+        || image?.imageUrl
+        || image?.file_uri
+        || image?.fileUri
+        || '',
+    ).trim();
     if (!/^https?:\/\//i.test(imageUrl) || typeof fetch !== 'function') {
         return null;
     }

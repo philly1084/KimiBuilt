@@ -460,6 +460,9 @@
         if (!text) return '';
 
         const hasArtifactIntent = hasExplicitArtifactIntent(text);
+        const hasBuildIntent = /\b(create|make|generate|build|produce|render|prepare|draft)\b/.test(text);
+        const hasWebsiteArtifactSubject = /\b(website|web page|webpage|landing page|homepage|microsite|marketing site|frontend demo|front-end demo|site mockup|site prototype)\b/.test(text);
+        const hasSandboxPreviewCue = /\b(sandbox|preview|browser preview|live preview|full screen preview|fullscreen preview)\b/.test(text);
 
         if ((/\b(power\s*query|\.(pq|m)\b)/.test(text) && hasArtifactIntent)
             || /\b(power\s*query)\s+(?:file|script|artifact|export)\b/.test(text)) {
@@ -477,6 +480,7 @@
         if (/\bxml\b/.test(text) && hasArtifactIntent) return 'xml';
         if (hasExplicitMermaidIntent(text)) return 'mermaid';
         if (hasExplicitHtmlArtifactIntent(text)) return 'html';
+        if (hasWebsiteArtifactSubject && hasBuildIntent && hasSandboxPreviewCue) return 'html';
 
         return '';
     }

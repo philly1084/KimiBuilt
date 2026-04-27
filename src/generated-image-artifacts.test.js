@@ -149,4 +149,30 @@ describe('generated-image-artifacts', () => {
             await fs.rm(tempDir, { recursive: true, force: true });
         }
     });
+
+    test('persists alternate provider base64 image shapes', async () => {
+        const result = await persistGeneratedImages({
+            sessionId: 'session-1',
+            sourceMode: 'image',
+            prompt: 'Notebook cover',
+            model: 'gateway-image-model',
+            images: [{
+                base64: 'aGVs\nbG8=',
+                mime_type: 'image/webp',
+                revisedPrompt: 'Notebook cover with clean geometry',
+            }],
+        });
+
+        expect(artifactService.createStoredArtifact).toHaveBeenCalledWith(expect.objectContaining({
+            sessionId: 'session-1',
+            extension: 'webp',
+            mimeType: 'image/webp',
+            buffer: Buffer.from('hello'),
+        }));
+        expect(result.artifactIds).toEqual(['artifact-1']);
+        expect(result.images[0]).toEqual(expect.objectContaining({
+            artifactId: 'artifact-1',
+            revisedPrompt: 'Notebook cover with clean geometry',
+        }));
+    });
 });

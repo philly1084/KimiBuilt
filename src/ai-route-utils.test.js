@@ -289,11 +289,13 @@ describe('ai-route-utils', () => {
         expect(inferRequestedOutputFormat('Export this as a Mermaid file')).toBe('mermaid');
     });
 
-    test('inferRequestedOutputFormat only auto-selects html for explicit html or prototype-style website requests', () => {
+    test('inferRequestedOutputFormat auto-selects html for explicit html, sandbox preview, or prototype-style website requests', () => {
         expect(inferRequestedOutputFormat('Build a landing page for a climate startup')).toBeNull();
         expect(inferRequestedOutputFormat('Create a frontend demo microsite for our product launch')).toBe('html');
         expect(inferRequestedOutputFormat('Create an admin dashboard HTML for customer support ops')).toBe('html');
         expect(inferRequestedOutputFormat('Make a website mockup for a fintech launch')).toBe('html');
+        expect(inferRequestedOutputFormat('Build a sandbox weather webpage with current conditions cards')).toBe('html');
+        expect(inferRequestedOutputFormat('Create a weather web page with a browser preview')).toBe('html');
         expect(inferRequestedOutputFormat('Create website slides for a fintech launch that I can reuse as a Vite template')).toBe('html');
         expect(inferRequestedOutputFormat('Build an executive brief template as a frontend example for our web design system')).toBe('html');
     });

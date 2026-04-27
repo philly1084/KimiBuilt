@@ -484,10 +484,102 @@ function toImageUrl(image = {}) {
     if (image.url) {
         return image.url;
     }
+    if (typeof image.image_url === 'string') {
+        return image.image_url;
+    }
+    if (typeof image.imageUrl === 'string') {
+        return image.imageUrl;
+    }
+    if (typeof image.image_url?.url === 'string') {
+        return image.image_url.url;
+    }
+    if (typeof image.file_uri === 'string') {
+        return image.file_uri;
+    }
+    if (typeof image.fileUri === 'string') {
+        return image.fileUri;
+    }
+    const mimeType = String(
+        image.mimeType
+        || image.mime_type
+        || image.inline_data?.mime_type
+        || image.inlineData?.mimeType
+        || 'image/png',
+    ).trim() || 'image/png';
     if (image.b64_json) {
-        return `data:image/png;base64,${image.b64_json}`;
+        return `data:${mimeType};base64,${image.b64_json}`;
+    }
+    if (image.b64) {
+        return `data:${mimeType};base64,${image.b64}`;
+    }
+    if (image.base64) {
+        return `data:${mimeType};base64,${image.base64}`;
+    }
+    if (image.image_base64) {
+        return `data:${mimeType};base64,${image.image_base64}`;
     }
     return null;
+}
+
+function normalizeProviderImageRecord(image = {}) {
+    const inlineData = image.inline_data || image.inlineData || null;
+    const imageUrl = image.image_url && typeof image.image_url === 'object'
+        ? image.image_url.url
+        : image.image_url;
+    const b64Json = image.b64_json
+        || image.b64
+        || image.base64
+        || image.image_base64
+        || image.imageBase64
+        || inlineData?.data
+        || null;
+    const url = toImageUrl({
+        ...image,
+        image_url: imageUrl,
+        b64_json: b64Json,
+    });
+
+    return {
+        url,
+        b64_json: b64Json || undefined,
+        revised_prompt: image.revised_prompt || image.revisedPrompt || image.prompt || undefined,
+        mimeType: image.mimeType || image.mime_type || inlineData?.mime_type || inlineData?.mimeType || undefined,
+    };
+}
+
+function extractProviderImageRecords(value, depth = 0) {
+    if (depth > 5 || value == null) {
+        return [];
+    }
+
+    if (Array.isArray(value)) {
+        return value.flatMap((entry) => extractProviderImageRecords(entry, depth + 1));
+    }
+
+    if (typeof value !== 'object') {
+        return [];
+    }
+
+    const hasDirectImage = Boolean(
+        value.url
+        || value.image_url
+        || value.imageUrl
+        || value.file_uri
+        || value.fileUri
+        || value.b64_json
+        || value.b64
+        || value.base64
+        || value.image_base64
+        || value.imageBase64
+        || value.inline_data?.data
+        || value.inlineData?.data,
+    );
+    if (hasDirectImage) {
+        return [normalizeProviderImageRecord(value)];
+    }
+
+    const nestedKeys = ['data', 'images', 'generated_images', 'generatedImages', 'output', 'content', 'parts', 'candidates'];
+    return nestedKeys.flatMap((key) => extractProviderImageRecords(value[key], depth + 1));
 }
 
 function parseErrorMessage(errorBody, status) {
@@ -5230,6 +5322,8 @@ async function generateImageWithSelection({
 
     const response = await postImageGeneration(params);
 
+    const images = extractProviderImageRecords(response);
+
     return {
         created: response.created,
         model: params.model,
@@ -5237,11 +5331,7 @@ async function generateImageWithSelection({
         quality: params.quality || null,
         style: params.style || null,
         background: params.background || null,
-        data: (response.data || []).map((image) => ({
-            url: toImageUrl(image),
-            b64_json: image.b64_json,
-            revised_prompt: image.revised_prompt,
-        })),
+        data: images,
     };
 }
 
