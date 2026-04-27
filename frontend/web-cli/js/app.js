@@ -1254,7 +1254,7 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
                 break;
             case 'files':
             case 'ls':
-                this.listFiles();
+                await this.listFiles();
                 break;
             case 'download':
                 if (args[0]) {
@@ -1304,6 +1304,13 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
             // Finalize streaming output after the pixel reveal buffer catches up.
             await this.finalizeStreamingOutput(response.content || 'No response');
             this.finalizeProgressLine();
+            const addedArtifactFiles = this.syncArtifactsToSessionFiles([
+                ...(Array.isArray(response.artifacts) ? response.artifacts : []),
+                ...this.collectArtifactsFromValue(response.toolEvents || []),
+            ]);
+            if (addedArtifactFiles.length > 0) {
+                this.printSystem(`Added ${addedArtifactFiles.length} artifact file(s) to /files.`);
+            }
 
             // Update status and session info
             this.setStatus('ready');
@@ -1802,7 +1809,9 @@ Examples:
             const stdout = String(result.stdout || '').trim();
             const stderr = String(result.stderr || '').trim();
             const files = Array.isArray(result.files) ? result.files : [];
-            const artifact = result.artifact || (Array.isArray(result.artifacts) ? result.artifacts[0] : null);
+            const artifacts = this.collectArtifactsFromValue(result);
+            const artifactFiles = this.syncArtifactsToSessionFiles(artifacts, 'sandbox-artifact');
+            const artifact = artifacts[0] || result.artifact || (Array.isArray(result.artifacts) ? result.artifacts[0] : null);
             const lines = [`## Sandbox Result: \`${language}\``, '', `Exit code: \`${exitCode}\``];
 
             if (stdout) {
@@ -1831,6 +1840,9 @@ Examples:
                 }
                 if (artifact.bundleDownloadUrl || artifact.downloadUrl) {
                     lines.push(`Download: ${artifact.bundleDownloadUrl || artifact.downloadUrl}`);
+                }
+                if (artifactFiles.length > 0) {
+                    lines.push(`File IDs: ${artifactFiles.map((file) => `#${file.id}`).join(', ')}`);
                 }
             }
 
@@ -2165,8 +2177,15 @@ Raw expert access remains available:
         this.recordVoxelToolUse('tool');
         try {
             const invocation = await api.invokeTool(toolId, params);
+            const artifactFiles = this.syncArtifactsToSessionFiles(
+                this.collectArtifactsFromValue(invocation?.result),
+                'tool-artifact'
+            );
             const serialized = JSON.stringify(invocation?.result, null, 2);
-            this.printAI(`## Tool Result: \`${toolId}\`\n\n\`\`\`json\n${serialized}\n\`\`\``);
+            const artifactNote = artifactFiles.length > 0
+                ? `\n\nAdded artifact file(s): ${artifactFiles.map((file) => `#${file.id}`).join(', ')}. Use /files to manage.`
+                : '';
+            this.printAI(`## Tool Result: \`${toolId}\`\n\n\`\`\`json\n${serialized}\n\`\`\`${artifactNote}`);
         } catch (error) {
             this.printError(`Tool failed: ${error.message}`);
         } finally {
@@ -2921,6 +2940,7 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
                             'image'
                         );
                     })
+                    .map((file) => file.id)
                     .filter((fileId) => fileId !== null);
 
                 if (fileIds.length === 0) {
@@ -3253,7 +3273,7 @@ ${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${p
         const a = document.createElement('a');
         let url = null;
 
-        if (typeof content === 'string' && /^(data:|blob:|https?:)/i.test(content)) {
+        if (typeof content === 'string' && /^(data:|blob:|https?:|\/)/i.test(content)) {
             url = content;
         } else {
             const blob = new Blob([content], { type: mimeType });
@@ -3520,6 +3540,7 @@ ${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${p
 
         try {
             const artifacts = await api.getSessionArtifacts(api.sessionId);
+            this.syncArtifactsToSessionFiles(artifacts);
             if (!artifacts.length) {
                 this.printSystem('No persisted artifacts for this session yet.');
                 return;
@@ -3586,24 +3607,178 @@ ${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${p
     /**
      * Add a file to the session
      */
-    addSessionFile(filename, content, mimeType, type = 'generated') {
+    addSessionFile(filename, content, mimeType, type = 'generated', metadata = {}) {
         const file = {
             id: this.nextFileId++,
             filename,
             content,
             mimeType,
             type,
-            size: new Blob([content]).size,
-            createdAt: new Date().toISOString()
+            size: Number.isFinite(Number(metadata.size))
+                ? Number(metadata.size)
+                : new Blob([content || '']).size,
+            createdAt: metadata.createdAt || new Date().toISOString(),
+            artifactId: metadata.artifactId || null,
+            downloadUrl: metadata.downloadUrl || null,
+            previewUrl: metadata.previewUrl || null,
+            bundleDownloadUrl: metadata.bundleDownloadUrl || null,
         };
         this.sessionFiles.push(file);
         return file;
+    }
+
+    collectArtifactsFromValue(value, depth = 0) {
+        if (depth > 5 || value == null) {
+            return [];
+        }
+
+        if (Array.isArray(value)) {
+            return value.flatMap((entry) => this.collectArtifactsFromValue(entry, depth + 1));
+        }
+
+        if (typeof value !== 'object') {
+            return [];
+        }
+
+        const artifacts = [];
+        const normalized = this.normalizeArtifactFileSource(value);
+        if (normalized) {
+            artifacts.push(normalized);
+        }
+
+        [
+            'artifact',
+            'artifacts',
+            'document',
+            'documents',
+            'generatedArtifact',
+            'generatedArtifacts',
+            'video',
+            'videoArtifact',
+            'data',
+            'result',
+        ].forEach((key) => {
+            if (Object.prototype.hasOwnProperty.call(value, key)) {
+                artifacts.push(...this.collectArtifactsFromValue(value[key], depth + 1));
+            }
+        });
+
+        return artifacts;
+    }
+
+    normalizeArtifactFileSource(artifact = null) {
+        if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)) {
+            return null;
+        }
+
+        const id = String(artifact.id || artifact.artifactId || artifact.artifact_id || artifact.documentId || '').trim();
+        const filename = String(artifact.filename || artifact.name || '').trim();
+        const downloadUrl = String(artifact.bundleDownloadUrl || artifact.bundle_download_url || artifact.downloadUrl || artifact.download_url || artifact.inlinePath || '').trim();
+        const previewUrl = String(artifact.previewUrl || artifact.preview_url || artifact.sandboxUrl || '').trim();
+        const artifactLike = Boolean(
+            filename
+            || downloadUrl
+            || previewUrl
+            || artifact.artifactId
+            || artifact.artifact_id
+            || artifact.documentId
+            || artifact.document_id
+            || artifact.format
+            || artifact.extension
+            || artifact.mimeType
+            || artifact.mime_type
+        );
+
+        if (!artifactLike || (!id && !downloadUrl && !previewUrl)) {
+            return null;
+        }
+
+        const extension = String(artifact.extension || artifact.format || '').trim().replace(/^\./, '');
+        const fallbackDownloadUrl = id ? `/api/artifacts/${encodeURIComponent(id)}/download` : '';
+        return {
+            ...artifact,
+            id,
+            filename: filename || (id ? `${id}${extension ? `.${extension}` : ''}` : 'artifact'),
+            mimeType: String(artifact.mimeType || artifact.mime_type || 'application/octet-stream').trim(),
+            sizeBytes: Number.isFinite(Number(artifact.sizeBytes || artifact.size))
+                ? Number(artifact.sizeBytes || artifact.size)
+                : 0,
+            downloadUrl: downloadUrl || previewUrl || fallbackDownloadUrl,
+            previewUrl,
+            bundleDownloadUrl: String(artifact.bundleDownloadUrl || artifact.bundle_download_url || '').trim(),
+        };
+    }
+
+    syncArtifactsToSessionFiles(artifacts = [], type = 'artifact') {
+        const added = [];
+        const seenInBatch = new Set();
+
+        (Array.isArray(artifacts) ? artifacts : [artifacts]).forEach((artifact) => {
+            const normalized = this.normalizeArtifactFileSource(artifact);
+            if (!normalized) {
+                return;
+            }
+
+            const identity = normalized.id
+                || normalized.downloadUrl
+                || normalized.bundleDownloadUrl
+                || normalized.previewUrl
+                || normalized.filename;
+            if (!identity || seenInBatch.has(identity)) {
+                return;
+            }
+            seenInBatch.add(identity);
+
+            const exists = this.sessionFiles.some((file) => (
+                (normalized.id && file.artifactId === normalized.id)
+                || (normalized.downloadUrl && (file.downloadUrl === normalized.downloadUrl || file.content === normalized.downloadUrl))
+                || (normalized.bundleDownloadUrl && file.bundleDownloadUrl === normalized.bundleDownloadUrl)
+            ));
+            if (exists) {
+                return;
+            }
+
+            const content = normalized.bundleDownloadUrl || normalized.downloadUrl || normalized.previewUrl || '';
+            const file = this.addSessionFile(
+                normalized.filename,
+                content,
+                normalized.mimeType,
+                type,
+                {
+                    size: normalized.sizeBytes,
+                    createdAt: normalized.createdAt,
+                    artifactId: normalized.id,
+                    downloadUrl: normalized.downloadUrl,
+                    previewUrl: normalized.previewUrl,
+                    bundleDownloadUrl: normalized.bundleDownloadUrl,
+                }
+            );
+            added.push(file);
+        });
+
+        return added;
+    }
+
+    async syncStoredSessionArtifacts() {
+        if (!api.sessionId) {
+            return [];
+        }
+
+        try {
+            const artifacts = await api.getSessionArtifacts(api.sessionId);
+            return this.syncArtifactsToSessionFiles(artifacts);
+        } catch (error) {
+            console.warn('[CLI] Failed to sync stored artifacts into session files:', error);
+            return [];
+        }
     }
     
     /**
      * List all session files
      */
-    listFiles() {
+    async listFiles() {
+        await this.syncStoredSessionArtifacts();
+
         if (this.sessionFiles.length === 0) {
             this.printSystem('No files in this session. Generate files with /diagram, /image, or AI file generation.');
             return;
@@ -3659,6 +3834,10 @@ ${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${p
      * Open file manager modal
      */
     openFileManager() {
+        this.syncStoredSessionArtifacts().then(() => this.renderFileManager()).catch(() => this.renderFileManager());
+    }
+
+    renderFileManager() {
         // Remove existing modal
         const existing = document.getElementById('file-manager-modal');
         if (existing) existing.remove();
