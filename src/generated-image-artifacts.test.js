@@ -19,6 +19,14 @@ const { artifactService } = require('./artifacts/artifact-service');
 const { sessionStore } = require('./session-store');
 const { persistGeneratedImages } = require('./generated-image-artifacts');
 
+function buildPngBuffer({ width = 2, height = 2 } = {}) {
+    const buffer = Buffer.alloc(32);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(buffer, 0);
+    buffer.writeUInt32BE(width, 16);
+    buffer.writeUInt32BE(height, 20);
+    return buffer;
+}
+
 describe('generated-image-artifacts', () => {
     let originalFetch;
 
@@ -55,8 +63,8 @@ describe('generated-image-artifacts', () => {
             prompt: 'Cuba beaches at sunset',
             model: 'kimi-k2-turbo-preview',
             images: [{
-                url: 'data:image/png;base64,aGVsbG8=',
-                b64_json: 'aGVsbG8=',
+                url: `data:image/png;base64,${buildPngBuffer().toString('base64')}`,
+                b64_json: buildPngBuffer().toString('base64'),
                 revised_prompt: 'Cuba beaches at sunset, art deco poster style',
             }],
         });
@@ -91,7 +99,7 @@ describe('generated-image-artifacts', () => {
             headers: {
                 get: (name) => (String(name).toLowerCase() === 'content-type' ? 'image/png' : null),
             },
-            arrayBuffer: async () => Uint8Array.from([1, 2, 3, 4]).buffer,
+            arrayBuffer: async () => buildPngBuffer().buffer,
         }));
 
         const result = await persistGeneratedImages({
@@ -123,7 +131,7 @@ describe('generated-image-artifacts', () => {
         const localImagePath = path.join(tempDir, 'generated-image.png');
 
         try {
-            await fs.writeFile(localImagePath, Buffer.from([0, 1, 2, 3]));
+            await fs.writeFile(localImagePath, buildPngBuffer());
 
             const result = await persistGeneratedImages({
                 sessionId: 'session-1',
@@ -157,22 +165,71 @@ describe('generated-image-artifacts', () => {
             prompt: 'Notebook cover',
             model: 'gateway-image-model',
             images: [{
-                base64: 'aGVs\nbG8=',
-                mime_type: 'image/webp',
+                base64: buildPngBuffer().toString('base64').replace(/(.{8})/g, '$1\n'),
+                mime_type: 'image/png',
                 revisedPrompt: 'Notebook cover with clean geometry',
             }],
         });
 
         expect(artifactService.createStoredArtifact).toHaveBeenCalledWith(expect.objectContaining({
             sessionId: 'session-1',
-            extension: 'webp',
-            mimeType: 'image/webp',
-            buffer: Buffer.from('hello'),
+            extension: 'png',
+            mimeType: 'image/png',
+            buffer: buildPngBuffer(),
         }));
         expect(result.artifactIds).toEqual(['artifact-1']);
         expect(result.images[0]).toEqual(expect.objectContaining({
             artifactId: 'artifact-1',
             revisedPrompt: 'Notebook cover with clean geometry',
+        }));
+    });
+
+    test('falls back to a usable URL when a base64 field is truncated or invalid', async () => {
+        global.fetch = jest.fn(async () => ({
+            ok: true,
+            headers: {
+                get: (name) => (String(name).toLowerCase() === 'content-type' ? 'image/png' : null),
+            },
+            arrayBuffer: async () => buildPngBuffer().buffer,
+        }));
+
+        const result = await persistGeneratedImages({
+            sessionId: 'session-1',
+            sourceMode: 'image',
+            prompt: 'Fallback image',
+            model: 'gateway-image-model',
+            images: [{
+                url: 'https://images.example.com/fallback.png',
+                b64_json: '[truncated 123 chars]',
+                revised_prompt: 'Fallback image',
+            }],
+        });
+
+        expect(global.fetch).toHaveBeenCalledWith('https://images.example.com/fallback.png', expect.objectContaining({
+            method: 'GET',
+        }));
+        expect(result.images[0]).toEqual(expect.objectContaining({
+            artifactId: 'artifact-1',
+            url: '/api/artifacts/artifact-1/download?inline=1',
+        }));
+    });
+
+    test('does not persist one-pixel placeholder image payloads as artifacts', async () => {
+        const result = await persistGeneratedImages({
+            sessionId: 'session-1',
+            sourceMode: 'image',
+            prompt: 'Tiny placeholder',
+            model: 'gateway-image-model',
+            images: [{
+                b64_json: buildPngBuffer({ width: 1, height: 1 }).toString('base64'),
+                revised_prompt: 'Tiny placeholder',
+            }],
+        });
+
+        expect(artifactService.createStoredArtifact).not.toHaveBeenCalled();
+        expect(result.images[0]).toEqual(expect.objectContaining({
+            artifactId: null,
+            b64_json: expect.any(String),
         }));
     });
 });

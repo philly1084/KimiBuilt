@@ -71,15 +71,134 @@ function decodeDataUrl(url = '') {
         return null;
     }
 
-    const base64 = String(match[2] || '').replace(/\s+/g, '');
-    if (!base64) {
+    const buffer = decodeBase64ImageBuffer(match[2]);
+    if (!buffer) {
+        return null;
+    }
+
+    return normalizeDecodedImageBuffer(buffer, match[1]);
+}
+
+function isTruncatedImagePayload(value = '') {
+    return /\[truncated\s+\d+\s+chars\]/i.test(String(value || ''));
+}
+
+function decodeBase64ImageBuffer(value = '') {
+    const normalized = String(value || '').replace(/\s+/g, '');
+    if (!normalized || isTruncatedImagePayload(normalized)) {
+        return null;
+    }
+
+    if (normalized.length % 4 === 1 || !/^[A-Za-z0-9+/]*={0,2}$/.test(normalized)) {
+        return null;
+    }
+
+    const buffer = Buffer.from(normalized, 'base64');
+    return buffer.length > 0 ? buffer : null;
+}
+
+function sniffImageMimeType(buffer) {
+    if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+        return null;
+    }
+
+    if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+        return 'image/png';
+    }
+    if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+        return 'image/jpeg';
+    }
+    if (buffer.length >= 6 && /^GIF8[79]a$/.test(buffer.subarray(0, 6).toString('ascii'))) {
+        return 'image/gif';
+    }
+    if (buffer.length >= 12
+        && buffer.subarray(0, 4).toString('ascii') === 'RIFF'
+        && buffer.subarray(8, 12).toString('ascii') === 'WEBP') {
+        return 'image/webp';
+    }
+
+    const prefix = buffer.subarray(0, Math.min(buffer.length, 256)).toString('utf8').trimStart().toLowerCase();
+    if (prefix.startsWith('<svg') || prefix.startsWith('<?xml')) {
+        return 'image/svg+xml';
+    }
+
+    return null;
+}
+
+function readPngDimensions(buffer) {
+    if (!Buffer.isBuffer(buffer) || buffer.length < 24) {
+        return null;
+    }
+    return {
+        width: buffer.readUInt32BE(16),
+        height: buffer.readUInt32BE(20),
+    };
+}
+
+function readGifDimensions(buffer) {
+    if (!Buffer.isBuffer(buffer) || buffer.length < 10) {
+        return null;
+    }
+    return {
+        width: buffer.readUInt16LE(6),
+        height: buffer.readUInt16LE(8),
+    };
+}
+
+function readJpegDimensions(buffer) {
+    if (!Buffer.isBuffer(buffer) || buffer.length < 4) {
+        return null;
+    }
+
+    let offset = 2;
+    while (offset + 9 < buffer.length) {
+        if (buffer[offset] !== 0xff) {
+            offset += 1;
+            continue;
+        }
+
+        const marker = buffer[offset + 1];
+        const length = buffer.readUInt16BE(offset + 2);
+        if (length < 2) {
+            return null;
+        }
+
+        if ((marker >= 0xc0 && marker <= 0xc3) || (marker >= 0xc5 && marker <= 0xc7) || (marker >= 0xc9 && marker <= 0xcb) || (marker >= 0xcd && marker <= 0xcf)) {
+            return {
+                width: buffer.readUInt16BE(offset + 7),
+                height: buffer.readUInt16BE(offset + 5),
+            };
+        }
+
+        offset += 2 + length;
+    }
+
+    return null;
+}
+
+function readImageDimensions(buffer, mimeType = '') {
+    if (mimeType === 'image/png') return readPngDimensions(buffer);
+    if (mimeType === 'image/gif') return readGifDimensions(buffer);
+    if (mimeType === 'image/jpeg') return readJpegDimensions(buffer);
+    return null;
+}
+
+function normalizeDecodedImageBuffer(buffer, preferredMimeType = 'image/png') {
+    const sniffedMimeType = sniffImageMimeType(buffer);
+    if (!sniffedMimeType) {
+        return null;
+    }
+
+    const mimeType = sniffedMimeType || String(preferredMimeType || 'image/png').trim().toLowerCase();
+    const dimensions = readImageDimensions(buffer, mimeType);
+    if (dimensions && dimensions.width <= 1 && dimensions.height <= 1) {
         return null;
     }
 
     return {
-        mimeType: match[1].toLowerCase(),
-        extension: extensionForMimeType(match[1]),
-        buffer: Buffer.from(base64, 'base64'),
+        mimeType,
+        extension: extensionForMimeType(mimeType),
+        buffer,
     };
 }
 
@@ -108,11 +227,11 @@ function decodeGeneratedImage(image = {}) {
             || image?.inlineData?.mimeType
             || 'image/png',
         ).trim().toLowerCase();
-        return {
-            mimeType,
-            extension: extensionForMimeType(mimeType),
-            buffer: Buffer.from(normalizeBase64Payload(base64Value), 'base64'),
-        };
+        const buffer = decodeBase64ImageBuffer(normalizeBase64Payload(base64Value));
+        const decoded = buffer ? normalizeDecodedImageBuffer(buffer, mimeType) : null;
+        if (decoded) {
+            return decoded;
+        }
     }
 
     return decodeDataUrl(
@@ -177,11 +296,7 @@ async function readGeneratedImageFromLocalPath(image = {}) {
     try {
         const buffer = await fs.readFile(filePath);
         const mimeType = inferMimeTypeFromUrl(filePath);
-        return {
-            mimeType,
-            extension: extensionForMimeType(mimeType),
-            buffer,
-        };
+        return normalizeDecodedImageBuffer(buffer, mimeType);
     } catch (error) {
         console.warn('[Images] Failed to read generated sandbox image for persistence:', error.message);
         return null;
@@ -234,14 +349,14 @@ async function downloadGeneratedImage(image = {}) {
         const mimeType = contentType.startsWith('image/')
             ? contentType.split(';')[0].trim()
             : inferMimeTypeFromUrl(imageUrl);
-        const extension = extensionForMimeType(mimeType);
         const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const decoded = normalizeDecodedImageBuffer(buffer, mimeType);
+        if (!decoded) {
+            throw new Error('Downloaded response was not a usable image');
+        }
 
-        return {
-            mimeType,
-            extension,
-            buffer: Buffer.from(arrayBuffer),
-        };
+        return decoded;
     } catch (error) {
         console.warn('[Images] Failed to download generated image URL for persistence:', error.message);
         return null;
