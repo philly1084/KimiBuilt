@@ -286,6 +286,26 @@ class Dashboard {
         document.getElementById('agentNotesContent')?.addEventListener('input', () => {
             this.syncAgentNotesCharacterCount();
         });
+
+        document.querySelectorAll('.podcast-audio-upload').forEach(button => {
+            button.addEventListener('click', () => {
+                const input = document.querySelector(`.podcast-audio-input[data-track="${button.dataset.track}"]`);
+                input?.click();
+            });
+        });
+
+        document.querySelectorAll('.podcast-audio-input').forEach(input => {
+            input.addEventListener('change', () => {
+                this.uploadPodcastAudioTrack(input.dataset.track, input.files?.[0]);
+                input.value = '';
+            });
+        });
+
+        document.querySelectorAll('.podcast-audio-remove').forEach(button => {
+            button.addEventListener('click', () => {
+                this.removePodcastAudioTrack(button.dataset.track);
+            });
+        });
         
         document.getElementById('apiSettingsForm')?.addEventListener('submit', (e) => {
             e.preventDefault();
@@ -778,8 +798,9 @@ class Dashboard {
      */
     async loadSettings() {
         try {
-            const [settingsResponse] = await Promise.allSettled([
+            const [settingsResponse, podcastAudioResponse] = await Promise.allSettled([
                 apiClient.get('/api/admin/settings'),
+                apiClient.get('/api/admin/podcast-audio'),
             ]);
 
             if (settingsResponse.status === 'fulfilled') {
@@ -790,6 +811,10 @@ class Dashboard {
                 }
             } else {
                 throw settingsResponse.reason;
+            }
+
+            if (podcastAudioResponse.status === 'fulfilled') {
+                this.renderPodcastAudioSettings(this.unwrapApiPayload(podcastAudioResponse.value, null));
             }
 
         } catch (error) {
@@ -2209,6 +2234,83 @@ class Dashboard {
             this.showToast('Failed to save API settings', 'error');
         }
     }
+
+    async uploadPodcastAudioTrack(track, file) {
+        if (!track || !file) {
+            return;
+        }
+
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            const response = await fetch(`/api/admin/podcast-audio/${encodeURIComponent(track)}`, {
+                method: 'POST',
+                body: formData,
+                headers: apiClient.apiKey ? { Authorization: `Bearer ${apiClient.apiKey}` } : {},
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok || payload.success === false) {
+                throw new Error(payload.error || 'Upload failed');
+            }
+            this.renderPodcastAudioSettings(this.unwrapApiPayload(payload, null));
+            this.showToast('Podcast audio uploaded', 'success');
+        } catch (error) {
+            console.error('Error uploading podcast audio:', error);
+            this.showToast(error.message || 'Failed to upload podcast audio', 'error');
+        }
+    }
+
+    async removePodcastAudioTrack(track) {
+        if (!track || !confirm('Remove this podcast audio track?')) {
+            return;
+        }
+
+        try {
+            const response = await apiClient.delete(`/api/admin/podcast-audio/${encodeURIComponent(track)}`);
+            this.renderPodcastAudioSettings(this.unwrapApiPayload(response, null));
+            this.showToast('Podcast audio removed', 'success');
+        } catch (error) {
+            console.error('Error removing podcast audio:', error);
+            this.showToast('Failed to remove podcast audio', 'error');
+        }
+    }
+
+    renderPodcastAudioSettings(data = null) {
+        if (!data) {
+            return;
+        }
+
+        const folderLabel = document.getElementById('podcastAudioFolderLabel');
+        if (folderLabel) {
+            folderLabel.textContent = data.storageDirectory || 'Server state folder';
+        }
+
+        const tracks = data.tracks || (data.track ? { [data.track.track]: data.track } : {});
+        const statusIds = {
+            intro: 'podcastAudioIntroStatus',
+            outro: 'podcastAudioOutroStatus',
+            musicBed: 'podcastAudioMusicBedStatus',
+        };
+
+        Object.entries(statusIds).forEach(([track, id]) => {
+            const status = document.getElementById(id);
+            const removeButton = document.querySelector(`.podcast-audio-remove[data-track="${track}"]`);
+            const asset = tracks[track];
+            if (!status) {
+                return;
+            }
+
+            if (asset?.configured) {
+                const existsLabel = asset.exists === false ? 'missing on disk' : 'ready';
+                const sizeLabel = asset.size ? `, ${this.formatBytes(asset.size)}` : '';
+                status.textContent = `${asset.originalFilename || asset.filename || asset.path} (${existsLabel}${sizeLabel})`;
+                removeButton?.removeAttribute('disabled');
+            } else {
+                status.textContent = 'No file uploaded';
+                removeButton?.setAttribute('disabled', 'disabled');
+            }
+        });
+    }
     
     async testConnection() {
         try {
@@ -3275,6 +3377,21 @@ class Dashboard {
         a.click();
         URL.revokeObjectURL(url);
     }
+
+    formatBytes(bytes) {
+        const value = Number(bytes) || 0;
+        if (value < 1024) {
+            return `${value} B`;
+        }
+        const units = ['KB', 'MB', 'GB'];
+        let size = value / 1024;
+        let unitIndex = 0;
+        while (size >= 1024 && unitIndex < units.length - 1) {
+            size /= 1024;
+            unitIndex += 1;
+        }
+        return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[unitIndex]}`;
+    }
     
     debounce(func, wait) {
         let timeout;
@@ -4020,6 +4137,12 @@ class Dashboard {
             agentNotesCharacterLimit.textContent = String(agentNotes.characterLimit || 4000);
         }
         this.syncAgentNotesCharacterCount();
+        if (settings.audioProcessing?.podcastAssets) {
+            this.renderPodcastAudioSettings({
+                storageDirectory: settings.audioProcessing.storageDirectory || 'Server state folder',
+                tracks: settings.audioProcessing.podcastAssets,
+            });
+        }
 
         this.syncModelOptions();
         this.setInputValue('defaultModel', models.defaultModel || 'gpt-4o');

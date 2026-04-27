@@ -2567,6 +2567,33 @@ select.form-control,
     color: var(--text-muted);
 }
 
+.podcast-audio-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    margin-top: var(--space-md);
+}
+
+.podcast-audio-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+    padding: var(--space-md) 0;
+    border-bottom: 1px solid var(--border-secondary);
+}
+
+.podcast-audio-item:last-child {
+    border-bottom: none;
+}
+
+.podcast-audio-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex-shrink: 0;
+}
+
 .opencode-runtime-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

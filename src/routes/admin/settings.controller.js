@@ -105,6 +105,12 @@ class SettingsController {
         enabled: true,
         displayName: 'Carryover Notes'
       },
+      audioProcessing: {
+        podcastIntroPath: config.audioProcessing?.podcastIntroPath || '',
+        podcastOutroPath: config.audioProcessing?.podcastOutroPath || '',
+        podcastMusicBedPath: config.audioProcessing?.podcastMusicBedPath || '',
+        podcastAssets: {},
+      },
       notifications: {
         enableEmail: false,
         enableWebhook: false,
@@ -344,6 +350,7 @@ class SettingsController {
           if (this.settings?.integrations?.opencode) {
             delete this.settings.integrations.opencode;
           }
+          this.applyAudioProcessingSettingsToRuntime();
           return;
         }
       } catch (error) {
@@ -358,6 +365,7 @@ class SettingsController {
       if (this.settings?.integrations?.opencode) {
         delete this.settings.integrations.opencode;
       }
+      this.applyAudioProcessingSettingsToRuntime();
     } catch (error) {
       // Use defaults if file doesn't exist
       if (process.env.NODE_ENV !== 'test') {
@@ -644,6 +652,7 @@ class SettingsController {
     const authEnabled = Boolean(config.auth.username && config.auth.password && config.auth.jwtSecret);
     publicSettings.personality = this.getEffectivePersonalityConfig();
     publicSettings.agentNotes = this.getEffectiveAgentNotesConfig();
+    publicSettings.audioProcessing = this.getPublicAudioProcessingConfig();
 
     if (ssh) {
       const effective = this.getEffectiveSshConfig();
@@ -679,6 +688,30 @@ class SettingsController {
     }
 
     return publicSettings;
+  }
+
+  applyAudioProcessingSettingsToRuntime() {
+    try {
+      const { audioProcessingService } = require('../../audio/audio-processing-service');
+      const audioSettings = this.settings?.audioProcessing || {};
+      audioProcessingService.updateConfig?.({
+        podcastIntroPath: audioSettings.podcastIntroPath || config.audioProcessing?.podcastIntroPath || '',
+        podcastOutroPath: audioSettings.podcastOutroPath || config.audioProcessing?.podcastOutroPath || '',
+        podcastMusicBedPath: audioSettings.podcastMusicBedPath || config.audioProcessing?.podcastMusicBedPath || '',
+      });
+    } catch (error) {
+      console.warn('[Settings] Failed to apply audio processing settings:', error.message);
+    }
+  }
+
+  getPublicAudioProcessingConfig() {
+    const audioSettings = this.settings?.audioProcessing || {};
+    return {
+      podcastIntroPath: audioSettings.podcastIntroPath || '',
+      podcastOutroPath: audioSettings.podcastOutroPath || '',
+      podcastMusicBedPath: audioSettings.podcastMusicBedPath || '',
+      podcastAssets: audioSettings.podcastAssets || {},
+    };
   }
 
   getSettingsPath() {
@@ -925,6 +958,12 @@ class SettingsController {
       agentNotes: {
         enabled: true,
         displayName: 'Carryover Notes'
+      },
+      audioProcessing: {
+        podcastIntroPath: config.audioProcessing?.podcastIntroPath || '',
+        podcastOutroPath: config.audioProcessing?.podcastOutroPath || '',
+        podcastMusicBedPath: config.audioProcessing?.podcastMusicBedPath || '',
+        podcastAssets: {},
       },
       notifications: {
         enableEmail: false,

@@ -1,6 +1,9 @@
 'use strict';
 
 const express = require('express');
+const fs = require('fs/promises');
+const os = require('os');
+const path = require('path');
 const request = require('supertest');
 
 jest.mock('./dashboard.controller', () => jest.fn().mockImplementation(function DashboardController(orchestrator) {
@@ -21,6 +24,7 @@ jest.mock('../../admin/runtime-monitor', () => ({
 
 const DashboardController = require('./dashboard.controller');
 const { setDashboardController } = require('../../admin/runtime-monitor');
+const settingsController = require('./settings.controller');
 const adminRouter = require('./index');
 
 describe('/api/admin workload routes', () => {
@@ -131,5 +135,36 @@ describe('/api/admin workload routes', () => {
         expect(DashboardController).toHaveBeenCalledWith(app.locals.conversationOrchestrator);
         expect(setDashboardController).toHaveBeenCalledTimes(1);
         expect(app.locals.dashboardController).toBeTruthy();
+    });
+
+    test('uploads a podcast intro audio asset from the admin dashboard', async () => {
+        const previousStateDir = process.env.KIMIBUILT_STATE_DIR;
+        const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-admin-audio-'));
+        process.env.KIMIBUILT_STATE_DIR = stateDir;
+        settingsController.settings = settingsController.getDefaultSettings();
+        const app = buildApp({ isAvailable: jest.fn(() => true) });
+
+        try {
+            const response = await request(app)
+                .post('/api/admin/podcast-audio/intro')
+                .attach('file', Buffer.from('audio-bytes'), 'intro.wav');
+
+            expect(response.status).toBe(200);
+            expect(response.body.success).toBe(true);
+            expect(response.body.data.storageDirectory).toBe(path.join(stateDir, 'podcast-audio'));
+            expect(response.body.data.tracks.intro).toEqual(expect.objectContaining({
+                configured: true,
+                exists: true,
+                originalFilename: 'intro.wav',
+            }));
+            expect(settingsController.settings.audioProcessing.podcastIntroPath).toContain('intro-');
+        } finally {
+            if (previousStateDir === undefined) {
+                delete process.env.KIMIBUILT_STATE_DIR;
+            } else {
+                process.env.KIMIBUILT_STATE_DIR = previousStateDir;
+            }
+            await fs.rm(stateDir, { recursive: true, force: true });
+        }
     });
 });

@@ -7,12 +7,30 @@ const COMPACTION_TRIGGER_MESSAGE_COUNT = 28;
 const COMPACTION_COMPLETION_MIN_MESSAGES = 12;
 const COMPACTION_MIN_NEW_MESSAGES = 10;
 const COMPACTION_RETAIN_RECENT_MESSAGES = 6;
+const COMPACTION_UNRULY_ACTIVE_MESSAGE_COUNT = 80;
+const COMPACTION_UNRULY_ACTIVE_MIN_NEW_MESSAGES = 24;
+const MAX_COMPLETION_REPORT_CHARS = 1400;
 const MAX_OBJECTIVES = 8;
 const MAX_OUTCOMES = 8;
 const MAX_OPEN_ITEMS = 4;
 
 function normalizeLine(value = '', limit = 220) {
     const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!normalized) {
+        return '';
+    }
+
+    return normalized.length > limit
+        ? `${normalized.slice(0, Math.max(0, limit - 3)).trim()}...`
+        : normalized;
+}
+
+function normalizeBlock(value = '', limit = 1400) {
+    const normalized = String(value || '')
+        .replace(/\r\n/g, '\n')
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
     if (!normalized) {
         return '';
     }
@@ -95,6 +113,14 @@ function isMeaningfulAssistantOutcome(text = '') {
     return !/^(sure|okay|alright|done|i completed the request)\b/i.test(normalized.toLowerCase());
 }
 
+function extractLatestAssistantReport(messages = []) {
+    const latestAssistant = [...(Array.isArray(messages) ? messages : [])]
+        .reverse()
+        .find((entry) => entry?.role === 'assistant' && normalizeBlock(entry.content || '', MAX_COMPLETION_REPORT_CHARS));
+
+    return normalizeBlock(latestAssistant?.content || '', MAX_COMPLETION_REPORT_CHARS);
+}
+
 function extractObjectiveHighlights(messages = []) {
     return normalizeCompactionList(
         (Array.isArray(messages) ? messages : [])
@@ -140,6 +166,7 @@ function buildCompactionSummaryText(compaction = {}) {
     const objectives = normalizeCompactionList(compaction?.objectives || [], MAX_OBJECTIVES, 200);
     const outcomes = normalizeCompactionList(compaction?.outcomes || [], MAX_OUTCOMES, 220);
     const openItems = normalizeCompactionList(compaction?.openItems || [], MAX_OPEN_ITEMS, 220);
+    const completionReport = normalizeBlock(compaction?.completionReport || '', MAX_COMPLETION_REPORT_CHARS);
     const compactedMessageCount = Math.max(0, Number(compaction?.compactedMessageCount || 0));
     const lines = [];
 
@@ -164,6 +191,14 @@ function buildCompactionSummaryText(compaction = {}) {
         openItems.forEach((entry) => lines.push(`- ${entry}`));
     }
 
+    if (completionReport) {
+        if (lines.length > 0) {
+            lines.push('');
+        }
+        lines.push('Final user-visible completion report:');
+        lines.push(completionReport);
+    }
+
     if (compactedMessageCount > 0) {
         if (lines.length > 0) {
             lines.push('');
@@ -183,6 +218,7 @@ function normalizeSessionCompaction(value = {}) {
         objectives: normalizeCompactionList(source.objectives || [], MAX_OBJECTIVES, 200),
         outcomes: normalizeCompactionList(source.outcomes || [], MAX_OUTCOMES, 220),
         openItems: normalizeCompactionList(source.openItems || [], MAX_OPEN_ITEMS, 220),
+        completionReport: normalizeBlock(source.completionReport || '', MAX_COMPLETION_REPORT_CHARS) || null,
         updatedAt: normalizeLine(source.updatedAt || '', 80) || null,
         trigger: normalizeLine(source.trigger || '', 64) || null,
     };
@@ -203,6 +239,10 @@ function inferCompactionTrigger(workflow = null) {
         return 'workflow-blocked';
     }
 
+    if (workflow?.status === 'active') {
+        return 'active-workflow-transcript-unruly';
+    }
+
     return 'transcript-growth';
 }
 
@@ -213,7 +253,9 @@ function shouldCompactSession({
 } = {}) {
     const transcriptMessages = normalizeTranscriptMessages(messages);
     const existing = normalizeSessionCompaction(existingCompaction || {});
-    const completionPoint = ['completed', 'blocked'].includes(String(workflow?.status || '').trim().toLowerCase());
+    const workflowStatus = String(workflow?.status || '').trim().toLowerCase();
+    const completionPoint = ['completed', 'blocked'].includes(workflowStatus);
+    const activeWorkflow = workflowStatus === 'active';
     const nextCompactedMessageCount = Math.max(0, transcriptMessages.length - COMPACTION_RETAIN_RECENT_MESSAGES);
     const newlyCompactedMessages = nextCompactedMessageCount - existing.compactedMessageCount;
 
@@ -223,6 +265,11 @@ function shouldCompactSession({
 
     if (completionPoint && transcriptMessages.length >= COMPACTION_COMPLETION_MIN_MESSAGES) {
         return newlyCompactedMessages > 0;
+    }
+
+    if (activeWorkflow) {
+        return transcriptMessages.length >= COMPACTION_UNRULY_ACTIVE_MESSAGE_COUNT
+            && newlyCompactedMessages >= COMPACTION_UNRULY_ACTIVE_MIN_NEW_MESSAGES;
     }
 
     return transcriptMessages.length >= COMPACTION_TRIGGER_MESSAGE_COUNT
@@ -262,6 +309,9 @@ function buildSessionCompaction({
             220,
         ),
         openItems: extractOpenItems({ workflow, projectMemory }),
+        completionReport: String(workflow?.status || '').trim().toLowerCase() === 'completed'
+            ? extractLatestAssistantReport(transcriptMessages)
+            : existing.completionReport,
         updatedAt: new Date().toISOString(),
         trigger: inferCompactionTrigger(workflow),
     };

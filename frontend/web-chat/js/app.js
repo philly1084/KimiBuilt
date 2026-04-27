@@ -4093,13 +4093,17 @@ class ChatApp {
     async submitAgentSurvey(trigger) {
         const button = trigger?.closest?.('.agent-survey-card__submit') || trigger;
         const card = button?.closest?.('.agent-survey-card');
-        if (!card || this.isCurrentSessionProcessing()) {
+        if (!card) {
             return;
         }
 
         const messageId = String(card.dataset.messageId || '').trim();
         const surveyId = String(card.dataset.surveyId || '').trim();
         const sessionId = sessionManager.currentSessionId;
+        if (this.isCurrentSessionProcessing() && !this.isMatchingPendingSurveyCheckpoint(sessionId, surveyId)) {
+            return;
+        }
+
         const surveyMessage = this.getSessionMessage(sessionId, messageId);
         const survey = this.getMessageSurveyDefinition(surveyMessage);
         if (!survey || survey.id !== surveyId) {
@@ -4181,6 +4185,7 @@ class ChatApp {
             button.disabled = true;
         }
 
+        this.releasePendingSurveyProcessingGate(sessionId, surveyId);
         const sendSucceeded = await this.sendPreparedMessage(responseContent);
         if (!sendSucceeded) {
             if (surveyMessage) {
@@ -4203,13 +4208,17 @@ class ChatApp {
     goToPreviousSurveyStep(trigger) {
         const button = trigger?.closest?.('.agent-survey-card__secondary') || trigger;
         const card = button?.closest?.('.agent-survey-card');
-        if (!card || this.isCurrentSessionProcessing()) {
+        if (!card) {
             return;
         }
 
         const messageId = String(card.dataset.messageId || '').trim();
         const surveyId = String(card.dataset.surveyId || '').trim();
         const sessionId = sessionManager.currentSessionId;
+        if (this.isCurrentSessionProcessing() && !this.isMatchingPendingSurveyCheckpoint(sessionId, surveyId)) {
+            return;
+        }
+
         const surveyMessage = this.getSessionMessage(sessionId, messageId);
         const survey = this.getMessageSurveyDefinition(surveyMessage);
         if (!survey || survey.id !== surveyId) {
@@ -5424,6 +5433,31 @@ curl -fsSIL --max-time 20 "https://$host"`;
         }
 
         return sessionManager.sessions.find((session) => session.id === sessionId) || null;
+    }
+
+    getPendingSurveyCheckpoint(sessionId = '') {
+        return uiHelpers.normalizeSurveyDefinition(
+            this.getSessionRecord(sessionId)?.controlState?.userCheckpoint?.pending || null,
+        );
+    }
+
+    isMatchingPendingSurveyCheckpoint(sessionId = '', checkpointId = '') {
+        const normalizedCheckpointId = String(checkpointId || '').trim();
+        if (!normalizedCheckpointId) {
+            return false;
+        }
+
+        return this.getPendingSurveyCheckpoint(sessionId)?.id === normalizedCheckpointId;
+    }
+
+    releasePendingSurveyProcessingGate(sessionId = '', checkpointId = '') {
+        if (!this.isSessionProcessing(sessionId)
+            || !this.isMatchingPendingSurveyCheckpoint(sessionId, checkpointId)) {
+            return false;
+        }
+
+        this.finishSessionStream(sessionId);
+        return true;
     }
 
     buildSyntheticSurveyMessageId(checkpointId = '') {

@@ -982,6 +982,7 @@
                         <div class="settings-sidebar">
                             <div class="settings-nav">
                                 <button class="settings-nav-item active" data-settings="general">General</button>
+                                <button class="settings-nav-item" data-settings="podcastAudio">Podcast Audio</button>
                                 <button class="settings-nav-item" data-settings="features">Features</button>
                                 <button class="settings-nav-item" data-settings="api">API & Integrations</button>
                                 <button class="settings-nav-item" data-settings="notifications">Notifications</button>
@@ -1096,6 +1097,56 @@
                                         <div class="form-actions">
                                             <button type="submit" form="generalSettingsForm" class="btn btn-primary">Save Notes + General</button>
                                             <button type="button" class="btn btn-ghost" id="resetAgentNotesBtn">Reset agent-notes.md</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Podcast Audio Settings -->
+                            <div class="settings-section" id="podcastAudioSettings">
+                                <h2>Podcast Audio</h2>
+                                <div class="card">
+                                    <div class="card-body">
+                                        <h3>Loop Tracks</h3>
+                                        <p class="text-muted">Upload audio files for podcast intro, outro, and background music bed. These files are saved in the server state folder and used by audio and video podcast generation.</p>
+                                        <p class="text-muted">Folder: <code id="podcastAudioFolderLabel">Loading...</code></p>
+
+                                        <div class="podcast-audio-list">
+                                            <div class="podcast-audio-item" data-track="intro">
+                                                <div class="feature-info">
+                                                    <span class="feature-name">Intro</span>
+                                                    <span class="feature-desc" id="podcastAudioIntroStatus">No file uploaded</span>
+                                                </div>
+                                                <div class="podcast-audio-actions">
+                                                    <input type="file" class="sr-only podcast-audio-input" id="podcastIntroFile" data-track="intro" accept=".wav,.mp3,.m4a,.aac,.ogg,.flac,.aiff,audio/*">
+                                                    <button type="button" class="btn btn-secondary podcast-audio-upload" data-track="intro">Upload</button>
+                                                    <button type="button" class="btn btn-ghost podcast-audio-remove" data-track="intro">Remove</button>
+                                                </div>
+                                            </div>
+
+                                            <div class="podcast-audio-item" data-track="outro">
+                                                <div class="feature-info">
+                                                    <span class="feature-name">Outro</span>
+                                                    <span class="feature-desc" id="podcastAudioOutroStatus">No file uploaded</span>
+                                                </div>
+                                                <div class="podcast-audio-actions">
+                                                    <input type="file" class="sr-only podcast-audio-input" id="podcastOutroFile" data-track="outro" accept=".wav,.mp3,.m4a,.aac,.ogg,.flac,.aiff,audio/*">
+                                                    <button type="button" class="btn btn-secondary podcast-audio-upload" data-track="outro">Upload</button>
+                                                    <button type="button" class="btn btn-ghost podcast-audio-remove" data-track="outro">Remove</button>
+                                                </div>
+                                            </div>
+
+                                            <div class="podcast-audio-item" data-track="musicBed">
+                                                <div class="feature-info">
+                                                    <span class="feature-name">Music Bed</span>
+                                                    <span class="feature-desc" id="podcastAudioMusicBedStatus">No file uploaded</span>
+                                                </div>
+                                                <div class="podcast-audio-actions">
+                                                    <input type="file" class="sr-only podcast-audio-input" id="podcastMusicBedFile" data-track="musicBed" accept=".wav,.mp3,.m4a,.aac,.ogg,.flac,.aiff,audio/*">
+                                                    <button type="button" class="btn btn-secondary podcast-audio-upload" data-track="musicBed">Upload</button>
+                                                    <button type="button" class="btn btn-ghost podcast-audio-remove" data-track="musicBed">Remove</button>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>

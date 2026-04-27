@@ -13,6 +13,7 @@ const logsController = require('./logs.controller');
 const skillsController = require('./skills.controller');
 const tracesController = require('./traces.controller');
 const settingsController = require('./settings.controller');
+const podcastAudioController = require('./podcast-audio.controller');
 const DashboardController = require('./dashboard.controller');
 const { setDashboardController } = require('../../admin/runtime-monitor');
 
@@ -83,6 +84,11 @@ router.get('/settings', callController(settingsController, 'getAll'));
 router.put('/settings', callController(settingsController, 'update'));
 router.post('/settings/reset', callController(settingsController, 'reset'));
 router.post('/settings/clear-cache', callController(settingsController, 'clearCache'));
+
+// Podcast audio assets
+router.get('/podcast-audio', callController(podcastAudioController, 'list'));
+router.post('/podcast-audio/:track', callController(podcastAudioController, 'upload'));
+router.delete('/podcast-audio/:track', callController(podcastAudioController, 'remove'));
 
 // SDK Control
 router.post('/sdk/execute', (req, res) => getDashboardController(req).executeTask(req, res));
