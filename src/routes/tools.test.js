@@ -52,6 +52,14 @@ describe('/api/tools routes', () => {
         expect(response.status).toBe(200);
         expect(response.body.data.runtime.source).toBeDefined();
         expect(response.body.data.runtime.runnerAvailable).toBe(false);
+        expect(response.body.data.runtime.commandCatalog).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'repo-map' }),
+            expect.objectContaining({ id: 'changed-files' }),
+            expect.objectContaining({ id: 'dependency-check' }),
+            expect.objectContaining({ id: 'k8s-manifest-summary' }),
+            expect.objectContaining({ id: 'focused-test' }),
+            expect.objectContaining({ id: 'deploy-verify' }),
+        ]));
     });
 
     test('remote-command tool details expose online runner CLI inventory', async () => {
@@ -80,6 +88,19 @@ describe('/api/tools routes', () => {
             expect.objectContaining({ name: 'rg', available: false }),
         ]));
         expect(response.body.meta.runtime.remoteRunner.availableCliTools).toEqual(expect.arrayContaining(['kubectl', 'git']));
+    });
+
+    test('k3s-deploy tool details expose verification-oriented command catalog entries', async () => {
+        const app = buildApp();
+
+        const response = await request(app).get('/api/tools/k3s-deploy');
+
+        expect(response.status).toBe(200);
+        expect(response.body.data.runtime.commandCatalog).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'k8s-app-inventory' }),
+            expect.objectContaining({ id: 'pod-debug' }),
+            expect.objectContaining({ id: 'deploy-verify' }),
+        ]));
     });
 
     test('managed-app details and invocation are disabled', async () => {

@@ -62,10 +62,22 @@ function probeCommand(command, args = [], options = {}) {
     const timeout = options.timeout || 5000;
 
     return new Promise((resolve) => {
-        const child = spawn(command, args, {
-            env: options.env || process.env,
-            stdio: ['ignore', 'pipe', 'pipe'],
-        });
+        let child;
+        try {
+            child = spawn(command, args, {
+                env: options.env || process.env,
+                stdio: ['ignore', 'pipe', 'pipe'],
+            });
+        } catch (error) {
+            resolve({
+                ok: false,
+                code: error.code || 'ERROR',
+                stdout: '',
+                stderr: '',
+                message: error.message,
+            });
+            return;
+        }
 
         let stdout = '';
         let stderr = '';

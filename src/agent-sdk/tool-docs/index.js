@@ -20,11 +20,46 @@ const REMOTE_CLI_COMMAND_CATALOG = Object.freeze([
     command: 'pwd && find . -maxdepth 2 -type f | sort | head -n 120 && (test -d .git && git status --short --branch || true)',
   },
   {
+    id: 'repo-map',
+    label: 'Repository map',
+    profile: 'inspect',
+    description: 'Build a compact project map from manifests, package scripts, Dockerfiles, k8s manifests, and top-level docs without reading the whole repo.',
+    command: 'pwd && find . -maxdepth 3 \\( -name package.json -o -name Dockerfile -o -name docker-compose.yml -o -name "*.yaml" -o -name "*.yml" -o -name README.md -o -name AGENTS.md -o -name agents.md \\) -not -path "*/node_modules/*" -not -path "*/.git/*" | sort | head -n 160 && (test -f package.json && node -e "const p=require(\'./package.json\'); console.log(JSON.stringify({name:p.name,scripts:p.scripts,dependencies:Object.keys(p.dependencies||{}).slice(0,40),devDependencies:Object.keys(p.devDependencies||{}).slice(0,40)}, null, 2))" || true)',
+  },
+  {
+    id: 'changed-files',
+    label: 'Changed files',
+    profile: 'inspect',
+    description: 'Show only git changes and names so agents can review the active work without scanning unrelated code.',
+    command: 'if [ -d .git ]; then git status --short --branch && git diff --name-status && git diff --stat; else echo "No .git directory in current workspace"; fi',
+  },
+  {
     id: 'file-search',
     label: 'File search',
     profile: 'inspect',
     description: 'Search remote files with portable find/grep patterns; do not assume rg exists.',
     command: 'find . -maxdepth 4 -type f | sort | head -n 200',
+  },
+  {
+    id: 'targeted-grep',
+    label: 'Targeted grep',
+    profile: 'inspect',
+    description: 'Search for a symbol or route using grep on likely source files; set NEEDLE before running.',
+    command: 'needle="${NEEDLE:-TODO}"; find . -maxdepth 6 -type f \\( -name "*.js" -o -name "*.ts" -o -name "*.jsx" -o -name "*.tsx" -o -name "*.json" -o -name "*.md" -o -name "*.yaml" -o -name "*.yml" \\) -not -path "*/node_modules/*" -not -path "*/.git/*" -print0 | xargs -0 grep -n -- "$needle" | head -n 200',
+  },
+  {
+    id: 'dependency-check',
+    label: 'Dependency check',
+    profile: 'inspect',
+    description: 'Inspect package manager state, lockfiles, outdated packages, and audit summary before update work.',
+    command: 'set -e; node --version 2>/dev/null || true; npm --version 2>/dev/null || true; find . -maxdepth 2 \\( -name package.json -o -name package-lock.json -o -name pnpm-lock.yaml -o -name yarn.lock \\) -not -path "*/node_modules/*" | sort; if [ -f package.json ]; then npm outdated --depth=0 || true; npm audit --omit=dev || true; fi',
+  },
+  {
+    id: 'k8s-manifest-summary',
+    label: 'K8s manifest summary',
+    profile: 'inspect',
+    description: 'Summarize Kubernetes manifest kinds, names, images, hosts, and namespaces from repo files.',
+    command: 'manifest_dir="${MANIFEST_DIR:-k8s}"; if [ -d "$manifest_dir" ]; then find "$manifest_dir" -maxdepth 2 -type f \\( -name "*.yaml" -o -name "*.yml" \\) | sort | while read -r f; do echo "### $f"; grep -nE "^(kind:|  name:|  namespace:|        image:|      - host:|  host:|  ingressClassName:|    cert-manager.io/cluster-issuer:)" "$f" || true; done; else echo "No manifest directory at $manifest_dir"; fi',
   },
   {
     id: 'build',
@@ -39,6 +74,13 @@ const REMOTE_CLI_COMMAND_CATALOG = Object.freeze([
     profile: 'build',
     description: 'Run the focused or project test command discovered from the repository.',
     command: 'if [ -f package.json ]; then npm test; else echo "No package.json test target found"; fi',
+  },
+  {
+    id: 'focused-test',
+    label: 'Focused tests',
+    profile: 'build',
+    description: 'Run a focused Jest test path or pattern; set TEST_PATH to avoid running the full suite while iterating.',
+    command: 'if [ -f package.json ]; then test_path="${TEST_PATH:-}"; if [ -n "$test_path" ]; then npx jest --runInBand "$test_path"; else npm test -- --runInBand; fi; else echo "No package.json test target found"; fi',
   },
   {
     id: 'buildkit',
@@ -62,11 +104,25 @@ const REMOTE_CLI_COMMAND_CATALOG = Object.freeze([
     command: 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; kubectl get nodes -o wide && kubectl get pods -A -o wide',
   },
   {
+    id: 'k8s-app-inventory',
+    label: 'K8s app inventory',
+    profile: 'inspect',
+    description: 'List namespaced deployments, services, ingresses, images, and recent events for a target namespace.',
+    command: 'set -e; ns="${NAMESPACE:-kimibuilt}"; export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; kubectl get deploy,sts,svc,ingress,certificate -n "$ns" -o wide || true; kubectl get deploy -n "$ns" -o jsonpath="{range .items[*]}{.metadata.name}{\"\\t\"}{range .spec.template.spec.containers[*]}{.name}{\"=\"}{.image}{\" \"}{end}{\"\\n\"}{end}" || true; kubectl get events -n "$ns" --sort-by=.lastTimestamp | tail -n 60 || true',
+  },
+  {
     id: 'logs',
     label: 'Deployment logs',
     profile: 'inspect',
     description: 'Read Kubernetes logs for the target workload.',
     command: 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; kubectl logs deployment/backend -n kimibuilt --all-containers=true --tail=200',
+  },
+  {
+    id: 'pod-debug',
+    label: 'Pod debug',
+    profile: 'inspect',
+    description: 'Describe pods and fetch current plus previous logs for a deployment in the target namespace.',
+    command: 'set -e; ns="${NAMESPACE:-kimibuilt}"; app="${DEPLOYMENT:-backend}"; export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; kubectl describe deployment/"$app" -n "$ns"; kubectl get pods -n "$ns" -l app="$app" -o wide || true; kubectl logs deployment/"$app" -n "$ns" --all-containers=true --tail=200 || true; kubectl logs deployment/"$app" -n "$ns" --all-containers=true --previous --tail=200 || true',
   },
   {
     id: 'rollout',
@@ -81,6 +137,13 @@ const REMOTE_CLI_COMMAND_CATALOG = Object.freeze([
     profile: 'inspect',
     description: 'Verify DNS and public HTTPS for the deployed domain.',
     command: 'host=demoserver2.buzz; getent ahosts "$host" || true; curl -fsSIL --max-time 20 "https://$host"',
+  },
+  {
+    id: 'deploy-verify',
+    label: 'Deploy verify',
+    profile: 'deploy',
+    description: 'Verify rollout, service, ingress, TLS certificate objects, DNS, and public HTTPS for a deployed app.',
+    command: 'set -e; ns="${NAMESPACE:-kimibuilt}"; app="${DEPLOYMENT:-backend}"; host="${PUBLIC_HOST:-demoserver2.buzz}"; export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; kubectl rollout status deployment/"$app" -n "$ns" --timeout=180s; kubectl wait --for=condition=available deployment/"$app" -n "$ns" --timeout=180s; kubectl get deploy,svc,ingress,certificate -n "$ns" -o wide || true; getent ahosts "$host" || true; curl -fsSIL --max-time 20 "https://$host"',
   },
 ]);
 

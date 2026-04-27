@@ -228,7 +228,16 @@ function buildToolRuntime(toolId, options = {}) {
       cliTools: runnerDetails?.cliTools || [],
       availableCliTools: runnerDetails?.availableCliTools || [],
       transportPreference: runner ? 'runner-first' : 'ssh',
-      commandCatalog: REMOTE_CLI_COMMAND_CATALOG.filter((entry) => ['kubectl-inspect', 'rollout', 'https-verify'].includes(entry.id)),
+      commandCatalog: REMOTE_CLI_COMMAND_CATALOG.filter((entry) => [
+        'k8s-manifest-summary',
+        'kubectl-inspect',
+        'k8s-app-inventory',
+        'logs',
+        'pod-debug',
+        'rollout',
+        'https-verify',
+        'deploy-verify',
+      ].includes(entry.id)),
     };
   }
 

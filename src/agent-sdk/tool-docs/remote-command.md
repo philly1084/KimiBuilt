@@ -75,15 +75,28 @@ These catalog entries are exposed through `/api/tools/available` so agents can s
 |----|---------|---------|
 | `baseline` | `inspect` | Confirm host identity, user, CPU architecture, OS, and uptime. |
 | `repo-inspect` | `inspect` | Inspect current workspace, nearby files, package scripts, and git status. |
+| `repo-map` | `inspect` | Build a compact map from manifests, package scripts, Dockerfiles, k8s manifests, and top-level docs without reading the whole repo. |
+| `changed-files` | `inspect` | Show only git changes, changed names, and diff stats for active work review. |
 | `file-search` | `inspect` | Search remote files using `find` and `grep -R`; do not assume `rg` exists. |
+| `targeted-grep` | `inspect` | Search likely source/config files for a specific symbol, route, env var, or error string. |
+| `dependency-check` | `inspect` | Inspect lockfiles, package manager versions, outdated dependencies, and audit summary before update work. |
+| `k8s-manifest-summary` | `inspect` | Summarize repo Kubernetes manifest kinds, names, images, hosts, namespaces, ingress class, and issuer fields. |
 | `build` | `build` | Run the project build command discovered from the repo. |
 | `test` | `build` | Run the focused or project test command discovered from the repo. |
-| `docker-buildkit` | `inspect` | Check Docker/BuildKit availability and builder state. |
+| `focused-test` | `build` | Run a focused Jest test path or pattern while iterating. |
+| `buildkit` | `inspect` | Check BuildKit availability and builder state. |
 | `direct-image-build` | `build` | Build and push an image from the remote workspace through the direct BuildKit runner. |
 | `kubectl-inspect` | `inspect` | Inspect k3s nodes, workloads, services, ingress, and pods. |
+| `k8s-app-inventory` | `inspect` | List namespaced deployments, services, ingresses, certificates, images, and recent events. |
 | `logs` | `inspect` | Read Kubernetes logs and recent events for the target workload. |
+| `pod-debug` | `inspect` | Describe a deployment and fetch current plus previous logs for the target workload. |
 | `rollout` | `deploy` | Check rollout and available conditions for a deployment. |
 | `https-verify` | `inspect` | Verify DNS and public HTTPS for the deployed domain. |
+| `deploy-verify` | `deploy` | Verify rollout, service, ingress, TLS objects, DNS, and public HTTPS before claiming success. |
+
+For repo maintenance and updates, start with `repo-map`, `changed-files`, and `dependency-check`. Then use `targeted-grep` or focused file reads for the feature area instead of walking the full repository.
+
+For k3s app delivery, use `k8s-manifest-summary`, `buildkit`, `direct-image-build`, `k8s-app-inventory`, `rollout`, and `deploy-verify` as the default progression.
 
 ### 1. Cluster survey
 
