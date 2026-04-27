@@ -761,6 +761,21 @@ const Agent = (function() {
         return String(value || '').replace(/\u0000/g, '');
     }
 
+    function hasInternalToolCallMarkup(text = '') {
+        return /<\s*(?:[|｜]\s*)?(?:DSML\s*[|｜]\s*)?tool_calls(?:\s*[|｜])?\s*>/i.test(String(text || ''));
+    }
+
+    function stripInternalToolCallMarkup(text = '') {
+        let value = stripUnsafeNullCharacters(text);
+        if (!value) {
+            return '';
+        }
+
+        value = value.replace(/<\s*(?:[|｜]\s*)?(?:DSML\s*[|｜]\s*)?tool_calls(?:\s*[|｜])?\s*>[\s\S]*?<\s*\/\s*(?:[|｜]\s*)?(?:DSML\s*[|｜]\s*)?tool_calls(?:\s*[|｜])?\s*>/gi, '');
+        value = value.replace(/<\s*(?:[|｜]\s*)?(?:DSML\s*[|｜]\s*)?tool_calls(?:\s*[|｜])?\s*>[\s\S]*$/i, '');
+        return value.trim();
+    }
+
     function sanitizeStructuredValue(value) {
         if (typeof value === 'string') {
             return stripUnsafeNullCharacters(value);
@@ -794,6 +809,7 @@ const Agent = (function() {
                 || normalized.includes('previous failed reply:')
             )
         )
+            || hasInternalToolCallMarkup(text)
             || normalized.includes('interpret "page" as the current notes page shown in this editor')
             || normalized.includes('return notes-actions that apply the content to the current notes page')
             || normalized.includes('use this approved page plan:')
@@ -3041,6 +3057,7 @@ GUIDELINES:
 - The editor will automatically apply your actions and show the assistant_reply to the user
 - Your default job in this interface is to edit the current notes page itself through block updates.
 - When notes mode is active, the only supporting tools you may rely on are web-search, web-fetch, and web-scrape.
+- Never print internal tool-call markup such as <|tool_calls|>, <｜DSML｜tool_calls>, invoke tags, or parameter tags in the assistant reply. If a tool is unavailable, say what is missing in plain language.
 - Do not rely on document creation, artifact generation, filesystem writes, image tools, Git, deployment tools, or remote/server commands from this surface.
 - Use any gathered web information only to improve the current page blocks or to answer the user in chat while planning.
 - When the user asks for page changes, put the final content into page blocks instead of replying with standalone HTML, artifact info, download links, or chat-only prose.
@@ -3212,6 +3229,7 @@ GUIDELINES:
 - The editor will automatically apply your actions and show the assistant_reply to the user
 - Your default job in this interface is to edit the current notes page itself through block updates.
 - When notes mode is active, the only supporting tools you may rely on are web-search, web-fetch, and web-scrape.
+- Never print internal tool-call markup such as <|tool_calls|>, <｜DSML｜tool_calls>, invoke tags, or parameter tags in the assistant reply. If a tool is unavailable, say what is missing in plain language.
 - Do not rely on document creation, artifact generation, filesystem writes, image tools, Git, deployment tools, or remote/server commands from this surface.
 - Use any gathered web information only to update the current page blocks or to answer the user in chat while planning.
 - When the user asks for page changes, put the final content into page blocks instead of replying with standalone HTML, artifact info, download links, or chat-only prose.
@@ -6542,7 +6560,7 @@ Silently verify the lead cluster, section order, and final polish before returni
     }
 
     function stripStructuredResponseText(text) {
-        const value = stripUnsafeNullCharacters(text);
+        const value = stripInternalToolCallMarkup(text);
         if (startsWithMermaidResponse(value) || looksLikeInternalNotesScaffold(value)) {
             return '';
         }
@@ -6560,7 +6578,7 @@ Silently verify the lead cluster, section order, and final polish before returni
     }
 
     function extractNotesActionPlan(responseText) {
-        const text = stripUnsafeNullCharacters(responseText);
+        const text = stripInternalToolCallMarkup(responseText);
         const match = text.match(/```+\s*notes\s*(?:[_-]|\s)\s*actions\b\s*([\s\S]*?)```/i);
         if (!match) {
             const jsonFenceMatch = text.match(/```+\s*json\b\s*([\s\S]*?)```/i);
@@ -7151,7 +7169,7 @@ Silently verify the lead cluster, section order, and final polish before returni
     }
 
     function resolveVisibleAssistantText(preparedDisplayText = '', responseText = '') {
-        const normalizedPrepared = stripUnsafeNullCharacters(preparedDisplayText).trim();
+        const normalizedPrepared = stripInternalToolCallMarkup(preparedDisplayText).trim();
         if (normalizedPrepared
             && !isAssistantReplyPlaceholderText(normalizedPrepared)
             && !looksLikeInternalNotesScaffold(normalizedPrepared)) {
@@ -7174,7 +7192,7 @@ Silently verify the lead cluster, section order, and final polish before returni
     }
 
     function getStreamingVisibleText(text) {
-        const value = stripUnsafeNullCharacters(text);
+        const value = stripInternalToolCallMarkup(text);
         const trimmed = value.trim();
 
         if (/^\{[\s\S]*"\s*(?:actions|operations|edits)\s*"\s*:/i.test(trimmed)

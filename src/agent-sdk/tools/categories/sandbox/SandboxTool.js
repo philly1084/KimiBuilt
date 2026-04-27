@@ -15,7 +15,7 @@ class SandboxTool extends ToolBase {
     super({
       id: 'code-sandbox',
       name: 'Code Sandbox',
-      description: 'Execute code in isolated Docker containers with resource limits, or persist previewable frontend project files',
+      description: 'Execute code in isolated Docker containers with resource limits and optional package installs, or persist previewable frontend project files with browser libraries such as React, Tailwind, Chart.js, D3, Mermaid, and Cytoscape',
       category: 'sandbox',
       version: '1.0.0',
       backend: {
@@ -35,8 +35,8 @@ class SandboxTool extends ToolBase {
           },
           language: {
             type: 'string',
-            enum: ['javascript', 'python', 'bash', 'sql', 'ruby', 'go', 'rust', 'html', 'vite'],
-            description: 'Programming language or project type'
+            enum: ['javascript', 'python', 'java', 'bash', 'sql', 'ruby', 'go', 'rust', 'html', 'vite', 'react', 'tailwind'],
+            description: 'Programming language or project type. Use project mode with html, vite, react, or tailwind for previewable sites.'
           },
           code: {
             type: 'string',
@@ -72,7 +72,7 @@ class SandboxTool extends ToolBase {
           dependencies: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Package dependencies to install'
+            description: 'Package dependencies to install before execution. Supported for javascript/npm and python/pip execution; frontend project previews should prefer CDN/browser imports so the saved site works immediately.'
           },
           environment: {
             type: 'object',
@@ -149,7 +149,7 @@ class SandboxTool extends ToolBase {
       });
     }
 
-    if (['html', 'vite'].includes(String(language || '').trim().toLowerCase())) {
+    if (['html', 'vite', 'react', 'tailwind'].includes(String(language || '').trim().toLowerCase())) {
       throw new Error(`Language "${language}" is only supported with mode: "project".`);
     }
 
@@ -268,11 +268,9 @@ class SandboxTool extends ToolBase {
       const normalizedLanguage = String(language || '').trim().toLowerCase();
       const fallbackPath = normalizedLanguage === 'javascript'
         ? 'index.js'
-        : normalizedLanguage === 'vite'
+        : ['vite', 'react', 'tailwind', 'html'].includes(normalizedLanguage)
           ? 'index.html'
-          : normalizedLanguage === 'html'
-            ? 'index.html'
-            : 'index.txt';
+          : 'index.txt';
 
       normalizedFiles.push({
         path: normalizeBundlePath(entry || fallbackPath) || fallbackPath,
@@ -424,6 +422,7 @@ class SandboxTool extends ToolBase {
     const extensions = {
       javascript: 'js',
       python: 'py',
+      java: 'java',
       bash: 'sh',
       sql: 'sql',
       ruby: 'rb',
@@ -434,6 +433,7 @@ class SandboxTool extends ToolBase {
     const filenames = {
       javascript: 'index.js',
       python: 'main.py',
+      java: 'Main.java',
       bash: 'script.sh',
       sql: 'query.sql',
       ruby: 'main.rb',
@@ -449,15 +449,53 @@ class SandboxTool extends ToolBase {
     return filename;
   }
 
+  normalizeDependencies(dependencies = []) {
+    return (Array.isArray(dependencies) ? dependencies : [])
+      .map((dependency) => String(dependency || '').trim())
+      .filter(Boolean)
+      .filter((dependency) => dependency.length <= 120)
+      .filter((dependency) => /^[A-Za-z0-9@._/:+\-~<>=!,[\]]+$/.test(dependency))
+      .slice(0, 30);
+  }
+
+  shellQuote(value = '') {
+    return `'${String(value).replace(/'/g, `'\\''`)}'`;
+  }
+
+  buildInstallCommand(language, dependencies = []) {
+    const safeDependencies = this.normalizeDependencies(dependencies);
+    if (safeDependencies.length === 0) {
+      return '';
+    }
+
+    const quotedDependencies = safeDependencies.map((dependency) => this.shellQuote(dependency)).join(' ');
+    if (language === 'javascript') {
+      return `npm init -y >/dev/null 2>&1 && npm install --no-audit --no-fund ${quotedDependencies}`;
+    }
+    if (language === 'python') {
+      return `python -m pip install --no-cache-dir ${quotedDependencies}`;
+    }
+    return '';
+  }
+
   getDockerConfig(language, dependencies) {
+    const installCommand = this.buildInstallCommand(language, dependencies);
+    const withInstall = (runCommand) => installCommand
+      ? ['sh', '-c', `${installCommand} && ${runCommand}`]
+      : null;
+
     const configs = {
       javascript: {
         image: 'node:18-alpine',
-        command: (file) => ['node', file]
+        command: (file) => withInstall(`node ${this.shellQuote(file)}`) || ['node', file]
       },
       python: {
         image: 'python:3.11-alpine',
-        command: (file) => ['python', file]
+        command: (file) => withInstall(`python ${this.shellQuote(file)}`) || ['python', file]
+      },
+      java: {
+        image: 'eclipse-temurin:21-jdk-alpine',
+        command: (file) => ['sh', '-c', `javac ${this.shellQuote(file)} && java Main`]
       },
       bash: {
         image: 'alpine:latest',

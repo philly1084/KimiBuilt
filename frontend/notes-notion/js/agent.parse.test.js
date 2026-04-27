@@ -240,6 +240,25 @@ Approved page plan:
         expect(parsed.actions).toEqual([]);
     });
 
+    test('strips Kimi DSML tool-call markup from visible assistant text', () => {
+        const agent = loadAgent();
+        const responseText = [
+            'Let me gather current info on recursive training with the OpenAI Agents SDK before building the page.',
+            '<｜DSML｜tool_calls>',
+            '<｜DSML｜invoke name="web-search">',
+            '<｜DSML｜parameter name="query" string="true">recursive training OpenAI Agents SDK 2025 2026 patterns</｜DSML｜parameter>',
+            '</｜DSML｜invoke>',
+            '</｜DSML｜tool_calls>',
+        ].join(' ');
+
+        const parsed = agent._extractNotesActionPlan(responseText);
+
+        expect(parsed.displayText).toBe('Let me gather current info on recursive training with the OpenAI Agents SDK before building the page.');
+        expect(parsed.displayText).not.toContain('DSML');
+        expect(parsed.displayText).not.toContain('web-search');
+        expect(parsed.actions).toEqual([]);
+    });
+
     test('parses malformed kimi-style notes-actions fences and spaced keys', () => {
         const agent = loadAgent();
         const responseText = [
