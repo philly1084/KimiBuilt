@@ -562,6 +562,94 @@ function buildPlaceholderFrameBuffer(width = DEFAULT_WIDTH, height = DEFAULT_HEI
   return Buffer.concat([header, pixels]);
 }
 
+function analyzePpmImage(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 32 || buffer.slice(0, 2).toString('ascii') !== 'P6') {
+    return null;
+  }
+
+  const headerEnd = buffer.indexOf(Buffer.from('\n255\n', 'ascii'));
+  if (headerEnd < 0) {
+    return null;
+  }
+
+  const header = buffer.slice(0, headerEnd + 5).toString('ascii');
+  const match = header.match(/^P6\s+(\d+)\s+(\d+)\s+255\s/s);
+  if (!match) {
+    return null;
+  }
+
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  const pixelData = buffer.slice(headerEnd + 5);
+  const pixelCount = Math.floor(pixelData.length / 3);
+  if (!width || !height || pixelCount <= 0) {
+    return null;
+  }
+
+  const stride = Math.max(1, Math.floor(pixelCount / 512));
+  let samples = 0;
+  let minR = 255;
+  let minG = 255;
+  let minB = 255;
+  let maxR = 0;
+  let maxG = 0;
+  let maxB = 0;
+  let sumR = 0;
+  let sumG = 0;
+  let sumB = 0;
+
+  for (let pixelIndex = 0; pixelIndex < pixelCount; pixelIndex += stride) {
+    const offset = pixelIndex * 3;
+    const r = pixelData[offset];
+    const g = pixelData[offset + 1];
+    const b = pixelData[offset + 2];
+    minR = Math.min(minR, r);
+    minG = Math.min(minG, g);
+    minB = Math.min(minB, b);
+    maxR = Math.max(maxR, r);
+    maxG = Math.max(maxG, g);
+    maxB = Math.max(maxB, b);
+    sumR += r;
+    sumG += g;
+    sumB += b;
+    samples += 1;
+  }
+
+  return {
+    width,
+    height,
+    range: Math.max(maxR - minR, maxG - minG, maxB - minB),
+    avgR: sumR / samples,
+    avgG: sumG / samples,
+    avgB: sumB / samples,
+  };
+}
+
+function isLikelyBadSceneImage(image = {}) {
+  const buffer = image?.buffer;
+  if (!Buffer.isBuffer(buffer) || buffer.length < 16) {
+    return true;
+  }
+
+  const head = buffer.slice(0, Math.min(buffer.length, 256)).toString('utf8').trim().toLowerCase();
+  if (head.startsWith('<!doctype html') || head.startsWith('<html') || head.includes('<title>error')) {
+    return true;
+  }
+
+  const ppm = analyzePpmImage(buffer);
+  if (!ppm) {
+    return false;
+  }
+
+  const mostlyBlue = ppm.avgB > 150 && ppm.avgR < 110 && ppm.avgG < 160;
+  const mostlyPink = ppm.avgR > 180 && ppm.avgB > 140 && ppm.avgG < 150;
+  return ppm.width > 8 && ppm.height > 8 && (ppm.range < 12 || (ppm.range < 28 && (mostlyBlue || mostlyPink)));
+}
+
+function isUsableSceneImage(image = {}) {
+  return Boolean(image?.buffer?.length) && !isLikelyBadSceneImage(image);
+}
+
 function escapeConcatPath(filePath = '') {
   return String(filePath || '').replace(/\\/g, '/').replace(/'/g, "'\\''");
 }
@@ -918,7 +1006,7 @@ class PodcastVideoService {
 
         if (isLikelyImageUrl(resultUrl)) {
           const direct = await this.downloadImage(resultUrl).catch(() => null);
-          if (direct?.buffer?.length) {
+          if (isUsableSceneImage(direct)) {
             return {
               ...direct,
               source: 'web-search',
@@ -943,7 +1031,7 @@ class PodcastVideoService {
 
         for (const imageUrl of imageUrls.slice(0, 4)) {
           const downloaded = await this.downloadImage(imageUrl).catch(() => null);
-          if (downloaded?.buffer?.length) {
+          if (isUsableSceneImage(downloaded)) {
             return {
               ...downloaded,
               source: 'web-search',
@@ -969,7 +1057,7 @@ class PodcastVideoService {
 
     if (scene.imageUrl) {
       const downloaded = await this.downloadImage(scene.imageUrl).catch(() => null);
-      if (downloaded?.buffer?.length) {
+      if (isUsableSceneImage(downloaded)) {
         return {
           ...downloaded,
           source: scene.imageSource || 'provided',
@@ -982,7 +1070,7 @@ class PodcastVideoService {
     const allowWebSearch = ['mixed', 'web'].includes(imageMode);
     if (allowWebSearch) {
       const webImage = await this.resolveWebSearchImage(scene, options);
-      if (webImage?.buffer?.length) {
+      if (isUsableSceneImage(webImage)) {
         return webImage;
       }
     }
@@ -998,7 +1086,7 @@ class PodcastVideoService {
         const image = results?.results?.[0] || null;
         const imageUrl = image?.urls?.regular || image?.urls?.full || image?.urls?.small || '';
         const downloaded = await this.downloadImage(imageUrl);
-        if (downloaded?.buffer?.length) {
+        if (isUsableSceneImage(downloaded)) {
           return {
             ...downloaded,
             source: 'unsplash',
@@ -1020,24 +1108,29 @@ class PodcastVideoService {
     const allowGenerated = ['mixed', 'generated'].includes(imageMode) && options.generateImages === true;
     if (allowGenerated) {
       try {
-        const response = await this.generateImageBatch({
-          prompt: scene.visualPrompt || scene.visualQuery || scene.summary,
-          model: options.imageModel || null,
-          size: options.imageSize || (orientation === 'portrait' ? '1024x1536' : '1536x1024'),
-          quality: options.imageQuality || 'auto',
-          background: 'opaque',
-          n: 1,
-        });
-        const generatedImage = response?.data?.[0] || null;
-        const downloaded = await this.downloadImage(generatedImage?.url || '');
-        if (downloaded?.buffer?.length) {
-          return {
-            ...downloaded,
-            source: 'generated',
-            url: generatedImage?.url || null,
-            attribution: null,
-            revisedPrompt: generatedImage?.revised_prompt || null,
-          };
+        const maxAttempts = Math.max(1, Math.min(3, Number(options.imageRetryAttempts) || 3));
+        for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+          const response = await this.generateImageBatch({
+            prompt: scene.visualPrompt || scene.visualQuery || scene.summary,
+            model: options.imageModel || null,
+            size: options.imageSize || (orientation === 'portrait' ? '1024x1536' : '1536x1024'),
+            quality: options.imageQuality || 'auto',
+            background: 'opaque',
+            n: 1,
+          });
+          const generatedImage = response?.data?.[0] || null;
+          const downloaded = await this.downloadImage(generatedImage?.url || '');
+          if (isUsableSceneImage(downloaded)) {
+            return {
+              ...downloaded,
+              source: 'generated',
+              url: generatedImage?.url || null,
+              attribution: null,
+              revisedPrompt: generatedImage?.revised_prompt || null,
+              retryCount: attempt,
+            };
+          }
+          console.warn(`[PodcastVideo] Rejected low-quality generated image for scene ${scene.id}; retry ${attempt + 1}/${maxAttempts}.`);
         }
       } catch (error) {
         console.warn(`[PodcastVideo] Generated image failed for scene ${scene.id}: ${error.message}`);

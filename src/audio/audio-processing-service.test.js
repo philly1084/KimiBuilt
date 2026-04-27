@@ -36,6 +36,7 @@ describe('AudioProcessingService', () => {
     const filterIndex = mixArgs.indexOf('-filter_complex') + 1;
 
     expect(mixArgs[filterIndex]).toContain('amix=inputs=2:duration=shortest');
+    expect(mixArgs[filterIndex]).toContain('alimiter=limit=0.95');
     expect(mixArgs[filterIndex]).not.toContain('duration=second');
   });
 });

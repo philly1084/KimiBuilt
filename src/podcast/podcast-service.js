@@ -7,6 +7,7 @@ const settingsController = require('../routes/admin/settings.controller');
 const {
   concatWavBuffers,
   createSilenceWavBuffer,
+  applyWavEdgeFade,
   normalizeWavBufferFormat,
   parseWavBuffer,
   wavFormatsMatch,
@@ -1275,7 +1276,7 @@ class PodcastService {
         ? synthesis.audioBuffer
         : normalizeWavBufferFormat(synthesis.audioBuffer, outputFormat);
 
-      wavBuffers.push(normalizedAudioBuffer);
+      wavBuffers.push(applyWavEdgeFade(normalizedAudioBuffer, 8));
       wavBuffers.push(createSilenceWavBuffer(outputFormat, silenceMs));
     }
 

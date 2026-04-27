@@ -2,6 +2,11 @@ const fs = require('fs/promises');
 const { PodcastVideoService, buildFallbackStoryboard } = require('./podcast-video-service');
 
 describe('PodcastVideoService', () => {
+  function ppmDataUrl(width, height, pixels) {
+    const header = Buffer.from(`P6\n${width} ${height}\n255\n`, 'ascii');
+    return `data:image/x-portable-pixmap;base64,${Buffer.concat([header, Buffer.from(pixels)]).toString('base64')}`;
+  }
+
   let originalFetch;
 
   beforeEach(() => {
@@ -225,7 +230,10 @@ describe('PodcastVideoService', () => {
   });
 
   test('can harvest an image from a web-search result via web-fetch', async () => {
-    const imageBytes = Buffer.from([1, 2, 3, 4]);
+    const imageBytes = Buffer.concat([
+      Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+      Buffer.alloc(64, 8),
+    ]);
     global.fetch = jest.fn(async (url) => {
       if (url === 'https://cdn.example.com/story.jpg') {
         return {
@@ -284,6 +292,41 @@ describe('PodcastVideoService', () => {
       url: 'https://cdn.example.com/story.jpg',
       extension: 'jpg',
       buffer: imageBytes,
+    }));
+  });
+
+  test('retries generated scene images that look like solid blue or pink placeholders', async () => {
+    const badPink = ppmDataUrl(16, 16, Array.from({ length: 16 * 16 * 3 }, (_value, index) => (
+      [255, 80, 210][index % 3]
+    )));
+    const usable = ppmDataUrl(2, 2, [
+      10, 20, 30, 240, 220, 180,
+      80, 120, 60, 20, 180, 210,
+    ]);
+    const generateImageBatch = jest.fn()
+      .mockResolvedValueOnce({ data: [{ url: badPink }] })
+      .mockResolvedValueOnce({ data: [{ url: usable, revised_prompt: 'usable visual' }] });
+    const service = new PodcastVideoService({
+      isUnsplashConfigured: () => false,
+      searchImages: jest.fn(),
+      generateImageBatch,
+    });
+
+    const image = await service.resolveSceneImage({
+      id: 'scene-02',
+      summary: 'Access control room',
+      visualPrompt: 'A realistic access control room with no text.',
+    }, {
+      imageMode: 'generated',
+      generateImages: true,
+      imageRetryAttempts: 2,
+    });
+
+    expect(generateImageBatch).toHaveBeenCalledTimes(2);
+    expect(image).toEqual(expect.objectContaining({
+      source: 'generated',
+      revisedPrompt: 'usable visual',
+      retryCount: 1,
     }));
   });
 });

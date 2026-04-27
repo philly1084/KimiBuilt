@@ -236,7 +236,48 @@ function concatWavBuffers(buffers = []) {
   });
 }
 
+function applyWavEdgeFade(buffer, fadeMs = 8) {
+  const parsed = parseWavBuffer(buffer);
+  if (parsed.audioFormat !== 1 || parsed.bitsPerSample !== 16) {
+    return buffer;
+  }
+
+  const frameCount = Math.floor(parsed.data.length / (2 * parsed.numChannels));
+  if (frameCount < 4) {
+    return buffer;
+  }
+  const fadeFrames = Math.min(
+    Math.floor(frameCount / 2),
+    Math.max(0, Math.round((parsed.sampleRate * Math.max(0, Number(fadeMs) || 0)) / 1000)),
+  );
+  if (fadeFrames <= 0) {
+    return buffer;
+  }
+
+  const faded = Buffer.from(parsed.data);
+  for (let frameIndex = 0; frameIndex < fadeFrames; frameIndex += 1) {
+    const fadeInScale = frameIndex / fadeFrames;
+    const fadeOutScale = frameIndex / fadeFrames;
+    const fadeOutFrame = frameCount - 1 - frameIndex;
+
+    for (let channelIndex = 0; channelIndex < parsed.numChannels; channelIndex += 1) {
+      const inOffset = ((frameIndex * parsed.numChannels) + channelIndex) * 2;
+      const outOffset = ((fadeOutFrame * parsed.numChannels) + channelIndex) * 2;
+      faded.writeInt16LE(Math.round(faded.readInt16LE(inOffset) * fadeInScale), inOffset);
+      faded.writeInt16LE(Math.round(faded.readInt16LE(outOffset) * fadeOutScale), outOffset);
+    }
+  }
+
+  return writeWavBuffer({
+    sampleRate: parsed.sampleRate,
+    bitsPerSample: parsed.bitsPerSample,
+    numChannels: parsed.numChannels,
+    data: faded,
+  });
+}
+
 module.exports = {
+  applyWavEdgeFade,
   concatWavBuffers,
   createSilenceWavBuffer,
   normalizeWavBufferFormat,

@@ -1,6 +1,7 @@
 const {
   concatWavBuffers,
   createSilenceWavBuffer,
+  applyWavEdgeFade,
   normalizeWavBufferFormat,
   parseWavBuffer,
   writeWavBuffer,
@@ -77,5 +78,20 @@ describe('wav-utils', () => {
     expect(parsed.bitsPerSample).toBe(16);
     expect(parsed.numChannels).toBe(1);
     expect(parsed.data.length).toBeGreaterThan(Buffer.from([1, 0, 2, 0, 3, 0, 4, 0]).length);
+  });
+
+  test('applies short edge fades to 16-bit pcm audio', () => {
+    const source = writeWavBuffer({
+      sampleRate: 1000,
+      bitsPerSample: 16,
+      numChannels: 1,
+      data: Buffer.from([100, 0, 100, 0, 100, 0, 100, 0]),
+    });
+
+    const faded = parseWavBuffer(applyWavEdgeFade(source, 2));
+
+    expect(faded.data.readInt16LE(0)).toBe(0);
+    expect(faded.data.readInt16LE(2)).toBeGreaterThan(0);
+    expect(faded.data.readInt16LE(6)).toBeLessThan(100);
   });
 });

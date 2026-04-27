@@ -387,7 +387,8 @@ class AudioProcessingService {
         const filter = [
           `[0:a]volume=${escapeFilterValue(bedLevel)},aresample=${sampleRate},aformat=sample_fmts=s16:channel_layouts=${channelLayout}[bed]`,
           `[1:a]volume=${escapeFilterValue(speechLevel)},aresample=${sampleRate},aformat=sample_fmts=s16:channel_layouts=${channelLayout}[speech]`,
-          '[bed][speech]amix=inputs=2:duration=shortest:dropout_transition=0:normalize=0[a]',
+          '[bed][speech]amix=inputs=2:duration=shortest:dropout_transition=0:normalize=0[mixed]',
+          '[mixed]alimiter=limit=0.95[a]',
         ].join(';');
 
         await this.runFfmpeg([
