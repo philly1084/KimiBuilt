@@ -2858,6 +2858,95 @@ describe('ConversationOrchestrator', () => {
         expect(result.output).toBe('The remote pod inspection ran and found the backend pod running, but public ingress still needs verification.');
     });
 
+    test('recovers leaked DSML remote-command tool calls by executing them', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const leakedPayload = [
+            'I will SSH into the server, inspect the Sophia coloring book site, update the pages with the new coloring content, and verify the deployment.',
+            '<｜DSML｜tool_calls>',
+            '<｜DSML｜invoke name="remote-command">',
+            '<｜DSML｜parameter name="host" string="true">162.55.163.199</｜DSML｜parameter>',
+            '<｜DSML｜parameter name="username" string="true">root</｜DSML｜parameter>',
+            '<｜DSML｜parameter name="command" string="true">ls -la /opt/sophia-color-world/ && cat /opt/sophia-color-world/index.html</｜DSML｜parameter>',
+            '</｜DSML｜invoke>',
+            '</｜DSML｜tool_calls>',
+        ].join('\n');
+        const llmClient = {
+            createResponse: jest.fn()
+                .mockResolvedValueOnce(buildResponse(leakedPayload, 'resp_invalid_dsml_remote_payload'))
+                .mockResolvedValueOnce(buildResponse(
+                    'The remote Sophia site inspection ran and returned the current index.html, so the next step is to apply the requested content changes.',
+                    'resp_repaired_dsml_remote_payload',
+                )),
+            complete: jest.fn().mockResolvedValue(JSON.stringify({ steps: [] })),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['remote-command', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read']
+                    .includes(toolId)
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn().mockResolvedValue({
+                success: true,
+                toolId: 'remote-command',
+                data: {
+                    stdout: '<!doctype html><title>Sophia Color World</title>',
+                    stderr: '',
+                    host: '162.55.163.199:22',
+                },
+            }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-dsml-remote-payload', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'SSH into 162.55.163.199 and run the command from the leaked DSML block.',
+            sessionId: 'session-dsml-remote-payload',
+            executionProfile: 'remote-build',
+            stream: false,
+        });
+
+        expect(toolManager.executeTool).toHaveBeenCalledTimes(1);
+        expect(toolManager.executeTool).toHaveBeenCalledWith(
+            'remote-command',
+            expect.objectContaining({
+                host: '162.55.163.199',
+                username: 'root',
+                command: 'ls -la /opt/sophia-color-world/ && cat /opt/sophia-color-world/index.html',
+            }),
+            expect.objectContaining({
+                sessionId: 'session-dsml-remote-payload',
+                executionProfile: 'remote-build',
+            }),
+        );
+        expect(llmClient.createResponse).toHaveBeenCalledTimes(2);
+        expect(result.output).toBe('The remote Sophia site inspection ran and returned the current index.html, so the next step is to apply the requested content changes.');
+    });
+
     test('repairs invalid final responses that surface serialized tool-call wrapper payloads', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,

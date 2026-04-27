@@ -4153,6 +4153,46 @@ function collectJsonCandidatesFromText(text = '') {
     return candidates;
 }
 
+function collectDsmlToolCallCandidatesFromText(text = '') {
+    const source = String(text || '').trim();
+    if (!source || !/<\s*[|｜]\s*(?:DSML\s*[|｜]\s*)?(?:tool_calls|invoke|parameter)\b/i.test(source)) {
+        return [];
+    }
+
+    const normalized = source.replace(/｜/g, '|');
+    const candidates = [];
+    const invokePattern = /<\s*\|\s*(?:DSML\s*\|\s*)?invoke\b([^>]*)>([\s\S]*?)<\s*\/\s*\|\s*(?:DSML\s*\|\s*)?invoke\s*>/gi;
+    let invokeMatch;
+
+    while ((invokeMatch = invokePattern.exec(normalized)) !== null) {
+        const attrs = invokeMatch[1] || '';
+        const body = invokeMatch[2] || '';
+        const name = (attrs.match(/\bname\s*=\s*"([^"]+)"/i)?.[1] || '').trim();
+        if (!name) {
+            continue;
+        }
+
+        const params = {};
+        const parameterPattern = /<\s*\|\s*(?:DSML\s*\|\s*)?parameter\b([^>]*)>([\s\S]*?)<\s*\/\s*\|\s*(?:DSML\s*\|\s*)?parameter\s*>/gi;
+        let parameterMatch;
+        while ((parameterMatch = parameterPattern.exec(body)) !== null) {
+            const parameterAttrs = parameterMatch[1] || '';
+            const parameterName = (parameterAttrs.match(/\bname\s*=\s*"([^"]+)"/i)?.[1] || '').trim();
+            if (!parameterName) {
+                continue;
+            }
+            params[parameterName] = String(parameterMatch[2] || '').trim();
+        }
+
+        candidates.push({
+            tool: name,
+            params,
+        });
+    }
+
+    return candidates;
+}
+
 function parsePayloadObject(value = null) {
     if (!value) {
         return null;
@@ -4259,7 +4299,8 @@ function isLeakedRemoteCommandPayloadText(text = '') {
         return false;
     }
 
-    return collectJsonCandidatesFromText(source).some((candidate) => Boolean(findRemoteCommandPayload(candidate)));
+    return collectJsonCandidatesFromText(source).some((candidate) => Boolean(findRemoteCommandPayload(candidate)))
+        || collectDsmlToolCallCandidatesFromText(source).some((candidate) => Boolean(findRemoteCommandPayload(candidate)));
 }
 
 function buildRecoveryPlanFromLeakedRemoteCommandPayload(text = '', toolPolicy = {}) {
@@ -4277,6 +4318,19 @@ function buildRecoveryPlanFromLeakedRemoteCommandPayload(text = '', toolPolicy =
         return [{
             tool: remoteToolId,
             reason: 'Recover leaked remote-command JSON by executing it as a verified tool call.',
+            params: payload.params,
+        }];
+    }
+
+    for (const candidate of collectDsmlToolCallCandidatesFromText(text)) {
+        const payload = findRemoteCommandPayload(candidate);
+        if (!payload?.params?.command) {
+            continue;
+        }
+
+        return [{
+            tool: remoteToolId,
+            reason: 'Recover leaked remote-command DSML by executing it as a verified tool call.',
             params: payload.params,
         }];
     }
