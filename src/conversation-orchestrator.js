@@ -4471,7 +4471,7 @@ function hasRemoteCliAgentAuthoringIntent(text = '') {
         return false;
     }
 
-    const authoringIntent = /\b(create|make|build|generate|implement|develop|write|update|fix|deploy|publish|launch|ship)\b/.test(normalized);
+    const authoringIntent = /\b(create|make|build|generate|implement|develop|write|update|fix|finish|continue|resume|complete|deploy|publish|launch|ship)\b/.test(normalized);
     const softwareTarget = /\b(app|application|site|website|web app|web page|webpage|frontend|dashboard|visualization|visualisation|viewer|map|globe|world|service)\b/.test(normalized);
     const remoteTarget = /\b(remote|server|host|k3s|k8s|kubernetes|cluster|dns|domain|ingress|traefik|tls|deploy|deployment|live)\b/.test(normalized)
         || /\b[a-z0-9-]+(?:\.[a-z0-9-]+){1,}\b/.test(normalized);
@@ -9460,6 +9460,7 @@ class ConversationOrchestrator extends EventEmitter {
                 session,
                 toolContext,
             });
+            const priorAgentState = getSessionControlState(session).remoteCliAgent || {};
             return finalizeAction({
                 tool: 'remote-cli-agent',
                 reason: 'The request asks an assisted remote CLI agent to own the coding, build, deploy, and verification loop.',
@@ -9467,6 +9468,8 @@ class ConversationOrchestrator extends EventEmitter {
                     task: objective,
                     waitMs: 30000,
                     ...(cwd ? { cwd } : {}),
+                    ...(priorAgentState.sessionId ? { sessionId: priorAgentState.sessionId } : {}),
+                    ...(priorAgentState.mcpSessionId ? { mcpSessionId: priorAgentState.mcpSessionId } : {}),
                 },
             });
         }
@@ -9599,6 +9602,7 @@ class ConversationOrchestrator extends EventEmitter {
         }
 
         if (normalizedStep.tool === 'remote-cli-agent') {
+            const priorAgentState = getSessionControlState(session).remoteCliAgent || {};
             const cwd = String(
                 normalizedStep.params.cwd
                 || resolvePreferredRemoteCliWorkspacePath({
@@ -9612,6 +9616,8 @@ class ConversationOrchestrator extends EventEmitter {
                 task: String(normalizedStep.params.task || objective || '').trim(),
                 waitMs: Number(normalizedStep.params.waitMs || normalizedStep.params.wait_ms || 30000) || 30000,
                 ...(cwd ? { cwd } : {}),
+                ...(normalizedStep.params.sessionId || priorAgentState.sessionId ? { sessionId: normalizedStep.params.sessionId || priorAgentState.sessionId } : {}),
+                ...(normalizedStep.params.mcpSessionId || priorAgentState.mcpSessionId ? { mcpSessionId: normalizedStep.params.mcpSessionId || priorAgentState.mcpSessionId } : {}),
             };
             delete normalizedStep.params.wait_ms;
             return normalizedStep;

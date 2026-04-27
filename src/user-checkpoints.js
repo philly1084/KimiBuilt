@@ -284,19 +284,21 @@ function getUserCheckpointState(session = null) {
     };
 }
 
-function buildUserCheckpointPolicy({ session = null, clientSurface = '' } = {}) {
+function buildUserCheckpointPolicy({ session = null, clientSurface = '', latestResponse = null } = {}) {
     const state = getUserCheckpointState(session);
     const enabled = isUserCheckpointSurface(clientSurface);
+    const answeredThisTurn = Boolean(latestResponse?.checkpointId);
 
     return {
         enabled,
         maxQuestions: state.maxQuestions,
         askedCount: state.askedCount,
-        remaining: enabled
+        remaining: enabled && !answeredThisTurn
             ? Math.max(0, state.maxQuestions - state.askedCount)
             : 0,
         pending: enabled ? state.pending : null,
         lastResponse: state.lastResponse,
+        answeredThisTurn,
     };
 }
 

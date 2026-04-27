@@ -21,6 +21,7 @@ describe('RemoteCliAgentsSdkRunner', () => {
     expect(instructions).toContain('repo-map');
     expect(instructions).toContain('deploy-verify');
     expect(instructions).toContain('remote_code_status');
+    expect(instructions).toContain('persistent private workbench');
     expect(instructions).toContain('sess_123');
   });
 

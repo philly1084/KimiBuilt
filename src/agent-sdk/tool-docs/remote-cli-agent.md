@@ -37,8 +37,10 @@ remoteCliTargets:
 Behavior:
 - The bearer key is used only by backend Node.js code. Do not expose it to browser JavaScript.
 - The inner agent receives instructions to use `remote_code_run`, poll `remote_code_status` when jobs are still running, and reuse returned session IDs for continuation.
+- The backend stores returned `sessionId` and `mcpSessionId` in the conversation control state, so follow-up requests can continue the same remote workbench session.
 - Prefer `waitMs: 30000` for long coding tasks.
 - Pass `sessionId` when continuing a previous remote coding session.
 - Pass `mcpSessionId` when continuing a previous Streamable HTTP MCP session.
+- Frontends expose `/remote agent <task>` for handing a full coding, build, deploy, and verification loop to this tool.
 
 Use `remote-command` instead for quick non-interactive host inspection or small kubectl/log checks. Use `remote-cli-agent` when the remote code agent should own the coding loop.

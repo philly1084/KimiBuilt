@@ -692,13 +692,16 @@ class WebCLIAPI {
         };
     }
 
-    async getAvailableTools(category = null) {
+    async getAvailableTools(category = null, options = {}) {
         const params = new URLSearchParams();
         if (category) {
             params.set('category', category);
         }
         params.set('taskType', WEB_CLI_TASK_TYPE);
         params.set('clientSurface', WEB_CLI_CLIENT_SURFACE);
+        if (options.executionProfile) {
+            params.set('executionProfile', options.executionProfile);
+        }
         if (this.sessionId && !String(this.sessionId).startsWith('local_')) {
             params.set('sessionId', this.sessionId);
         }
@@ -709,7 +712,7 @@ class WebCLIAPI {
                 method: 'GET',
                 headers: { 'Accept': 'application/json' },
             },
-            10000
+            options.timeout || 10000
         );
 
         if (!response.ok) {
@@ -741,7 +744,7 @@ class WebCLIAPI {
         return data.data || null;
     }
 
-    async invokeTool(toolId, params = {}) {
+    async invokeTool(toolId, params = {}, options = {}) {
         await this.ensureSession({ title: 'Voxel Tool' });
 
         const response = await this.fetchWithTimeout(
@@ -756,9 +759,17 @@ class WebCLIAPI {
                     model: this.currentModel || null,
                     taskType: WEB_CLI_TASK_TYPE,
                     clientSurface: WEB_CLI_CLIENT_SURFACE,
+                    ...(options.executionProfile ? { executionProfile: options.executionProfile } : {}),
+                    metadata: {
+                        clientSurface: WEB_CLI_CLIENT_SURFACE,
+                        sessionIsolation: WEB_CLI_SESSION_ISOLATION,
+                        ...(options.metadata && typeof options.metadata === 'object'
+                            ? options.metadata
+                            : {}),
+                    },
                 }),
             },
-            120000
+            options.timeout || 120000
         );
 
         if (!response.ok) {

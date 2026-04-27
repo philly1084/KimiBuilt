@@ -538,6 +538,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         const userCheckpointPolicy = buildUserCheckpointPolicy({
             session: effectiveSession,
             clientSurface,
+            latestResponse: answeredCheckpointResult.response,
         });
         const sshContext = resolveSshRequestContext(message, effectiveSession);
         const effectiveMessage = sshContext.effectivePrompt || message;

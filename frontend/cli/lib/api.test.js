@@ -330,6 +330,63 @@ describe('OpenAIClient provider sessions', () => {
     );
   });
 
+  test('runRemoteCliAgent invokes the remote-cli-agent tool with remote-build metadata', async () => {
+    global.fetch.mockResolvedValue({
+      ok: true,
+      headers: {
+        get: jest.fn(() => 'application/json'),
+      },
+      json: jest.fn(async () => ({
+        success: true,
+        sessionId: 'backend-session-2',
+        data: {
+          finalOutput: 'deployed',
+          mcpSessionId: 'mcp-1',
+        },
+      })),
+    });
+
+    const client = new OpenAIClient();
+    await client.runRemoteCliAgent('Build a weather app', {
+      cwd: '/srv/apps/weather',
+      backendSessionId: 'backend-session-1',
+      executionProfile: 'remote-build',
+      model: 'gpt-5.4-mini',
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://localhost:8080/api/tools/invoke',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer config-front-key',
+        }),
+        body: JSON.stringify({
+          tool: 'remote-cli-agent',
+          params: {
+            task: 'Build a weather app',
+            waitMs: 30000,
+            maxTurns: 30,
+            cwd: '/srv/apps/weather',
+            model: 'gpt-5.4-mini',
+          },
+          sessionId: 'backend-session-1',
+          taskType: 'chat',
+          clientSurface: 'cli',
+          executionProfile: 'remote-build',
+          model: 'gpt-5.4-mini',
+          metadata: {
+            remoteBuildAutonomyApproved: true,
+            remoteCommandSource: 'cli',
+            clientSurface: 'cli',
+            requestedModel: 'gpt-5.4-mini',
+          },
+        }),
+      }),
+    );
+  });
+
   test('runK3sDeploy invokes k3s-deploy with action params', async () => {
     global.fetch.mockResolvedValue({
       ok: true,

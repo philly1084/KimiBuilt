@@ -4534,8 +4534,9 @@ class ChatApp {
             '2. `/remote tools` - choose a catalog command.',
             '3. `/remote <tool-id>` - run a catalog entry such as `baseline`, `kubectl-inspect`, `logs`, `rollout`, `build`, or `test`.',
             '4. `/remote run <command>` - execute one purposeful inspect, fix, or verify batch.',
-            '5. Continue normal build/test failures while the next step is still on plan.',
-            '6. Stop for sudo/package installs, secrets, destructive deletes, force push, repeated failures, missing credentials, or unclear recovery.',
+            '5. `/remote agent <task>` - hand a full coding/build/deploy loop to the backend remote CLI agent.',
+            '6. Continue normal build/test failures while the next step is still on plan.',
+            '7. Stop for sudo/package installs, secrets, destructive deletes, force push, repeated failures, missing credentials, or unclear recovery.',
             '',
             'Raw expert access: `/remote run hostname && whoami && uname -m`',
         ].join('\n');
@@ -4582,6 +4583,7 @@ curl -fsSIL --max-time 20 "https://$host"`;
             '',
             `- Remote runner: ${runner.healthy ? 'healthy' : 'not healthy'} (enabled=${runner.enabled ? 'yes' : 'no'}, preferred=${runner.preferred ? 'yes' : 'no'})`,
             `- Remote-command: ${remoteTool?.runtime?.configured ? 'configured' : 'not configured'} via ${remoteTool?.runtime?.source || 'unknown'}`,
+            `- Remote-cli-agent: ${remoteCatalog.tools?.find((tool) => tool.id === 'remote-cli-agent')?.runtime?.configured ? 'configured' : 'not configured'}`,
             `- Default target: ${remoteTool?.runtime?.defaultTarget || 'none'}`,
             `- SSH fallback: ${ssh.configured ? `${ssh.username || 'unknown'}@${ssh.host}:${ssh.port || 22}` : 'not configured'}`,
             `- Deploy defaults: namespace=${deploy.namespace || 'unset'}, deployment=${deploy.deployment || 'unset'}, domain=${deploy.publicDomain || 'unset'}`,
@@ -4639,6 +4641,35 @@ curl -fsSIL --max-time 20 "https://$host"`;
         return sections.join('\n');
     }
 
+    formatRemoteAgentResult(result = {}) {
+        const output = String(result.finalOutput || result.output || '').trim();
+        const metadata = [];
+        if (result.targetId) {
+            metadata.push(`Target: \`${result.targetId}\``);
+        }
+        if (result.cwd) {
+            metadata.push(`Workspace: \`${result.cwd}\``);
+        }
+        if (result.sessionId) {
+            metadata.push(`Remote session: \`${result.sessionId}\``);
+        }
+        if (result.mcpSessionId) {
+            metadata.push(`MCP session: \`${result.mcpSessionId}\``);
+        }
+        if (result.model) {
+            metadata.push(`Model: \`${result.model}\``);
+        }
+
+        return [
+            '## Remote CLI Agent Result',
+            '',
+            ...metadata.map((line) => `- ${line}`),
+            ...(output
+                ? ['', output]
+                : ['', '```json', JSON.stringify(result, null, 2), '```']),
+        ].join('\n');
+    }
+
     async handleRemoteCommand(argString = '') {
         if (!sessionManager.currentSessionId) {
             await this.createNewSession();
@@ -4685,6 +4716,20 @@ curl -fsSIL --max-time 20 "https://$host"`;
                         this.syncBackendSession(invocation.sessionId);
                     }
                     assistantContent = this.formatRemoteResult(this.unwrapRemoteResult(invocation));
+                } else if (subcommand === 'agent') {
+                    if (!rest) {
+                        throw new Error('Usage: /remote agent <coding/build/deploy task>');
+                    }
+                    const remoteAgent = remoteCatalog.tools?.find((tool) => tool.id === 'remote-cli-agent') || null;
+                    const invocation = await apiClient.invokeRemoteCliAgent(rest, {
+                        cwd: remoteAgent?.runtime?.defaultCwd || remoteCatalog.runtime?.remoteRunner?.defaultWorkspace || '',
+                        waitMs: 30000,
+                        maxTurns: 30,
+                    });
+                    if (invocation?.sessionId) {
+                        this.syncBackendSession(invocation.sessionId);
+                    }
+                    assistantContent = this.formatRemoteAgentResult(this.unwrapRemoteResult(invocation));
                 } else if (subcommand === 'verify') {
                     const command = this.buildRemoteHttpsVerifyCommand(rest);
                     const invocation = await apiClient.invokeRemoteCommand(command, {
@@ -4699,7 +4744,7 @@ curl -fsSIL --max-time 20 "https://$host"`;
                 } else {
                     const catalogEntry = this.resolveRemoteCatalogEntry(remoteCatalog.catalog, subcommand);
                     if (!catalogEntry) {
-                        throw new Error('Usage: /remote status | /remote tools | /remote plan | /remote <catalog-id> | /remote run <command> | /remote verify [host]');
+                        throw new Error('Usage: /remote status | /remote tools | /remote plan | /remote <catalog-id> | /remote run <command> | /remote agent <task> | /remote verify [host]');
                     }
                     const command = String(catalogEntry.command || '').trim();
                     if (!command) {

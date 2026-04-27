@@ -7980,6 +7980,68 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
+    test('continues explicit remote CLI agent work with prior remote sessions', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+        settingsController.getEffectiveOpencodeConfig.mockReturnValue({
+            enabled: true,
+            remoteDefaultWorkspace: '/srv/apps/kimibuilt',
+            allowedWorkspaceRoots: ['C:/Users/phill/KimiBuilt'],
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['remote-cli-agent', 'remote-command', 'web-search', 'tool-doc-read']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'use remote cli agent to finish deploying the weather app';
+        const session = {
+            metadata: {},
+            controlState: {
+                remoteCliAgent: {
+                    sessionId: 'remote-session-1',
+                    mcpSessionId: 'mcp-session-1',
+                },
+            },
+        };
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+            session,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            session,
+            toolPolicy,
+            toolContext: {
+                remoteWorkspacePath: '/srv/apps/weather',
+            },
+        });
+
+        expect(directAction.params).toEqual(expect.objectContaining({
+            sessionId: 'remote-session-1',
+            mcpSessionId: 'mcp-session-1',
+            cwd: '/srv/apps/weather',
+        }));
+    });
+
     test('keeps deploy-only workflow verification pinned to the configured ssh target when the prompt includes a registration email', () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,

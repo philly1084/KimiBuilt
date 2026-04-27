@@ -2252,6 +2252,11 @@ class UIHelpers {
         const steps = Array.isArray(survey.steps) ? survey.steps : [];
         const currentStepIndex = isAnswered ? 0 : this.getSurveyCurrentStepIndex(survey, surveyState);
         const currentStep = steps[currentStepIndex] || steps[0] || null;
+        const surveyTitle = String(survey.title || 'Choose a direction').trim() || 'Choose a direction';
+        const currentQuestion = String(currentStep?.question || survey.question || '').trim();
+        const showQuestion = !isAnswered
+            && currentQuestion
+            && currentQuestion.toLowerCase() !== surveyTitle.toLowerCase();
         const stepAnswer = currentStep
             ? this.getSurveyStepAnswer(surveyState, currentStep.id)
             : null;
@@ -2290,7 +2295,7 @@ class UIHelpers {
                 '>',
                 '<div class="agent-survey-card__eyebrow">Decision checkpoint</div>',
                 '<div class="agent-survey-card__title-row">',
-                `<h4 class="agent-survey-card__title">${this.escapeHtml(survey.title)}</h4>`,
+                `<h4 class="agent-survey-card__title">${this.escapeHtml(surveyTitle)}</h4>`,
                 '<span class="agent-survey-card__meta">Answered</span>',
                 '</div>',
                 preamble ? `<p class="agent-survey-card__preamble">${this.escapeHtml(preamble)}</p>` : '',
@@ -2317,7 +2322,7 @@ class UIHelpers {
             ` data-submitted="${isAnswered ? 'true' : 'false'}">`,
             '<div class="agent-survey-card__eyebrow">Decision checkpoint</div>',
             '<div class="agent-survey-card__title-row">',
-            `<h4 class="agent-survey-card__title">${this.escapeHtml(survey.title)}</h4>`,
+            `<h4 class="agent-survey-card__title">${this.escapeHtml(surveyTitle)}</h4>`,
             `<span class="agent-survey-card__meta">${this.escapeHtml(progressLabel)}</span>`,
             '</div>',
             steps.length > 1
@@ -2330,7 +2335,7 @@ class UIHelpers {
                 : '',
             preamble ? `<p class="agent-survey-card__preamble">${this.escapeHtml(preamble)}</p>` : '',
             (!isAnswered && currentStep?.title) ? `<p class="agent-survey-card__step-title">${this.escapeHtml(currentStep.title)}</p>` : '',
-            !isAnswered ? `<p class="agent-survey-card__question">${this.escapeHtml(currentStep?.question || survey.question)}</p>` : '',
+            showQuestion ? `<p class="agent-survey-card__question">${this.escapeHtml(currentQuestion)}</p>` : '',
             survey.whyThisMatters ? `<p class="agent-survey-card__context">${this.escapeHtml(survey.whyThisMatters)}</p>` : '',
             stepInputHtml,
             '<div class="agent-survey-card__footer">',

@@ -4230,6 +4230,10 @@ class ToolManager {
             const hasPendingCheckpoint = Boolean(policy?.pending?.id);
             const remainingQuestions = Number(policy?.remaining ?? 0);
 
+            if (policy?.answeredThisTurn === true) {
+              throw new Error('The latest user turn already answered a checkpoint. Continue from that answer instead of asking another checkpoint.');
+            }
+
             if (hasPendingCheckpoint) {
               throw new Error('A user checkpoint is already pending in this session.');
             }

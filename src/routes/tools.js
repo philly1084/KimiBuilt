@@ -604,8 +604,42 @@ async function resolveToolSessionId(requestedSessionId = null, ownerId = null, s
   return session.id;
 }
 
-async function updateSessionToolMetadata(sessionId, toolId, params = {}) {
+function unwrapToolResultPayload(result = {}) {
+  const envelope = result && typeof result === 'object' ? result : {};
+  return envelope.data || envelope.result || envelope;
+}
+
+async function updateSessionToolMetadata(sessionId, toolId, params = {}, result = {}) {
   if (!sessionId || !isRemoteCommandToolId(toolId)) {
+    return;
+  }
+
+  if (toolId === 'remote-cli-agent') {
+    const payload = unwrapToolResultPayload(result);
+    const task = String(params.task || params.prompt || params.message || '').trim();
+    const remoteCliPatch = {
+      lastTask: task || null,
+      lastTaskAt: new Date().toISOString(),
+      ...(payload?.sessionId ? { sessionId: payload.sessionId } : {}),
+      ...(payload?.mcpSessionId ? { mcpSessionId: payload.mcpSessionId } : {}),
+      ...(payload?.targetId ? { targetId: payload.targetId } : {}),
+      ...(payload?.cwd || params.cwd ? { cwd: payload?.cwd || params.cwd } : {}),
+      ...(payload?.model ? { model: payload.model } : {}),
+    };
+    const controlPatch = {
+      lastToolIntent: 'remote-cli-agent',
+      remoteCliAgent: remoteCliPatch,
+    };
+
+    if (sessionStore.updateControlState) {
+      await sessionStore.updateControlState(sessionId, controlPatch);
+    }
+
+    await sessionStore.update(sessionId, {
+      metadata: {
+        ...controlPatch,
+      },
+    });
     return;
   }
 
@@ -656,9 +690,38 @@ async function updateSessionToolFailureMetadata(sessionId, toolId, params = {}, 
     return;
   }
 
-  const command = String(params.command || '').trim();
   const workflowAction = String(params.workflowAction || params.workflow_action || '').trim();
   const message = String(error?.message || error || 'Tool invocation failed').trim();
+
+  if (toolId === 'remote-cli-agent') {
+    const task = String(params.task || params.prompt || params.message || '').trim();
+    const remoteCliPatch = {
+      lastTask: task || null,
+      lastTaskAt: new Date().toISOString(),
+      lastFailure: {
+        task,
+        reason: message,
+        failedAt: new Date().toISOString(),
+      },
+    };
+    const controlPatch = {
+      lastToolIntent: 'remote-cli-agent',
+      remoteCliAgent: remoteCliPatch,
+    };
+
+    if (sessionStore.updateControlState) {
+      await sessionStore.updateControlState(sessionId, controlPatch);
+    }
+
+    await sessionStore.update(sessionId, {
+      metadata: {
+        ...controlPatch,
+      },
+    });
+    return;
+  }
+
+  const command = String(params.command || '').trim();
   const remoteCliPatch = {
     lastCommand: command || null,
     lastCommandAt: new Date().toISOString(),
@@ -916,7 +979,7 @@ router.post('/invoke', async (req, res) => {
       params,
       buildToolExecutionContext(toolManager, req, resolvedSessionId, resolvedSession),
     );
-    await updateSessionToolMetadata(resolvedSessionId, toolId, params);
+    await updateSessionToolMetadata(resolvedSessionId, toolId, params, result);
     
     res.json({ success: true, data: result, sessionId: resolvedSessionId });
   } catch (error) {
@@ -956,7 +1019,7 @@ router.post('/invoke/:id', async (req, res) => {
       params,
       buildToolExecutionContext(toolManager, req, resolvedSessionId, resolvedSession),
     );
-    await updateSessionToolMetadata(resolvedSessionId, id, params);
+    await updateSessionToolMetadata(resolvedSessionId, id, params, result);
     
     res.json({ success: true, data: result, sessionId: resolvedSessionId });
   } catch (error) {

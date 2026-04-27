@@ -718,6 +718,32 @@ class OpenAIClient {
     });
   }
 
+  async runRemoteCliAgent(task, options = {}) {
+    return this.invokeTool('remote-cli-agent', {
+      task,
+      waitMs: options.waitMs || 30000,
+      maxTurns: options.maxTurns || 30,
+      ...(options.cwd || options.workingDirectory ? { cwd: options.cwd || options.workingDirectory } : {}),
+      ...(options.targetId ? { targetId: options.targetId } : {}),
+      ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+      ...(options.mcpSessionId ? { mcpSessionId: options.mcpSessionId } : {}),
+      ...(options.model ? { model: options.model } : {}),
+      ...(options.instructions ? { instructions: options.instructions } : {}),
+    }, {
+      sessionId: options.backendSessionId,
+      taskType: options.taskType || CLI_TASK_TYPE,
+      clientSurface: options.clientSurface || CLI_CLIENT_SURFACE,
+      executionProfile: options.executionProfile || 'remote-build',
+      model: options.model,
+      timeout: options.timeout || 900000,
+      metadata: {
+        remoteBuildAutonomyApproved: true,
+        remoteCommandSource: options.clientSurface || CLI_CLIENT_SURFACE,
+        ...(options.metadata || {}),
+      },
+    });
+  }
+
   async runK3sDeploy(params = {}, options = {}) {
     return this.invokeTool('k3s-deploy', params, {
       sessionId: options.sessionId,
@@ -1176,6 +1202,7 @@ module.exports = {
   getToolDetails: (toolId, options) => client.getToolDetails(toolId, options),
   invokeTool: (toolId, params, options) => client.invokeTool(toolId, params, options),
   runRemoteCommand: (command, options) => client.runRemoteCommand(command, options),
+  runRemoteCliAgent: (task, options) => client.runRemoteCliAgent(task, options),
   runK3sDeploy: (params, options) => client.runK3sDeploy(params, options),
   uploadArtifact,
   listArtifacts,

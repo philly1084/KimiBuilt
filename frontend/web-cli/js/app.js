@@ -1879,7 +1879,9 @@ Examples:
     }
 
     async loadRemoteToolCatalog() {
-        const response = await api.getAvailableTools('ssh');
+        const response = await api.getAvailableTools('ssh', {
+            executionProfile: 'remote-build',
+        });
         const tools = response?.tools || [];
         const remoteTool = tools.find((tool) => tool.id === 'remote-command')
             || tools.find((tool) => Array.isArray(tool.runtime?.commandCatalog));
@@ -1897,8 +1899,9 @@ Examples:
 1. \`/remote status\` - confirm remote runner health and fallback target.
 2. \`/remote tools\` - choose a catalog command: baseline, repo-inspect, file-search, build, test, docker-buildkit, kubectl-inspect, logs, rollout, or https-verify.
 3. \`/remote run <command>\` - execute one purposeful inspect, fix, or verify batch.
-4. Continue normal build/test failures while the next step is still on plan.
-5. Stop and report on privilege boundaries, secrets, destructive deletes, force push, repeated failures, missing credentials, or unclear recovery.
+4. \`/remote agent <task>\` - hand a full coding/build/deploy loop to the backend remote CLI agent.
+5. Continue normal build/test failures while the next step is still on plan.
+6. Stop and report on privilege boundaries, secrets, destructive deletes, force push, repeated failures, missing credentials, or unclear recovery.
 
 Raw expert access remains available:
 \`\`\`text
@@ -1920,13 +1923,14 @@ Raw expert access remains available:
         if (subcommand === 'status') {
             this.setStatus('thinking');
             try {
-                const { runtime, remoteTool } = await this.loadRemoteToolCatalog();
+                const { runtime, remoteTool, tools } = await this.loadRemoteToolCatalog();
                 const runner = runtime?.remoteRunner || {};
                 const ssh = runtime?.sshDefaults || {};
                 const deploy = runtime?.deployDefaults || {};
                 const lines = ['## Remote CLI Status', ''];
                 lines.push(`Remote runner: \`${runner.healthy ? 'healthy' : 'not healthy'}\` (enabled=${runner.enabled ? 'yes' : 'no'}, preferred=${runner.preferred ? 'yes' : 'no'})`);
                 lines.push(`Remote-command: \`${remoteTool?.runtime?.configured ? 'configured' : 'not configured'}\` via \`${remoteTool?.runtime?.source || 'unknown'}\``);
+                lines.push(`Remote-cli-agent: \`${tools.find((tool) => tool.id === 'remote-cli-agent')?.runtime?.configured ? 'configured' : 'not configured'}\``);
                 lines.push(`Default target: \`${remoteTool?.runtime?.defaultTarget || 'none'}\``);
                 lines.push(`SSH fallback: \`${ssh.configured ? `${ssh.username || 'unknown'}@${ssh.host}:${ssh.port || 22}` : 'not configured'}\``);
                 lines.push(`Deploy defaults: namespace=\`${deploy.namespace || 'unset'}\`, deployment=\`${deploy.deployment || 'unset'}\`, domain=\`${deploy.publicDomain || 'unset'}\``);
@@ -1992,6 +1996,45 @@ Raw expert access remains available:
             return;
         }
 
+        if (subcommand === 'agent') {
+            if (!rest) {
+                this.printError('Usage: /remote agent <coding/build/deploy task>');
+                return;
+            }
+            this.setStatus('thinking');
+            this.recordVoxelToolUse('tool');
+            try {
+                const { runtime, tools } = await this.loadRemoteToolCatalog();
+                const remoteAgent = tools.find((tool) => tool.id === 'remote-cli-agent') || null;
+                const invocation = await api.invokeTool('remote-cli-agent', {
+                    task: rest,
+                    cwd: remoteAgent?.runtime?.defaultCwd || runtime?.remoteRunner?.defaultWorkspace || '',
+                    waitMs: 30000,
+                    maxTurns: 30,
+                }, {
+                    executionProfile: 'remote-build',
+                    timeout: 900000,
+                    metadata: {
+                        remoteBuildAutonomyApproved: true,
+                        remoteCommandSource: 'web-cli',
+                    },
+                });
+                const result = invocation?.result?.data || invocation?.result?.result || invocation?.result || {};
+                const lines = ['## Remote CLI Agent Result', ''];
+                if (result.targetId) lines.push(`Target: \`${result.targetId}\``);
+                if (result.cwd) lines.push(`Workspace: \`${result.cwd}\``);
+                if (result.sessionId) lines.push(`Remote session: \`${result.sessionId}\``);
+                if (result.mcpSessionId) lines.push(`MCP session: \`${result.mcpSessionId}\``);
+                lines.push('', result.finalOutput || result.output || 'Remote CLI agent completed.');
+                this.printAI(lines.join('\n'));
+            } catch (error) {
+                this.printError(`Remote agent failed: ${error.message}`);
+            } finally {
+                this.setStatus('ready');
+            }
+            return;
+        }
+
         if (subcommand === 'verify') {
             const host = rest || 'demoserver2.buzz';
             if (!/^[a-z0-9.-]+(?::[0-9]{1,5})?$/i.test(host)) {
@@ -2017,7 +2060,7 @@ Raw expert access remains available:
             return;
         }
 
-        this.printError('Usage: /remote status | /remote tools | /remote plan | /remote run <command> | /remote verify [host]');
+        this.printError('Usage: /remote status | /remote tools | /remote plan | /remote run <command> | /remote agent <task> | /remote verify [host]');
     }
 
     async listTools(category = null) {

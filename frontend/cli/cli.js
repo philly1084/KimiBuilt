@@ -172,7 +172,7 @@ function printHelp() {
     ['/providers', 'List session-capable backend CLI providers'],
     ['/attach <provider> [cwd]', 'Attach to codex-cli, gemini-cli, or kimi-cli'],
     ['/provider-status', 'Show the active backend CLI session'],
-    ['/remote <cmd>', 'Remote CLI status, tools, plan, run, or verify'],
+    ['/remote <cmd>', 'Remote CLI status, tools, plan, run, agent, or verify'],
     ['/theme <name>', 'Set theme (default|minimal|colorful|dark)'],
     ['/export <file>', 'Export current session to file'],
     ['/import <file>', 'Import session from file'],
@@ -1500,11 +1500,13 @@ async function loadRemoteToolCatalog() {
   const tools = response.data || [];
   const remoteTool = tools.find((tool) => tool.id === 'remote-command')
     || tools.find((tool) => Array.isArray(tool.runtime?.commandCatalog));
+  const remoteAgentTool = tools.find((tool) => tool.id === 'remote-cli-agent') || null;
 
   return {
     tools,
     runtime: response.meta?.runtime || null,
     remoteTool,
+    remoteAgentTool,
     catalog: remoteTool?.runtime?.commandCatalog || [],
   };
 }
@@ -1542,8 +1544,9 @@ function printRemotePlan() {
   console.log(chalk.gray('  2. /remote tools - choose a catalog command.'));
   console.log(chalk.gray('  3. /remote <tool-id> - run a catalog entry such as baseline, kubectl-inspect, logs, rollout, build, or test.'));
   console.log(chalk.gray('  4. /remote run <command> - execute one purposeful inspect, fix, or verify batch.'));
-  console.log(chalk.gray('  5. Continue normal build/test failures while the next step is still on plan.'));
-  console.log(chalk.gray('  6. Stop for sudo/package installs, secrets, destructive deletes, force push, repeated failures, missing credentials, or unclear recovery.\n'));
+  console.log(chalk.gray('  5. /remote agent <task> - hand a full coding/build/deploy loop to the backend remote CLI agent.'));
+  console.log(chalk.gray('  6. Continue normal build/test failures while the next step is still on plan.'));
+  console.log(chalk.gray('  7. Stop for sudo/package installs, secrets, destructive deletes, force push, repeated failures, missing credentials, or unclear recovery.\n'));
   console.log(chalk.gray('Raw expert access: /remote run hostname && whoami && uname -m\n'));
 }
 
@@ -1574,6 +1577,34 @@ function printRemoteResult(result = {}) {
   console.log('');
 }
 
+function printRemoteAgentResult(result = {}) {
+  const output = String(result.finalOutput || result.output || '').trim();
+
+  console.log(chalk.cyan.bold('\nRemote CLI Agent Result'));
+  if (result.targetId) {
+    console.log(chalk.gray(`Target: ${result.targetId}`));
+  }
+  if (result.cwd) {
+    console.log(chalk.gray(`Workspace: ${result.cwd}`));
+  }
+  if (result.sessionId) {
+    console.log(chalk.gray(`Remote session: ${result.sessionId}`));
+  }
+  if (result.mcpSessionId) {
+    console.log(chalk.gray(`MCP session: ${result.mcpSessionId}`));
+  }
+  if (result.model) {
+    console.log(chalk.gray(`Model: ${result.model}`));
+  }
+  if (output) {
+    console.log('');
+    console.log(output);
+  } else {
+    console.log(JSON.stringify(result, null, 2));
+  }
+  console.log('');
+}
+
 async function invokeRemoteCommand(command, options = {}) {
   const response = await api.runRemoteCommand(command, {
     profile: options.profile || 'build',
@@ -1583,6 +1614,27 @@ async function invokeRemoteCommand(command, options = {}) {
     environment: options.environment,
     approval: options.approval,
     sessionId: currentSessionId,
+    taskType: 'chat',
+    clientSurface: 'cli',
+    executionProfile: REMOTE_BUILD_EXECUTION_PROFILE,
+    model: currentModel || null,
+  });
+
+  if (response.sessionId) {
+    currentSessionId = response.sessionId;
+    session.setCurrent(currentSessionId);
+  }
+
+  const envelope = response.data || {};
+  return envelope.data || envelope.result || envelope;
+}
+
+async function invokeRemoteCliAgent(task, options = {}) {
+  const response = await api.runRemoteCliAgent(task, {
+    backendSessionId: currentSessionId,
+    cwd: options.cwd || getWorkbenchCwd(),
+    waitMs: options.waitMs || 30000,
+    maxTurns: options.maxTurns || 30,
     taskType: 'chat',
     clientSurface: 'cli',
     executionProfile: REMOTE_BUILD_EXECUTION_PROFILE,
@@ -1784,7 +1836,7 @@ async function handleRemote(argString = '') {
   const spinner = ora(`Remote ${subcommand}...`).start();
   try {
     if (subcommand === 'status') {
-      const { runtime, remoteTool } = await loadRemoteToolCatalog();
+      const { runtime, remoteTool, remoteAgentTool } = await loadRemoteToolCatalog();
       spinner.stop();
       const runner = runtime?.remoteRunner || {};
       const ssh = runtime?.sshDefaults || {};
@@ -1792,6 +1844,7 @@ async function handleRemote(argString = '') {
       console.log(chalk.cyan.bold('\nRemote CLI Status'));
       console.log(chalk.gray(`Remote runner: ${runner.healthy ? 'healthy' : 'not healthy'} (enabled=${runner.enabled ? 'yes' : 'no'}, preferred=${runner.preferred ? 'yes' : 'no'})`));
       console.log(chalk.gray(`Remote-command: ${remoteTool?.runtime?.configured ? 'configured' : 'not configured'} via ${remoteTool?.runtime?.source || 'unknown'}`));
+      console.log(chalk.gray(`Remote-cli-agent: ${remoteAgentTool?.runtime?.configured ? 'configured' : 'not configured'}${remoteAgentTool?.runtime?.defaultTargetId ? ` target=${remoteAgentTool.runtime.defaultTargetId}` : ''}`));
       console.log(chalk.gray(`Default target: ${remoteTool?.runtime?.defaultTarget || 'none'}`));
       console.log(chalk.gray(`SSH fallback: ${ssh.configured ? `${ssh.username || 'unknown'}@${ssh.host}:${ssh.port || 22}` : 'not configured'}`));
       console.log(chalk.gray(`Deploy defaults: namespace=${deploy.namespace || 'unset'}, deployment=${deploy.deployment || 'unset'}, domain=${deploy.publicDomain || 'unset'}\n`));
@@ -1847,6 +1900,21 @@ async function handleRemote(argString = '') {
       return;
     }
 
+    if (subcommand === 'agent') {
+      if (!rest) {
+        spinner.fail('Usage: /remote agent <coding/build/deploy task>');
+        return;
+      }
+      const result = await invokeRemoteCliAgent(rest, {
+        cwd: getWorkbenchCwd(),
+        waitMs: 30000,
+        maxTurns: 30,
+      });
+      spinner.stop();
+      printRemoteAgentResult(result);
+      return;
+    }
+
     if (subcommand === 'verify') {
       const result = await invokeRemoteCommand(buildHttpsVerifyCommand(rest), {
         profile: 'inspect',
@@ -1858,7 +1926,7 @@ async function handleRemote(argString = '') {
       return;
     }
 
-    spinner.fail('Usage: /remote status | /remote tools | /remote plan | /remote <catalog-id> | /remote run <command> | /remote verify [host]');
+    spinner.fail('Usage: /remote status | /remote tools | /remote plan | /remote <catalog-id> | /remote run <command> | /remote agent <task> | /remote verify [host]');
   } catch (err) {
     spinner.fail(chalk.red(`Remote ${subcommand} failed: ${err.message}`));
   }
@@ -2159,6 +2227,7 @@ Remote CLI Commands:
   /remote plan                  Show the remote CLI build loop
   /remote baseline              Run a catalog command by ID
   /remote run <command>         Execute a curated remote-command call
+  /remote agent <task>          Delegate a coding/build/deploy loop to the remote CLI agent
   /remote verify [host]         Verify DNS and HTTPS from the remote host
 
 Examples:

@@ -329,6 +329,16 @@ describe('/api/chat user checkpoints', () => {
                     userCheckpointPolicy: expect.objectContaining({
                         enabled: true,
                         pending: null,
+                        remaining: 0,
+                        answeredThisTurn: true,
+                    }),
+                }),
+                metadata: expect.objectContaining({
+                    userCheckpointPolicy: expect.objectContaining({
+                        enabled: true,
+                        pending: null,
+                        remaining: 0,
+                        answeredThisTurn: true,
                     }),
                 }),
             }),

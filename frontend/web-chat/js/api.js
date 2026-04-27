@@ -2104,6 +2104,29 @@ class OpenAIAPIClient extends EventTarget {
         });
     }
 
+    async invokeRemoteCliAgent(task, options = {}) {
+        const normalizedTask = String(task || '').trim();
+        if (!normalizedTask) {
+            throw new Error('Remote agent task is required.');
+        }
+
+        return this.invokeTool('remote-cli-agent', {
+            task: normalizedTask,
+            waitMs: options.waitMs || 30000,
+            maxTurns: options.maxTurns || 30,
+            ...(options.cwd ? { cwd: options.cwd } : {}),
+            ...(options.targetId ? { targetId: options.targetId } : {}),
+            ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+            ...(options.mcpSessionId ? { mcpSessionId: options.mcpSessionId } : {}),
+        }, {
+            executionProfile: 'remote-build',
+            metadata: {
+                remoteBuildAutonomyApproved: true,
+                remoteCommandSource: 'web-chat',
+            },
+        });
+    }
+
     async getSessionWorkloads(sessionId) {
         const response = await fetch(`${BASE_URL_WITHOUT_API}/api/sessions/${encodeURIComponent(sessionId)}/workloads`, {
             method: 'GET',

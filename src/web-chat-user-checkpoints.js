@@ -36,6 +36,7 @@ function buildUserCheckpointPolicyMetadata(policy = {}) {
                 question: String(normalizedPolicy.pending.question || '').trim(),
             }
             : null,
+        answeredThisTurn: normalizedPolicy.answeredThisTurn === true,
     };
 }
 
