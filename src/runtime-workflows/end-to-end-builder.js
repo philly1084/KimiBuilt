@@ -127,12 +127,25 @@ function hasRepoImplementationIntent(text = '') {
         return false;
     }
 
+    if (hasExplicitRemoteCliAgentIntent(normalized)) {
+        return false;
+    }
+
     const repoContext = /\b(repo|repository|code|codebase|workspace|project|app|application|frontend|backend|service|component|site|website|web app|web page|webpage|dashboard|visualization|visualisation|viewer|map|globe|world|ui)\b/.test(normalized)
         || /\b(remote|server|host)\b[\s\S]{0,40}\b(cli tool|remote cli|assisted cli|coding agent|code agent)\b/.test(normalized)
         || /\b(cli tool|remote cli|assisted cli|coding agent|code agent)\b[\s\S]{0,40}\b(remote|server|host)\b/.test(normalized);
     const changeIntent = /\b(fix|implement|build|create|generate|make|update|change|refactor|add|remove|edit|patch|write|test|compile|ship)\b/.test(normalized);
 
     return repoContext && changeIntent;
+}
+
+function hasExplicitRemoteCliAgentIntent(text = '') {
+    const normalized = normalizeText(text).toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(remote cli agent|remote coding agent|remote code run|remote_code_run|agents sdk remote cli)\b/.test(normalized);
 }
 
 function hasGitSaveIntent(text = '') {
@@ -187,6 +200,10 @@ function inferWorkflowLane(objective = '') {
     }
 
     if (hasDiscoveryPlanningIntent(normalized)) {
+        return null;
+    }
+
+    if (hasExplicitRemoteCliAgentIntent(normalized)) {
         return null;
     }
 

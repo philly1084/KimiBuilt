@@ -82,6 +82,21 @@ describe('end-to-end builder workflow', () => {
         }));
     });
 
+    test('does not claim explicit remote CLI agent authoring requests', () => {
+        const workflow = inferEndToEndBuilderWorkflow({
+            objective: 'can you use remote cli agent to build a weather app on the server. use weather.demoserver2.buzz for the dns and build the ingress and tls.',
+            workspacePath: '/workspace/app',
+            repositoryPath: '/workspace/app',
+            remoteTarget: {
+                host: '10.0.0.5',
+                username: 'ubuntu',
+                port: 22,
+            },
+        });
+
+        expect(workflow).toBeNull();
+    });
+
     test('classifies remote CLI dashboard create-and-deploy requests into a repo-then-deploy lane', () => {
         const workflow = inferEndToEndBuilderWorkflow({
             objective: 'Can you make a dashboard on the remote server with the cli tool and have it take live data on satellite locations and overlay it on a 3d world, then deploy it with k3s routing for world.demoserver2.buzz.',
