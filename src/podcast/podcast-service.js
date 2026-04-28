@@ -47,7 +47,6 @@ const PODCAST_HIGH_QUALITY_VOICE_IDS = Object.freeze([
   'ljspeech-high',
   'ryan-high',
   'cori-high',
-  'amy-broadcast',
 ]);
 const DEFAULT_MAX_VOICE_FALLBACK_ATTEMPTS = 2;
 const MAX_PODCAST_TTS_SPLIT_DEPTH = 3;
@@ -431,8 +430,11 @@ function shouldUsePodcastMusicBed(params = {}, audioProcessingConfig = null) {
     return false;
   }
 
-  return Boolean(String(params.musicBedPath || '').trim())
-    || audioProcessingConfig?.defaults?.musicBedPathConfigured === true;
+  return params.includeMusicBed === true
+    && (
+      Boolean(String(params.musicBedPath || '').trim())
+      || audioProcessingConfig?.defaults?.musicBedPathConfigured === true
+    );
 }
 
 function uniqueUrls(items = []) {
@@ -1278,7 +1280,7 @@ class PodcastService {
         ? synthesis.audioBuffer
         : normalizeWavBufferFormat(synthesis.audioBuffer, outputFormat);
 
-      wavBuffers.push(applyWavEdgeFade(normalizedAudioBuffer, 8));
+      wavBuffers.push(applyWavEdgeFade(normalizedAudioBuffer, 18));
       wavBuffers.push(createSilenceWavBuffer(outputFormat, silenceMs));
     }
 
@@ -1358,7 +1360,7 @@ class PodcastService {
     const wantsMixing = requestedMixing(params) || useMusicBed;
     const wantsEnhancement = params.enhanceSpeech === false
       ? false
-      : audioProcessingConfig?.configured === true && (wantsMp3 || wantsMixing || params.includeVideo === true);
+      : audioProcessingConfig?.configured === true && params.enhanceSpeech === true;
 
     // Validate TTS compatibility before starting the full run.
     script.turns.forEach((turn) => {
