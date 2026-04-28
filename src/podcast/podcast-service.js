@@ -44,17 +44,10 @@ const MAX_PODCAST_RESEARCH_CONCURRENCY = 12;
 const MAX_PODCAST_TTS_CONCURRENCY = 24;
 const PODCAST_HIGH_QUALITY_VOICE_IDS = Object.freeze([
   'lessac-high',
-  'lessac-bright',
   'ljspeech-high',
   'ryan-high',
-  'ryan-direct',
   'cori-high',
-  'hfc-female-rich',
-  'hfc-female-medium',
-  'kathleen-low',
-  'amy-expressive',
   'amy-broadcast',
-  'amy-medium',
 ]);
 const DEFAULT_MAX_VOICE_FALLBACK_ATTEMPTS = 2;
 const MAX_PODCAST_TTS_SPLIT_DEPTH = 3;
@@ -64,35 +57,35 @@ const DEFAULT_HOST_ROSTER = Object.freeze([
     name: 'Maya',
     role: 'Lead host',
     persona: 'Warm, curious, and good at guiding the listener through the big picture.',
-    preferredVoiceIds: ['lessac-high', 'lessac-bright', 'ljspeech-high', 'hfc-female-rich'],
+    preferredVoiceIds: ['lessac-high', 'ljspeech-high', 'amy-broadcast'],
   },
   {
     key: 'hostB',
     name: 'Ryan',
     role: 'Co-host',
     persona: 'Grounded, calm, and precise when unpacking details, tradeoffs, and practical consequences.',
-    preferredVoiceIds: ['ryan-high', 'ryan-direct', 'cori-high'],
+    preferredVoiceIds: ['ryan-high', 'cori-high', 'ljspeech-high'],
   },
   {
     key: 'hostC',
     name: 'June',
     role: 'Co-host',
     persona: 'Sharper, more analytical, and slightly playful when unpacking details and tradeoffs.',
-    preferredVoiceIds: ['cori-high', 'lessac-bright', 'amy-broadcast'],
+    preferredVoiceIds: ['cori-high', 'amy-broadcast', 'lessac-high'],
   },
   {
     key: 'hostD',
     name: 'Elliot',
     role: 'Lead host',
     persona: 'Measured, thoughtful, and good at turning technical material into clear narrative beats.',
-    preferredVoiceIds: ['ryan-direct', 'ryan-high', 'ljspeech-high'],
+    preferredVoiceIds: ['ryan-high', 'ljspeech-high', 'cori-high'],
   },
   {
     key: 'hostE',
     name: 'Nora',
     role: 'Lead host',
     persona: 'Polished, editorial, and relaxed, with an emphasis on listener trust and clean pacing.',
-    preferredVoiceIds: ['ljspeech-high', 'lessac-high', 'kathleen-low'],
+    preferredVoiceIds: ['ljspeech-high', 'lessac-high', 'amy-broadcast'],
   },
   {
     key: 'hostF',
@@ -108,14 +101,14 @@ const LEGACY_DEFAULT_HOSTS = Object.freeze([
     name: 'Maya',
     role: 'Lead host',
     persona: 'Warm, curious, and good at guiding the listener through the big picture.',
-    preferredVoiceIds: ['lessac-high', 'lessac-bright', 'ljspeech-high', 'hfc-female-rich'],
+    preferredVoiceIds: ['lessac-high', 'ljspeech-high', 'amy-broadcast'],
   },
   {
     key: 'hostB',
     name: 'June',
     role: 'Co-host',
     persona: 'Sharper, more analytical, and slightly playful when unpacking details and tradeoffs.',
-    preferredVoiceIds: ['cori-high', 'lessac-bright', 'amy-broadcast'],
+    preferredVoiceIds: ['cori-high', 'amy-broadcast', 'ryan-high'],
   },
 ]);
 
@@ -431,6 +424,17 @@ function requestedMixing(params = {}) {
     || Boolean(String(params.introPath || '').trim())
     || Boolean(String(params.outroPath || '').trim())
     || Boolean(String(params.musicBedPath || '').trim());
+}
+
+function shouldUsePodcastMusicBed(params = {}, audioProcessingConfig = null) {
+  if (params.includeMusicBed === false) {
+    return false;
+  }
+
+  return params.includeMusicBed === true
+    || params.includeVideo === true
+    || Boolean(String(params.musicBedPath || '').trim())
+    || audioProcessingConfig?.defaults?.musicBedPathConfigured === true;
 }
 
 function uniqueUrls(items = []) {
@@ -1351,9 +1355,12 @@ class PodcastService {
     });
     const transcript = buildTranscript(script.turns);
     const wantsMp3 = prefersMp3(params);
-    const wantsMixing = requestedMixing(params);
     const audioProcessingConfig = this.audioProcessingService?.getPublicConfig?.() || null;
-    const wantsEnhancement = params.enhanceSpeech === true && audioProcessingConfig?.configured === true;
+    const useMusicBed = shouldUsePodcastMusicBed(params, audioProcessingConfig);
+    const wantsMixing = requestedMixing(params) || useMusicBed;
+    const wantsEnhancement = params.enhanceSpeech === false
+      ? false
+      : audioProcessingConfig?.configured === true && (wantsMp3 || wantsMixing || params.includeVideo === true);
 
     // Validate TTS compatibility before starting the full run.
     script.turns.forEach((turn) => {
@@ -1380,7 +1387,7 @@ class PodcastService {
           speechWavBuffer,
           includeIntro: params.includeIntro === true,
           includeOutro: params.includeOutro === true,
-          includeMusicBed: params.includeMusicBed === true || params.includeVideo === true,
+          includeMusicBed: useMusicBed,
           enhanceSpeech: wantsEnhancement,
           introPath: params.introPath || '',
           outroPath: params.outroPath || '',
@@ -1436,6 +1443,7 @@ class PodcastService {
         processing: {
           mixed: wantsMixing,
           enhanced: wantsEnhancement,
+          musicBedApplied: useMusicBed,
           mp3Exported: wantsMp3,
           allowVoiceFallback,
           scriptRequestTimeoutMs: podcastScriptRequestTimeoutMs,
@@ -1504,6 +1512,7 @@ class PodcastService {
           processing: {
             mixed: wantsMixing,
             enhanced: wantsEnhancement,
+            musicBedApplied: useMusicBed,
             mp3Exported: true,
             allowVoiceFallback,
             researchConcurrency: podcastResearchConcurrency,
@@ -1546,6 +1555,7 @@ class PodcastService {
       processing: {
         mixed: wantsMixing,
         enhanced: wantsEnhancement,
+        musicBedApplied: useMusicBed,
         mp3Exported: wantsMp3,
         allowVoiceFallback,
         researchConcurrency: podcastResearchConcurrency,

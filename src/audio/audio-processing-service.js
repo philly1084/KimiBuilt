@@ -179,9 +179,11 @@ class AudioProcessingService {
       : -1.5;
 
     return [
-      'highpass=f=55',
-      'lowpass=f=14000',
+      'highpass=f=70',
+      'lowpass=f=11500',
+      'afftdn=nf=-25',
       `loudnorm=I=${targetLufs}:TP=${truePeakDb}:LRA=7`,
+      'alimiter=limit=0.95',
     ].join(',');
   }
 
@@ -346,7 +348,7 @@ class AudioProcessingService {
       : (Number(this.audioProcessingConfig.podcastOutroVolume) || 1);
     const bedLevel = Number.isFinite(Number(musicVolume))
       ? Number(musicVolume)
-      : (Number(this.audioProcessingConfig.podcastMusicVolume) || 0.22);
+      : (Number(this.audioProcessingConfig.podcastMusicVolume) || 0.12);
     const resolvedIntroPath = (includeIntro || Boolean(String(introPath || '').trim()))
       ? this.resolveAssetPath(introPath, this.audioProcessingConfig.podcastIntroPath, 'Podcast intro audio')
       : '';

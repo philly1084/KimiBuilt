@@ -46,6 +46,7 @@ jest.mock('../audio/audio-processing-service', () => ({
       supportsMixing: true,
       defaults: {
         masteringEnabled: true,
+        musicBedPathConfigured: false,
         mp3BitrateKbps: 192,
       },
       diagnostics: {
@@ -395,7 +396,7 @@ describe('PodcastService', () => {
     expect(audioProcessingService.composePodcastAudio).toHaveBeenCalledWith(expect.objectContaining({
       includeIntro: true,
       includeMusicBed: true,
-      enhanceSpeech: false,
+      enhanceSpeech: true,
       musicBedPath: 'C:\\audio\\bed.wav',
     }));
     expect(audioProcessingService.transcodeWavToMp3).toHaveBeenCalled();
@@ -409,7 +410,55 @@ describe('PodcastService', () => {
     expect(result.audioVariants).toHaveLength(2);
     expect(result.processing.mp3Exported).toBe(true);
     expect(result.processing.mixed).toBe(true);
-    expect(result.processing.enhanced).toBe(false);
+    expect(result.processing.enhanced).toBe(true);
+  });
+
+  test('uses configured admin music bed automatically at podcast generation time', async () => {
+    audioProcessingService.getPublicConfig.mockReturnValue({
+      configured: true,
+      provider: 'ffmpeg',
+      supportsMp3: true,
+      supportsMixing: true,
+      defaults: {
+        masteringEnabled: true,
+        musicBedPathConfigured: true,
+        mp3BitrateKbps: 192,
+      },
+      diagnostics: {
+        status: 'ready',
+      },
+    });
+    persistGeneratedAudio.mockResolvedValueOnce({
+      artifact: { id: 'artifact-podcast-wav', filename: 'battery-breakdown.wav' },
+      artifactIds: ['artifact-podcast-wav'],
+      audio: { artifactId: 'artifact-podcast-wav', downloadUrl: '/api/artifacts/artifact-podcast-wav/download' },
+    });
+
+    const service = new PodcastService();
+    const executeTool = jest.fn(async (toolId) => {
+      if (toolId === 'web-search') {
+        return { success: true, data: { results: [{ title: 'A', url: 'https://example.com/a', snippet: 'A' }] } };
+      }
+      if (toolId === 'web-fetch') {
+        return { success: true, data: { headers: { 'content-type': 'text/html' }, body: '<p>Battery systems store energy.</p>' } };
+      }
+      throw new Error(`Unexpected tool: ${toolId}`);
+    });
+
+    const result = await service.createPodcast({
+      topic: 'How grid batteries work',
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+      toolManager: { executeTool },
+    });
+
+    expect(audioProcessingService.composePodcastAudio).toHaveBeenCalledWith(expect.objectContaining({
+      includeMusicBed: true,
+      musicBedPath: '',
+      musicVolume: undefined,
+    }));
+    expect(result.processing.musicBedApplied).toBe(true);
   });
 
   test('retries transient ffmpeg post-processing failures once for podcast mastering and mp3 export', async () => {
@@ -889,11 +938,10 @@ describe('PodcastService', () => {
     usedVoiceIds.forEach((voiceId) => {
       expect([
         'lessac-high',
-        'lessac-bright',
         'ljspeech-high',
         'ryan-high',
-        'ryan-direct',
         'cori-high',
+        'amy-broadcast',
       ]).toContain(voiceId);
     });
   });

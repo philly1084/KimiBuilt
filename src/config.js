@@ -436,7 +436,7 @@ const config = {
         podcastOutroPath: resolveConfigPath(process.env.PODCAST_OUTRO_PATH || ''),
         podcastMusicBedPath: resolveConfigPath(process.env.PODCAST_MUSIC_BED_PATH || ''),
         podcastSpeechVolume: parseOptionalFloat(process.env.PODCAST_SPEECH_VOLUME) ?? 1,
-        podcastMusicVolume: parseOptionalFloat(process.env.PODCAST_MUSIC_VOLUME) ?? 0.22,
+        podcastMusicVolume: parseOptionalFloat(process.env.PODCAST_MUSIC_VOLUME) ?? 0.12,
         podcastIntroVolume: parseOptionalFloat(process.env.PODCAST_INTRO_VOLUME) ?? 1,
         podcastOutroVolume: parseOptionalFloat(process.env.PODCAST_OUTRO_VOLUME) ?? 1,
     },
