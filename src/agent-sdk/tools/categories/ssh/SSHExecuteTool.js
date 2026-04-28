@@ -13,6 +13,10 @@ const { artifactService } = require('../../../../artifacts/artifact-service');
 const { researchBucketService } = require('../../../../research-buckets');
 const { executeWithRunnerPreference, shouldPreferRunner } = require('../../../../remote-runner/transport');
 const {
+  assertRemoteCommandPreflight,
+  collectK3sCommandHints,
+} = require('../../../../remote-command-safety');
+const {
   normalizeContextDirectory,
   normalizeContextFiles,
   sanitizeContextFilename,
@@ -133,6 +137,8 @@ class SSHExecuteTool extends ToolBase {
       environment = {},
       sudo = false
     } = params;
+    assertRemoteCommandPreflight(command);
+
     const contextFiles = await this.prepareContextFiles(params, context);
     const contextDirectory = normalizeContextDirectory(params.contextDirectory || params.contextDir);
 
@@ -652,13 +658,22 @@ class SSHExecuteTool extends ToolBase {
       hints.push('The remote account requires an interactive sudo password. Use a root-capable account or a non-interactive sudo configuration for automation.');
     }
 
-    if (hints.length > 0) {
-      enrichedError.hints = hints;
+    hints.push(...collectK3sCommandHints({
+      command,
+      stderr,
+      stdout,
+      message: error?.message || '',
+    }));
+
+    const dedupedHints = Array.from(new Set(hints));
+
+    if (dedupedHints.length > 0) {
+      enrichedError.hints = dedupedHints;
       enrichedError.message = [
         error?.message || `SSH execution failed${host ? ` on ${host}` : ''}`,
         '',
         'Hints:',
-        ...hints.map((hint) => `- ${hint}`),
+        ...dedupedHints.map((hint) => `- ${hint}`),
       ].join('\n');
     }
 

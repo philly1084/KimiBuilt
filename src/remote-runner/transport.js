@@ -3,6 +3,10 @@
 const settingsController = require('../routes/admin/settings.controller');
 const { config } = require('../config');
 const { remoteRunnerService } = require('./service');
+const {
+  assertRemoteCommandPreflight,
+  enrichRemoteExecutionError,
+} = require('../remote-command-safety');
 
 function normalizeText(value = '') {
   return String(value || '').trim();
@@ -52,6 +56,7 @@ class RunnerCommandTransport {
     if (!command) {
       throw new Error('command is required');
     }
+    assertRemoteCommandPreflight(command);
 
     const runnerId = normalizeText(params.runnerId || params.remoteRunnerId || context.runnerId);
     const profile = normalizeText(params.profile || params.capabilityProfile || context.profile || 'deploy');
@@ -85,7 +90,10 @@ class RunnerCommandTransport {
       error.duration = Number(result.duration || 0);
       error.host = result.host || `runner:${runnerId || 'default'}`;
       error.runnerCommandFailed = true;
-      throw error;
+      throw enrichRemoteExecutionError(error, {
+        command,
+        host: error.host,
+      });
     }
 
     return {
@@ -112,7 +120,7 @@ async function executeWithRunnerPreference({
     try {
       return await transport.execute(params, context, tracker);
     } catch (error) {
-      if (error.runnerCommandFailed) {
+      if (error.runnerCommandFailed || error.remoteCommandPreflightFailed) {
         throw error;
       }
       if (!fallback) {

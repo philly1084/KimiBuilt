@@ -45,6 +45,47 @@ describe('RunnerCommandTransport', () => {
       toolId: 'remote-command',
     }));
   });
+
+  test('blocks invalid kubectl set --add syntax before dispatching to runner', async () => {
+    const dispatchCommand = jest.fn();
+    const transport = new RunnerCommandTransport({
+      runnerService: {
+        getHealthyRunner: jest.fn(() => ({ runnerId: 'runner-1' })),
+        dispatchCommand,
+      },
+    });
+
+    await expect(transport.execute({
+      command: 'kubectl set --add volume deployment/gamer -n gamer',
+      profile: 'deploy',
+    }, {
+      toolId: 'remote-command',
+    })).rejects.toThrow('kubectl set --add');
+
+    expect(dispatchCommand).not.toHaveBeenCalled();
+  });
+
+  test('enriches failed runner kubectl output with k3s hints', async () => {
+    const transport = new RunnerCommandTransport({
+      runnerService: {
+        getHealthyRunner: jest.fn(() => ({ runnerId: 'runner-1' })),
+        dispatchCommand: jest.fn(async () => ({
+          stdout: '',
+          stderr: 'error: strict decoding error: unknown field "spec.app"',
+          exitCode: 1,
+          duration: 10,
+          host: 'runner-host',
+        })),
+      },
+    });
+
+    await expect(transport.execute({
+      command: 'kubectl apply -f /tmp/gamer.yaml',
+      profile: 'deploy',
+    }, {
+      toolId: 'remote-command',
+    })).rejects.toThrow('dry-run=server');
+  });
 });
 
 describe('remote runner transport preference', () => {

@@ -140,6 +140,20 @@ describe('SSHExecuteTool', () => {
     expect(tool.buildRemoteLauncher({ sudo: true })).toContain('exec sudo -n bash -seuo pipefail');
   });
 
+  test('blocks invalid kubectl set --add syntax before remote execution', async () => {
+    const tool = new SSHExecuteTool();
+    const getConnectionConfig = jest.spyOn(tool, 'getConnectionConfig');
+
+    const result = await tool.execute({
+      command: 'kubectl set --add volume deployment/gamer -n gamer',
+    }, {});
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('kubectl set --add');
+    expect(result.error).toContain('kubectl set volume');
+    expect(getConnectionConfig).not.toHaveBeenCalled();
+  });
+
   test('enrichExecutionError adds Ubuntu and arm64 hints for common failures', () => {
     const tool = new SSHExecuteTool();
     const error = new Error('sh: 1: rg: not found');
@@ -171,6 +185,21 @@ describe('SSHExecuteTool', () => {
       expect.stringContaining('Inline Python failed before the remote edit ran'),
     ]));
     expect(enriched.message).toContain('stage a real script/file');
+  });
+
+  test('enrichExecutionError adds k3s hints for dead kubectl context', () => {
+    const tool = new SSHExecuteTool();
+    const error = new Error('Unable to connect to the server');
+    error.stderr = 'Unable to connect to the server: dial tcp 127.0.0.1:59668: connect: connection refused';
+
+    const enriched = tool.enrichExecutionError(error, {
+      command: 'kubectl get pods -A',
+      host: '10.0.0.5:22',
+    });
+
+    expect(enriched.hints).toEqual(expect.arrayContaining([
+      expect.stringContaining('KUBECONFIG=/etc/rancher/k3s/k3s.yaml'),
+    ]));
   });
 
   test('stripBenignSshWarnings removes known-hosts noise from stderr', () => {
