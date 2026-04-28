@@ -331,4 +331,60 @@ describe('orchestration rewrite policy', () => {
       }),
     }));
   });
+
+  test('uses generate-suite for explicit multi-format PDF and PPTX document packages', () => {
+    const orchestrator = new ConversationOrchestrator({});
+    const toolManager = buildToolManager(['document-workflow']);
+    const objective = 'Create a PDF and PPTX package for the quarterly operations brief.';
+    const policy = orchestrator.buildToolPolicy({
+      objective,
+      executionProfile: 'default',
+      toolManager,
+    });
+
+    const action = orchestrator.buildDirectAction({
+      objective,
+      toolPolicy: policy,
+    });
+
+    expect(action).toEqual(expect.objectContaining({
+      tool: 'document-workflow',
+      params: expect.objectContaining({
+        action: 'generate-suite',
+        formats: expect.arrayContaining(['pdf', 'pptx']),
+      }),
+    }));
+    expect(action.params.formats).not.toContain('html');
+    expect(action.params.useSandbox).toBeUndefined();
+  });
+
+  test('adds an HTML preview companion for web-chat PDF deliverables', () => {
+    const orchestrator = new ConversationOrchestrator({});
+    const toolManager = buildToolManager(['document-workflow']);
+    const objective = 'Create a PDF report about our Q2 roadmap.';
+    const policy = orchestrator.buildToolPolicy({
+      objective,
+      executionProfile: 'default',
+      toolManager,
+    });
+
+    const action = orchestrator.buildDirectAction({
+      objective,
+      toolPolicy: policy,
+      toolContext: {
+        clientSurface: 'web-chat',
+      },
+    });
+
+    expect(action).toEqual(expect.objectContaining({
+      tool: 'document-workflow',
+      params: expect.objectContaining({
+        action: 'generate-suite',
+        formats: expect.arrayContaining(['pdf', 'html']),
+        buildMode: 'sandbox',
+        useSandbox: true,
+        includeContent: true,
+      }),
+    }));
+  });
 });

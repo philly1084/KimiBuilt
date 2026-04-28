@@ -2304,6 +2304,128 @@ function shouldIncludeDocumentWorkflowContent(text = '') {
         && /\b(file|page|write|save|inject|local)\b/i.test(String(text || ''));
 }
 
+function normalizeDocumentRequestFormat(value = '') {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized) {
+        return '';
+    }
+
+    if (['powerpoint', 'ppt', 'pptx', 'slides', 'slide deck', 'deck'].includes(normalized)) {
+        return 'pptx';
+    }
+    if (['pdf'].includes(normalized)) {
+        return 'pdf';
+    }
+    if (['html', 'web page', 'webpage', 'website', 'landing page'].includes(normalized)) {
+        return 'html';
+    }
+    if (['markdown', 'md'].includes(normalized)) {
+        return 'md';
+    }
+    if (['excel', 'xlsx', 'spreadsheet', 'workbook'].includes(normalized)) {
+        return 'xlsx';
+    }
+    if (['doc', 'docx', 'word', 'word document'].includes(normalized)) {
+        return 'html';
+    }
+
+    return normalized;
+}
+
+function inferDocumentWorkflowFormatsFromText(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return [];
+    }
+
+    const formats = new Set();
+    if (/\bpdf\b|\.pdf\b/.test(normalized)) {
+        formats.add('pdf');
+    }
+    if (/\b(?:powerpoint|pptx?|slide deck|slides?|deck)\b/.test(normalized)) {
+        formats.add('pptx');
+    }
+    if (/\b(?:html|web page|webpage|landing page|site page)\b/.test(normalized)) {
+        formats.add('html');
+    }
+    if (/\b(?:markdown|md)\b/.test(normalized)) {
+        formats.add('md');
+    }
+    if (/\b(?:excel|xlsx|spreadsheet|workbook)\b/.test(normalized)) {
+        formats.add('xlsx');
+    }
+    if (/\b(?:docx|word document)\b/.test(normalized)) {
+        formats.add('html');
+    }
+
+    const explicitFormatList = normalized.match(/\b(?:formats?|outputs?|exports?)\s*[:=]?\s*([a-z0-9,\/+\s-]{3,80})/i);
+    if (explicitFormatList?.[1]) {
+        explicitFormatList[1]
+            .split(/[,/+&]|\band\b|\bplus\b/gi)
+            .map((entry) => normalizeDocumentRequestFormat(entry))
+            .filter(Boolean)
+            .forEach((format) => formats.add(format));
+    }
+
+    return Array.from(formats);
+}
+
+function hasDocumentSuiteIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(package|suite|bundle|multi[-\s]?format|multiple formats?|all formats?|export package|deliverables?|kit)\b/.test(normalized)
+        || /\b(?:pdf|pptx?|powerpoint|slides?|deck|html|markdown|md|xlsx|spreadsheet)\b[\s\S]{0,80}\b(?:and|plus|with|alongside|together with)\b[\s\S]{0,80}\b(?:pdf|pptx?|powerpoint|slides?|deck|html|markdown|md|xlsx|spreadsheet)\b/.test(normalized);
+}
+
+function shouldAddWebChatHtmlPreview({ clientSurface = '', formats = [], objective = '' } = {}) {
+    const normalizedSurface = String(clientSurface || '').trim().toLowerCase();
+    if (normalizedSurface !== 'web-chat') {
+        return false;
+    }
+
+    const requested = new Set(Array.isArray(formats) ? formats : []);
+    if (requested.has('html')) {
+        return false;
+    }
+
+    return requested.has('pdf')
+        || requested.has('pptx')
+        || requested.has('xlsx')
+        || /\b(pdf|pptx?|powerpoint|slide deck|slides?|deck|spreadsheet|xlsx|workbook)\b/i.test(String(objective || ''));
+}
+
+function buildDocumentWorkflowFormatPlan({ objective = '', clientSurface = '' } = {}) {
+    const websiteBuild = hasWebsiteBuildIntent(objective);
+    const explicitFormats = websiteBuild
+        ? ['html']
+        : inferDocumentWorkflowFormatsFromText(objective);
+    const formats = Array.from(new Set(explicitFormats.filter(Boolean)));
+
+    if (shouldAddWebChatHtmlPreview({ clientSurface, formats, objective })) {
+        formats.push('html');
+    }
+
+    const suiteIntent = websiteBuild
+        || hasDocumentSuiteIntent(objective)
+        || formats.length > 1
+        || (String(clientSurface || '').trim().toLowerCase() === 'web-chat' && formats.includes('html') && formats.some((format) => format !== 'html'));
+    const useSandbox = formats.includes('html') && (
+        websiteBuild
+        || hasDocumentSuiteIntent(objective)
+        || shouldAddWebChatHtmlPreview({ clientSurface, formats: explicitFormats, objective })
+    );
+
+    return {
+        websiteBuild,
+        formats,
+        suiteIntent,
+        useSandbox,
+    };
+}
+
 function buildDesignResourceSearchParams({ objective = '', rolePipeline = null } = {}) {
     const websiteBuild = hasWebsiteBuildIntent(objective) || rolePipeline?.requiresSandbox === true;
     const surface = websiteBuild
@@ -2427,20 +2549,22 @@ function buildDocumentWorkflowSourcesFromToolEvents(toolEvents = []) {
     return sources;
 }
 
-function buildDocumentWorkflowGenerateParams({ objective = '', toolEvents = [] } = {}) {
-    const websiteBuild = hasWebsiteBuildIntent(objective);
+function buildDocumentWorkflowGenerateParams({ objective = '', toolEvents = [], clientSurface = '' } = {}) {
+    const formatPlan = buildDocumentWorkflowFormatPlan({
+        objective,
+        clientSurface,
+    });
     const params = {
-        action: websiteBuild ? 'generate-suite' : 'generate',
+        action: formatPlan.suiteIntent ? 'generate-suite' : 'generate',
         prompt: objective,
-        includeContent: websiteBuild || shouldIncludeDocumentWorkflowContent(objective),
-        ...(websiteBuild
+        includeContent: formatPlan.formats.includes('html') || shouldIncludeDocumentWorkflowContent(objective),
+        ...(formatPlan.suiteIntent
             ? {
-                documentType: 'website',
-                formats: ['html'],
-                buildMode: 'sandbox',
-                useSandbox: true,
+                formats: formatPlan.formats.length > 0 ? formatPlan.formats : ['html'],
+                ...(formatPlan.useSandbox ? { buildMode: 'sandbox', useSandbox: true } : {}),
             }
-            : {}),
+            : (formatPlan.formats.length === 1 ? { format: formatPlan.formats[0] } : {})),
+        ...(formatPlan.websiteBuild ? { documentType: 'website' } : {}),
     };
     const sources = buildDocumentWorkflowSourcesFromToolEvents(toolEvents);
 
@@ -4159,7 +4283,7 @@ function buildResearchFollowupPlanFromToolEvents({ objective = '', toolPolicy = 
     return [];
 }
 
-function buildDocumentWorkflowFollowupPlanFromToolEvents({ objective = '', toolPolicy = {}, toolEvents = [] } = {}) {
+function buildDocumentWorkflowFollowupPlanFromToolEvents({ objective = '', toolPolicy = {}, toolEvents = [], clientSurface = '' } = {}) {
     if (!hasDocumentWorkflowIntentText(objective)
         || !toolPolicy.candidateToolIds.includes(DOCUMENT_WORKFLOW_TOOL_ID)) {
         return [];
@@ -4168,6 +4292,7 @@ function buildDocumentWorkflowFollowupPlanFromToolEvents({ objective = '', toolP
     const params = buildDocumentWorkflowGenerateParams({
         objective,
         toolEvents,
+        clientSurface,
     });
 
     if (!Array.isArray(params.sources) || params.sources.length === 0) {
@@ -7936,6 +8061,7 @@ class ConversationOrchestrator extends EventEmitter {
                             objective,
                             toolPolicy,
                             toolEvents,
+                            clientSurface,
                         }),
                         executedStepSignatures,
                         executedStepSignatureCounts,
@@ -9524,6 +9650,7 @@ class ConversationOrchestrator extends EventEmitter {
         const documentWorkflowParams = buildDocumentWorkflowGenerateParams({
             objective,
             toolEvents,
+            clientSurface: toolContext?.clientSurface || '',
         });
         const hasGroundedDocumentSources = Array.isArray(documentWorkflowParams.sources)
             && documentWorkflowParams.sources.length > 0;
@@ -10018,6 +10145,7 @@ class ConversationOrchestrator extends EventEmitter {
                 params: buildDocumentWorkflowGenerateParams({
                     objective: prompt,
                     toolEvents,
+                    clientSurface: toolContext?.clientSurface || '',
                 }),
             }];
         }
@@ -10118,6 +10246,7 @@ class ConversationOrchestrator extends EventEmitter {
                     'Follow role order through handoff artifacts: research evidence first when required, design brief before build, sandbox/project build for websites, then QA/integration.',
                     'Use `design-resource-search` for the design role before generating design-sensitive websites, dashboards, documents, or page artifacts unless it has already succeeded in this run.',
                     'For website, dashboard, landing-page, and frontend builds, prefer `document-workflow` with `action:"generate-suite"`, `formats:["html"]`, `buildMode:"sandbox"`, and `useSandbox:true`; direct `code-sandbox` calls must use `mode:"project"` rather than execute mode.',
+                    'For explicit PDF/PPTX/HTML/XLSX packages or multi-format document requests, use `document-workflow generate-suite` with the requested `formats`. On web-chat, include an HTML companion preview when the main deliverable is PDF, PPTX, or XLSX.',
                 ]
                 : []),
             'Candidate tools:',
@@ -10230,6 +10359,7 @@ class ConversationOrchestrator extends EventEmitter {
             'Every `document-workflow` step must include `params.action` set to `recommend`, `plan`, `generate`, `assemble`, or `generate-suite`.',
             'Use `document-workflow generate` for final briefs, reports, documents, HTML pages, and slide decks.',
             'Use `document-workflow generate-suite` with `buildMode:"sandbox"` or `useSandbox:true` for previewable website/dashboard/front-end artifacts so the builder produces a sandbox project instead of only a template.',
+            'Use `document-workflow generate-suite` for requested output packages such as PDF + PPTX + HTML, or when web-chat needs an HTML preview companion for PDF/PPTX/XLSX deliverables.',
             'Every direct `code-sandbox` website build step must use `params.mode:"project"` plus previewable files. Do not use `code-sandbox` execute mode unless a separate confirmation policy explicitly allows executable code.',
             'When the user wants a research-backed deliverable, prefer `web-search` and `web-fetch` first, then use `web-scrape` only when a page needs rendered or structured extraction before `document-workflow` with grounded `sources` derived from the verified tool results.',
             'Set `document-workflow.params.includeContent` to `true` only when a later step needs the full textual body for `file-write`; otherwise prefer the stored document download URL.',
@@ -10937,6 +11067,7 @@ class ConversationOrchestrator extends EventEmitter {
             if (toolPolicy.rolePipeline.requiresSandbox && allowedToolIds.includes('code-sandbox')) {
                 parts.push('For website/dashboard/front-end outputs, produce a previewable sandbox project. Prefer `document-workflow generate-suite` with `buildMode:"sandbox"`/`useSandbox:true`, or use `code-sandbox` only in `mode:"project"` with files.');
             }
+            parts.push('For PDF, PPTX, HTML, XLSX, or multi-format document packages, let the builder role produce concrete `document-workflow` artifacts. Use `generate-suite` when multiple formats or an HTML preview companion are needed.');
         }
 
         if (canUseUserCheckpoint) {
@@ -11054,6 +11185,7 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('For routine public research behind those deliverables, discover candidate source URLs through Perplexity-backed `web-search`, choose the strongest sites yourself, verify them with `web-fetch` first, and use `web-scrape` only when deeper extraction is needed instead of asking the user which websites to scrape.');
             parts.push('For research-backed deliverables, gather verified facts with `web-search` and `web-fetch` first, then use `web-scrape` only when a page needs rendered or structured extraction before calling `document-workflow generate` with grounded `sources` built from those verified results.');
             parts.push('For previewable website/dashboard/front-end artifacts, use `document-workflow generate-suite` with `formats:["html"]`, `buildMode:"sandbox"`, and `useSandbox:true` so the workflow can create a sandbox bundle.');
+            parts.push('For explicit document packages or web-chat PDF/PPTX/XLSX deliverables, prefer `document-workflow generate-suite` with all requested formats and include `html` as a preview companion when useful.');
             parts.push('Use `document-workflow assemble` when the goal is to compile source material into a straightforward document without heavy rewriting.');
             parts.push('Set `document-workflow includeContent: true` only when a later `file-write` step needs the full HTML or markdown body.');
         }
