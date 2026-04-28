@@ -182,6 +182,35 @@ describe('PodcastService', () => {
     expect(result.processing.enhanced).toBe(false);
   });
 
+  test('does not create a synthetic music bed when music is requested but no bed asset exists', async () => {
+    const service = new PodcastService();
+    const executeTool = jest.fn(async (toolId) => {
+      if (toolId === 'web-search') {
+        return { success: true, data: { results: [{ title: 'A', url: 'https://example.com/a', snippet: 'A' }] } };
+      }
+      if (toolId === 'web-fetch') {
+        return { success: true, data: { headers: { 'content-type': 'text/html' }, body: '<p>Battery systems store energy.</p>' } };
+      }
+      throw new Error(`Unexpected tool: ${toolId}`);
+    });
+
+    const result = await service.createPodcast({
+      topic: 'How grid batteries work',
+      includeMusicBed: true,
+      includeVideo: true,
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+      toolManager: { executeTool },
+    });
+
+    expect(audioProcessingService.composePodcastAudio).toHaveBeenCalledWith(expect.objectContaining({
+      includeMusicBed: false,
+      musicBedPath: '',
+    }));
+    expect(result.processing.musicBedApplied).toBe(false);
+  });
+
   test('uses the active chat model for podcast script generation when no podcast-specific model is provided', async () => {
     const service = new PodcastService();
     const executeTool = jest.fn(async (toolId) => {

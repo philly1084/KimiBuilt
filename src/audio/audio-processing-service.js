@@ -360,34 +360,25 @@ class AudioProcessingService {
     const mixedSpeechPath = path.join(tempDir, 'speech-mixed.wav');
     const finalPath = path.join(tempDir, 'podcast-final.wav');
     const masteredPath = path.join(tempDir, 'podcast-mastered.wav');
-    const generatedBedPath = path.join(tempDir, 'calm-music-bed.wav');
 
     try {
       await fs.writeFile(speechPath, speechWavBuffer);
       let currentPath = speechPath;
       let resolvedBedPath = '';
+      const bytesPerSample = Math.max(1, Math.floor(format.bitsPerSample / 8));
+      const durationSeconds = format.data.length / Math.max(1, sampleRate * format.numChannels * bytesPerSample);
       if (includeMusicBed || Boolean(String(musicBedPath || '').trim())) {
         resolvedBedPath = this.resolveAssetPath(
           musicBedPath,
           this.audioProcessingConfig.podcastMusicBedPath,
           'Podcast music bed audio',
         );
-        if (!resolvedBedPath) {
-          const bytesPerSample = Math.max(1, Math.floor(format.bitsPerSample / 8));
-          const durationSeconds = format.data.length / Math.max(1, sampleRate * format.numChannels * bytesPerSample);
-          await this.generateCalmMusicBed({
-            outputPath: generatedBedPath,
-            durationSeconds,
-            sampleRate,
-            channelLayout,
-          });
-          resolvedBedPath = generatedBedPath;
-        }
       }
 
       if (resolvedBedPath) {
+        const fadeOutStart = Math.max(0, durationSeconds - 2);
         const filter = [
-          `[0:a]volume=${escapeFilterValue(bedLevel)},aresample=${sampleRate},aformat=sample_fmts=s16:channel_layouts=${channelLayout}[bed]`,
+          `[0:a]volume=${escapeFilterValue(bedLevel)},aresample=${sampleRate},aformat=sample_fmts=s16:channel_layouts=${channelLayout},apad,atrim=0:${durationSeconds.toFixed(3)},afade=t=in:st=0:d=1,afade=t=out:st=${fadeOutStart.toFixed(3)}:d=2[bed]`,
           `[1:a]volume=${escapeFilterValue(speechLevel)},aresample=${sampleRate},aformat=sample_fmts=s16:channel_layouts=${channelLayout}[speech]`,
           '[bed][speech]amix=inputs=2:duration=shortest:dropout_transition=0:normalize=0[mixed]',
           '[mixed]alimiter=limit=0.95[a]',
@@ -395,7 +386,6 @@ class AudioProcessingService {
 
         await this.runFfmpeg([
           '-y',
-          '-stream_loop', '-1',
           '-i', resolvedBedPath,
           '-i', speechPath,
           '-filter_complex', filter,

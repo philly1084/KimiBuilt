@@ -27,6 +27,7 @@ describe('AudioProcessingService', () => {
     await service.composePodcastAudio({
       speechWavBuffer,
       includeMusicBed: true,
+      musicBedPath: __filename,
       enhanceSpeech: false,
     });
 
@@ -36,7 +37,33 @@ describe('AudioProcessingService', () => {
     const filterIndex = mixArgs.indexOf('-filter_complex') + 1;
 
     expect(mixArgs[filterIndex]).toContain('amix=inputs=2:duration=shortest');
+    expect(mixArgs[filterIndex]).toContain('apad,atrim=0:');
+    expect(mixArgs[filterIndex]).toContain('afade=t=in');
+    expect(mixArgs[filterIndex]).toContain('afade=t=out');
     expect(mixArgs[filterIndex]).toContain('alimiter=limit=0.95');
     expect(mixArgs[filterIndex]).not.toContain('duration=second');
+    expect(mixArgs).not.toEqual(expect.arrayContaining(['-stream_loop', '-1']));
+  });
+
+  test('does not synthesize a fallback music bed when no bed asset is configured', async () => {
+    const speechWavBuffer = createTestWav();
+    const service = new AudioProcessingService({
+      enabled: true,
+      ffmpegBinaryPath: 'ffmpeg',
+      podcastMasteringEnabled: false,
+    });
+
+    const runFfmpeg = jest.spyOn(service, 'runFfmpeg').mockImplementation(async (args) => {
+      await fs.writeFile(args[args.length - 1], speechWavBuffer);
+    });
+
+    const result = await service.composePodcastAudio({
+      speechWavBuffer,
+      includeMusicBed: true,
+      enhanceSpeech: false,
+    });
+
+    expect(result).toEqual(speechWavBuffer);
+    expect(runFfmpeg).not.toHaveBeenCalled();
   });
 });

@@ -431,9 +431,7 @@ function shouldUsePodcastMusicBed(params = {}, audioProcessingConfig = null) {
     return false;
   }
 
-  return params.includeMusicBed === true
-    || params.includeVideo === true
-    || Boolean(String(params.musicBedPath || '').trim())
+  return Boolean(String(params.musicBedPath || '').trim())
     || audioProcessingConfig?.defaults?.musicBedPathConfigured === true;
 }
 
