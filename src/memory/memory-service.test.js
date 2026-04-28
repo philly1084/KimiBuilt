@@ -350,6 +350,64 @@ describe('MemoryService recall profiles', () => {
         }));
     });
 
+    test('rememberLearnedSkill indexes successful programming steps by tool and file keywords', async () => {
+        const service = new MemoryService();
+        const rememberSpy = jest.spyOn(service, 'remember').mockResolvedValue('skill-point-1');
+
+        await service.rememberLearnedSkill('session-1', {
+            objective: 'Fix the failing chat route tests in this repo.',
+            assistantText: 'Updated src/routes/chat.js and verified npm test passed.',
+            toolEvents: [
+                {
+                    reason: 'Inspect the chat route implementation.',
+                    toolCall: {
+                        function: {
+                            name: 'file-read',
+                            arguments: JSON.stringify({ path: 'src/routes/chat.js' }),
+                        },
+                    },
+                    result: {
+                        success: true,
+                        toolId: 'file-read',
+                        data: 'router.post("/", validate(chatSchema), async (req, res) => {})',
+                    },
+                },
+                {
+                    reason: 'Run the route tests.',
+                    toolCall: {
+                        function: {
+                            name: 'code-sandbox',
+                            arguments: JSON.stringify({ command: 'npm test -- src/routes/chat.test.js' }),
+                        },
+                    },
+                    result: {
+                        success: true,
+                        toolId: 'code-sandbox',
+                        data: 'PASS src/routes/chat.test.js',
+                    },
+                },
+            ],
+            metadata: {
+                memoryKeywords: ['chat-route'],
+            },
+        });
+
+        expect(rememberSpy).toHaveBeenCalledWith('session-1', expect.stringContaining('Reusable workflow'), 'skill', expect.objectContaining({
+            memoryType: 'skill',
+            skillKind: 'workflow-summary',
+            toolIds: ['file-read', 'code-sandbox'],
+            memoryKeywords: expect.arrayContaining([
+                'chat-route',
+                'route',
+                'src/routes/chat.js',
+                'chat.js',
+                'chat.test.js',
+                'testing',
+                'debugging',
+            ]),
+        }));
+    });
+
     test('judgment v2 returns typed recall bundles and rationale details', async () => {
         config.config.runtime.judgmentV2Enabled = true;
         const service = new MemoryService();

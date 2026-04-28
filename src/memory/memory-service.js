@@ -104,6 +104,32 @@ function summarizeSkillText({ objective = '', assistantText = '', toolEvents = [
     ].filter(Boolean).join('\n');
 }
 
+function summarizeToolEventKeywordText(toolEvents = []) {
+    return (Array.isArray(toolEvents) ? toolEvents : [])
+        .slice(0, 8)
+        .map((event) => {
+            const toolId = String(event?.toolCall?.function?.name || event?.result?.toolId || '').trim();
+            const args = String(event?.toolCall?.function?.arguments || '').slice(0, 500);
+            const reason = String(event?.reason || '').slice(0, 220);
+            let resultText = '';
+            try {
+                resultText = typeof event?.result?.data === 'string'
+                    ? event.result.data
+                    : JSON.stringify(event?.result?.data || event?.result || {});
+            } catch (_error) {
+                resultText = String(event?.result?.summary || event?.result?.error || '');
+            }
+            return [
+                toolId,
+                reason,
+                args,
+                String(resultText || '').slice(0, 700),
+            ].filter(Boolean).join('\n');
+        })
+        .filter(Boolean)
+        .join('\n');
+}
+
 function normalizeToolFamily(value = '') {
     const normalized = String(value || '').trim().toLowerCase();
     if (!normalized) {
@@ -441,6 +467,7 @@ class MemoryService {
                     artifact?.format || '',
                     relevantToolIds.join(' '),
                     toolFamily,
+                    summarizeToolEventKeywordText(relevantToolEvents),
                 ].join('\n'),
             ),
         });

@@ -74,6 +74,7 @@ function buildPlannerPromptSurface() {
     'When remote build work needs selected artifacts, generated images, fetched pages, or search data from web-chat/web-cli, pass selected IDs as params.artifactIds and compact non-artifact evidence as params.contextFiles so the remote runner can stage them before executing.',
     'When an SSH runtime target is already available, prefer trying remote-command before asking the user for host details again.',
     'Only ask for SSH connection details after an actual tool failure shows the target is missing or incorrect.',
+    'For remote-command payloads, avoid indentation-sensitive inline Python or YAML heredocs. For larger edits, stage a real script/file or use compact non-interactive commands; if Python reports IndentationError, switch command shape before retrying.',
     'For remote reconnect or baseline checks, assume Ubuntu/Linux and prefer a concrete command such as: hostname && uname -m && (test -f /etc/os-release && sed -n \'1,3p\' /etc/os-release || true) && uptime',
     'The common remote target in this project is Ubuntu ARM64 with k3s. Verify architecture early and prefer arm64 binaries when installing software.',
     'On remote Ubuntu hosts, prefer find and grep -R, kubectl or k3s kubectl, ip addr, and ss -tulpn instead of rg, Docker, docker-compose, ifconfig, and netstat.',

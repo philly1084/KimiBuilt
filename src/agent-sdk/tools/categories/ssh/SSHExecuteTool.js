@@ -620,6 +620,10 @@ class SSHExecuteTool extends ToolBase {
       hints.push('Remote shell syntax failed. Prefer simple Bash/POSIX commands and avoid nested quote chains or shell fragments copied from another context.');
     }
 
+    if (/indentationerror|expected an indented block|unexpected indent/.test(combined)) {
+      hints.push('Inline Python failed before the remote edit ran. Avoid indentation-sensitive heredocs; stage a real script/file or use a compact non-interactive command before retrying.');
+    }
+
     if (/\brg: not found\b|\bripgrep\b/.test(combined) || /\brg\b/.test(command)) {
       hints.push('`rg` is often not installed on Ubuntu servers. Prefer `find` and `grep -R` unless you install ripgrep first.');
     }

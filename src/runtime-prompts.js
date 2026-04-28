@@ -25,6 +25,7 @@ function buildContinuityInstructions(extra = '') {
         'When scheduling work for later or on a recurrence, use agent-workload with the full original user request. Do not invent separate command, schedule, or cron fields unless the runtime already built them for you.',
         'If the user asks for multiple scheduled jobs, split them into separate agent-workload creations rather than one combined workload.',
         'When calling remote-command, always include a non-empty command parameter. Host, username, and port may be omitted only when the runtime already has a default SSH target.',
+        'For remote-command payloads, avoid indentation-sensitive inline Python or YAML heredocs. For larger edits, stage a real script/file or use compact non-interactive commands; if Python reports IndentationError, switch command shape before retrying.',
         'For remote server or remote-build work, assume an Ubuntu/Linux target unless tool results prove otherwise. A safe reconnect baseline is: hostname && uname -m && (test -f /etc/os-release && sed -n \'1,3p\' /etc/os-release || true) && uptime',
         'Many remote tasks in this project run on an Ubuntu ARM64 k3s host. Verify `uname -m` early and prefer Linux arm64 binaries when installing software.',
         'On remote Ubuntu hosts, do not assume `rg`, Docker, `docker-compose`, `ifconfig`, or `netstat` exist. Prefer `find` and `grep -R`, `kubectl`/`k3s kubectl`, `ip addr`, and `ss -tulpn`.',

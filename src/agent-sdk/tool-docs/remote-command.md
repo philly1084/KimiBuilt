@@ -22,6 +22,7 @@ Project defaults:
 - Prefer Bash or POSIX shell syntax.
 - Prefer short inspect -> fix -> verify command batches over giant scripts.
 - Prefer verified command output over assumptions.
+- Avoid indentation-sensitive inline scripts in remote command payloads. For Python, YAML, or other block-structured content, prefer a short `python -c` expression, shell-safe `printf`, staged `contextFiles`, or writing a real script/file and executing it separately. If a heredoc is unavoidable, use a quoted delimiter and preserve indentation exactly.
 - The saved deploy defaults may provide a public domain, namespace, deployment name, ingress class, and TLS `ClusterIssuer`.
 - If no public domain is configured in Admin Settings, the backend falls back to `demoserver2.buzz`.
 - Project playbook: `k8s/K3S_RANCHER_PLAYBOOK.md`
@@ -97,6 +98,16 @@ These catalog entries are exposed through `/api/tools/available` so agents can s
 For repo maintenance and updates, start with `repo-map`, `changed-files`, and `dependency-check`. Then use `targeted-grep` or focused file reads for the feature area instead of walking the full repository.
 
 For k3s app delivery, use `k8s-manifest-summary`, `buildkit`, `direct-image-build`, `k8s-app-inventory`, `rollout`, and `deploy-verify` as the default progression.
+
+### Command construction
+
+Remote command payloads pass through several quoting layers before they run on the target host. Keep the command shape boring:
+
+- Prefer single-purpose shell commands, `sed`, `perl`, `node -e`, or compact `python -c` for tiny text changes.
+- For larger edits, stage a file through `contextFiles`, write a real script in the remote workspace, run it, then verify the changed file.
+- Avoid embedding multi-line Python directly in a remote command when the script depends on indentation after `if`, `for`, `while`, `def`, `class`, `try`, or `with`.
+- If Python fails with `IndentationError`, do not retry the same heredoc shape. Switch to a staged script/file, a compact non-interactive command, or a simpler shell-native edit.
+- Always follow an edit with a verification command that reads the changed marker, file section, or deployed content.
 
 ### 1. Cluster survey
 

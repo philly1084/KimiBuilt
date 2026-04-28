@@ -21,6 +21,73 @@ const WEB_CLI_CLIENT_SURFACE = 'web-cli';
 const WEB_CLI_REMOTE_BUILD_AUTONOMY_APPROVED = true;
 const WEB_CLI_SESSION_ISOLATION = true;
 const WEB_CLI_ACTIVE_SESSION_KEY = 'codecli-active-session-id';
+const gatewayStreamHelpers = window.KimiBuiltGatewaySSE || {};
+const streamGatewayResponse = gatewayStreamHelpers.streamGatewayResponse || null;
+const extractAssistantMetadata = gatewayStreamHelpers.extractAssistantMetadata || (() => null);
+const extractStreamMetadata = gatewayStreamHelpers.extractStreamMetadata || (() => ({}));
+const stripNullCharacters = gatewayStreamHelpers.stripNullCharacters || ((value = '') => String(value || '').replace(/\u0000/g, ''));
+
+function normalizeReasoningSummary(value = '') {
+    if (typeof value === 'string') {
+        return stripNullCharacters(value).replace(/\s+/g, ' ').trim();
+    }
+
+    if (Array.isArray(value)) {
+        return value
+            .map((entry) => normalizeReasoningSummary(entry))
+            .filter(Boolean)
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    if (!value || typeof value !== 'object') {
+        return '';
+    }
+
+    return normalizeReasoningSummary(
+        value.reasoningSummary
+        || value.reasoning_summary
+        || value.summary
+        || value.summary_text
+        || value.reasoning
+        || value.reasoning_delta
+        || value.text
+        || value.content
+        || '',
+    );
+}
+
+function mergeAssistantMetadata(currentValue, nextValue) {
+    const currentMetadata = currentValue && typeof currentValue === 'object' && !Array.isArray(currentValue)
+        ? currentValue
+        : {};
+    const nextMetadata = nextValue && typeof nextValue === 'object' && !Array.isArray(nextValue)
+        ? nextValue
+        : {};
+    const mergedMetadata = {
+        ...currentMetadata,
+        ...nextMetadata,
+    };
+
+    if (currentMetadata.reasoningSummary && nextMetadata.reasoningSummary) {
+        mergedMetadata.reasoningSummary = nextMetadata.reasoningSummary;
+    }
+
+    return Object.keys(mergedMetadata).length > 0 ? mergedMetadata : null;
+}
+
+function appendReasoningSummary(currentValue = '', nextValue = '') {
+    const current = normalizeReasoningSummary(currentValue);
+    const next = normalizeReasoningSummary(nextValue);
+    if (!next) {
+        return current;
+    }
+    if (!current || next.startsWith(current) || current.includes(next)) {
+        return next.startsWith(current) ? next : current || next;
+    }
+    return `${current}${next}`.replace(/\s+/g, ' ').trim();
+}
 
 class WebCLIAPI {
     constructor() {
@@ -175,6 +242,140 @@ class WebCLIAPI {
         return payload?.type === 'done'
             || payload?.type === 'response.completed'
             || ['stop', 'length', 'content_filter'].includes(finishReason);
+    }
+
+    applyNormalizedStreamMetadata(event = {}, pendingDone = {}) {
+        if (event.sessionId) {
+            this.persistActiveSessionId(event.sessionId);
+            pendingDone.sessionId = this.sessionId || event.sessionId;
+        }
+
+        if (event.responseId) {
+            pendingDone.responseId = event.responseId;
+        }
+
+        if (event.model) {
+            pendingDone.model = event.model;
+        }
+
+        if (Array.isArray(event.artifacts) && event.artifacts.length > 0) {
+            pendingDone.artifacts = event.artifacts;
+        }
+
+        if (Array.isArray(event.toolEvents) && event.toolEvents.length > 0) {
+            pendingDone.toolEvents = event.toolEvents;
+        }
+
+        if (event.assistantMetadata) {
+            pendingDone.assistantMetadata = mergeAssistantMetadata(
+                pendingDone.assistantMetadata,
+                event.assistantMetadata,
+            );
+        }
+    }
+
+    async *streamNormalizedGatewayEvents(response, pendingDone = {}) {
+        if (!streamGatewayResponse) {
+            return false;
+        }
+
+        for await (const event of streamGatewayResponse(response)) {
+            if (!event || typeof event !== 'object') {
+                continue;
+            }
+
+            if (event.type === 'error') {
+                yield {
+                    type: 'error',
+                    error: event.error?.message || event.error?.error?.message || event.error || 'Stream error',
+                    suggestions: ['Retry the request', 'Check backend logs if the problem persists'],
+                };
+                return true;
+            }
+
+            this.applyNormalizedStreamMetadata(event, pendingDone);
+
+            if (event.type === 'text_delta' && event.content) {
+                yield { type: 'delta', content: event.content, sessionId: this.sessionId };
+                continue;
+            }
+
+            if (event.type === 'reasoning_delta') {
+                const content = normalizeReasoningSummary(event.content || '');
+                const currentSummary = pendingDone.assistantMetadata?.reasoningSummary || '';
+                const summary = appendReasoningSummary(currentSummary, event.summary || content);
+                if (summary || content) {
+                    pendingDone.assistantMetadata = mergeAssistantMetadata(
+                        pendingDone.assistantMetadata,
+                        {
+                            reasoningSummary: summary || content,
+                            reasoningAvailable: true,
+                        },
+                    );
+                    yield {
+                        type: 'reasoning_summary_delta',
+                        content,
+                        summary: summary || content,
+                        sessionId: this.sessionId,
+                    };
+                }
+                continue;
+            }
+
+            if (event.type === 'tool_calls') {
+                for (const toolCall of (Array.isArray(event.toolCalls) ? event.toolCalls : [])) {
+                    yield {
+                        ...this.buildToolEventDetail(toolCall, event.stage === 'done' ? 'done' : 'started'),
+                        sessionId: this.sessionId,
+                    };
+                }
+                continue;
+            }
+
+            if (event.type === 'progress') {
+                const progress = event.progress && typeof event.progress === 'object'
+                    ? event.progress
+                    : {};
+                const phase = String(progress.phase || event.phase || 'thinking').trim() || 'thinking';
+                const detail = String(progress.detail || event.detail || '').trim();
+                yield {
+                    type: 'progress',
+                    progress: {
+                        ...progress,
+                        phase,
+                        detail,
+                    },
+                    phase,
+                    detail,
+                    sessionId: this.sessionId,
+                };
+                continue;
+            }
+
+            if (event.type === 'final') {
+                this.applyNormalizedStreamMetadata({
+                    ...extractStreamMetadata(event.response || event.raw || {}),
+                    assistantMetadata: extractAssistantMetadata(event.response || event.raw || {}),
+                }, pendingDone);
+                continue;
+            }
+
+            if (event.type === 'finish' || event.type === 'done') {
+                yield {
+                    type: 'done',
+                    ...pendingDone,
+                    sessionId: this.sessionId || pendingDone.sessionId,
+                };
+                return true;
+            }
+        }
+
+        yield {
+            type: 'done',
+            ...pendingDone,
+            sessionId: this.sessionId || pendingDone.sessionId,
+        };
+        return true;
     }
 
     /**
@@ -376,14 +577,28 @@ class WebCLIAPI {
                 this.persistActiveSessionId(responseSessionId);
             }
 
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
             let pendingDone = {
                 sessionId: this.sessionId,
                 artifacts: [],
                 toolEvents: [],
+                assistantMetadata: null,
+                responseId: null,
+                model: null,
             };
+
+            if (streamGatewayResponse) {
+                for await (const event of this.streamNormalizedGatewayEvents(response, pendingDone)) {
+                    yield event;
+                    if (event.type === 'done' || event.type === 'error') {
+                        return;
+                    }
+                }
+                return;
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -421,6 +636,44 @@ class WebCLIAPI {
                             const artifacts = this.extractArtifacts(parsed);
                             if (artifacts.length > 0) {
                                 pendingDone.artifacts = artifacts;
+                            }
+                            const assistantMetadata = extractAssistantMetadata(parsed);
+                            if (assistantMetadata) {
+                                pendingDone.assistantMetadata = mergeAssistantMetadata(
+                                    pendingDone.assistantMetadata,
+                                    assistantMetadata,
+                                );
+                            }
+                            const reasoningSummary = normalizeReasoningSummary(
+                                parsed.type === 'response.reasoning_summary_text.delta'
+                                    ? (parsed.delta || parsed.reasoning_delta || parsed.summary || '')
+                                    : (
+                                        parsed?.choices?.[0]?.delta?.reasoning
+                                        || parsed?.choices?.[0]?.delta?.reasoning_text
+                                        || parsed?.choices?.[0]?.delta?.reasoning_content
+                                        || parsed?.choices?.[0]?.delta?.reasoning_details
+                                        || parsed?.reasoning_delta
+                                        || ''
+                                    ),
+                            );
+                            if (reasoningSummary) {
+                                const nextReasoningSummary = appendReasoningSummary(
+                                    pendingDone.assistantMetadata?.reasoningSummary || '',
+                                    reasoningSummary,
+                                );
+                                pendingDone.assistantMetadata = mergeAssistantMetadata(
+                                    pendingDone.assistantMetadata,
+                                    {
+                                        reasoningSummary: nextReasoningSummary,
+                                        reasoningAvailable: true,
+                                    },
+                                );
+                                yield {
+                                    type: 'reasoning_summary_delta',
+                                    content: reasoningSummary,
+                                    summary: nextReasoningSummary,
+                                    sessionId: this.sessionId,
+                                };
                             }
                             const progress = this.extractStreamProgress(parsed);
                             if (progress) {
@@ -475,6 +728,7 @@ class WebCLIAPI {
         let fullContent = '';
         let tokens = 0;
         let finalChunk = null;
+        let assistantMetadata = null;
         
         for await (const chunk of this.streamChat(
             message,
@@ -486,6 +740,20 @@ class WebCLIAPI {
             if (chunk.type === 'delta') {
                 fullContent += chunk.content;
                 tokens += 1; // Approximate
+                if (onChunk) {
+                    onChunk(chunk);
+                }
+            } else if (chunk.type === 'reasoning_summary_delta') {
+                const reasoningSummary = normalizeReasoningSummary(chunk.summary || chunk.content || '');
+                if (reasoningSummary) {
+                    assistantMetadata = mergeAssistantMetadata(
+                        assistantMetadata,
+                        {
+                            reasoningSummary,
+                            reasoningAvailable: true,
+                        },
+                    );
+                }
                 if (onChunk) {
                     onChunk(chunk);
                 }
@@ -507,6 +775,7 @@ class WebCLIAPI {
             sessionId: this.sessionId,
             artifacts: Array.isArray(finalChunk?.artifacts) ? finalChunk.artifacts : [],
             toolEvents: Array.isArray(finalChunk?.toolEvents) ? finalChunk.toolEvents : [],
+            assistantMetadata: mergeAssistantMetadata(assistantMetadata, finalChunk?.assistantMetadata),
         };
     }
 

@@ -157,6 +157,22 @@ describe('SSHExecuteTool', () => {
     expect(enriched.message).toContain('Hints:');
   });
 
+  test('enrichExecutionError explains remote inline Python indentation failures', () => {
+    const tool = new SSHExecuteTool();
+    const error = new Error('IndentationError: expected an indented block after if statement on line 7');
+    error.stderr = '  File "<stdin>", line 8\nIndentationError: expected an indented block after if statement on line 7';
+
+    const enriched = tool.enrichExecutionError(error, {
+      command: "python3 - <<'PY'\nif marker:\nprint(marker)\nPY",
+      host: '10.0.0.5:22',
+    });
+
+    expect(enriched.hints).toEqual(expect.arrayContaining([
+      expect.stringContaining('Inline Python failed before the remote edit ran'),
+    ]));
+    expect(enriched.message).toContain('stage a real script/file');
+  });
+
   test('stripBenignSshWarnings removes known-hosts noise from stderr', () => {
     const tool = new SSHExecuteTool();
     const cleaned = tool.stripBenignSshWarnings([

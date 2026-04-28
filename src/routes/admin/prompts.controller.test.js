@@ -210,5 +210,6 @@ describe('admin prompts controller', () => {
     const prompt = promptsController.getSurfaceById('conversation-planner');
 
     expect(prompt.content).toContain('Treat "remote CLI", "direct CLI", and "remote command" as aliases for the `remote-command` tool.');
+    expect(prompt.content).toContain('avoid indentation-sensitive inline Python or YAML heredocs');
   });
 });

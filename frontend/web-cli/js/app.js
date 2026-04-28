@@ -1295,6 +1295,11 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
                     const detail = String(chunk.detail || chunk.progress?.detail || '').trim();
                     const phase = String(chunk.phase || chunk.progress?.phase || 'working').trim();
                     this.updateProgressLine(detail || phase);
+                } else if (chunk.type === 'reasoning_summary_delta') {
+                    const summary = String(chunk.summary || chunk.content || '').replace(/\s+/g, ' ').trim();
+                    if (summary) {
+                        this.updateProgressLine(`Reasoning: ${summary}`);
+                    }
                 } else if (chunk.type === 'tool_event') {
                     this.recordVoxelToolUse('tool');
                     this.updateProgressLine(chunk.detail || 'Running tool');
@@ -1304,6 +1309,14 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
             // Finalize streaming output after the pixel reveal buffer catches up.
             await this.finalizeStreamingOutput(response.content || 'No response');
             this.finalizeProgressLine();
+            const reasoningSummary = String(
+                response.assistantMetadata?.reasoningSummary
+                || response.assistantMetadata?.reasoning_summary
+                || '',
+            ).replace(/\s+/g, ' ').trim();
+            if (reasoningSummary) {
+                this.printSystem(`Reasoning summary: ${reasoningSummary}`);
+            }
             const addedArtifactFiles = this.syncArtifactsToSessionFiles([
                 ...(Array.isArray(response.artifacts) ? response.artifacts : []),
                 ...this.collectArtifactsFromValue(response.toolEvents || []),
