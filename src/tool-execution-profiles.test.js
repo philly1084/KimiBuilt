@@ -20,6 +20,8 @@ describe('tool execution profiles', () => {
             'speech-generate',
             'podcast',
             'deep-research-presentation',
+            'design-resource-search',
+            'code-sandbox',
             'security-scan',
             'architecture-design',
             'uml-generate',

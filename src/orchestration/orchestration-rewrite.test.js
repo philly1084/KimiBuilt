@@ -10,6 +10,11 @@ const {
   selectCandidatesForAgencyMode,
 } = require('./tool-policy');
 const { validatePlan, validatePlanStep } = require('./plan-validator');
+const { buildToolContract } = require('./tool-contracts');
+const {
+  ROLE_IDS,
+  inferAgentRolePipeline,
+} = require('./agent-roles');
 
 function withRewriteFlag(value, fn) {
   const previous = process.env.ORCHESTRATION_REWRITE_ENABLED;
@@ -26,12 +31,9 @@ function withRewriteFlag(value, fn) {
 }
 
 function buildToolManager(toolIds = []) {
-  const tools = new Map(toolIds.map((toolId) => [toolId, {
-    id: toolId,
-    name: toolId,
-    description: `${toolId} test tool`,
-    inputSchema: toolId === 'agent-workload'
-      ? {
+  const buildInputSchema = (toolId) => {
+    if (toolId === 'agent-workload') {
+      return {
         type: 'object',
         required: ['action'],
         properties: {
@@ -40,13 +42,35 @@ function buildToolManager(toolIds = []) {
           timezone: { type: 'string' },
         },
         additionalProperties: false,
-      }
-      : {
+      };
+    }
+
+    if (toolId === 'code-sandbox') {
+      return {
         type: 'object',
-        properties: {},
-      },
+        required: ['language'],
+        properties: {
+          mode: { type: 'string', enum: ['execute', 'project'] },
+          language: { type: 'string', enum: ['javascript', 'html', 'vite'] },
+          code: { type: 'string' },
+          files: { type: 'array' },
+        },
+      };
+    }
+
+    return {
+      type: 'object',
+      properties: {},
+    };
+  };
+
+  const tools = new Map(toolIds.map((toolId) => [toolId, {
+    id: toolId,
+    name: toolId,
+    description: `${toolId} test tool`,
+    inputSchema: buildInputSchema(toolId),
     backend: {
-      sideEffects: toolId.startsWith('agent-') ? ['write'] : [],
+      sideEffects: toolId.startsWith('agent-') || toolId === 'code-sandbox' ? ['write'] : [],
     },
   }]));
   return {
@@ -137,5 +161,174 @@ describe('orchestration rewrite policy', () => {
       agencyProfile: { mode: AGENCY_MODES.MULTI_STEP },
     });
     expect(candidates).toEqual(['agent-workload', 'agent-delegate', 'remote-command']);
+  });
+
+  test('infers research, design, sandbox build, QA, and integration roles for website builds', () => {
+    const pipeline = inferAgentRolePipeline({
+      objective: 'Research competitors and build a polished landing page website.',
+      classification: {
+        taskFamily: 'research-deliverable',
+        groundingRequirement: 'required',
+      },
+      executionProfile: 'default',
+    });
+
+    expect(pipeline).toEqual(expect.objectContaining({
+      strategy: 'research-design-sandbox-build',
+      requiresResearch: true,
+      requiresDesign: true,
+      requiresBuild: true,
+      requiresSandbox: true,
+    }));
+    expect(pipeline.roles.map((role) => role.id)).toEqual(expect.arrayContaining([
+      ROLE_IDS.ORCHESTRATOR,
+      ROLE_IDS.RESEARCH,
+      ROLE_IDS.DESIGN,
+      ROLE_IDS.BUILDER,
+      ROLE_IDS.QA,
+      ROLE_IDS.INTEGRATOR,
+    ]));
+  });
+
+  test('allows previewable code-sandbox project mode but blocks executable sandbox mode', () => {
+    const tool = buildToolManager(['code-sandbox']).getTool('code-sandbox');
+    const contracts = {
+      'code-sandbox': buildToolContract('code-sandbox', tool),
+    };
+
+    const projectStep = validatePlanStep({
+      tool: 'code-sandbox',
+      params: {
+        mode: 'project',
+        language: 'html',
+        files: [{ path: 'index.html', content: '<main>Preview</main>' }],
+      },
+    }, {
+      candidateToolIds: ['code-sandbox'],
+      contracts,
+    });
+    expect(projectStep.ok).toBe(true);
+
+    const executeStep = validatePlanStep({
+      tool: 'code-sandbox',
+      params: {
+        mode: 'execute',
+        language: 'javascript',
+        code: 'console.log("runs arbitrary code")',
+      },
+    }, {
+      candidateToolIds: ['code-sandbox'],
+      contracts,
+    });
+    expect(executeStep.ok).toBe(false);
+    expect(executeStep.rejections.map((rejection) => rejection.code)).toContain('confirmation_required');
+  });
+
+  test('orchestrator policy exposes role pipeline design and sandbox candidates for site builds', () => {
+    const orchestrator = new ConversationOrchestrator({});
+    const toolManager = buildToolManager([
+      'document-workflow',
+      'design-resource-search',
+      'code-sandbox',
+      'web-search',
+      'web-fetch',
+    ]);
+    const objective = 'Build a polished landing page website for a local AI consulting firm.';
+    const policy = orchestrator.buildToolPolicy({
+      objective,
+      executionProfile: 'default',
+      toolManager,
+    });
+
+    expect(policy.rolePipeline).toEqual(expect.objectContaining({
+      requiresDesign: true,
+      requiresBuild: true,
+      requiresSandbox: true,
+    }));
+    expect(policy.candidateToolIds).toEqual(expect.arrayContaining([
+      'document-workflow',
+      'design-resource-search',
+      'code-sandbox',
+    ]));
+
+    const directAction = orchestrator.buildDirectAction({
+      objective,
+      toolPolicy: policy,
+    });
+    expect(directAction).toEqual(expect.objectContaining({
+      tool: 'design-resource-search',
+      params: expect.objectContaining({
+        action: 'search',
+        surface: 'website',
+      }),
+    }));
+  });
+
+  test('uses design resources as document-workflow sources and requests sandbox suite output', () => {
+    const orchestrator = new ConversationOrchestrator({});
+    const toolManager = buildToolManager([
+      'document-workflow',
+      'design-resource-search',
+      'code-sandbox',
+    ]);
+    const objective = 'Build a modern website for a neighborhood bakery.';
+    const policy = orchestrator.buildToolPolicy({
+      objective,
+      executionProfile: 'default',
+      toolManager,
+    });
+    const action = orchestrator.buildDirectAction({
+      objective,
+      toolPolicy: policy,
+      toolEvents: [{
+        toolCall: {
+          function: {
+            name: 'design-resource-search',
+            arguments: JSON.stringify({ action: 'search', query: objective }),
+          },
+        },
+        result: {
+          toolId: 'design-resource-search',
+          success: true,
+          data: {
+            results: [{
+              id: 'tailwind-css',
+              name: 'Tailwind CSS Docs',
+              provider: 'Tailwind Labs',
+              category: 'styling',
+              description: 'Responsive layout and utility styling reference.',
+              bestFor: ['responsive layout', 'component styling'],
+              formats: ['css', 'utility-classes'],
+              domains: ['tailwindcss.com'],
+              license: 'MIT',
+              attribution: 'Follow Tailwind CSS documentation and package license terms.',
+              fetchPlan: {
+                params: {
+                  url: 'https://tailwindcss.com/docs/utility-first',
+                },
+              },
+            }],
+          },
+        },
+      }],
+    });
+
+    expect(action).toEqual(expect.objectContaining({
+      tool: 'document-workflow',
+      params: expect.objectContaining({
+        action: 'generate-suite',
+        documentType: 'website',
+        formats: ['html'],
+        buildMode: 'sandbox',
+        useSandbox: true,
+        includeContent: true,
+        sources: [
+          expect.objectContaining({
+            kind: 'design-resource-search',
+            sourceUrl: 'https://tailwindcss.com/docs/utility-first',
+          }),
+        ],
+      }),
+    }));
   });
 });

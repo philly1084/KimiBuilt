@@ -53,6 +53,24 @@ const TOOL_CONTRACT_OVERRIDES = Object.freeze({
     requiresConfirmation: false,
     idempotency: 'caller',
   },
+  'design-resource-search': {
+    capabilities: ['design', 'research', 'resource-index'],
+    foregroundEligible: true,
+    backgroundEligible: true,
+    supportsSchedule: false,
+    destructiveRisk: 'low',
+    requiresConfirmation: false,
+    idempotency: 'readonly',
+  },
+  'code-sandbox': {
+    capabilities: ['sandbox', 'build', 'preview', 'code'],
+    foregroundEligible: true,
+    backgroundEligible: true,
+    supportsSchedule: false,
+    destructiveRisk: 'medium',
+    requiresConfirmation: true,
+    idempotency: 'workspace',
+  },
 });
 
 function normalizeSideEffects(tool = {}) {

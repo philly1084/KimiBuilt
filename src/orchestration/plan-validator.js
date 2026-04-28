@@ -44,6 +44,19 @@ function validateAdditionalProperties(schema = {}, params = {}) {
   return Object.keys(params).filter((key) => !Object.prototype.hasOwnProperty.call(schema.properties, key));
 }
 
+function requiresConfirmationForStep(contract = null, normalized = null) {
+  if (contract?.requiresConfirmation !== true) {
+    return false;
+  }
+
+  if (normalized?.tool === 'code-sandbox'
+    && String(normalized?.params?.mode || '').trim().toLowerCase() === 'project') {
+    return false;
+  }
+
+  return true;
+}
+
 function validatePlanStep(step = {}, {
   candidateToolIds = [],
   toolManager = null,
@@ -74,7 +87,7 @@ function validatePlanStep(step = {}, {
   }
 
   const contract = contracts[normalized.tool] || null;
-  if (contract?.requiresConfirmation) {
+  if (requiresConfirmationForStep(contract, normalized)) {
     rejections.push({ code: 'confirmation_required', message: `Tool ${normalized.tool} requires confirmation.` });
   }
 

@@ -102,6 +102,13 @@ const { buildAgencyProfile: buildRewriteAgencyProfile, inferTaskIntent } = requi
 const { buildDeterministicRoute } = require('./orchestration/plan-router');
 const { validatePlan } = require('./orchestration/plan-validator');
 const {
+    ROLE_IDS,
+    formatAgentRolePipelineForPrompt,
+    hasRole,
+    hasWebsiteBuildIntent,
+    inferAgentRolePipeline,
+} = require('./orchestration/agent-roles');
+const {
     inferSurfaceFinisher,
     scorePerceivedIntelligence,
 } = require('./perceived-intelligence-harness');
@@ -890,7 +897,7 @@ function hasDocumentWorkflowIntentText(text = '') {
     }
 
     return (
-        /\b(document|doc|report|brief|proposal|guide|summary|one-pager|whitepaper|slides|presentation|deck|pptx|docx|pdf|html page|html document|web page)\b/.test(normalized)
+        /\b(document|doc|report|brief|proposal|guide|summary|one-pager|whitepaper|slides|presentation|deck|pptx|docx|pdf|html page|html document|web page|webpage|website|web site|site|landing page|microsite|product page|dashboard|frontend|front end|web app)\b/.test(normalized)
         && /\b(create|make|generate|build|prepare|draft|write|assemble|compile|organize|inject|turn|convert|export)\b/.test(normalized)
     ) || (
         /\b(slides|presentation|deck|pptx|docx|pdf|html document|research brief)\b/.test(normalized)
@@ -1254,6 +1261,7 @@ function buildScoredCandidateToolMap({
     hasMigrationChangeIntent = false,
     hasSecurityIntent = false,
     agencyProfile = null,
+    rolePipeline = null,
 } = {}) {
     const scoreMap = Object.fromEntries(
         allowedToolIds.map((toolId) => [toolId, { score: 0, reasons: [] }]),
@@ -1393,6 +1401,13 @@ function buildScoredCandidateToolMap({
     if (hasPodcastIntent) {
         adjustCandidateToolScore(scoreMap, 'podcast', 1.4, 'Explicit podcast wording should keep the podcast workflow tool in the candidate set.');
         adjustCandidateToolScore(scoreMap, 'web-search', 0.25, 'Podcast production may still need a research fallback when the podcast tool is unavailable.');
+    }
+    if (rolePipeline?.requiresDesign || hasRole(rolePipeline, ROLE_IDS.DESIGN)) {
+        adjustCandidateToolScore(scoreMap, 'design-resource-search', 1.1, 'The active role pipeline includes a design agent that needs curated design references and assets.');
+    }
+    if (rolePipeline?.requiresSandbox || hasRole(rolePipeline, ROLE_IDS.QA)) {
+        adjustCandidateToolScore(scoreMap, 'code-sandbox', 0.95, 'The active role pipeline requires a previewable sandbox project for website or dashboard output.');
+        adjustCandidateToolScore(scoreMap, DOCUMENT_WORKFLOW_TOOL_ID, 1.05, 'The active role pipeline should build the deliverable through the document workflow with sandbox output.');
     }
     if (workflowNeedsRepoLane && remoteToolId) {
         adjustCandidateToolScore(scoreMap, remoteToolId, 1.05, 'Repository work in remote-build mode should use the remote CLI lane.');
@@ -2289,6 +2304,35 @@ function shouldIncludeDocumentWorkflowContent(text = '') {
         && /\b(file|page|write|save|inject|local)\b/i.test(String(text || ''));
 }
 
+function buildDesignResourceSearchParams({ objective = '', rolePipeline = null } = {}) {
+    const websiteBuild = hasWebsiteBuildIntent(objective) || rolePipeline?.requiresSandbox === true;
+    const surface = websiteBuild
+        ? 'website'
+        : (hasDocumentWorkflowIntentText(objective) ? 'document' : undefined);
+    return {
+        action: 'search',
+        query: normalizeInlineText(objective) || 'design resources',
+        ...(surface ? { surface } : {}),
+        limit: 6,
+    };
+}
+
+function buildDesignResourceSourceContent(resource = {}) {
+    const bestFor = Array.isArray(resource.bestFor) ? resource.bestFor.filter(Boolean).join(', ') : '';
+    const formats = Array.isArray(resource.formats) ? resource.formats.filter(Boolean).join(', ') : '';
+    const domains = Array.isArray(resource.domains) ? resource.domains.filter(Boolean).join(', ') : '';
+    const safetyNotes = Array.isArray(resource.safetyNotes) ? resource.safetyNotes.filter(Boolean).join('; ') : '';
+    return [
+        resource.description ? `Description: ${normalizeInlineText(resource.description)}` : '',
+        bestFor ? `Best for: ${normalizeInlineText(bestFor)}` : '',
+        formats ? `Formats: ${normalizeInlineText(formats)}` : '',
+        domains ? `Approved domains: ${normalizeInlineText(domains)}` : '',
+        resource.attribution ? `Attribution: ${normalizeInlineText(resource.attribution)}` : '',
+        resource.license ? `License: ${normalizeInlineText(resource.license)}` : '',
+        safetyNotes ? `Safety notes: ${normalizeInlineText(safetyNotes)}` : '',
+    ].filter(Boolean).join('\n');
+}
+
 function buildDocumentWorkflowSourcesFromToolEvents(toolEvents = []) {
     const events = Array.isArray(toolEvents) ? toolEvents : [];
     const lastSearchEvent = getLastSuccessfulToolEvent(events, 'web-search');
@@ -2337,14 +2381,66 @@ function buildDocumentWorkflowSourcesFromToolEvents(toolEvents = []) {
         }
     }
 
+    for (const event of events) {
+        const toolId = event?.toolCall?.function?.name || event?.result?.toolId || '';
+        if (toolId !== 'design-resource-search' || event?.result?.success === false) {
+            continue;
+        }
+
+        const results = Array.isArray(event?.result?.data?.results)
+            ? event.result.data.results
+            : [];
+
+        for (const resource of results.slice(0, 4)) {
+            const id = String(resource?.id || '').trim();
+            const title = normalizeInlineText(resource?.name || resource?.title || id || 'Design resource');
+            const fetchUrl = String(resource?.fetchPlan?.params?.url || resource?.docsUrl || resource?.apiUrl || '').trim();
+            const content = buildDesignResourceSourceContent(resource);
+            const dedupeKey = id || fetchUrl || `${title}:${content}`;
+
+            if (!content || seen.has(dedupeKey)) {
+                continue;
+            }
+
+            seen.add(dedupeKey);
+            sources.push({
+                id: `design-resource-${sources.length + 1}`,
+                title,
+                sourceLabel: resource?.provider
+                    ? `Design resource: ${resource.provider}`
+                    : 'Design resource index',
+                sourceUrl: fetchUrl,
+                kind: 'design-resource-search',
+                content,
+            });
+
+            if (sources.length >= 8) {
+                break;
+            }
+        }
+
+        if (sources.length >= 8) {
+            break;
+        }
+    }
+
     return sources;
 }
 
 function buildDocumentWorkflowGenerateParams({ objective = '', toolEvents = [] } = {}) {
+    const websiteBuild = hasWebsiteBuildIntent(objective);
     const params = {
-        action: 'generate',
+        action: websiteBuild ? 'generate-suite' : 'generate',
         prompt: objective,
-        includeContent: shouldIncludeDocumentWorkflowContent(objective),
+        includeContent: websiteBuild || shouldIncludeDocumentWorkflowContent(objective),
+        ...(websiteBuild
+            ? {
+                documentType: 'website',
+                formats: ['html'],
+                buildMode: 'sandbox',
+                useSandbox: true,
+            }
+            : {}),
     };
     const sources = buildDocumentWorkflowSourcesFromToolEvents(toolEvents);
 
@@ -4085,6 +4181,29 @@ function buildDocumentWorkflowFollowupPlanFromToolEvents({ objective = '', toolP
     }];
 }
 
+function buildDesignResourceFollowupPlanFromToolEvents({ objective = '', toolPolicy = {}, toolEvents = [] } = {}) {
+    if (!toolPolicy?.rolePipeline?.requiresDesign
+        || !toolPolicy.candidateToolIds.includes('design-resource-search')
+        || getLastSuccessfulToolEvent(toolEvents, 'design-resource-search')) {
+        return [];
+    }
+
+    if (toolPolicy.rolePipeline.requiresResearch
+        && !hasGroundedResearchToolResult(toolEvents)
+        && !getLastSuccessfulToolEvent(toolEvents, 'web-search')) {
+        return [];
+    }
+
+    return [{
+        tool: 'design-resource-search',
+        reason: 'The design role needs curated resource guidance before building the requested website or document artifact.',
+        params: buildDesignResourceSearchParams({
+            objective,
+            rolePipeline: toolPolicy.rolePipeline,
+        }),
+    }];
+}
+
 function shouldAllowGuardedCompletionContinuation({
     objective = '',
     toolPolicy = {},
@@ -4112,6 +4231,8 @@ function shouldAllowGuardedCompletionContinuation({
     const objectiveNeedsDeterministicFollowup = hasExplicitWebResearchIntentText(objective)
         || hasCurrentInfoIntentText(objective)
         || hasDocumentWorkflowIntentText(objective)
+        || toolPolicy?.rolePipeline?.requiresDesign === true
+        || toolPolicy?.rolePipeline?.requiresBuild === true
         || toolPolicy?.projectPlan?.status === 'active'
         || toolPolicy?.workflow?.status === 'active';
 
@@ -7173,10 +7294,12 @@ class ConversationOrchestrator extends EventEmitter {
         const guardedAgencyRounds = Math.max(
             deterministicFollowupRounds,
             Number(agencyProfile?.maxRoundsHint || 1),
+            Number(toolPolicy?.rolePipeline?.maxRoundsHint || 1),
         );
         const guardedAgencyToolCalls = Math.max(
             MAX_PLAN_STEPS,
             Number(agencyProfile?.maxToolCallsHint || MAX_PLAN_STEPS),
+            Number(toolPolicy?.rolePipeline?.maxToolCallsHint || MAX_PLAN_STEPS),
         );
         const hasCustomToolBudget = Number.isFinite(Number(toolBudget?.maxDurationMs)) && Number(toolBudget.maxDurationMs) > 0;
         const budgetState = {
@@ -7197,6 +7320,14 @@ class ConversationOrchestrator extends EventEmitter {
         const restoredHarnessSnapshot = isHarnessResumeTurn(rawObjective, objective)
             ? sessionControlState.harness
             : null;
+        const shouldUseRolePipelineCriteria = toolPolicy?.rolePipeline?.requiresDesign === true
+            || toolPolicy?.rolePipeline?.requiresBuild === true;
+        const rolePipelineCriteria = shouldUseRolePipelineCriteria && Array.isArray(toolPolicy?.rolePipeline?.roles)
+            ? toolPolicy.rolePipeline.roles
+                .filter((role) => ![ROLE_IDS.ORCHESTRATOR, ROLE_IDS.INTEGRATOR].includes(role?.id))
+                .map((role) => role?.outputContract?.format || role?.label || '')
+                .filter(Boolean)
+            : [];
         const harnessRunDefaults = {
             objective,
             executionProfile: resolvedProfile,
@@ -7211,7 +7342,7 @@ class ConversationOrchestrator extends EventEmitter {
                     .filter((milestone) => milestone?.status !== 'completed')
                     .map((milestone) => milestone.title || milestone.objective || '')
                     .filter(Boolean)
-                : [],
+                : rolePipelineCriteria,
             workflow: endToEndWorkflow,
             projectPlan: activeProjectPlan,
         };
@@ -7778,6 +7909,24 @@ class ConversationOrchestrator extends EventEmitter {
                         nextPlan = guidedResearchPlan;
                         runtimeMode = 'guided-tools';
                         planSource = 'guided-research';
+                    }
+                }
+
+                if (nextPlan.length === 0) {
+                    const guidedDesignPlan = filterRepeatedPlanSteps(
+                        buildDesignResourceFollowupPlanFromToolEvents({
+                            objective,
+                            toolPolicy,
+                            toolEvents,
+                        }),
+                        executedStepSignatures,
+                        executedStepSignatureCounts,
+                    );
+
+                    if (guidedDesignPlan.length > 0) {
+                        nextPlan = guidedDesignPlan;
+                        runtimeMode = 'guided-tools';
+                        planSource = 'guided-design';
                     }
                 }
 
@@ -8959,6 +9108,11 @@ class ConversationOrchestrator extends EventEmitter {
             session,
             workflow: workflowSeed,
         });
+        const rolePipelineSeed = inferAgentRolePipeline({
+            objective,
+            classification,
+            executionProfile,
+        });
         const continuationGate = normalizeForegroundContinuationGate(getSessionControlState(session).foregroundContinuationGate);
         const autonomyContinuationDecision = parseAutonomyContinuationDecision(objective);
         const shouldClearContinuationPause = autonomyContinuationDecision === 'continue'
@@ -8967,6 +9121,7 @@ class ConversationOrchestrator extends EventEmitter {
             || (continuationGate?.paused && !shouldClearContinuationPause);
         const effectiveWorkflowSeed = shouldHoldForegroundWork ? null : workflowSeed;
         const effectiveProjectPlanSeed = shouldHoldForegroundWork ? null : projectPlanSeed;
+        const effectiveRolePipelineSeed = shouldHoldForegroundWork ? null : rolePipelineSeed;
         const workflowNeedsRepoLane = effectiveWorkflowSeed?.lane === 'repo-only' || effectiveWorkflowSeed?.lane === 'repo-then-deploy';
         const workflowNeedsDeployLane = effectiveWorkflowSeed?.lane === 'deploy-only' || effectiveWorkflowSeed?.lane === 'repo-then-deploy';
         const hasActiveForegroundWorkflow = effectiveWorkflowSeed?.status === 'active';
@@ -9018,6 +9173,7 @@ class ConversationOrchestrator extends EventEmitter {
                 hasMigrationChangeIntent,
                 hasSecurityIntent,
                 agencyProfile: effectiveAgencyProfile,
+                rolePipeline: effectiveRolePipelineSeed,
             })
             : null;
 
@@ -9063,6 +9219,13 @@ class ConversationOrchestrator extends EventEmitter {
                 candidates.add('docker-exec');
             }
             if (allowedToolIds.includes('code-sandbox') && hasExplicitLocalSandboxIntent(prompt)) {
+                candidates.add('code-sandbox');
+            }
+            if (effectiveRolePipelineSeed?.requiresDesign && allowedToolIds.includes('design-resource-search')) {
+                candidates.add('design-resource-search');
+            }
+            if ((effectiveRolePipelineSeed?.requiresSandbox || hasExplicitLocalSandboxIntent(prompt))
+                && allowedToolIds.includes('code-sandbox')) {
                 candidates.add('code-sandbox');
             }
             if (hasArchitectureIntent && allowedToolIds.includes('architecture-design')) {
@@ -9219,6 +9382,13 @@ class ConversationOrchestrator extends EventEmitter {
             if (hasRemoteCliAgentAuthoringRequest && allowedToolIds.includes('remote-cli-agent')) {
                 candidates.add('remote-cli-agent');
             }
+            if (effectiveRolePipelineSeed?.requiresDesign && allowedToolIds.includes('design-resource-search')) {
+                candidates.add('design-resource-search');
+            }
+            if ((effectiveRolePipelineSeed?.requiresSandbox || hasExplicitLocalSandboxIntent(prompt))
+                && allowedToolIds.includes('code-sandbox')) {
+                candidates.add('code-sandbox');
+            }
             if (/\b(git|github)\b[\s\S]{0,80}\b(status|diff|branch|stage|add|commit|push|save and push|save-and-push)\b/.test(prompt)
                 && allowedToolIds.includes('git-safe')) {
                 candidates.add('git-safe');
@@ -9298,6 +9468,7 @@ class ConversationOrchestrator extends EventEmitter {
             activeTaskFrame,
             classification,
             agencyProfile: effectiveAgencyProfile,
+            rolePipeline: effectiveRolePipelineSeed,
             workflow: effectiveWorkflowSeed,
             projectPlan: effectiveProjectPlanSeed,
             clusterRegistrySummary,
@@ -9535,6 +9706,19 @@ class ConversationOrchestrator extends EventEmitter {
                 tool: 'web-scrape',
                 reason: 'Explicit scrape request with a direct URL should start with deterministic web scraping.',
                 params: inferBlindScrapeParams(objective, firstUrl),
+            });
+        }
+
+        if (toolPolicy?.rolePipeline?.requiresDesign
+            && toolPolicy.candidateToolIds.includes('design-resource-search')
+            && !getLastSuccessfulToolEvent(toolEvents, 'design-resource-search')) {
+            return finalizeAction({
+                tool: 'design-resource-search',
+                reason: 'The design role should gather curated design resources before the requested artifact is generated.',
+                params: buildDesignResourceSearchParams({
+                    objective,
+                    rolePipeline: toolPolicy.rolePipeline,
+                }),
             });
         }
 
@@ -9927,6 +10111,15 @@ class ConversationOrchestrator extends EventEmitter {
                     'Prefer proceeding with reasonable assumptions for routine context gathering, implementation, testing, and verification; ask only when missing input materially changes scope, credentials, destructive actions, or product/architecture direction.',
                 ]
                 : []),
+            ...(toolPolicy?.rolePipeline
+                ? [
+                    'Active agent role contracts:',
+                    formatAgentRolePipelineForPrompt(toolPolicy.rolePipeline),
+                    'Follow role order through handoff artifacts: research evidence first when required, design brief before build, sandbox/project build for websites, then QA/integration.',
+                    'Use `design-resource-search` for the design role before generating design-sensitive websites, dashboards, documents, or page artifacts unless it has already succeeded in this run.',
+                    'For website, dashboard, landing-page, and frontend builds, prefer `document-workflow` with `action:"generate-suite"`, `formats:["html"]`, `buildMode:"sandbox"`, and `useSandbox:true`; direct `code-sandbox` calls must use `mode:"project"` rather than execute mode.',
+                ]
+                : []),
             'Candidate tools:',
             toolCatalog,
             '',
@@ -10036,6 +10229,8 @@ class ConversationOrchestrator extends EventEmitter {
             'For routine public research and research-backed slides or documents, do not stop to ask which websites to scrape. Use Perplexity-backed `web-search` to discover candidate URLs, choose the strongest public sources yourself, verify them with `web-fetch` first, and use `web-scrape` only when a page needs rendered or structured extraction unless the user explicitly wants a constrained source list.',
             'Every `document-workflow` step must include `params.action` set to `recommend`, `plan`, `generate`, `assemble`, or `generate-suite`.',
             'Use `document-workflow generate` for final briefs, reports, documents, HTML pages, and slide decks.',
+            'Use `document-workflow generate-suite` with `buildMode:"sandbox"` or `useSandbox:true` for previewable website/dashboard/front-end artifacts so the builder produces a sandbox project instead of only a template.',
+            'Every direct `code-sandbox` website build step must use `params.mode:"project"` plus previewable files. Do not use `code-sandbox` execute mode unless a separate confirmation policy explicitly allows executable code.',
             'When the user wants a research-backed deliverable, prefer `web-search` and `web-fetch` first, then use `web-scrape` only when a page needs rendered or structured extraction before `document-workflow` with grounded `sources` derived from the verified tool results.',
             'Set `document-workflow.params.includeContent` to `true` only when a later step needs the full textual body for `file-write`; otherwise prefer the stored document download URL.',
             'Use `deep-research-presentation` when the user wants a research-backed deck handled as one ordered plan -> research -> images -> presentation workflow.',
@@ -10049,6 +10244,8 @@ class ConversationOrchestrator extends EventEmitter {
                         : (Number(toolPolicy.userCheckpointPolicy.remaining || 0) > 0
                             ? 'If a checkpoint would unblock a major decision, you may use `user-checkpoint` instead of stopping with a prose question.'
                             : 'If more input is truly required, ask at most one concise plain-text question; otherwise proceed with a reasonable assumption.'),
+                    'On web-chat, treat `user-checkpoint` as the primary quick way to involve the user when one concise choice or direction check would help.',
+                    'On web-chat, `user-checkpoint` renders as an inline survey card with clickable options, so prefer it over a plain-text multiple-choice question.',
                 ]
                 : []),
             'If a multi-job cron request omits exact times, you may pass one derived sub-request per job with conservative defaults in local time, such as daily at 9:00 AM for checks and every Monday at 2:00 AM for updates.',
@@ -10731,6 +10928,17 @@ class ConversationOrchestrator extends EventEmitter {
             }
         }
 
+        if (toolPolicy?.rolePipeline) {
+            parts.push(`Active agent role contracts:\n${formatAgentRolePipelineForPrompt(toolPolicy.rolePipeline)}`);
+            parts.push('Use the role contracts as bounded autonomy: orchestrate the sequence, gather research/design handoff artifacts where required, build from those specs, verify, and then integrate the final response.');
+            if (toolPolicy.rolePipeline.requiresDesign && allowedToolIds.includes('design-resource-search')) {
+                parts.push('Use `design-resource-search` as the design agent resource lane for curated fonts, styling, icons, safe visual sources, and website/document design references.');
+            }
+            if (toolPolicy.rolePipeline.requiresSandbox && allowedToolIds.includes('code-sandbox')) {
+                parts.push('For website/dashboard/front-end outputs, produce a previewable sandbox project. Prefer `document-workflow generate-suite` with `buildMode:"sandbox"`/`useSandbox:true`, or use `code-sandbox` only in `mode:"project"` with files.');
+            }
+        }
+
         if (canUseUserCheckpoint) {
             parts.push('Use `user-checkpoint` when one high-impact decision would materially change the plan before major implementation, refactoring, or other long multi-step work.');
             parts.push('On web-chat, treat `user-checkpoint` as the primary quick way to involve the user when one concise choice or direction check would help.');
@@ -10845,6 +11053,7 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('Use `document-workflow` to recommend, plan, and generate reports, briefs, HTML documents, and slide decks.');
             parts.push('For routine public research behind those deliverables, discover candidate source URLs through Perplexity-backed `web-search`, choose the strongest sites yourself, verify them with `web-fetch` first, and use `web-scrape` only when deeper extraction is needed instead of asking the user which websites to scrape.');
             parts.push('For research-backed deliverables, gather verified facts with `web-search` and `web-fetch` first, then use `web-scrape` only when a page needs rendered or structured extraction before calling `document-workflow generate` with grounded `sources` built from those verified results.');
+            parts.push('For previewable website/dashboard/front-end artifacts, use `document-workflow generate-suite` with `formats:["html"]`, `buildMode:"sandbox"`, and `useSandbox:true` so the workflow can create a sandbox bundle.');
             parts.push('Use `document-workflow assemble` when the goal is to compile source material into a straightforward document without heavy rewriting.');
             parts.push('Set `document-workflow includeContent: true` only when a later `file-write` step needs the full HTML or markdown body.');
         }
@@ -11014,6 +11223,7 @@ class ConversationOrchestrator extends EventEmitter {
             activeTaskFrame,
             surfaceFinisher,
             agencyProfile: toolPolicy?.agencyProfile || null,
+            rolePipeline: toolPolicy?.rolePipeline || null,
             ...(harnessSummary ? { harness: harnessSummary } : {}),
             perceivedIntelligenceScores: intelligenceSummary.perceivedIntelligenceScores,
             failureTags: intelligenceSummary.failureTags,

@@ -1,0 +1,237 @@
+'use strict';
+
+const ROLE_IDS = Object.freeze({
+  ORCHESTRATOR: 'orchestrator',
+  RESEARCH: 'research_agent',
+  DESIGN: 'design_agent',
+  BUILDER: 'builder_agent',
+  QA: 'qa_agent',
+  INTEGRATOR: 'integrator',
+});
+
+function normalizeText(value = '') {
+  return String(value || '').trim();
+}
+
+function normalizeLowerText(value = '') {
+  return normalizeText(value).toLowerCase();
+}
+
+function hasResearchIntent(text = '') {
+  const normalized = normalizeLowerText(text);
+  return /\b(research|look up|search|browse|latest|current|compare|comparison|source|sources|evidence|pricing|news)\b/.test(normalized);
+}
+
+function hasDesignIntent(text = '') {
+  const normalized = normalizeLowerText(text);
+  return /\b(design|layout|visual|style|theme|brand|branding|ux|ui|information architecture|wireframe|prototype|polish|beautiful|modern)\b/.test(normalized);
+}
+
+function hasWebsiteBuildIntent(text = '') {
+  const normalized = normalizeLowerText(text);
+  if (!normalized) {
+    return false;
+  }
+
+  const buildVerb = /\b(create|make|generate|build|draft|design|prototype|ship|assemble|produce|turn)\b/.test(normalized);
+  const webTarget = /\b(website|web site|site|webpage|web page|landing page|microsite|product page|dashboard|frontend|front end|web app|html page|html document)\b/.test(normalized);
+  return buildVerb && webTarget;
+}
+
+function hasDocumentBuildIntent(text = '') {
+  const normalized = normalizeLowerText(text);
+  if (!normalized) {
+    return false;
+  }
+
+  const buildVerb = /\b(create|make|generate|build|prepare|draft|write|assemble|compile|organize|turn|convert|export)\b/.test(normalized);
+  const documentTarget = /\b(document|doc|report|brief|proposal|guide|summary|one-pager|whitepaper|slides|presentation|deck|pptx|docx|pdf)\b/.test(normalized);
+  return buildVerb && documentTarget;
+}
+
+function buildRole({
+  id,
+  label,
+  purpose,
+  tools = [],
+  outputContract = {},
+  autonomy = 'bounded',
+} = {}) {
+  return {
+    id,
+    label,
+    purpose,
+    tools,
+    outputContract,
+    autonomy,
+  };
+}
+
+function inferAgentRolePipeline({
+  objective = '',
+  classification = null,
+  executionProfile = 'default',
+} = {}) {
+  const text = normalizeText(objective);
+  const normalized = normalizeLowerText(text);
+  if (!normalized) {
+    return null;
+  }
+
+  const websiteBuild = hasWebsiteBuildIntent(normalized);
+  const documentBuild = hasDocumentBuildIntent(normalized);
+  const researchNeeded = hasResearchIntent(normalized)
+    || classification?.groundingRequirement === 'required'
+    || classification?.taskFamily === 'research'
+    || classification?.taskFamily === 'research-deliverable';
+  const designNeeded = websiteBuild
+    || hasDesignIntent(normalized)
+    || classification?.taskFamily === 'document';
+  const buildNeeded = websiteBuild || documentBuild;
+
+  if (!researchNeeded && !designNeeded && !buildNeeded) {
+    return null;
+  }
+
+  const roles = [
+    buildRole({
+      id: ROLE_IDS.ORCHESTRATOR,
+      label: 'Orchestrator',
+      purpose: 'Own the task graph, budgets, sequencing, and handoff artifacts.',
+      tools: ['user-checkpoint', 'agent-delegate', 'agent-workload'],
+      outputContract: {
+        format: 'json',
+        required: ['rolePlan', 'handoffArtifacts', 'completionCriteria'],
+      },
+    }),
+  ];
+
+  if (researchNeeded) {
+    roles.push(buildRole({
+      id: ROLE_IDS.RESEARCH,
+      label: 'Research Agent',
+      purpose: 'Gather and verify sources before synthesis or artifact generation.',
+      tools: ['web-search', 'web-fetch', 'web-scrape', 'research-bucket-write'],
+      outputContract: {
+        format: 'source-pack',
+        required: ['claims', 'sources', 'sourceUrls'],
+      },
+    }));
+  }
+
+  if (designNeeded) {
+    roles.push(buildRole({
+      id: ROLE_IDS.DESIGN,
+      label: 'Design Agent',
+      purpose: 'Produce information architecture, visual direction, design tokens, and content structure before building.',
+      tools: ['design-resource-search', 'image-search-unsplash', 'image-generate', 'graph-diagram'],
+      outputContract: {
+        format: 'design-brief',
+        required: ['audience', 'layoutPlan', 'visualDirection', 'componentMap'],
+      },
+    }));
+  }
+
+  if (buildNeeded) {
+    roles.push(buildRole({
+      id: ROLE_IDS.BUILDER,
+      label: 'Builder Agent',
+      purpose: 'Build the requested artifact from research and design specs in a previewable sandbox or artifact pipeline.',
+      tools: websiteBuild
+        ? ['document-workflow', 'code-sandbox', 'file-write']
+        : ['document-workflow', 'graph-diagram'],
+      outputContract: {
+        format: websiteBuild ? 'sandbox-project' : 'document-artifact',
+        required: websiteBuild
+          ? ['workspacePath', 'previewUrl', 'files']
+          : ['artifactUrl', 'format'],
+      },
+    }));
+  }
+
+  if (websiteBuild) {
+    roles.push(buildRole({
+      id: ROLE_IDS.QA,
+      label: 'QA Agent',
+      purpose: 'Verify the generated website or dashboard for renderability, responsiveness, and obvious content/design regressions.',
+      tools: ['code-sandbox', 'web-fetch'],
+      outputContract: {
+        format: 'qa-report',
+        required: ['checks', 'issues', 'ready'],
+      },
+    }));
+  }
+
+  roles.push(buildRole({
+    id: ROLE_IDS.INTEGRATOR,
+    label: 'Integrator',
+    purpose: 'Assemble the final user-facing response, cite verified sources, and persist durable project context.',
+    tools: ['document-workflow', 'agent-notes-write'],
+    outputContract: {
+      format: 'final-response',
+      required: ['summary', 'artifacts', 'nextSteps'],
+    },
+  }));
+
+  return {
+    type: 'AgentRolePipeline',
+    version: 1,
+    strategy: websiteBuild
+      ? 'research-design-sandbox-build'
+      : (documentBuild ? 'research-design-document-build' : 'research-design-synthesis'),
+    executionProfile,
+    requiresResearch: researchNeeded,
+    requiresDesign: designNeeded,
+    requiresBuild: buildNeeded,
+    requiresSandbox: websiteBuild,
+    maxRoundsHint: websiteBuild ? 4 : (researchNeeded && documentBuild ? 3 : 2),
+    maxToolCallsHint: websiteBuild ? 10 : 7,
+    sandboxPolicy: websiteBuild
+      ? {
+        required: true,
+        mode: 'project',
+        reason: 'Website and dashboard artifacts should be built as previewable project workspaces, not only template text.',
+      }
+      : {
+        required: false,
+      },
+    roles,
+  };
+}
+
+function hasRole(pipeline = null, roleId = '') {
+  return Array.isArray(pipeline?.roles)
+    && pipeline.roles.some((role) => role?.id === roleId);
+}
+
+function formatAgentRolePipelineForPrompt(pipeline = null) {
+  if (!pipeline || !Array.isArray(pipeline.roles) || pipeline.roles.length === 0) {
+    return '(none)';
+  }
+
+  return JSON.stringify({
+    strategy: pipeline.strategy,
+    requiresResearch: pipeline.requiresResearch,
+    requiresDesign: pipeline.requiresDesign,
+    requiresBuild: pipeline.requiresBuild,
+    sandboxPolicy: pipeline.sandboxPolicy,
+    roles: pipeline.roles.map((role) => ({
+      id: role.id,
+      label: role.label,
+      purpose: role.purpose,
+      tools: role.tools,
+      outputContract: role.outputContract,
+      autonomy: role.autonomy,
+    })),
+  }, null, 2);
+}
+
+module.exports = {
+  ROLE_IDS,
+  formatAgentRolePipelineForPrompt,
+  hasDocumentBuildIntent,
+  hasResearchIntent,
+  hasRole,
+  hasWebsiteBuildIntent,
+  inferAgentRolePipeline,
+};

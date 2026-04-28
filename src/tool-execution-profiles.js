@@ -48,9 +48,11 @@ const BASE_SHARED_TOOL_IDS = Object.freeze([
     'agent-workload',
     'document-workflow',
     'deep-research-presentation',
+    'design-resource-search',
     'user-checkpoint',
     'git-safe',
     'tool-doc-read',
+    'code-sandbox',
     ...PROMOTED_LOCAL_TOOL_IDS,
 ]);
 
@@ -100,7 +102,6 @@ const PROFILE_TOOL_ALLOWLISTS = Object.freeze({
         'remote-cli-agent',
         'k3s-deploy',
         ...BASE_SHARED_TOOL_IDS,
-        'code-sandbox',
     ]),
 });
 
