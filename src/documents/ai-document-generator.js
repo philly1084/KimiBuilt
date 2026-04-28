@@ -456,9 +456,11 @@ class AIDocumentGenerator {
    * @returns {Promise<Object>} Generated content structure
    */
   async generate(prompt, options = {}) {
+    const antiScaffoldPass = Boolean(options._antiScaffoldPass);
     const systemPrompt = this.buildSystemPrompt({
       ...options,
       prompt,
+      antiScaffold: antiScaffoldPass,
     });
     
     const messages = [
@@ -472,9 +474,16 @@ class AIDocumentGenerator {
         model: options.model || 'gpt-4o',
         reasoningEffort: options.reasoningEffort || null,
       });
-      
-      // Validate and normalize response
-      return this.normalizeDocumentStructure(content);
+      const normalizedContent = this.normalizeDocumentStructure(content);
+
+      if (this.isLikelyScaffoldedDocument(normalizedContent) && !antiScaffoldPass && options.retryOnScaffold !== false) {
+        return this.generate(prompt, {
+          ...options,
+          _antiScaffoldPass: true,
+        });
+      }
+
+      return normalizedContent;
     } catch (error) {
       console.error('[AIDocumentGenerator] Generation failed:', error);
       if (error?.responseText) {
@@ -484,6 +493,40 @@ class AIDocumentGenerator {
       }
       throw new Error(`AI generation failed: ${error.message}`);
     }
+  }
+
+  isLikelyScaffoldedDocument(content = {}) {
+    const sections = Array.isArray(content?.sections) ? content.sections : [];
+    const normalizedSections = sections.filter((section) => section && typeof section === 'object');
+    if (normalizedSections.length <= 1) {
+      return true;
+    }
+
+    const hasRichContent = normalizedSections.some((section) => {
+      const sectionText = String(section.content || '').trim();
+      const bullets = Array.isArray(section.bullets) ? section.bullets.filter(Boolean) : [];
+      const hasStructured = Array.isArray(section.stats) && section.stats.length > 0
+        || section.callout
+        || section.table
+        || section.chart;
+      return sectionText.length > 180 || bullets.join(' ').length > 180 || hasStructured;
+    });
+
+    if (hasRichContent) {
+      return false;
+    }
+
+    if (normalizedSections.length > 8) {
+      return false;
+    }
+
+    const scaffoldHeading = /^(step|section|slide|point|item)\s*\d+$/i;
+    const isHeadingScaffolded = normalizedSections.every((section) => {
+      const heading = String(section.heading || '').trim();
+      return heading.length < 32 && (scaffoldHeading.test(heading) || /^part\s*\d+$/i.test(heading));
+    });
+
+    return isHeadingScaffolded;
   }
 
   /**
@@ -756,6 +799,9 @@ Return JSON:
       pageTarget ? `- Keep metadata.estimatedPages at or below ${pageTarget}.` : null,
       '- Never mention internal tool names, failed tool calls, exact tool errors, web-search/web-fetch workflow steps, or process notes in visible document text.',
       '- Do not output markdown fences, commentary, or any text outside the JSON object.',
+      options.antiScaffold
+        ? '- If a previous draft drifted into a numbered scaffold (for example "Step 1", "Section 2"), do not output it again. Expand each section into request-specific headings and substance tied to the prompt.'
+        : null,
       '</rules>',
     ].filter(Boolean).join('\n');
   }
