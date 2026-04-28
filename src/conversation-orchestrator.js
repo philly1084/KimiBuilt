@@ -77,6 +77,8 @@ const {
     DEFAULT_EXECUTION_PROFILE,
     NOTES_EXECUTION_PROFILE,
     REMOTE_BUILD_EXECUTION_PROFILE,
+    PODCAST_EXECUTION_PROFILE,
+    PODCAST_VIDEO_EXECUTION_PROFILE,
     PROFILE_TOOL_ALLOWLISTS,
 } = require('./tool-execution-profiles');
 const {
@@ -797,6 +799,23 @@ function normalizeExecutionProfile(value = '') {
         'software-builder',
     ].includes(normalized)) {
         return REMOTE_BUILD_EXECUTION_PROFILE;
+    }
+
+    if ([
+        'podcast',
+        'podcast-audio',
+        'podcast_audio',
+    ].includes(normalized)) {
+        return PODCAST_EXECUTION_PROFILE;
+    }
+
+    if ([
+        'podcast-video',
+        'podcast_video',
+        'video-podcast',
+        'video_podcast',
+    ].includes(normalized)) {
+        return PODCAST_VIDEO_EXECUTION_PROFILE;
     }
 
     return DEFAULT_EXECUTION_PROFILE;
@@ -10015,7 +10034,7 @@ class ConversationOrchestrator extends EventEmitter {
             'When the latest user turn starts with `Survey response (`, treat that as the resolved answer to the prior checkpoint and continue the work instead of planning another survey.',
             'For research, web-search, web-fetch, or web-scrape work, avoid long scrape surveys and example-heavy intake. If clarification is truly needed, use one short choice hotlist with 2 to 4 concrete options, then continue after the answer.',
             'For routine public research and research-backed slides or documents, do not stop to ask which websites to scrape. Use Perplexity-backed `web-search` to discover candidate URLs, choose the strongest public sources yourself, verify them with `web-fetch` first, and use `web-scrape` only when a page needs rendered or structured extraction unless the user explicitly wants a constrained source list.',
-            'Every `document-workflow` step must include `params.action` set to `recommend`, `plan`, `generate`, or `assemble`.',
+            'Every `document-workflow` step must include `params.action` set to `recommend`, `plan`, `generate`, `assemble`, or `generate-suite`.',
             'Use `document-workflow generate` for final briefs, reports, documents, HTML pages, and slide decks.',
             'When the user wants a research-backed deliverable, prefer `web-search` and `web-fetch` first, then use `web-scrape` only when a page needs rendered or structured extraction before `document-workflow` with grounded `sources` derived from the verified tool results.',
             'Set `document-workflow.params.includeContent` to `true` only when a later step needs the full textual body for `file-write`; otherwise prefer the stored document download URL.',

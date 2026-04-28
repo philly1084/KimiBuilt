@@ -1,6 +1,8 @@
 const DEFAULT_EXECUTION_PROFILE = 'default';
 const NOTES_EXECUTION_PROFILE = 'notes';
 const REMOTE_BUILD_EXECUTION_PROFILE = 'remote-build';
+const PODCAST_EXECUTION_PROFILE = 'podcast';
+const PODCAST_VIDEO_EXECUTION_PROFILE = 'podcast-video';
 const NOTES_ALLOWED_TOOL_IDS = Object.freeze([
     'web-search',
     'web-fetch',
@@ -60,6 +62,39 @@ const PROFILE_TOOL_ALLOWLISTS = Object.freeze({
     [NOTES_EXECUTION_PROFILE]: Object.freeze([
         ...NOTES_ALLOWED_TOOL_IDS,
     ]),
+    [PODCAST_EXECUTION_PROFILE]: Object.freeze([
+        'web-search',
+        'web-fetch',
+        'web-scrape',
+        'image-generate',
+        'image-search-unsplash',
+        'image-from-url',
+        'speech-generate',
+        'asset-search',
+        'research-bucket-list',
+        'research-bucket-search',
+        'research-bucket-read',
+        'public-source-list',
+        'public-source-search',
+        'public-source-get',
+        'tool-doc-read',
+    ]),
+    [PODCAST_VIDEO_EXECUTION_PROFILE]: Object.freeze([
+        'web-search',
+        'web-fetch',
+        'web-scrape',
+        'image-generate',
+        'image-search-unsplash',
+        'image-from-url',
+        'asset-search',
+        'research-bucket-list',
+        'research-bucket-search',
+        'research-bucket-read',
+        'public-source-list',
+        'public-source-search',
+        'public-source-get',
+        'tool-doc-read',
+    ]),
     [REMOTE_BUILD_EXECUTION_PROFILE]: Object.freeze([
         'remote-command',
         'remote-cli-agent',
@@ -81,6 +116,8 @@ module.exports = {
     DEFAULT_EXECUTION_PROFILE,
     NOTES_EXECUTION_PROFILE,
     REMOTE_BUILD_EXECUTION_PROFILE,
+    PODCAST_EXECUTION_PROFILE,
+    PODCAST_VIDEO_EXECUTION_PROFILE,
     NOTES_ALLOWED_TOOL_IDS,
     PROMOTED_LOCAL_TOOL_IDS,
     PROFILE_TOOL_ALLOWLISTS,

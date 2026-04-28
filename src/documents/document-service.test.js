@@ -505,6 +505,52 @@ describe('DocumentService', () => {
     }));
     expect(plan.themeSuggestion).toEqual(expect.any(String));
     expect(plan.humanizationNotes.length).toBeGreaterThan(0);
+    expect(plan.productionToolchain).toEqual(expect.objectContaining({
+      customGeneration: true,
+      computeTools: expect.arrayContaining(['graph-diagram', 'code-sandbox']),
+      packageTargets: expect.arrayContaining(['vite-preview-bundle']),
+    }));
+    expect(plan.productionCapabilities.suiteActions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'generate-suite',
+        computeTools: expect.arrayContaining(['document-workflow', 'graph-diagram', 'code-sandbox']),
+      }),
+    ]));
+  });
+
+  test('advertises compute-backed document production capabilities by format', () => {
+    const service = new DocumentService({
+      responses: {
+        create: jest.fn(),
+      },
+    });
+
+    const capabilities = service.getDocumentProductionCapabilities();
+
+    expect(capabilities.policy.templateUse).toContain('not final canned output');
+    expect(capabilities.formats).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'pdf',
+        generator: 'browser-html-pdf',
+        toolchain: expect.objectContaining({
+          renderPipeline: expect.arrayContaining(['headless-browser-pdf']),
+        }),
+      }),
+      expect.objectContaining({
+        id: 'pptx',
+        generator: 'pptxgenjs',
+        toolchain: expect.objectContaining({
+          computeTools: expect.arrayContaining(['image-generation', 'graph-diagram']),
+        }),
+      }),
+      expect.objectContaining({
+        id: 'xlsx',
+        generator: 'xlsx-workbook-builder',
+        toolchain: expect.objectContaining({
+          visualCapabilities: expect.arrayContaining(['chart data sheets']),
+        }),
+      }),
+    ]));
   });
 
   test('builds approved document layout options and honors an explicit selection', () => {

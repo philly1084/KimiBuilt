@@ -251,6 +251,35 @@ describe('runtime-execution', () => {
         })).toBe('notes');
     });
 
+    test('keeps podcast surfaces out of remote-build even with sticky remote session state', () => {
+        const remoteSession = {
+            metadata: {
+                lastToolIntent: 'remote-command',
+                lastSshTarget: {
+                    host: '162.55.163.199',
+                },
+            },
+        };
+
+        expect(inferExecutionProfile({
+            taskType: 'podcast',
+            input: 'Research battery storage and make a podcast.',
+            session: remoteSession,
+        })).toBe('podcast');
+
+        expect(inferExecutionProfile({
+            taskType: 'podcast-video',
+            input: 'Research battery storage and make a video podcast.',
+            session: remoteSession,
+        })).toBe('podcast-video');
+
+        expect(inferExecutionProfile({
+            executionProfile: 'podcast-video',
+            input: 'Research battery storage and make a video podcast.',
+            session: remoteSession,
+        })).toBe('podcast-video');
+    });
+
     test('uses the latest user turn instead of stale remote transcript content when inferring execution profile', () => {
         expect(inferExecutionProfile({
             input: [

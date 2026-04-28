@@ -44,6 +44,23 @@ describe('/api/tools routes', () => {
         expect(response.body.data.map((tool) => tool.id)).not.toContain('managed-app');
     });
 
+    test('podcast-video catalog excludes remote-build tools', async () => {
+        const app = buildApp();
+
+        const response = await request(app).get('/api/tools/available?taskType=podcast-video');
+
+        expect(response.status).toBe(200);
+        expect(response.body.meta.executionProfile).toBe('podcast-video');
+        expect(response.body.data.map((tool) => tool.id)).toEqual(expect.arrayContaining([
+            'web-fetch',
+            'web-scrape',
+            'image-generate',
+        ]));
+        expect(response.body.data.map((tool) => tool.id)).not.toContain('remote-command');
+        expect(response.body.data.map((tool) => tool.id)).not.toContain('remote-cli-agent');
+        expect(response.body.data.map((tool) => tool.id)).not.toContain('k3s-deploy');
+    });
+
     test('remote-command tool details report runner target availability', async () => {
         const app = buildApp();
 

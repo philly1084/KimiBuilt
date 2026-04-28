@@ -484,7 +484,10 @@ router.get('/formats', (req, res) => {
   const documentService = req.app.locals.documentService;
   
   res.json({
-    formats: documentService.getSupportedFormats()
+    formats: documentService.getSupportedFormats(),
+    productionCapabilities: typeof documentService.getDocumentProductionCapabilities === 'function'
+      ? documentService.getDocumentProductionCapabilities()
+      : null,
   });
 });
 

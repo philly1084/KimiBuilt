@@ -1239,7 +1239,7 @@ describe('ToolManager image tools', () => {
       'code-sandbox',
       expect.objectContaining({
         mode: 'project',
-        language: 'html',
+        language: 'vite',
         files: expect.arrayContaining([
           expect.objectContaining({ path: 'index.html' }),
           expect.objectContaining({ path: 'assets/chart.png', contentBase64: expect.any(String) }),
@@ -1251,6 +1251,108 @@ describe('ToolManager image tools', () => {
     expect(result.data.sandboxBuild).toEqual(expect.objectContaining({
       mode: 'project',
       artifact: expect.objectContaining({ id: 'sandbox-artifact-1' }),
+    }));
+  });
+
+  test('uses graph-diagram before building a visual document suite', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const documentService = {
+      recommendDocumentWorkflow: jest.fn(({ format }) => ({
+        inferredType: 'data-story',
+        recommendedFormat: format || 'html',
+        blueprint: { label: 'Data Story' },
+      })),
+      buildDocumentPlan: jest.fn(),
+      assemble: jest.fn(),
+      generatePresentation: jest.fn(),
+      aiGenerate: jest.fn(async (_prompt, options) => ({
+        id: `doc-${options.format}`,
+        filename: `data-story-${options.format}.html`,
+        mimeType: 'text/html',
+        content: `<!DOCTYPE html><html><body><h1>${options.format}</h1></body></html>`,
+        contentBuffer: Buffer.from(`<!DOCTYPE html><html><body><h1>${options.format}</h1></body></html>`),
+        metadata: { format: options.format },
+        downloadUrl: `/api/documents/doc-${options.format}/download`,
+      })),
+    };
+    const nestedToolManager = {
+      executeTool: jest.fn(async (id, params) => {
+        if (id === 'graph-diagram') {
+          return {
+            success: true,
+            data: {
+              graphCount: 1,
+              images: [{
+                title: 'Adoption Flow',
+                url: '/api/artifacts/graph-1/download',
+              }],
+              artifacts: [{ id: 'graph-1' }],
+              graphs: [{ id: 'adoption-flow', formats: { svg: '<svg></svg>' } }],
+            },
+          };
+        }
+        if (id === 'code-sandbox') {
+          return {
+            success: true,
+            data: {
+              mode: 'project',
+              files: params.files.map((file) => ({ path: file.path })),
+            },
+          };
+        }
+        throw new Error(`Unexpected nested tool call: ${id}`);
+      }),
+    };
+
+    const result = await toolManager.executeTool('document-workflow', {
+      action: 'generate-suite',
+      prompt: 'Build a visual data-story bundle.',
+      formats: ['html'],
+      buildMode: 'sandbox',
+      graphs: [{
+        type: 'flowchart',
+        title: 'Adoption Flow',
+        nodes: [{ id: 'lead', label: 'Lead' }, { id: 'active', label: 'Active' }],
+        edges: [{ from: 'lead', to: 'active', label: 'converts' }],
+      }],
+    }, {
+      documentService,
+      toolManager: nestedToolManager,
+      sessionId: 'session-1',
+    });
+
+    expect(result.success).toBe(true);
+    expect(nestedToolManager.executeTool).toHaveBeenCalledWith(
+      'graph-diagram',
+      expect.objectContaining({
+        graphs: expect.arrayContaining([
+          expect.objectContaining({ title: 'Adoption Flow' }),
+        ]),
+        renderMode: 'artifact',
+      }),
+      expect.any(Object),
+    );
+    expect(documentService.aiGenerate).toHaveBeenCalledWith(
+      expect.stringContaining('/api/artifacts/graph-1/download'),
+      expect.objectContaining({ format: 'html' }),
+    );
+    expect(nestedToolManager.executeTool).toHaveBeenCalledWith(
+      'code-sandbox',
+      expect.objectContaining({
+        language: 'vite',
+        files: expect.arrayContaining([
+          expect.objectContaining({
+            path: 'assets/images.json',
+            content: expect.stringContaining('/api/artifacts/graph-1/download'),
+          }),
+        ]),
+      }),
+      expect.any(Object),
+    );
+    expect(result.data.graphBuild).toEqual(expect.objectContaining({
+      graphCount: 1,
     }));
   });
 

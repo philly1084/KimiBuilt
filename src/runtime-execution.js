@@ -10,6 +10,8 @@ const RECENT_TRANSCRIPT_LIMIT = config.memory.recentTranscriptLimit;
 const DEFAULT_EXECUTION_PROFILE = 'default';
 const NOTES_EXECUTION_PROFILE = 'notes';
 const REMOTE_BUILD_EXECUTION_PROFILE = 'remote-build';
+const PODCAST_EXECUTION_PROFILE = 'podcast';
+const PODCAST_VIDEO_EXECUTION_PROFILE = 'podcast-video';
 
 function isRemotePermissionGrantText(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
@@ -139,6 +141,23 @@ function normalizeExecutionProfile(value = '') {
         return NOTES_EXECUTION_PROFILE;
     }
 
+    if ([
+        'podcast',
+        'podcast-audio',
+        'podcast_audio',
+    ].includes(normalized)) {
+        return PODCAST_EXECUTION_PROFILE;
+    }
+
+    if ([
+        'podcast-video',
+        'podcast_video',
+        'video-podcast',
+        'video_podcast',
+    ].includes(normalized)) {
+        return PODCAST_VIDEO_EXECUTION_PROFILE;
+    }
+
     return DEFAULT_EXECUTION_PROFILE;
 }
 
@@ -195,6 +214,8 @@ function inferExecutionProfile(payload = {}) {
         || '',
     ).trim().toLowerCase();
     const notesSurfaceRequested = ['notes', 'notes-app', 'notes_app', 'notes-editor', 'notes_editor'].includes(taskType);
+    const podcastSurfaceRequested = ['podcast', 'podcast-audio', 'podcast_audio'].includes(taskType);
+    const podcastVideoSurfaceRequested = ['podcast-video', 'podcast_video', 'video-podcast', 'video_podcast'].includes(taskType);
     const configuredProfile = normalizeExecutionProfile(
         payload?.executionProfile
         || payload?.execution_profile
@@ -210,6 +231,14 @@ function inferExecutionProfile(payload = {}) {
 
     if (notesSurfaceRequested) {
         return NOTES_EXECUTION_PROFILE;
+    }
+
+    if (podcastVideoSurfaceRequested || configuredProfile === PODCAST_VIDEO_EXECUTION_PROFILE) {
+        return PODCAST_VIDEO_EXECUTION_PROFILE;
+    }
+
+    if (podcastSurfaceRequested || configuredProfile === PODCAST_EXECUTION_PROFILE) {
+        return PODCAST_EXECUTION_PROFILE;
     }
 
     if (configuredProfile === REMOTE_BUILD_EXECUTION_PROFILE) {

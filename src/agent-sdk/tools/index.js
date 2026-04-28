@@ -701,6 +701,35 @@ function normalizeDocumentWorkflowImages(images = []) {
     .slice(0, 8);
 }
 
+function normalizeDocumentWorkflowGraphs(graphs = []) {
+  return (Array.isArray(graphs) ? graphs : [])
+    .map((graph, index) => {
+      if (!graph || typeof graph !== 'object') {
+        return null;
+      }
+
+      return {
+        ...graph,
+        id: String(graph.id || graph.name || graph.title || `document-graph-${index + 1}`).trim(),
+        title: normalizeWhitespace(graph.title || graph.name || `Document Graph ${index + 1}`),
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+function buildGraphImageAssetsFromResult(graphResult = null) {
+  const images = Array.isArray(graphResult?.images) ? graphResult.images : [];
+  return images
+    .map((image) => ({
+      url: String(image.url || image.downloadUrl || '').trim(),
+      title: normalizeWhitespace(image.title || 'Generated diagram'),
+      alt: normalizeWhitespace(image.alt || image.title || 'Generated diagram'),
+      source: 'graph-diagram',
+    }))
+    .filter((image) => image.url);
+}
+
 function buildGroundedDocumentPrompt(prompt = '', sources = [], preferences = {}) {
   const normalizedPrompt = String(prompt || '').trim();
   const normalizedSources = normalizeDocumentSources(sources);
@@ -2429,7 +2458,13 @@ class ToolManager {
             const useSandboxBuild = params.useSandbox === true || ['sandbox', 'scripted', 'code'].includes(buildMode);
             const pageTarget = normalizeDocumentPageTarget(params.pageTarget || params.maxPages || params.pages, null);
             const sources = normalizeDocumentSources(params.sources || []);
-            const imageAssets = normalizeDocumentWorkflowImages(params.images || params.imageAssets || params.assets || []);
+            const rawImageAssets = [
+              ...(Array.isArray(params.images) ? params.images : []),
+              ...(Array.isArray(params.imageAssets) ? params.imageAssets : []),
+              ...(Array.isArray(params.assets) ? params.assets : []),
+            ];
+            let imageAssets = normalizeDocumentWorkflowImages(rawImageAssets);
+            const graphSpecs = normalizeDocumentWorkflowGraphs(params.graphs || params.graphAssets || params.diagrams || []);
             const limit = Number.isFinite(Number(params.limit))
               ? Math.max(1, Math.min(Number(params.limit), 8))
               : 4;
@@ -2604,6 +2639,25 @@ class ToolManager {
             }
 
             if (action === 'generate-suite') {
+              let graphBuild = null;
+              let graphImageAssets = [];
+              if (graphSpecs.length > 0) {
+                graphBuild = await executeNestedTool(context, 'graph-diagram', {
+                  title: params.title || recommendation.blueprint?.label || 'Document Suite Graphs',
+                  graphs: graphSpecs,
+                  outputFormats: ['native', 'mermaid', 'svg', 'html'],
+                  renderMode: context?.sessionId ? 'artifact' : 'svg',
+                  documentTarget: requestedFormats.includes('pptx') ? 'slides' : 'html',
+                  persistArtifacts: Boolean(context?.sessionId),
+                  model: params.model || context.model || undefined,
+                });
+                graphImageAssets = buildGraphImageAssetsFromResult(graphBuild);
+                imageAssets = [
+                  ...imageAssets,
+                  ...graphImageAssets,
+                ].slice(0, MAX_VERIFIED_REFERENCE_IMAGES);
+              }
+
               const groundedPrompt = buildGroundedDocumentPrompt(prompt, sources, {
                 title: params.title,
                 subtitle: params.subtitle,
@@ -2690,13 +2744,13 @@ class ToolManager {
                 const files = buildDocumentSuiteSandboxFiles(
                   documents,
                   String(params.title || recommendation.blueprint?.label || 'Document Suite').trim() || 'Document Suite',
-                  params.images || params.imageAssets || params.assets || [],
+                  [...rawImageAssets, ...graphImageAssets],
                 );
                 const hasPreviewableOutput = files.length > 1;
                 if (hasPreviewableOutput) {
                   sandboxBuild = await executeNestedTool(context, 'code-sandbox', {
                     mode: 'project',
-                    language: 'html',
+                    language: 'vite',
                     projectName: buildSafeDocumentBundlePath(params.title || prompt || 'document-suite', 'document-suite')
                       .replace(/\.html$/i, ''),
                     entry: 'index.html',
@@ -2717,6 +2771,7 @@ class ToolManager {
                 formats: requestedFormats,
                 pageTarget,
                 documents,
+                graphBuild,
                 sandboxBuild,
               };
             }
@@ -2783,6 +2838,21 @@ class ToolManager {
             assets: {
               type: 'array',
               maxItems: MAX_VERIFIED_REFERENCE_IMAGES,
+              items: { type: 'object' },
+            },
+            graphs: {
+              type: 'array',
+              maxItems: 8,
+              items: { type: 'object' },
+            },
+            graphAssets: {
+              type: 'array',
+              maxItems: 8,
+              items: { type: 'object' },
+            },
+            diagrams: {
+              type: 'array',
+              maxItems: 8,
               items: { type: 'object' },
             },
             title: { type: 'string' },

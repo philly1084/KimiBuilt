@@ -187,6 +187,36 @@ describe('/api/documents route', () => {
     ]));
   });
 
+  test('lists supported formats with production capabilities', async () => {
+    const documentService = {
+      getSupportedFormats: jest.fn().mockReturnValue([
+        { id: 'html', name: 'HTML Document', generator: 'custom-html-renderer' },
+        { id: 'pdf', name: 'PDF Document', generator: 'browser-html-pdf' },
+      ]),
+      getDocumentProductionCapabilities: jest.fn().mockReturnValue({
+        policy: {
+          templateUse: 'Use templates as curated starting structures, not final canned output.',
+        },
+        suiteActions: [
+          { id: 'generate-suite', computeTools: ['document-workflow', 'graph-diagram', 'code-sandbox'] },
+        ],
+      }),
+    };
+
+    const response = await request(buildApp(documentService)).get('/api/documents/formats');
+
+    expect(response.status).toBe(200);
+    expect(response.body.formats).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'pdf', generator: 'browser-html-pdf' }),
+    ]));
+    expect(response.body.productionCapabilities.suiteActions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'generate-suite',
+        computeTools: expect.arrayContaining(['graph-diagram', 'code-sandbox']),
+      }),
+    ]));
+  });
+
   test('returns workflow recommendations for a document request', async () => {
     const documentService = {
       recommendDocumentWorkflow: jest.fn().mockReturnValue({

@@ -1295,6 +1295,81 @@ class DocumentService {
     }));
   }
 
+  getProductionToolchain(format = '') {
+    const normalizedFormat = this.normalizeCreationFormat(format || 'html');
+    const common = {
+      customGeneration: true,
+      templateUse: 'Templates provide structure and constraints; final artifacts are generated through the active render pipeline.',
+      supportingTools: ['document-design-engine', 'document-layout-catalog'],
+    };
+
+    const toolchains = {
+      html: {
+        ...common,
+        renderPipeline: ['ai-document-generator', 'document-design-engine', 'html-renderer'],
+        computeTools: ['graph-diagram', 'code-sandbox'],
+        visualCapabilities: ['curated layout shells', 'section images', 'inline charts', 'Mermaid-ready HTML'],
+        packageTargets: ['static-html', 'vite-preview-bundle'],
+      },
+      pdf: {
+        ...common,
+        renderPipeline: ['html-renderer', 'headless-browser-pdf', 'pdfmake-fallback'],
+        computeTools: ['graph-diagram', 'artifact-renderer'],
+        visualCapabilities: ['browser-rendered layout fidelity', 'embedded images', 'charts', 'tables'],
+        packageTargets: ['pdf'],
+      },
+      pptx: {
+        ...common,
+        renderPipeline: ['ai-presentation-structure', 'pptxgenjs'],
+        computeTools: ['image-generation', 'graph-diagram'],
+        visualCapabilities: ['custom slide layouts', 'image slides', 'metric cards', 'chart slides'],
+        packageTargets: ['pptx', 'html-deck-preview'],
+      },
+      xlsx: {
+        ...common,
+        renderPipeline: ['structured-content-normalizer', 'xlsx-workbook-builder'],
+        computeTools: ['artifact-renderer'],
+        visualCapabilities: ['overview sheet', 'section sheets', 'chart data sheets', 'table sheets'],
+        packageTargets: ['xlsx', 'html-workbook-preview'],
+      },
+      md: {
+        ...common,
+        renderPipeline: ['structured-content-normalizer', 'markdown-renderer'],
+        computeTools: ['graph-diagram'],
+        visualCapabilities: ['graph embeds', 'portable source notes'],
+        packageTargets: ['markdown'],
+      },
+    };
+
+    return toolchains[normalizedFormat] || {
+      ...common,
+      renderPipeline: ['structured-content-normalizer'],
+      computeTools: [],
+      visualCapabilities: [],
+      packageTargets: [normalizedFormat],
+    };
+  }
+
+  getDocumentProductionCapabilities() {
+    return {
+      formats: this.getSupportedFormats().map((format) => ({
+        ...format,
+        toolchain: this.getProductionToolchain(format.id),
+      })),
+      suiteActions: [
+        {
+          id: 'generate-suite',
+          description: 'Build coordinated PDF, HTML, PPTX, XLSX, Markdown, graph, and sandbox preview outputs from one grounded prompt.',
+          computeTools: ['document-workflow', 'graph-diagram', 'code-sandbox', 'artifact-renderer'],
+        },
+      ],
+      policy: {
+        templateUse: 'Use templates as curated starting structures, not final canned output.',
+        visualDocuments: 'Prefer generated charts, diagrams, verified images, browser-rendered PDFs, and Vite/static preview bundles when they materially improve the deliverable.',
+      },
+    };
+  }
+
   buildDocumentPlan({
     prompt = '',
     documentType = '',
@@ -1362,6 +1437,8 @@ class DocumentService {
         recentArtifacts: creativity.continuity.recentArtifacts.length,
         recentMessages: creativity.continuity.recentMessages.length,
       },
+      productionToolchain: this.getProductionToolchain(recommendation.recommendedFormat || format),
+      productionCapabilities: this.getDocumentProductionCapabilities(),
     };
   }
 
@@ -1371,11 +1448,11 @@ class DocumentService {
    */
   getSupportedFormats() {
     return [
-      { id: 'html', name: 'HTML Document', mimeType: 'text/html', extension: '.html' },
-      { id: 'pdf', name: 'PDF Document', mimeType: 'application/pdf', extension: '.pdf' },
-      { id: 'pptx', name: 'PowerPoint', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', extension: '.pptx' },
-      { id: 'xlsx', name: 'Excel Workbook', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', extension: '.xlsx' },
-      { id: 'md', name: 'Markdown', mimeType: 'text/markdown', extension: '.md' }
+      { id: 'html', name: 'HTML Document', mimeType: 'text/html', extension: '.html', generator: 'custom-html-renderer' },
+      { id: 'pdf', name: 'PDF Document', mimeType: 'application/pdf', extension: '.pdf', generator: 'browser-html-pdf' },
+      { id: 'pptx', name: 'PowerPoint', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', extension: '.pptx', generator: 'pptxgenjs' },
+      { id: 'xlsx', name: 'Excel Workbook', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', extension: '.xlsx', generator: 'xlsx-workbook-builder' },
+      { id: 'md', name: 'Markdown', mimeType: 'text/markdown', extension: '.md', generator: 'markdown-renderer' }
     ];
   }
 

@@ -29,6 +29,8 @@ const {
   DEFAULT_EXECUTION_PROFILE,
   NOTES_EXECUTION_PROFILE,
   REMOTE_BUILD_EXECUTION_PROFILE,
+  PODCAST_EXECUTION_PROFILE,
+  PODCAST_VIDEO_EXECUTION_PROFILE,
   HIDDEN_FRONTEND_TOOL_IDS,
   getAllowedToolIdsForProfile,
 } = require('../tool-execution-profiles');
@@ -531,6 +533,25 @@ function looksLikeNotesSurface(value = '') {
   ].includes(normalized);
 }
 
+function looksLikePodcastSurface(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  return [
+    'podcast',
+    'podcast-audio',
+    'podcast_audio',
+  ].includes(normalized);
+}
+
+function looksLikePodcastVideoSurface(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  return [
+    'podcast-video',
+    'podcast_video',
+    'video-podcast',
+    'video_podcast',
+  ].includes(normalized);
+}
+
 function hasStickyRemoteSession(session = null) {
   const controlState = getSessionControlState(session);
   return isRemoteCommandToolId(controlState.lastToolIntent)
@@ -543,8 +564,7 @@ async function resolveToolExecutionProfile(req, requestedSessionId = null) {
   const session = normalizedSessionId && !normalizedSessionId.startsWith('local_')
     ? (ownerId ? await sessionStore.getOwned(normalizedSessionId, ownerId) : await sessionStore.get(normalizedSessionId))
     : null;
-  const taskType = looksLikeNotesSurface(
-    req.query?.taskType
+  const surfaceHint = req.query?.taskType
     || req.query?.task_type
     || req.query?.clientSurface
     || req.query?.client_surface
@@ -554,8 +574,14 @@ async function resolveToolExecutionProfile(req, requestedSessionId = null) {
     || req.body?.client_surface
     || session?.mode
     || session?.metadata?.taskType
-    || session?.metadata?.clientSurface
-  ) ? NOTES_EXECUTION_PROFILE : DEFAULT_EXECUTION_PROFILE;
+    || session?.metadata?.clientSurface;
+  const taskType = looksLikeNotesSurface(surfaceHint)
+    ? NOTES_EXECUTION_PROFILE
+    : looksLikePodcastVideoSurface(surfaceHint)
+      ? PODCAST_VIDEO_EXECUTION_PROFILE
+      : looksLikePodcastSurface(surfaceHint)
+        ? PODCAST_EXECUTION_PROFILE
+        : DEFAULT_EXECUTION_PROFILE;
 
   let executionProfile = inferExecutionProfile({
     executionProfile: req.query?.executionProfile
@@ -567,7 +593,12 @@ async function resolveToolExecutionProfile(req, requestedSessionId = null) {
     session,
   });
 
-  if (executionProfile !== REMOTE_BUILD_EXECUTION_PROFILE && hasStickyRemoteSession(session)) {
+  if (
+    executionProfile !== REMOTE_BUILD_EXECUTION_PROFILE
+    && executionProfile !== PODCAST_EXECUTION_PROFILE
+    && executionProfile !== PODCAST_VIDEO_EXECUTION_PROFILE
+    && hasStickyRemoteSession(session)
+  ) {
     executionProfile = REMOTE_BUILD_EXECUTION_PROFILE;
   }
 
