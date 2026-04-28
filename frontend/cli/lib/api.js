@@ -21,6 +21,14 @@ function stripGatewaySuffix(baseURL = '') {
   return String(baseURL || '').replace(/\/v1\/?$/i, '');
 }
 
+function ensureOpenAIBaseUrl(baseURL = '') {
+  const trimmed = String(baseURL || '').trim().replace(/\/+$/, '');
+  if (!trimmed) {
+    return trimmed;
+  }
+  return /\/v1$/i.test(trimmed) ? trimmed : `${trimmed}/v1`;
+}
+
 function parseProviderSessionFrame(frame = '') {
   const lines = String(frame || '').split('\n');
   let event = 'message';
@@ -69,7 +77,7 @@ class APIError extends Error {
  */
 class OpenAIClient {
   constructor() {
-    this.baseURL = getApiBaseUrl();
+    this.baseURL = ensureOpenAIBaseUrl(getApiBaseUrl());
     this.client = new OpenAI({
       baseURL: this.baseURL,
       apiKey: this.getFrontendApiKey() || 'any-key',
@@ -81,7 +89,7 @@ class OpenAIClient {
    * Refresh the client with current config (in case URL changed).
    */
   refreshClient() {
-    this.baseURL = getApiBaseUrl();
+    this.baseURL = ensureOpenAIBaseUrl(getApiBaseUrl());
     this.client = new OpenAI({
       baseURL: this.baseURL,
       apiKey: this.getFrontendApiKey() || 'any-key',
@@ -389,40 +397,39 @@ class OpenAIClient {
    */
   async canvas(message, sessionId, canvasType = 'document', existingContent = '', model = null) {
     this.refreshClient();
-    
-    // Canvas is handled via chat with a system prompt for now
-    // LillyBuilt backend can handle this via custom endpoint or through chat
-    const systemPrompt = `You are in canvas mode. Generate ${canvasType} content. ${existingContent ? 'Modify the existing content provided.' : ''}`;
-    
-    const messages = [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: message },
-    ];
-    
-    if (existingContent) {
-      messages.push({ role: 'assistant', content: existingContent });
-      messages.push({ role: 'user', content: 'Please modify the above content.' });
-    }
-    
-    const params = {
+
+    const payload = {
       model: resolvePreferredChatModel([], model || DEFAULT_CHAT_MODEL),
-      messages,
-      stream: false,
+      message,
+      canvasType,
+      existingContent,
+      clientSurface: CLI_CLIENT_SURFACE,
+      taskType: 'canvas',
+      enableConversationExecutor: true,
+      metadata: {
+        clientSurface: CLI_CLIENT_SURFACE,
+        enableConversationExecutor: true,
+      },
     };
     
     if (sessionId) {
-      params.session_id = sessionId;
+      payload.sessionId = sessionId;
     }
 
     try {
-      const response = await this.client.chat.completions.create(params);
+      const response = await this.apiRequest('/api/canvas', {
+        method: 'POST',
+        body: payload,
+        timeout: 120000,
+      });
       
       return {
-        content: response.choices[0]?.message?.content || '',
-        canvasType,
-        metadata: { model: response.model },
-        suggestions: [],
-        sessionId: response.session_id || sessionId,
+        content: response.content || response.message || response.result || '',
+        canvasType: response.canvasType || response.type || canvasType,
+        metadata: response.metadata || {},
+        suggestions: Array.isArray(response.suggestions) ? response.suggestions : [],
+        sessionId: response.sessionId || response.session_id || sessionId,
+        assistantMetadata: response.assistantMetadata || response.assistant_metadata || null,
       };
     } catch (err) {
       throw this._handleError(err);
@@ -760,10 +767,13 @@ class OpenAIClient {
     const body = {
       providerId: options.providerId,
       mode: options.mode || PROVIDER_SESSION_MODE,
-      cwd: options.cwd,
       cols: options.cols,
       rows: options.rows,
     };
+
+    if (options.cwd) {
+      body.cwd = options.cwd;
+    }
 
     if (options.model) {
       body.model = options.model;
@@ -937,7 +947,7 @@ class OpenAIClient {
     const https = require('https');
     
     return new Promise((resolve, reject) => {
-      const baseUrlStr = this.baseURL.replace('/v1', ''); // Remove /v1 for legacy endpoints
+      const baseUrlStr = this.getGatewayBaseUrl();
       let baseUrl;
       
       try {

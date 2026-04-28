@@ -1125,12 +1125,12 @@ async function handleAttach(argString) {
   if (!match) {
     console.log(chalk.yellow('Usage: /attach <providerId> [cwd]'));
     console.log(chalk.gray('Examples: /attach codex-cli'));
-    console.log(chalk.gray('          /attach gemini-cli C:\\repos\\my-app'));
+    console.log(chalk.gray('          /attach gemini-cli /workspace/my-app'));
     return;
   }
 
   const requestedProviderId = normalizeProviderId(match[1]);
-  const requestedCwd = String(match[2] || process.cwd()).trim();
+  const requestedCwd = String(match[2] || '').trim();
   const spinner = createSpinner(`Opening ${requestedProviderId} session...`);
   spinner.start();
 
@@ -1143,7 +1143,7 @@ async function handleAttach(argString) {
 
     const created = await api.createProviderSession({
       providerId: selectedProvider.providerId || requestedProviderId,
-      cwd: requestedCwd,
+      ...(requestedCwd ? { cwd: requestedCwd } : {}),
       cols: process.stdout.columns || 120,
       rows: process.stdout.rows || 40,
     });
@@ -1155,7 +1155,7 @@ async function handleAttach(argString) {
       ...(created.session || {}),
       id: created.session?.id,
       providerId: created.session?.providerId || selectedProvider.providerId || requestedProviderId,
-      cwd: created.session?.cwd || requestedCwd,
+      cwd: created.session?.cwd || requestedCwd || '',
       status: created.session?.status || 'starting',
       streamUrl: created.streamUrl,
       lastCursor: 0,
@@ -1163,7 +1163,7 @@ async function handleAttach(argString) {
     };
 
     updatePrompt();
-    spinner.succeed(chalk.green(`Attached to ${activeProviderSession.providerId} in ${activeProviderSession.cwd}`));
+    spinner.succeed(chalk.green(`Attached to ${activeProviderSession.providerId}${activeProviderSession.cwd ? ` in ${activeProviderSession.cwd}` : ''}`));
     console.log(chalk.gray('Backend CLI input is now passthrough. Use /.help for local escape commands.\n'));
     startProviderSessionStream(activeProviderSession);
   } catch (err) {
@@ -1629,10 +1629,45 @@ async function invokeRemoteCommand(command, options = {}) {
   return envelope.data || envelope.result || envelope;
 }
 
+function extractRemoteCliAgentContinuation(sessionRecord = {}) {
+  const metadata = sessionRecord.metadata && typeof sessionRecord.metadata === 'object'
+    ? sessionRecord.metadata
+    : {};
+  const controlState = sessionRecord.controlState && typeof sessionRecord.controlState === 'object'
+    ? sessionRecord.controlState
+    : {};
+  const metadataControlState = metadata.controlState && typeof metadata.controlState === 'object'
+    ? metadata.controlState
+    : {};
+
+  return {
+    ...(metadata.remoteCliAgent && typeof metadata.remoteCliAgent === 'object' ? metadata.remoteCliAgent : {}),
+    ...(metadataControlState.remoteCliAgent && typeof metadataControlState.remoteCliAgent === 'object' ? metadataControlState.remoteCliAgent : {}),
+    ...(controlState.remoteCliAgent && typeof controlState.remoteCliAgent === 'object' ? controlState.remoteCliAgent : {}),
+  };
+}
+
+async function loadRemoteCliAgentContinuation() {
+  if (!currentSessionId || String(currentSessionId).startsWith('local_')) {
+    return {};
+  }
+
+  try {
+    const sessionRecord = await api.getSession(currentSessionId);
+    return extractRemoteCliAgentContinuation(sessionRecord);
+  } catch {
+    return {};
+  }
+}
+
 async function invokeRemoteCliAgent(task, options = {}) {
+  const continuation = await loadRemoteCliAgentContinuation();
   const response = await api.runRemoteCliAgent(task, {
     backendSessionId: currentSessionId,
-    cwd: options.cwd || getWorkbenchCwd(),
+    cwd: options.cwd || continuation.cwd || getWorkbenchCwd(),
+    targetId: options.targetId || continuation.targetId,
+    sessionId: options.sessionId || continuation.sessionId,
+    mcpSessionId: options.mcpSessionId || continuation.mcpSessionId,
     waitMs: options.waitMs || 30000,
     maxTurns: options.maxTurns || 30,
     taskType: 'chat',

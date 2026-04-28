@@ -57,6 +57,7 @@ describe('/api/tools routes', () => {
             'image-generate',
         ]));
         expect(response.body.data.map((tool) => tool.id)).not.toContain('remote-command');
+        expect(response.body.data.map((tool) => tool.id)).not.toContain('remote-workbench');
         expect(response.body.data.map((tool) => tool.id)).not.toContain('remote-cli-agent');
         expect(response.body.data.map((tool) => tool.id)).not.toContain('k3s-deploy');
     });
@@ -105,6 +106,33 @@ describe('/api/tools routes', () => {
             expect.objectContaining({ name: 'rg', available: false }),
         ]));
         expect(response.body.meta.runtime.remoteRunner.availableCliTools).toEqual(expect.arrayContaining(['kubectl', 'git']));
+    });
+
+    test('remote-workbench tool details expose structured actions and runner inventory', async () => {
+        const app = buildApp();
+        remoteRunnerService.registerRunner({
+            runnerId: 'server-runner',
+            capabilities: ['inspect', 'build', 'deploy'],
+            metadata: {
+                defaultCwd: '/srv/kimibuilt',
+                shell: '/bin/bash',
+                availableCliTools: ['kubectl', 'git'],
+            },
+        }, { readyState: 1, send: jest.fn() });
+
+        const response = await request(app).get('/api/tools/remote-workbench');
+
+        expect(response.status).toBe(200);
+        expect(response.body.data.runtime.runnerAvailable).toBe(true);
+        expect(response.body.data.runtime.structuredActions).toEqual(expect.arrayContaining([
+            'grep',
+            'read-file',
+            'write-file',
+            'apply-patch',
+            'build',
+            'deploy-verify',
+        ]));
+        expect(response.body.data.runtime.availableCliTools).toEqual(expect.arrayContaining(['kubectl', 'git']));
     });
 
     test('k3s-deploy tool details expose verification-oriented command catalog entries', async () => {

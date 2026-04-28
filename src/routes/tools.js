@@ -182,6 +182,65 @@ function buildRunnerRuntimeDetails(runner = null) {
 }
 
 function buildToolRuntime(toolId, options = {}) {
+  if (toolId === 'remote-cli-agent') {
+    const publicConfig = remoteCliAgentsSdkRunner.getPublicConfig();
+    return {
+      configured: publicConfig.configured,
+      provider: 'openai-agents-sdk-streamable-http-mcp',
+      serverName: publicConfig.name,
+      url: publicConfig.url,
+      defaultTargetId: publicConfig.defaultTargetId,
+      defaultCwd: publicConfig.defaultCwd,
+      agentModel: publicConfig.agentModel,
+      timeoutMs: publicConfig.timeoutMs,
+      maxTurns: publicConfig.maxTurns,
+      serverSideOnly: true,
+    };
+  }
+
+  if (toolId === 'remote-workbench') {
+    const ssh = settingsController.getEffectiveSshConfig();
+    const runner = remoteRunnerService.getHealthyRunner();
+    const runnerDetails = buildRunnerRuntimeDetails(runner);
+    return {
+      configured: Boolean(runner || (ssh.enabled && ssh.host && ssh.username && (ssh.password || ssh.privateKeyPath))),
+      source: runner ? 'remote-runner' : (ssh.source || 'dashboard'),
+      defaultTarget: runner ? `runner:${runner.runnerId}` : (ssh.host ? `${ssh.username || 'unknown'}@${ssh.host}:${ssh.port || 22}` : null),
+      auth: ssh.privateKeyPath ? 'private-key' : (ssh.password ? 'password' : 'unset'),
+      runnerAvailable: Boolean(runner),
+      runner: runnerDetails,
+      defaultWorkspace: runnerDetails?.defaultWorkspace || '',
+      shell: runnerDetails?.shell || '',
+      cliTools: runnerDetails?.cliTools || [],
+      availableCliTools: runnerDetails?.availableCliTools || [],
+      transportPreference: runner ? 'runner-first' : 'ssh',
+      structuredActions: [
+        'baseline',
+        'repo-inspect',
+        'repo-map',
+        'changed-files',
+        'file-search',
+        'dependency-check',
+        'grep',
+        'read-file',
+        'write-file',
+        'apply-patch',
+        'build',
+        'test',
+        'focused-test',
+        'buildkit',
+        'direct-image-build',
+        'kubectl-inspect',
+        'k8s-app-inventory',
+        'logs',
+        'pod-debug',
+        'rollout',
+        'deploy-verify',
+      ],
+      commandCatalog: REMOTE_CLI_COMMAND_CATALOG,
+    };
+  }
+
   if (isRemoteCommandToolId(toolId)) {
     const ssh = settingsController.getEffectiveSshConfig();
     const runner = remoteRunnerService.getHealthyRunner();
@@ -240,22 +299,6 @@ function buildToolRuntime(toolId, options = {}) {
         'https-verify',
         'deploy-verify',
       ].includes(entry.id)),
-    };
-  }
-
-  if (toolId === 'remote-cli-agent') {
-    const publicConfig = remoteCliAgentsSdkRunner.getPublicConfig();
-    return {
-      configured: publicConfig.configured,
-      provider: 'openai-agents-sdk-streamable-http-mcp',
-      serverName: publicConfig.name,
-      url: publicConfig.url,
-      defaultTargetId: publicConfig.defaultTargetId,
-      defaultCwd: publicConfig.defaultCwd,
-      agentModel: publicConfig.agentModel,
-      timeoutMs: publicConfig.timeoutMs,
-      maxTurns: publicConfig.maxTurns,
-      serverSideOnly: true,
     };
   }
 
@@ -641,7 +684,8 @@ function unwrapToolResultPayload(result = {}) {
 }
 
 async function updateSessionToolMetadata(sessionId, toolId, params = {}, result = {}) {
-  if (!sessionId || !isRemoteCommandToolId(toolId)) {
+  const isRemoteWorkbenchTool = toolId === 'remote-workbench';
+  if (!sessionId || (!isRemoteCommandToolId(toolId) && !isRemoteWorkbenchTool)) {
     return;
   }
 
@@ -677,8 +721,9 @@ async function updateSessionToolMetadata(sessionId, toolId, params = {}, result 
   const host = String(params.host || '').trim();
   const safeHost = host && !isSuspiciousSshTargetHost(host) ? host : '';
 
-  const command = String(params.command || '').trim();
-  const workflowAction = String(params.workflowAction || params.workflow_action || '').trim();
+  const payload = unwrapToolResultPayload(result);
+  const command = String(params.command || payload.command || '').trim();
+  const workflowAction = String(params.workflowAction || params.workflow_action || (isRemoteWorkbenchTool ? params.action : '') || '').trim();
   const remoteCliPatch = {
     lastCommand: command || null,
     lastCommandAt: new Date().toISOString(),
@@ -694,7 +739,7 @@ async function updateSessionToolMetadata(sessionId, toolId, params = {}, result 
       : {}),
   };
   const controlPatch = {
-    lastToolIntent: canonicalizeRemoteToolId(toolId),
+    lastToolIntent: isRemoteWorkbenchTool ? 'remote-workbench' : canonicalizeRemoteToolId(toolId),
     remoteCli: remoteCliPatch,
     ...(safeHost ? {
       lastSshTarget: {
@@ -717,11 +762,12 @@ async function updateSessionToolMetadata(sessionId, toolId, params = {}, result 
 }
 
 async function updateSessionToolFailureMetadata(sessionId, toolId, params = {}, error = null) {
-  if (!sessionId || !isRemoteCommandToolId(toolId)) {
+  const isRemoteWorkbenchTool = toolId === 'remote-workbench';
+  if (!sessionId || (!isRemoteCommandToolId(toolId) && !isRemoteWorkbenchTool)) {
     return;
   }
 
-  const workflowAction = String(params.workflowAction || params.workflow_action || '').trim();
+  const workflowAction = String(params.workflowAction || params.workflow_action || (isRemoteWorkbenchTool ? params.action : '') || '').trim();
   const message = String(error?.message || error || 'Tool invocation failed').trim();
 
   if (toolId === 'remote-cli-agent') {
@@ -765,7 +811,7 @@ async function updateSessionToolFailureMetadata(sessionId, toolId, params = {}, 
     },
   };
   const controlPatch = {
-    lastToolIntent: canonicalizeRemoteToolId(toolId),
+    lastToolIntent: isRemoteWorkbenchTool ? 'remote-workbench' : canonicalizeRemoteToolId(toolId),
     remoteCli: remoteCliPatch,
   };
 

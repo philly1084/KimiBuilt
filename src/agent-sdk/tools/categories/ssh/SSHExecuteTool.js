@@ -73,6 +73,11 @@ class SSHExecuteTool extends ToolBase {
             type: 'object',
             description: 'Environment variables to set'
           },
+          profile: {
+            type: 'string',
+            enum: ['inspect', 'build', 'deploy'],
+            description: 'Remote runner capability profile required for this command. Use inspect for read-only checks, build for build/test/edit work, and deploy for rollout/deployment operations.'
+          },
           artifactIds: {
             type: 'array',
             description: 'Session artifact IDs to stage into the remote workspace before running the command.'
@@ -158,7 +163,7 @@ class SSHExecuteTool extends ToolBase {
           sudo,
           preferRunner: params.preferRunner === true,
           requireRunner: params.requireRunner === true,
-          profile: 'deploy',
+          profile: params.profile || 'deploy',
           approval: params.approval || {},
         },
         context: {

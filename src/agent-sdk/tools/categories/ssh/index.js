@@ -4,6 +4,7 @@
  */
 
 const { SSHExecuteTool } = require('./SSHExecuteTool');
+const { RemoteWorkbenchTool } = require('./RemoteWorkbenchTool');
 const { DockerExecTool } = require('./DockerExecTool');
 const { getUnifiedRegistry } = require('../../../registry/UnifiedRegistry');
 
@@ -12,6 +13,7 @@ function registerSSHTools() {
   
   const tools = [
     new SSHExecuteTool(),
+    new RemoteWorkbenchTool(),
     new DockerExecTool()
   ];
   
@@ -49,6 +51,7 @@ function registerSSHTools() {
 function getTriggerPatterns(toolId) {
   const patterns = {
     'ssh-execute': ['ssh', 'bash', 'shell', 'remote cli', 'remote command', 'execute on server', 'run on host', 'run bash remotely'],
+    'remote-workbench': ['remote workbench', 'remote repo status', 'remote file read', 'remote apply patch', 'remote build', 'remote test'],
     'docker-exec': ['docker', 'container', 'run in container', 'docker exec']
   };
   return patterns[toolId] || [toolId];
@@ -57,6 +60,7 @@ function getTriggerPatterns(toolId) {
 function getIcon(toolId) {
   const icons = {
     'ssh-execute': 'terminal',
+    'remote-workbench': 'terminal',
     'docker-exec': 'box'
   };
   return icons[toolId] || 'server';
@@ -65,6 +69,7 @@ function getIcon(toolId) {
 function getUIComponent(toolId) {
   const components = {
     'ssh-execute': 'SSHExecutor',
+    'remote-workbench': 'RemoteWorkbench',
     'docker-exec': 'DockerExecutor'
   };
   return components[toolId] || null;

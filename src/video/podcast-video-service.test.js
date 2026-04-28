@@ -170,8 +170,7 @@ describe('PodcastVideoService', () => {
     expect(ffmpegCalls[0].args.join(' ')).not.toContain('fade=t');
     expect(ffmpegCalls[2].args).toEqual(expect.arrayContaining([
       '-f', 'concat',
-      '-c:v', 'libx264',
-      '-tag:v', 'avc1',
+      '-c:v', 'copy',
       '-c:a', 'aac',
       '-ac', '2',
       '-ar', '48000',
@@ -183,6 +182,44 @@ describe('PodcastVideoService', () => {
     expect(result.scenes[0].image).toEqual(expect.objectContaining({
       source: 'fallback',
     }));
+  });
+
+  test('applies podcast audio repair during the final video mux by default', async () => {
+    const service = new PodcastVideoService({
+      audioProcessingService: {
+        assertConfigured: jest.fn(),
+        getEffectiveBinaryPath: () => 'ffmpeg',
+        buildPodcastMasteringFilter: jest.fn(() => 'repair-filter'),
+      },
+      isUnsplashConfigured: () => false,
+    });
+    const ffmpegCalls = [];
+    jest.spyOn(service, 'runFfmpeg').mockImplementation(async (args, options) => {
+      ffmpegCalls.push({ args, options });
+      await fs.writeFile(args[args.length - 1], Buffer.from('mp4'));
+      return { stdout: '', stderr: '' };
+    });
+
+    await service.renderMp4({
+      audioBuffer: Buffer.from('audio'),
+      title: 'Clean video audio',
+      imageMode: 'fallback',
+      scenes: [{
+        start: 0,
+        end: 12,
+        summary: 'Audio cleanup',
+        visualPrompt: 'podcast studio visual',
+      }],
+    });
+
+    const muxArgs = ffmpegCalls[1].args;
+    expect(muxArgs).toEqual(expect.arrayContaining([
+      '-af', 'repair-filter',
+      '-c:a', 'aac',
+      '-b:a', '192k',
+      '-ac', '2',
+      '-ar', '48000',
+    ]));
   });
 
   test('supports explicit single static-card mode when requested', async () => {

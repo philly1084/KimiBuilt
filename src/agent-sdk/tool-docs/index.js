@@ -161,6 +161,7 @@ const TOOL_SUPPORT = {
   'design-resource-search': { status: 'stable', notes: ['Curated safe design-resource index for backgrounds, fonts, CSS styling, icons, and website/document creation assets.', 'Returns web-fetch-ready fetch plans and approved source domains.'] },
   'ssh-execute': { status: 'requires_setup', notes: ['Requires SSH target credentials or cluster secret configuration.'] },
   'remote-command': { status: 'requires_setup', notes: ['Requires SSH target credentials or cluster secret configuration.', 'Optimized for Ubuntu/Linux host and k3s cluster operations in this project.'] },
+  'remote-workbench': { status: 'requires_setup', notes: ['Structured remote runner actions for repo inspection, guarded file reads/writes, patch application, build/test, logs, rollout, and deployment verification.', 'Uses inspect/build/deploy runner profiles instead of sending every operation through the deploy lane.'] },
   'remote-cli-agent': { status: 'requires_setup', notes: ['Server-side OpenAI Agents SDK integration for the remote-cli Streamable HTTP MCP gateway.', 'Requires REMOTE_CLI_MCP_URL or GATEWAY_URL plus REMOTE_CLI_MCP_BEARER_TOKEN or N8N_API_KEY in the trusted backend runtime.'] },
   'k3s-deploy': { status: 'requires_setup', notes: ['Requires SSH target credentials and kubectl/git on the remote host.'] },
   'docker-exec': { status: 'requires_setup', notes: ['Requires explicit Docker CLI/socket access in the backend runtime; not part of the default remote host lane.'] },

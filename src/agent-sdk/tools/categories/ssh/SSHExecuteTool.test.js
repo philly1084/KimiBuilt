@@ -261,3 +261,83 @@ describe('SSHExecuteTool', () => {
     );
   });
 });
+
+describe('SSHExecuteTool runner profile routing', () => {
+  afterEach(() => {
+    jest.dontMock('../../../../remote-runner/transport');
+    jest.resetModules();
+  });
+
+  test('passes the requested inspect/build/deploy profile to the remote runner transport', async () => {
+    const executeWithRunnerPreference = jest.fn(async ({ params }) => ({
+      stdout: 'ok',
+      stderr: '',
+      exitCode: 0,
+      duration: 1,
+      host: 'runner:test',
+      observedProfile: params.profile,
+    }));
+
+    jest.resetModules();
+    jest.doMock('../../../../routes/admin/settings.controller', () => ({
+      getEffectiveSshConfig: jest.fn(() => ({
+        enabled: false,
+        host: '',
+        port: 22,
+        username: '',
+        password: '',
+        privateKeyPath: '',
+      })),
+    }));
+    jest.doMock('../../../../artifacts/artifact-service', () => ({
+      artifactService: {
+        getArtifact: jest.fn(),
+      },
+    }));
+    jest.doMock('../../../../research-buckets', () => ({
+      researchBucketService: {
+        ensureInitialized: jest.fn(),
+        getRootPath: jest.fn(() => '/tmp/research-buckets/shared'),
+        resolveSafePath: jest.fn(),
+        validateSafeGlob: jest.fn((pattern) => pattern),
+      },
+    }));
+    jest.doMock('../../../../remote-runner/transport', () => ({
+      executeWithRunnerPreference,
+      shouldPreferRunner: jest.fn(() => true),
+    }));
+
+    const { SSHExecuteTool: IsolatedSSHExecuteTool } = require('./SSHExecuteTool');
+    const tool = new IsolatedSSHExecuteTool({ id: 'remote-command' });
+
+    const inspectResult = await tool.handler({
+      command: 'pwd',
+      profile: 'inspect',
+      preferRunner: true,
+    }, {}, { recordExecution: jest.fn(), recordNetworkCall: jest.fn() });
+    const buildResult = await tool.handler({
+      command: 'npm test',
+      profile: 'build',
+      preferRunner: true,
+    }, {}, { recordExecution: jest.fn(), recordNetworkCall: jest.fn() });
+    const deployResult = await tool.handler({
+      command: 'kubectl rollout status deployment/backend -n kimibuilt',
+      profile: 'deploy',
+      preferRunner: true,
+    }, {}, { recordExecution: jest.fn(), recordNetworkCall: jest.fn() });
+
+    expect(inspectResult.observedProfile).toBe('inspect');
+    expect(buildResult.observedProfile).toBe('build');
+    expect(deployResult.observedProfile).toBe('deploy');
+    expect(executeWithRunnerPreference).toHaveBeenCalledTimes(3);
+    expect(executeWithRunnerPreference).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      params: expect.objectContaining({ profile: 'inspect' }),
+    }));
+    expect(executeWithRunnerPreference).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      params: expect.objectContaining({ profile: 'build' }),
+    }));
+    expect(executeWithRunnerPreference).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      params: expect.objectContaining({ profile: 'deploy' }),
+    }));
+  });
+});

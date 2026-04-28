@@ -93,6 +93,25 @@ describe('OpenAIClient provider sessions', () => {
     ]);
   });
 
+  test('normalizes a root API URL to the OpenAI /v1 path for chat model catalog calls', async () => {
+    mockGetApiBaseUrl.mockReturnValue('http://localhost:8080');
+    global.fetch.mockResolvedValue({
+      ok: true,
+      headers: {
+        get: jest.fn(() => 'application/json'),
+      },
+      json: jest.fn(async () => ({ data: [{ id: 'gpt-5.4-mini' }] })),
+    });
+
+    const client = new OpenAIClient();
+    await client.getModels();
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://localhost:8080/v1/models',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
   test('chatNonStreaming enables the shared conversation executor for CLI tasks', async () => {
     mockChatCompletionsCreate.mockResolvedValue({
       id: 'resp-1',
@@ -119,6 +138,46 @@ describe('OpenAIClient provider sessions', () => {
         enableConversationExecutor: true,
         remoteBuildAutonomyApproved: true,
       }),
+    }));
+  });
+
+  test('canvas routes through the backend canvas endpoint instead of chat completions', async () => {
+    global.fetch.mockResolvedValue({
+      ok: true,
+      headers: {
+        get: jest.fn(() => 'application/json'),
+      },
+      json: jest.fn(async () => ({
+        sessionId: 'session-1',
+        canvasType: 'code',
+        content: 'const ok = true;',
+        metadata: { templateId: 'code-default' },
+        suggestions: ['run tests'],
+      })),
+    });
+
+    const client = new OpenAIClient();
+    const result = await client.canvas('write code', 'session-1', 'code', 'old code', 'gpt-5.4-mini');
+
+    expect(result.content).toBe('const ok = true;');
+    expect(mockChatCompletionsCreate).not.toHaveBeenCalled();
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://localhost:8080/api/canvas',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+        }),
+      }),
+    );
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual(expect.objectContaining({
+      message: 'write code',
+      sessionId: 'session-1',
+      canvasType: 'code',
+      existingContent: 'old code',
+      clientSurface: 'cli',
+      taskType: 'canvas',
+      enableConversationExecutor: true,
     }));
   });
 
@@ -155,15 +214,45 @@ describe('OpenAIClient provider sessions', () => {
           'Content-Type': 'application/json',
           Authorization: 'Bearer config-front-key',
         }),
-        body: JSON.stringify({
-          providerId: 'gemini-cli',
-          mode: 'interactive',
-          cwd: 'C:\\repos\\demo',
-          cols: 120,
-          rows: 40,
-        }),
       }),
     );
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({
+      providerId: 'gemini-cli',
+      mode: 'interactive',
+      cwd: 'C:\\repos\\demo',
+      cols: 120,
+      rows: 40,
+    });
+  });
+
+  test('createProviderSession omits cwd when the caller did not provide a backend path', async () => {
+    global.fetch.mockResolvedValue({
+      ok: true,
+      headers: {
+        get: jest.fn(() => 'application/json'),
+      },
+      json: jest.fn(async () => ({
+        session: {
+          id: 'session-1',
+          providerId: 'codex-cli',
+        },
+        streamUrl: '/admin/provider-sessions/session-1/stream?token=test-token',
+      })),
+    });
+
+    const client = new OpenAIClient();
+    await client.createProviderSession({
+      providerId: 'codex-cli',
+      cols: 120,
+      rows: 40,
+    });
+
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({
+      providerId: 'codex-cli',
+      mode: 'interactive',
+      cols: 120,
+      rows: 40,
+    });
   });
 
   test('streamProviderSession parses output, status, and exit events', async () => {

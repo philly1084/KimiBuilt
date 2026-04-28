@@ -78,6 +78,7 @@ const { registerDatabaseTools } = require('./categories/database');
 const { registerSandboxTools } = require('./categories/sandbox');
 // SSH tools
 const { SSHExecuteTool } = require('./categories/ssh/SSHExecuteTool');
+const { RemoteWorkbenchTool } = require('./categories/ssh/RemoteWorkbenchTool');
 const { DockerExecTool } = require('./categories/ssh/DockerExecTool');
 const { K3sDeployTool } = require('./categories/ssh/K3sDeployTool');
 const { RemoteCliAgentTool } = require('./categories/ssh/RemoteCliAgentTool');
@@ -532,12 +533,21 @@ function buildPodcastVideoOptions(params = {}, context = {}) {
   const nested = params.video && typeof params.video === 'object' && !Array.isArray(params.video)
     ? params.video
     : {};
+  const resolveBooleanOption = (...values) => {
+    for (const value of values) {
+      if (typeof value === 'boolean') {
+        return value;
+      }
+    }
+    return undefined;
+  };
 
   return {
     topic: params.topic || params.prompt || params.subject || nested.topic || '',
     aspectRatio: params.videoAspectRatio || params.aspectRatio || nested.aspectRatio || '16:9',
     imageMode: params.videoImageMode || params.imageMode || nested.imageMode || 'mixed',
-    generateImages: params.videoGenerateImages === true || params.generateImages === true || nested.generateImages === true,
+    generateImages: resolveBooleanOption(params.videoGenerateImages, params.generateImages, nested.generateImages),
+    enhanceAudio: resolveBooleanOption(params.videoEnhanceAudio, params.enhanceAudio, nested.enhanceAudio),
     sceneCount: Number(params.videoSceneCount || params.sceneCount || nested.sceneCount) || undefined,
     renderMode: params.videoRenderMode || params.renderMode || nested.renderMode || undefined,
     visualStyle: params.videoVisualStyle || params.visualStyle || nested.visualStyle || '',
@@ -1561,6 +1571,7 @@ class ToolManager {
           name: 'Remote Command',
           description: 'Execute remote server commands through the remote CLI runner when available, falling back to SSH',
         }),
+        new RemoteWorkbenchTool(),
         new DockerExecTool(),
         new K3sDeployTool(),
         new RemoteCliAgentTool(),
@@ -3695,6 +3706,7 @@ class ToolManager {
                 aspectRatio: { type: 'string', enum: ['16:9', '9:16', '1:1'] },
                 imageMode: { type: 'string', enum: ['mixed', 'web', 'unsplash', 'generated', 'fallback', 'provided'] },
                 generateImages: { type: 'boolean' },
+                enhanceAudio: { type: 'boolean' },
                 sceneCount: { type: 'integer', minimum: 1, maximum: 36 },
                 renderMode: { type: 'string', enum: ['static-card', 'storyboard'] },
                 visualStyle: { type: 'string' },
@@ -3710,6 +3722,7 @@ class ToolManager {
             videoAspectRatio: { type: 'string', enum: ['16:9', '9:16', '1:1'] },
             videoImageMode: { type: 'string', enum: ['mixed', 'web', 'unsplash', 'generated', 'fallback', 'provided'] },
             videoGenerateImages: { type: 'boolean' },
+            videoEnhanceAudio: { type: 'boolean' },
             videoSceneCount: { type: 'integer', minimum: 1, maximum: 36 },
             videoRenderMode: { type: 'string', enum: ['static-card', 'storyboard'] },
             renderMode: { type: 'string', enum: ['static-card', 'storyboard'] },
@@ -4591,6 +4604,19 @@ class ToolManager {
         'systemctl',
         'ingress',
         'deployment logs',
+      ],
+      'remote-workbench': [
+        'remote workbench',
+        'remote repo status',
+        'remote file read',
+        'remote file write',
+        'remote apply patch',
+        'remote grep',
+        'remote build',
+        'remote test',
+        'remote logs',
+        'remote rollout',
+        'remote verify',
       ],
       'remote-cli-agent': [
         'remote cli agent',

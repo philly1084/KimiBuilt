@@ -12,6 +12,26 @@ function createTestWav(bytes = [0, 0, 0, 0]) {
 }
 
 describe('AudioProcessingService', () => {
+  test('builds podcast mastering with hiss, click, and clipping repair filters', () => {
+    const service = new AudioProcessingService({
+      podcastMasteringLufs: -16,
+      podcastMasteringTruePeakDb: -1.5,
+    });
+
+    const filter = service.buildPodcastMasteringFilter({ sampleRate: 22050, channelLayout: 'mono' });
+
+    expect(filter).toContain('highpass=f=80');
+    expect(filter).toContain('adeclick');
+    expect(filter).toContain('adeclip');
+    expect(filter).toContain('afftdn=nr=12:nf=-30:tn=1');
+    expect(filter).toContain('deesser=i=0.25:m=0.5:f=0.5');
+    expect(filter).toContain('lowpass=f=10000');
+    expect(filter).toContain('loudnorm=I=-16:TP=-1.5:LRA=7');
+    expect(filter).toContain('alimiter=limit=0.94');
+    expect(filter).toContain('aresample=22050');
+    expect(filter).toContain('aformat=sample_fmts=s16:channel_layouts=mono');
+  });
+
   test('mixes podcast music bed with a valid amix duration mode', async () => {
     const speechWavBuffer = createTestWav();
     const service = new AudioProcessingService({

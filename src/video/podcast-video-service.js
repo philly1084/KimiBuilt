@@ -261,6 +261,30 @@ function normalizeImageMode(value = 'mixed') {
   return 'mixed';
 }
 
+function normalizeBooleanOption(value, fallback = false) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (value == null || value === '') {
+    return fallback;
+  }
+
+  const normalized = String(value || '').trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+  if (['0', 'false', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+
+  return fallback;
+}
+
+function normalizeVideoAudioRepair(value) {
+  return normalizeBooleanOption(value, config.podcastVideo?.audioRepairEnabled !== false);
+}
+
 function normalizeScene(scene = {}, index = 0) {
   const start = Math.max(0, Number(scene.start ?? scene.startSeconds ?? 0) || 0);
   const end = Math.max(start + MIN_SCENE_SECONDS, Number(scene.end ?? scene.endSeconds ?? (start + DEFAULT_SCENE_SECONDS)) || (start + DEFAULT_SCENE_SECONDS));
@@ -537,25 +561,34 @@ function extractImageUrlsFromHtml(html = '', baseUrl = '') {
 function buildPlaceholderFrameBuffer(width = DEFAULT_WIDTH, height = DEFAULT_HEIGHT, seed = '') {
   const hash = Buffer.from(String(seed || 'podcast-video'));
   const palettes = [
-    [[18, 42, 56], [86, 132, 128]],
-    [[22, 46, 38], [112, 142, 94]],
-    [[30, 43, 58], [122, 137, 151]],
-    [[44, 52, 42], [139, 128, 92]],
-    [[16, 55, 70], [80, 146, 154]],
+    [[42, 78, 104], [128, 172, 148]],
+    [[55, 88, 72], [174, 155, 95]],
+    [[62, 72, 96], [172, 144, 126]],
+    [[82, 72, 58], [166, 138, 86]],
+    [[38, 92, 112], [114, 176, 184]],
   ];
   const [startColor, endColor] = palettes[(hash[0] || 0) % palettes.length];
   const [r1, g1, b1] = startColor;
   const [r2, g2, b2] = endColor;
   const header = Buffer.from(`P6\n${width} ${height}\n255\n`, 'ascii');
   const pixels = Buffer.alloc(width * height * 3);
+  const phase = ((hash[1] || 0) / 255) * Math.PI * 2;
+  const clampByte = (value) => Math.max(0, Math.min(255, Math.round(value)));
 
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       const t = ((x / Math.max(1, width - 1)) * 0.65) + ((y / Math.max(1, height - 1)) * 0.35);
+      const normalizedX = x / Math.max(1, width - 1);
+      const normalizedY = y / Math.max(1, height - 1);
+      const waveY = 0.52 + (Math.sin((normalizedX * Math.PI * 5) + phase) * 0.09);
+      const waveform = Math.max(0, 1 - (Math.abs(normalizedY - waveY) / 0.018));
+      const grid = ((x + (hash[2] || 0)) % 96 < 3 || (y + (hash[3] || 0)) % 96 < 3) ? 1 : 0;
+      const spotlight = Math.max(0, 1 - Math.hypot(normalizedX - 0.72, normalizedY - 0.28) * 1.75);
+      const vignette = Math.hypot(normalizedX - 0.5, normalizedY - 0.5) * 24;
       const offset = (y * width + x) * 3;
-      pixels[offset] = Math.round(r1 + (r2 - r1) * t);
-      pixels[offset + 1] = Math.round(g1 + (g2 - g1) * t);
-      pixels[offset + 2] = Math.round(b1 + (b2 - b1) * t);
+      pixels[offset] = clampByte(r1 + (r2 - r1) * t + (waveform * 42) + (grid * 12) + (spotlight * 26) - vignette);
+      pixels[offset + 1] = clampByte(g1 + (g2 - g1) * t + (waveform * 46) + (grid * 12) + (spotlight * 30) - vignette);
+      pixels[offset + 2] = clampByte(b1 + (b2 - b1) * t + (waveform * 38) + (grid * 12) + (spotlight * 34) - vignette);
     }
   }
 
@@ -692,6 +725,7 @@ class PodcastVideoService {
         sceneCount: resolveDefaultStoryboardSceneCount(),
         maxScenes: MAX_SCENES,
         renderMode: runtime.renderMode,
+        audioRepairEnabled: config.podcastVideo?.audioRepairEnabled !== false,
       },
       timeouts: {
         segmentMs: runtime.segmentTimeoutMs,
@@ -792,6 +826,23 @@ class PodcastVideoService {
         ));
       });
     });
+  }
+
+  buildPodcastVideoAudioArgs({ enhanceAudio = true } = {}) {
+    const args = [];
+    if (normalizeVideoAudioRepair(enhanceAudio)
+      && typeof this.audioProcessingService?.buildPodcastMasteringFilter === 'function') {
+      args.push('-af', this.audioProcessingService.buildPodcastMasteringFilter({ sampleRate: 48000 }));
+    }
+
+    args.push(
+      '-c:a', 'aac',
+      '-b:a', '192k',
+      '-ac', '2',
+      '-ar', '48000',
+    );
+
+    return args;
   }
 
   async readAudioArtifact(artifactId = '') {
@@ -1174,6 +1225,7 @@ class PodcastVideoService {
     imageMode = 'mixed',
     generateImages = false,
     imageModel = null,
+    enhanceAudio = true,
     runtime,
     toolManager = null,
     toolContext = {},
@@ -1214,10 +1266,7 @@ class PodcastVideoService {
       '-shortest',
       '-r', String(DEFAULT_FPS),
       ...buildCompatibleH264VideoArgs(runtime),
-      '-c:a', 'aac',
-      '-b:a', '192k',
-      '-ac', '2',
-      '-ar', '48000',
+      ...this.buildPodcastVideoAudioArgs({ enhanceAudio }),
       '-movflags', '+faststart',
       outputPath,
     ], {
@@ -1253,6 +1302,7 @@ class PodcastVideoService {
     x264Preset = null,
     x264Crf = null,
     renderMode = null,
+    enhanceAudio = true,
     toolManager = null,
     toolContext = {},
   } = {}) {
@@ -1302,6 +1352,7 @@ class PodcastVideoService {
           imageMode,
           generateImages,
           imageModel,
+          enhanceAudio,
           runtime,
           toolManager,
           toolContext,
@@ -1315,6 +1366,7 @@ class PodcastVideoService {
           })),
           dimensions,
           renderMode: runtime.renderMode,
+          audioRepairEnabled: normalizeVideoAudioRepair(enhanceAudio),
         };
       }
 
@@ -1375,11 +1427,8 @@ class PodcastVideoService {
         '-map', '1:a:0',
         '-shortest',
         '-r', String(DEFAULT_FPS),
-        ...buildCompatibleH264VideoArgs(runtime),
-        '-c:a', 'aac',
-        '-b:a', '192k',
-        '-ac', '2',
-        '-ar', '48000',
+        '-c:v', 'copy',
+        ...this.buildPodcastVideoAudioArgs({ enhanceAudio }),
         '-movflags', '+faststart',
         outputPath,
       ], {
@@ -1408,6 +1457,7 @@ class PodcastVideoService {
         })),
         dimensions,
         renderMode: runtime.renderMode,
+        audioRepairEnabled: normalizeVideoAudioRepair(enhanceAudio),
       };
     } finally {
       await fs.rm(tempDir, { recursive: true, force: true });
@@ -1502,6 +1552,11 @@ class PodcastVideoService {
     const durationSeconds = Number(options.durationSeconds)
       || await this.getAudioDurationSeconds(audioBuffer, audioMimeType)
       || 0;
+    const imageMode = normalizeImageMode(options.imageMode || 'mixed');
+    const generateImages = normalizeBooleanOption(
+      options.generateImages,
+      ['mixed', 'generated'].includes(imageMode),
+    );
     const storyboard = Array.isArray(options.scenes) && options.scenes.length > 0
       ? {
         title: sanitizeText(title) || 'Podcast video',
@@ -1527,8 +1582,8 @@ class PodcastVideoService {
       scenes: storyboard.scenes,
       title: storyboard.title || title,
       aspectRatio: options.aspectRatio || '16:9',
-      imageMode: options.imageMode || 'mixed',
-      generateImages: options.generateImages === true,
+      imageMode,
+      generateImages,
       imageModel: options.imageModel || null,
       ffmpegTimeoutMs: options.ffmpegTimeoutMs || options.videoFfmpegTimeoutMs || options.timeoutMs || null,
       segmentTimeoutMs: options.segmentTimeoutMs || options.videoSegmentTimeoutMs || null,
@@ -1537,6 +1592,7 @@ class PodcastVideoService {
       x264Preset: options.x264Preset || options.videoX264Preset || null,
       x264Crf: options.x264Crf || options.videoX264Crf || null,
       renderMode: options.renderMode || options.videoRenderMode || null,
+      enhanceAudio: options.enhanceAudio ?? options.videoEnhanceAudio ?? options.repairAudio ?? options.cleanAudio,
       toolManager: options.toolManager || null,
       toolContext: options.toolContext || {},
     });
@@ -1554,8 +1610,9 @@ class PodcastVideoService {
         durationSeconds,
         dimensions: rendered.dimensions,
         renderMode: rendered.renderMode,
-        imageMode: normalizeImageMode(options.imageMode || 'mixed'),
-        generatedImagesEnabled: options.generateImages === true,
+        audioRepairEnabled: rendered.audioRepairEnabled,
+        imageMode,
+        generatedImagesEnabled: generateImages,
       },
     });
 
@@ -1594,6 +1651,7 @@ class PodcastVideoService {
       transcript = sanitizeText(transcription.text || '');
     }
 
+    const hasGenerateImagesField = fields.generateImages != null && fields.generateImages !== '';
     return this.createVideo({
       sessionId,
       title: fields.title || fields.topic || file.filename || 'Podcast video',
@@ -1604,7 +1662,7 @@ class PodcastVideoService {
         ...fields,
         transcription,
         sceneCount: Number(fields.sceneCount) || undefined,
-        generateImages: ['1', 'true', 'yes'].includes(String(fields.generateImages || '').toLowerCase()),
+        ...(hasGenerateImagesField ? { generateImages: normalizeBooleanOption(fields.generateImages, false) } : {}),
       },
     });
   }

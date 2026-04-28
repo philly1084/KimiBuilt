@@ -170,19 +170,35 @@ class AudioProcessingService {
     };
   }
 
-  buildPodcastMasteringFilter() {
+  buildPodcastMasteringFilter({ sampleRate = null, channelLayout = '' } = {}) {
     const targetLufs = Number.isFinite(Number(this.audioProcessingConfig.podcastMasteringLufs))
       ? Number(this.audioProcessingConfig.podcastMasteringLufs)
       : -16;
     const truePeakDb = Number.isFinite(Number(this.audioProcessingConfig.podcastMasteringTruePeakDb))
       ? Number(this.audioProcessingConfig.podcastMasteringTruePeakDb)
       : -1.5;
+    const requestedSampleRate = Number(sampleRate);
+    const lowpassFrequency = Number.isFinite(requestedSampleRate) && requestedSampleRate > 0
+      ? Math.max(3000, Math.min(10000, Math.floor((requestedSampleRate / 2) - 200)))
+      : 10000;
+    const outputFilters = [];
+    if (Number.isFinite(requestedSampleRate) && requestedSampleRate > 0) {
+      outputFilters.push(`aresample=${Math.round(requestedSampleRate)}`);
+    }
+    if (channelLayout) {
+      outputFilters.push(`aformat=sample_fmts=s16:channel_layouts=${channelLayout}`);
+    }
 
     return [
-      'highpass=f=70',
-      'lowpass=f=16000',
+      'highpass=f=80',
+      'adeclick',
+      'adeclip',
+      'afftdn=nr=12:nf=-30:tn=1',
+      'deesser=i=0.25:m=0.5:f=0.5',
+      `lowpass=f=${lowpassFrequency}`,
       `loudnorm=I=${targetLufs}:TP=${truePeakDb}:LRA=7`,
-      'alimiter=limit=0.95',
+      'alimiter=limit=0.94',
+      ...outputFilters,
     ].join(',');
   }
 
@@ -438,7 +454,7 @@ class AudioProcessingService {
       await this.runFfmpeg([
         '-y',
         '-i', assembledPath,
-        '-af', this.buildPodcastMasteringFilter(),
+        '-af', this.buildPodcastMasteringFilter({ sampleRate, channelLayout }),
         '-c:a', 'pcm_s16le',
         masteredPath,
       ], 'audio_mastering_failed', 'ffmpeg failed to master the podcast audio.');

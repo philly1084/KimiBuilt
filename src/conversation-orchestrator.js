@@ -278,6 +278,7 @@ function shouldHydrateRemoteOpsGuidance({
         remoteToolId
         || (Array.isArray(allowedToolIds) && (
             allowedToolIds.includes('remote-command')
+            || allowedToolIds.includes('remote-workbench')
             || allowedToolIds.includes('k3s-deploy')
             || allowedToolIds.includes('ssh-execute')
         ))
@@ -1267,6 +1268,7 @@ function buildScoredCandidateToolMap({
         allowedToolIds.map((toolId) => [toolId, { score: 0, reasons: [] }]),
     );
     const normalizedPrompt = String(prompt || '').toLowerCase();
+    const hasStructuredRemoteWorkbenchIntent = /\b(remote workbench|repo-map|repo map|changed files?|grep|read file|write file|apply patch|focused test|remote build|remote test|deployment logs?|rollout|deploy verify|deployment verification)\b/.test(normalizedPrompt);
     const groundedResearch = hasGroundedResearchToolResult(toolEvents);
     const classificationConfidence = Number(classification?.confidence || 0);
     const failedToolIds = Array.from(new Set((Array.isArray(toolEvents) ? toolEvents : [])
@@ -1293,11 +1295,13 @@ function buildScoredCandidateToolMap({
         switch (classification.taskFamily) {
         case 'remote-ops':
             adjustCandidateToolScore(scoreMap, remoteToolId, 1.25, 'Remote operations should start with the trusted remote tool.');
+            adjustCandidateToolScore(scoreMap, 'remote-workbench', hasStructuredRemoteWorkbenchIntent ? 0.9 : 0, 'Structured remote workbench actions fit routine remote inspection, file, build, test, log, and rollout work.');
             adjustCandidateToolScore(scoreMap, 'k3s-deploy', workflowNeedsDeployLane || explicitK3sDeployIntent ? 0.95 : 0, 'The active remote workflow includes deployment work.');
             adjustCandidateToolScore(scoreMap, 'git-safe', explicitGitIntent || workflowNeedsDeployLane ? 0.55 : 0, 'Git save/publish flow is relevant to the remote task.');
             break;
         case 'repo-work':
             adjustCandidateToolScore(scoreMap, remoteToolId, executionProfile === REMOTE_BUILD_EXECUTION_PROFILE ? 1.25 : 0, 'Remote CLI repository work should use the trusted remote command lane.');
+            adjustCandidateToolScore(scoreMap, 'remote-workbench', executionProfile === REMOTE_BUILD_EXECUTION_PROFILE && hasStructuredRemoteWorkbenchIntent ? 0.95 : 0, 'Structured remote repository work can use remote-workbench actions.');
             adjustCandidateToolScore(scoreMap, 'git-safe', explicitGitIntent ? 0.75 : 0.3, 'Repository work may end with a save/push step.');
             break;
         case 'research':
@@ -1359,6 +1363,9 @@ function buildScoredCandidateToolMap({
     }
     if (remoteToolId && executionProfile === REMOTE_BUILD_EXECUTION_PROFILE) {
         adjustCandidateToolScore(scoreMap, remoteToolId, 0.55, 'Remote-build profile keeps the remote tool available.');
+    }
+    if (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE && hasStructuredRemoteWorkbenchIntent) {
+        adjustCandidateToolScore(scoreMap, 'remote-workbench', 0.65, 'The request names a structured remote repo, file, build, test, log, rollout, or verification action.');
     }
     if (hasRemoteCliAgentAuthoringRequest) {
         adjustCandidateToolScore(scoreMap, 'remote-cli-agent', 1.35, 'The request explicitly asks an assisted remote CLI agent to own a coding/build/deploy task.');
@@ -9094,6 +9101,7 @@ class ConversationOrchestrator extends EventEmitter {
             ? baseAllowedToolIds.filter((toolId) => requested.includes(toolId))
             : baseAllowedToolIds;
         const prompt = `${objective || ''}\n${instructions || ''}`.toLowerCase();
+        const hasStructuredRemoteWorkbenchIntent = /\b(remote workbench|repo-map|repo map|changed files?|grep|read file|write file|apply patch|focused test|remote build|remote test|deployment logs?|rollout|deploy verify|deployment verification)\b/.test(prompt);
         const effectiveAgencyProfile = agencyProfile || inferAgencyProfile({
             objective,
             executionProfile,
@@ -9204,7 +9212,7 @@ class ConversationOrchestrator extends EventEmitter {
             || config.deploy.defaultRepositoryPath
             || '',
         ).trim();
-        const shouldBypassEndToEndWorkflow = false;
+        const shouldBypassEndToEndWorkflow = shouldPreferRemoteWebsiteSource;
         const shouldUseRemoteCliAgentAuthoring = allowedToolIds.includes('remote-cli-agent')
             && hasRemoteCliAgentAuthoringRequest;
         const inferredWorkflowSeed = executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
@@ -9331,6 +9339,9 @@ class ConversationOrchestrator extends EventEmitter {
 
             if (remoteToolId && (sshContext.shouldTreatAsSsh || executionProfile === REMOTE_BUILD_EXECUTION_PROFILE)) {
                 candidates.add(remoteToolId);
+            }
+            if (hasStructuredRemoteWorkbenchIntent && allowedToolIds.includes('remote-workbench')) {
+                candidates.add('remote-workbench');
             }
             if ((explicitGitIntent || workflowNeedsDeployLane) && allowedToolIds.includes('git-safe')) {
                 candidates.add('git-safe');
@@ -9791,7 +9802,15 @@ class ConversationOrchestrator extends EventEmitter {
             });
         }
 
-        if (toolPolicy.workflow) {
+        const workflowDeploy = toolPolicy.workflow?.deploy || {};
+        const isUnresolvedDeployOnlyWorkflow = toolPolicy.workflow?.lane === 'deploy-only'
+            && !workflowDeploy.repositoryUrl
+            && !workflowDeploy.targetDirectory
+            && !workflowDeploy.manifestsPath
+            && !workflowDeploy.namespace
+            && !workflowDeploy.deployment
+            && !workflowDeploy.publicDomain;
+        if (toolPolicy.workflow && !isUnresolvedDeployOnlyWorkflow) {
             const workflowPlan = buildEndToEndWorkflowPlan({
                 workflow: toolPolicy.workflow,
                 toolPolicy,
@@ -10313,8 +10332,10 @@ class ConversationOrchestrator extends EventEmitter {
             'Only use tools listed above.',
             'Do not invent SSH hosts, usernames, file paths, or credentials.',
             'Every `remote-command` step must include a non-empty `params.command` string.',
+            'Every `remote-workbench` step must include `params.action`; use action names such as `repo-map`, `changed-files`, `grep`, `read-file`, `write-file`, `apply-patch`, `build`, `test`, `logs`, `rollout`, or `deploy-verify`.',
             'Treat "remote CLI", "direct CLI", and "remote command" as aliases for `remote-command`; do not route those phrases to a local shell or code sandbox.',
             'For remote server, SSH, host, k3s, Kubernetes, and kubectl work, use `remote-command` as the primary remote CLI lane. Do not choose legacy raw SSH tooling when `remote-command` is available.',
+            'When a remote task matches a `remote-workbench` action, prefer that structured action over hand-writing equivalent shell in `remote-command`.',
             'When remote CLI runtime inventory is present, prefer commands and fallbacks that match the actual CLI tools reported by the online remote runner.',
             'Keep `remote-command` for kubectl, host inspection, package installs, logs, restarts, deployments, DNS, TLS, and other infrastructure operations.',
             'For Kubernetes deployment creation from `remote-command`, prefer repo manifests or `kubectl create ... --dry-run=client -o yaml | kubectl apply -f -` generators over hand-authored manifest heredocs inside a shell command.',
@@ -11125,6 +11146,10 @@ class ConversationOrchestrator extends EventEmitter {
         if (toolPolicy?.remoteCliInventorySummary) {
             parts.push(`Remote CLI runtime inventory:\n${toolPolicy.remoteCliInventorySummary}`);
             parts.push('Use `remote-command` to run commands through the online remote runner and prefer commands that match the reported remote CLI inventory.');
+        }
+
+        if (allowedToolIds.includes('remote-workbench')) {
+            parts.push('Use `remote-workbench` for structured remote repo and file actions (`repo-map`, `changed-files`, `grep`, `read-file`, `write-file`, `apply-patch`), build/test actions, logs, rollout, and deploy verification. Use `remote-command` for one-off expert shell that does not fit those actions.');
         }
 
         if (shouldHydrateRemoteOpsGuidance({

@@ -466,6 +466,7 @@ const config = {
         codecTag: 'avc1',
         renderMode: normalizedPodcastVideoRenderMode,
         defaultSceneCount: normalizedPodcastVideoDefaultSceneCount,
+        audioRepairEnabled: process.env.PODCAST_VIDEO_AUDIO_REPAIR_ENABLED !== 'false',
     },
 
     auth: {
@@ -622,7 +623,6 @@ const config = {
         name: process.env.REMOTE_CLI_MCP_NAME || 'remote-cli',
         apiKey: process.env.REMOTE_CLI_MCP_BEARER_TOKEN
             || process.env.N8N_API_KEY
-            || process.env.OPENAI_API_KEY
             || '',
         timeoutMs: Math.max(
             1000,

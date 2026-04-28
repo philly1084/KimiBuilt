@@ -39,6 +39,7 @@ Useful optional inputs:
 - `videoAspectRatio` (`16:9`, `9:16`, or `1:1`)
 - `videoImageMode` (`mixed`, `web`, `unsplash`, `generated`, or `fallback`)
 - `videoGenerateImages` (set `true` to allow generated images for scenes)
+- `videoEnhanceAudio` (defaults to `true`; set `false` only when you need the original uploaded/generated audio untouched)
 - `videoSceneCount`
 - `videoVisualStyle`
 
@@ -55,6 +56,7 @@ Notes:
 - Source verification still uses bounded parallelism by default. Podcast TTS concurrency is conservative by default; only raise `ttsConcurrency` if you need speed more than render stability.
 - MP3 export and intro/outro/music-bed mixing require ffmpeg audio processing to be configured.
 - MP4 podcast video rendering also requires ffmpeg. The default video render mode is `storyboard`: 14 stable scene visuals with hard cuts, encoded as H.264/AVC MP4 (`avc1`, yuv420p) with AAC audio for broad PC/browser compatibility.
+- Video podcast renders repair audio by default with click removal, declipping, FFT denoise, de-essing, loudness normalization, and limiting before AAC muxing. Keep MP4 unless the user has a platform-specific reason to request another container.
 - Use `videoRenderMode: "static-card"` only when the user explicitly wants one key visual for the full episode. The storyboard pipeline plans timestamped show segments from the transcript, tries direct/provided images, web-search page image extraction, Unsplash, generated images when allowed, and deterministic fallback frames.
 - Long video renders use adaptive ffmpeg budgets. Override with `videoFfmpegTimeoutMs`, `videoSegmentTimeoutMs`, or `videoMuxTimeoutMs` only when the host is known to need more time.
 - Only use music beds you are licensed to use. Provide a legal audio file path or upload; do not source copyrighted music without permission.

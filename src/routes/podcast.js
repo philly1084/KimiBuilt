@@ -68,6 +68,7 @@ const generateSchema = {
   videoAspectRatio: { required: false, type: 'string' },
   videoImageMode: { required: false, type: 'string' },
   videoGenerateImages: { required: false, type: 'boolean' },
+  videoEnhanceAudio: { required: false, type: 'boolean' },
   videoSceneCount: { required: false, type: 'number' },
   videoRenderMode: { required: false, type: 'string' },
   renderMode: { required: false, type: 'string' },
@@ -108,13 +109,24 @@ function parseBooleanField(value, fallback = false) {
   return fallback;
 }
 
+function resolveBooleanOption(...values) {
+  for (const value of values) {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+  }
+  return undefined;
+}
+
 function buildPodcastVideoOptions(input = {}, context = {}) {
   const nested = input.video && typeof input.video === 'object' ? input.video : {};
+  const imageMode = input.videoImageMode || input.imageMode || nested.imageMode || 'mixed';
   return {
     topic: input.topic || input.prompt || input.subject || nested.topic || '',
     aspectRatio: input.videoAspectRatio || input.aspectRatio || nested.aspectRatio || '16:9',
-    imageMode: input.videoImageMode || input.imageMode || nested.imageMode || 'mixed',
-    generateImages: input.videoGenerateImages === true || input.generateImages === true || nested.generateImages === true,
+    imageMode,
+    generateImages: resolveBooleanOption(input.videoGenerateImages, input.generateImages, nested.generateImages),
+    enhanceAudio: resolveBooleanOption(input.videoEnhanceAudio, input.enhanceAudio, nested.enhanceAudio),
     sceneCount: Number(input.videoSceneCount || input.sceneCount || nested.sceneCount) || undefined,
     renderMode: input.videoRenderMode || input.renderMode || nested.renderMode || undefined,
     visualStyle: input.videoVisualStyle || input.visualStyle || nested.visualStyle || '',
@@ -325,7 +337,8 @@ router.post('/video/render', async (req, res, next) => {
         fields: {
           ...fields,
           scenes,
-          generateImages: parseBooleanField(fields.generateImages, false),
+          generateImages: parseBooleanField(fields.generateImages, true),
+          enhanceAudio: parseBooleanField(fields.enhanceAudio, true),
           toolManager,
           toolContext: buildPodcastVideoContext(req, toolManager, sessionId),
         },

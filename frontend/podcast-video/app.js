@@ -84,10 +84,11 @@
     const data = new FormData(form);
     data.set('audio', file);
     data.set('generateImages', form.elements.generateImages.checked ? 'true' : 'false');
+    data.set('enhanceAudio', form.elements.enhanceAudio.checked ? 'true' : 'false');
 
     renderButton.disabled = true;
     result.hidden = true;
-    setStatus('working', 'Rendering', 'Planning scenes, sourcing images, applying motion, and muxing audio. Long podcasts can take several minutes.');
+    setStatus('working', 'Rendering', 'Repairing audio, planning scenes, sourcing images, applying motion, and muxing the MP4. Long podcasts can take several minutes.');
 
     try {
       const response = await fetch('/api/podcast/video/render', {
