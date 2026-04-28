@@ -1585,6 +1585,14 @@ class DocumentService {
       if (normalizedFormat === 'html') {
         return this.renderPresentationDeck(presentationContent, options);
       }
+      if (normalizedFormat === 'pptx') {
+        const pptxGenerator = this.generators.pptx;
+        if (!pptxGenerator) {
+          throw new Error('PPTX generator not available');
+        }
+
+        return pptxGenerator.generateFromContent(presentationContent, options);
+      }
     }
 
     if (normalizedFormat === 'html' || normalizedFormat === 'md' || normalizedFormat === 'markdown') {
@@ -2480,7 +2488,7 @@ class DocumentService {
 
   shouldRenderTemplateAsPresentation(template = {}, format = '') {
     const normalizedFormat = String(format || '').trim().toLowerCase();
-    if (normalizedFormat !== 'html') {
+    if (!['html', 'pptx'].includes(normalizedFormat)) {
       return false;
     }
 
