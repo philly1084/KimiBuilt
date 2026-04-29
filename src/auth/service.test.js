@@ -171,6 +171,31 @@ describe('auth service OpenCode gateway access', () => {
         });
     });
 
+    test('allows the frontend API token on remote agent task admin routes', () => {
+        const req = {
+            path: '/admin/remote-agent-tasks',
+            method: 'POST',
+            headers: {
+                authorization: 'Bearer frontend-secret',
+            },
+            secure: false,
+        };
+        const res = {
+            status: jest.fn().mockReturnThis(),
+            json: jest.fn(),
+            redirect: jest.fn(),
+        };
+        const next = jest.fn();
+
+        requireAuth(req, res, next);
+
+        expect(next).toHaveBeenCalledTimes(1);
+        expect(req.user).toEqual({
+            username: 'frontend-api',
+            role: 'frontend-api',
+        });
+    });
+
     test('prefers the signed-in browser user over the frontend API token when both are present', () => {
         const auth = createAuthToken('phill');
         const req = {

@@ -219,11 +219,13 @@ function isFrontendTokenRoute(req) {
     }
 
     if (routePath.startsWith('/api/admin/')) {
-        return routePath.startsWith('/api/admin/provider-');
+        return routePath.startsWith('/api/admin/provider-')
+            || routePath.startsWith('/api/admin/remote-agent-');
     }
 
     if (routePath.startsWith('/admin/')) {
-        return routePath.startsWith('/admin/provider-');
+        return routePath.startsWith('/admin/provider-')
+            || routePath.startsWith('/admin/remote-agent-');
     }
 
     return routePath.startsWith('/api/');

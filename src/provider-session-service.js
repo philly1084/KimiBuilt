@@ -1,7 +1,8 @@
 'use strict';
 
 const crypto = require('crypto');
-const fs = require('fs').promises;
+const fsSync = require('fs');
+const fs = fsSync.promises;
 const path = require('path');
 const EventEmitter = require('events');
 const { spawn } = require('child_process');
@@ -289,7 +290,7 @@ class ProviderSessionService {
     }
 
     getProviderDefinitions() {
-        return [
+        const builtInDefinitions = [
             {
                 providerId: 'codex-cli',
                 label: 'Codex CLI',
@@ -301,6 +302,14 @@ class ProviderSessionService {
                     process.env.CODEX_CLI_PATH,
                 ], 'codex'),
                 args: resolveCommandArgs(process.env.KIMIBUILT_CODEX_CLI_ARGS || process.env.CODEX_CLI_ARGS || ''),
+                sessionCommand: resolveCommandOverride([
+                    process.env.KIMIBUILT_CODEX_CLI_SESSION_COMMAND,
+                    process.env.CODEX_CLI_SESSION_COMMAND,
+                    process.env.KIMIBUILT_CODEX_CLI_COMMAND,
+                    process.env.CODEX_CLI_COMMAND,
+                    process.env.KIMIBUILT_CODEX_CLI_PATH,
+                    process.env.CODEX_CLI_PATH,
+                ], 'codex'),
                 prepareEnv: buildCodexEnvironment,
             },
             {
@@ -314,6 +323,14 @@ class ProviderSessionService {
                     process.env.GEMINI_CLI_PATH,
                 ], 'gemini'),
                 args: resolveCommandArgs(process.env.KIMIBUILT_GEMINI_CLI_ARGS || process.env.GEMINI_CLI_ARGS || ''),
+                sessionCommand: resolveCommandOverride([
+                    process.env.KIMIBUILT_GEMINI_CLI_SESSION_COMMAND,
+                    process.env.GEMINI_CLI_SESSION_COMMAND,
+                    process.env.KIMIBUILT_GEMINI_CLI_COMMAND,
+                    process.env.GEMINI_CLI_COMMAND,
+                    process.env.KIMIBUILT_GEMINI_CLI_PATH,
+                    process.env.GEMINI_CLI_PATH,
+                ], 'gemini'),
                 prepareEnv: (env) => env,
             },
             {
@@ -327,9 +344,33 @@ class ProviderSessionService {
                     process.env.KIMI_CLI_PATH,
                 ], 'kimi'),
                 args: resolveCommandArgs(process.env.KIMIBUILT_KIMI_CLI_ARGS || process.env.KIMI_CLI_ARGS || ''),
+                sessionCommand: resolveCommandOverride([
+                    process.env.KIMIBUILT_KIMI_CLI_SESSION_COMMAND,
+                    process.env.KIMI_CLI_SESSION_COMMAND,
+                    process.env.KIMIBUILT_KIMI_CLI_COMMAND,
+                    process.env.KIMI_CLI_COMMAND,
+                    process.env.KIMIBUILT_KIMI_CLI_PATH,
+                    process.env.KIMI_CLI_PATH,
+                ], 'kimi'),
                 prepareEnv: buildKimiEnvironment,
             },
         ];
+        const configuredDefinitions = loadConfiguredProviderDefinitions();
+        const merged = new Map();
+
+        builtInDefinitions.forEach((definition) => {
+            merged.set(definition.providerId, definition);
+        });
+        configuredDefinitions.forEach((definition) => {
+            const existing = merged.get(definition.providerId) || {};
+            merged.set(definition.providerId, {
+                ...existing,
+                ...definition,
+                prepareEnv: existing.prepareEnv || ((env) => env),
+            });
+        });
+
+        return Array.from(merged.values());
     }
 
     getProviderDefinition(providerId = '') {
@@ -508,6 +549,133 @@ function buildKimiEnvironment(env = {}) {
     }
 
     return nextEnv;
+}
+
+function loadConfiguredProviderDefinitions() {
+    const jsonDefinitions = parseProviderDefinitionsJson(
+        process.env.KIMIBUILT_CLI_PROVIDERS_JSON || process.env.CLI_PROVIDERS_JSON || '',
+    );
+    if (jsonDefinitions.length > 0) {
+        return jsonDefinitions;
+    }
+
+    const configPath = String(
+        process.env.PROVIDERS_CONFIG_PATH
+        || process.env.KIMIBUILT_PROVIDERS_CONFIG_PATH
+        || path.resolve(process.cwd(), 'providers.yaml')
+        || '',
+    ).trim();
+    if (!configPath || !fsSync.existsSync(configPath)) {
+        return [];
+    }
+
+    try {
+        return parseProviderDefinitionsYaml(fsSync.readFileSync(configPath, 'utf8'));
+    } catch (error) {
+        console.warn(`[ProviderSession] Failed to read providers config "${configPath}": ${error.message}`);
+        return [];
+    }
+}
+
+function parseProviderDefinitionsJson(rawValue = '') {
+    const normalized = String(rawValue || '').trim();
+    if (!normalized) {
+        return [];
+    }
+
+    try {
+        const parsed = JSON.parse(normalized);
+        const list = Array.isArray(parsed) ? parsed : parsed.providers;
+        return Array.isArray(list) ? list.map(normalizeProviderDefinition).filter(Boolean) : [];
+    } catch (error) {
+        console.warn(`[ProviderSession] Failed to parse CLI providers JSON: ${error.message}`);
+        return [];
+    }
+}
+
+function parseProviderDefinitionsYaml(contents = '') {
+    const lines = String(contents || '').split(/\r?\n/);
+    const providers = [];
+    let inProviders = false;
+    let current = null;
+
+    for (const rawLine of lines) {
+        const withoutComment = rawLine.replace(/\s+#.*$/, '');
+        if (!withoutComment.trim()) {
+            continue;
+        }
+
+        const indent = withoutComment.match(/^\s*/)?.[0].length || 0;
+        const trimmed = withoutComment.trim();
+        if (indent === 0) {
+            inProviders = trimmed === 'providers:';
+            continue;
+        }
+        if (!inProviders) {
+            continue;
+        }
+
+        if (trimmed.startsWith('- ')) {
+            if (current) {
+                providers.push(current);
+            }
+            current = {};
+            assignProviderYamlKeyValue(current, trimmed.slice(2).trim());
+            continue;
+        }
+
+        if (!current) {
+            continue;
+        }
+        assignProviderYamlKeyValue(current, trimmed);
+    }
+
+    if (current) {
+        providers.push(current);
+    }
+
+    return providers.map(normalizeProviderDefinition).filter(Boolean);
+}
+
+function assignProviderYamlKeyValue(target, line = '') {
+    const separator = line.indexOf(':');
+    if (separator === -1) {
+        return;
+    }
+
+    const key = line.slice(0, separator).trim();
+    const value = line.slice(separator + 1).trim();
+    target[key] = String(value || '').trim().replace(/^['"]|['"]$/g, '');
+}
+
+function normalizeProviderDefinition(definition = {}) {
+    if (!definition || typeof definition !== 'object') {
+        return null;
+    }
+
+    const providerId = normalizeOptionalString(definition.providerId || definition.id);
+    const sessionCommand = normalizeOptionalString(definition.sessionCommand || definition.command);
+    if (!providerId || !sessionCommand) {
+        return null;
+    }
+
+    const sessionParts = resolveCommandArgs(sessionCommand);
+    const explicitArgs = Array.isArray(definition.args)
+        ? definition.args.map((arg) => String(arg)).filter(Boolean)
+        : resolveCommandArgs(definition.sessionArgs || definition.args || '');
+
+    return {
+        providerId: providerId.toLowerCase(),
+        label: normalizeOptionalString(definition.label) || providerId,
+        description: normalizeOptionalString(definition.description) || `${providerId} terminal client running on the backend host.`,
+        command: sessionParts[0] || sessionCommand,
+        args: [
+            ...sessionParts.slice(1),
+            ...explicitArgs,
+        ],
+        sessionCommand,
+        prepareEnv: (env) => env,
+    };
 }
 
 function chunkToText(chunk) {

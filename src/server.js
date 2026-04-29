@@ -43,6 +43,7 @@ const managedAppsRouter = require('./routes/managed-apps');
 const runnersRouter = require('./routes/runners');
 const giteaIntegrationsRouter = require('./routes/integrations-gitea');
 const providerSessionsRouter = require('./routes/provider-sessions');
+const remoteAgentTasksRouter = require('./routes/remote-agent-tasks');
 const DashboardController = require('./routes/admin/dashboard.controller');
 const { getToolManager } = require('./agent-sdk/tools');
 const { setDashboardController } = require('./admin/runtime-monitor');
@@ -53,6 +54,7 @@ const { AgentWorkloadService } = require('./workloads/service');
 const { AgentWorkloadRunner } = require('./workloads/runner');
 const { ManagedAppService } = require('./managed-apps/service');
 const { ProviderSessionService } = require('./provider-session-service');
+const { RemoteAgentTaskService } = require('./remote-agent-task-service');
 const { TemplateStore } = require('./template-store');
 const { podcastService } = require('./podcast/podcast-service');
 const { podcastVideoService } = require('./video/podcast-video-service');
@@ -281,7 +283,9 @@ app.use('/v1', openaiCompatRouter);
 app.use('/openai/v1', openaiCompatRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/admin', providerSessionsRouter);
+app.use('/api/admin', remoteAgentTasksRouter);
 app.use('/admin', providerSessionsRouter);
+app.use('/admin', remoteAgentTasksRouter);
 app.use('/api/tools', toolsRouter);
 app.use('/api', workloadsRouter);
 app.use('/api', managedAppsRouter);
@@ -412,6 +416,9 @@ async function start() {
         app.locals.dashboardController.setOrchestrator(conversationOrchestrator);
         setDashboardController(app.locals.dashboardController);
         app.locals.providerSessionService = new ProviderSessionService();
+        app.locals.remoteAgentTaskService = new RemoteAgentTaskService({
+            providerSessionService: app.locals.providerSessionService,
+        });
         app.locals.conversationRunService = new ConversationRunService({
             app,
             sessionStore,
