@@ -533,6 +533,7 @@ function buildPodcastVideoOptions(params = {}, context = {}) {
   const nested = params.video && typeof params.video === 'object' && !Array.isArray(params.video)
     ? params.video
     : {};
+  const contextModel = String(context?.model || '').trim();
   const resolveBooleanOption = (...values) => {
     for (const value of values) {
       if (typeof value === 'boolean') {
@@ -553,7 +554,7 @@ function buildPodcastVideoOptions(params = {}, context = {}) {
     renderMode: params.videoRenderMode || params.renderMode || nested.renderMode || undefined,
     visualStyle: params.videoVisualStyle || params.visualStyle || nested.visualStyle || '',
     imageModel: params.videoImageModel || params.imageModel || nested.imageModel || null,
-    model: params.videoModel || params.model || nested.model || null,
+    model: contextModel || params.videoModel || params.model || nested.model || null,
     reasoningEffort: params.videoReasoningEffort || params.reasoningEffort || nested.reasoningEffort || null,
     ffmpegTimeoutMs: Number(params.videoFfmpegTimeoutMs || params.ffmpegTimeoutMs || nested.ffmpegTimeoutMs) || undefined,
     segmentTimeoutMs: Number(params.videoSegmentTimeoutMs || params.segmentTimeoutMs || nested.segmentTimeoutMs) || undefined,

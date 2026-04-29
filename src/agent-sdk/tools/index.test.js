@@ -273,11 +273,13 @@ describe('ToolManager image tools', () => {
       videoAspectRatio: '9:16',
       videoImageMode: 'generated',
       videoGenerateImages: true,
+      model: 'gpt-4o-mini',
     }, {
       sessionId: 'session-1',
       podcastService: podcastWorkflowService,
       podcastVideoService: videoWorkflowService,
       clientSurface: 'chat',
+      model: 'gpt-4o',
     });
 
     expect(result.success).toBe(true);
@@ -291,6 +293,7 @@ describe('ToolManager image tools', () => {
           aspectRatio: '9:16',
           imageMode: 'generated',
           generateImages: true,
+          model: 'gpt-4o',
         }),
       }),
     );

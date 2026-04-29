@@ -269,7 +269,7 @@ describe('PodcastService', () => {
     }));
   });
 
-  test('lets an explicit podcast model override the active chat model', async () => {
+  test('uses the active chat model instead of a conflicting tool model', async () => {
     const service = new PodcastService();
     const executeTool = jest.fn(async (toolId) => {
       if (toolId === 'web-search') {
@@ -307,10 +307,49 @@ describe('PodcastService', () => {
     });
 
     expect(createResponse).toHaveBeenCalledWith(expect.objectContaining({
-      model: 'gpt-5.4',
+      model: 'gemini-3.1-pro-preview',
       requestTimeoutMs: 300000,
       requestMaxRetries: 0,
     }));
+  });
+
+  test('uses the active chat model instead of an unsafe generated mini model', async () => {
+    const service = new PodcastService();
+    const executeTool = jest.fn(async (toolId) => {
+      if (toolId === 'web-search') {
+        return {
+          success: true,
+          data: {
+            results: [
+              { title: 'Boss traits', url: 'https://example.com/bosses', snippet: 'Good bosses communicate clearly.' },
+            ],
+          },
+        };
+      }
+      if (toolId === 'web-fetch') {
+        return {
+          success: true,
+          data: {
+            headers: { 'content-type': 'text/html' },
+            body: '<article><p>Good bosses set expectations, listen, and coach people through tradeoffs.</p></article>',
+          },
+        };
+      }
+      throw new Error(`Unexpected tool: ${toolId}`);
+    });
+
+    await service.createPodcast({
+      topic: 'What makes a good boss',
+      model: 'gpt-4o-mini',
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+      model: 'gpt-4o',
+      toolManager: { executeTool },
+    });
+
+    const usedModels = createResponse.mock.calls.map(([call]) => call.model);
+    expect(usedModels).toEqual(['gpt-4o']);
   });
 
   test('allows longer podcast script request budgets to be overridden per run', async () => {
@@ -1102,6 +1141,10 @@ describe('PodcastService', () => {
   });
 
   test('falls back to the configured fallback model after repeated transient script-generation failures', async () => {
+    settingsController.settings.models = {
+      ...(settingsController.settings?.models || {}),
+      fallbackModel: 'gpt-5.4-mini',
+    };
     const transientError = new Error('Connection terminated unexpectedly.');
     createResponse
       .mockRejectedValueOnce(transientError)
@@ -1169,7 +1212,7 @@ describe('PodcastService', () => {
       model: 'gpt-4o',
     }));
     expect(createResponse).toHaveBeenNthCalledWith(5, expect.objectContaining({
-      model: 'gpt-4o-mini',
+      model: 'gpt-5.4-mini',
     }));
     expect(result.script.summary).toBe('Fallback-model generation succeeded.');
   });

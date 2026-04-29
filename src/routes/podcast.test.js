@@ -112,6 +112,7 @@ describe('/api/podcast', () => {
         topic: 'How batteries work',
         sessionId: 'session-1',
         exportMp3: true,
+        model: 'gpt-4o',
       });
 
     expect(response.status).toBe(200);
@@ -119,9 +120,11 @@ describe('/api/podcast', () => {
     expect(podcastService.createPodcast).toHaveBeenCalledWith(expect.objectContaining({
       topic: 'How batteries work',
       exportMp3: true,
+      model: 'gpt-4o',
     }), expect.objectContaining({
       sessionId: 'session-1',
       clientSurface: 'podcast',
+      model: 'gpt-4o',
     }));
     expect(response.body).toEqual(expect.objectContaining({
       sessionId: 'session-1',
@@ -225,6 +228,8 @@ describe('/api/podcast', () => {
         videoAspectRatio: '9:16',
         videoImageMode: 'mixed',
         videoGenerateImages: true,
+        model: 'gpt-4o',
+        videoModel: 'gpt-4o-mini',
       });
 
     expect(response.status).toBe(200);
@@ -236,6 +241,7 @@ describe('/api/podcast', () => {
         aspectRatio: '9:16',
         imageMode: 'mixed',
         generateImages: true,
+        model: 'gpt-4o',
       }),
     }));
     expect(response.body.video).toEqual({ artifactId: 'artifact-video-1' });

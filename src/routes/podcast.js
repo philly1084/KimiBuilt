@@ -123,6 +123,7 @@ function resolveBooleanOption(...values) {
 function buildPodcastVideoOptions(input = {}, context = {}) {
   const nested = input.video && typeof input.video === 'object' ? input.video : {};
   const imageMode = input.videoImageMode || input.imageMode || nested.imageMode || 'mixed';
+  const contextModel = String(context?.model || context?.toolContext?.model || '').trim();
   return {
     topic: input.topic || input.prompt || input.subject || nested.topic || '',
     aspectRatio: input.videoAspectRatio || input.aspectRatio || nested.aspectRatio || '16:9',
@@ -134,7 +135,7 @@ function buildPodcastVideoOptions(input = {}, context = {}) {
     renderMode: input.videoRenderMode || input.renderMode || nested.renderMode || undefined,
     visualStyle: input.videoVisualStyle || input.visualStyle || nested.visualStyle || '',
     imageModel: input.videoImageModel || input.imageModel || nested.imageModel || null,
-    model: input.videoModel || input.model || nested.model || null,
+    model: contextModel || input.videoModel || input.model || nested.model || null,
     reasoningEffort: input.videoReasoningEffort || input.reasoningEffort || nested.reasoningEffort || null,
     ffmpegTimeoutMs: Number(input.videoFfmpegTimeoutMs || input.ffmpegTimeoutMs || nested.ffmpegTimeoutMs) || undefined,
     segmentTimeoutMs: Number(input.videoSegmentTimeoutMs || input.segmentTimeoutMs || nested.segmentTimeoutMs) || undefined,
@@ -147,6 +148,8 @@ function buildPodcastVideoOptions(input = {}, context = {}) {
 }
 
 function buildPodcastVideoContext(req, toolManager, sessionId) {
+  const metadata = req.body?.metadata && typeof req.body.metadata === 'object' ? req.body.metadata : {};
+  const model = String(req.body?.model || metadata.model || metadata.selectedModel || '').trim() || null;
   return {
     sessionId,
     route: req.originalUrl || req.path || '/api/podcast/video',
@@ -156,6 +159,7 @@ function buildPodcastVideoContext(req, toolManager, sessionId) {
     taskType: 'podcast-video',
     userId: req.user?.id || req.user?.username || null,
     ownerId: getRequestOwnerId(req),
+    model,
     toolManager,
   };
 }
@@ -227,6 +231,7 @@ async function resolvePodcastSessionId(req, requestedSessionId = null) {
 function buildPodcastContext(req, toolManager, sessionId) {
   const metadata = req.body?.metadata && typeof req.body.metadata === 'object' ? req.body.metadata : {};
   const timezone = String(metadata.timezone || metadata.timeZone || req.get('x-timezone') || '').trim() || null;
+  const model = String(req.body?.model || metadata.model || metadata.selectedModel || '').trim() || null;
   return {
     sessionId,
     userId: req.user?.id || req.user?.username || null,
@@ -235,6 +240,7 @@ function buildPodcastContext(req, toolManager, sessionId) {
     transport: 'http',
     executionProfile: 'podcast',
     timezone,
+    model,
     clientSurface: 'podcast',
     taskType: 'podcast',
     toolManager,

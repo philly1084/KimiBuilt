@@ -82,7 +82,7 @@ class SettingsController {
       },
       models: {
         defaultModel: 'gpt-4o',
-        fallbackModel: 'gpt-4o-mini',
+        fallbackModel: '',
         maxTokens: 4096,
         temperature: 0.7
       },
@@ -936,7 +936,7 @@ class SettingsController {
       },
       models: {
         defaultModel: 'gpt-4o',
-        fallbackModel: 'gpt-4o-mini',
+        fallbackModel: '',
         maxTokens: 4096,
         temperature: 0.7
       },

@@ -51,6 +51,9 @@ const PODCAST_HIGH_QUALITY_VOICE_IDS = Object.freeze([
 ]);
 const DEFAULT_MAX_VOICE_FALLBACK_ATTEMPTS = 2;
 const MAX_PODCAST_TTS_SPLIT_DEPTH = 3;
+const UNSAFE_IMPLICIT_PODCAST_SCRIPT_MODELS = new Set([
+  'gpt-4o-mini',
+]);
 const DEFAULT_HOST_ROSTER = Object.freeze([
   {
     key: 'hostA',
@@ -441,14 +444,32 @@ function resolvePodcastScriptModelCandidates(params = {}, context = {}) {
   const fallbackModel = String(settingsController?.settings?.models?.fallbackModel || '').trim();
   const configuredModel = String(config.openai?.model || '').trim();
   const contextModel = String(context?.model || '').trim();
+  const normalizedRequestedModel = requestedModel.toLowerCase();
+  const normalizedContextModel = contextModel.toLowerCase();
+  const shouldIgnoreRequestedModel = Boolean(
+    contextModel
+      && requestedModel
+      && normalizedRequestedModel !== normalizedContextModel,
+  );
 
   return uniqueOrdered([
-    requestedModel,
     contextModel,
+    shouldIgnoreRequestedModel ? '' : requestedModel,
     defaultModel,
     configuredModel,
     fallbackModel,
-  ]);
+  ].filter((model) => {
+    const normalized = String(model || '').trim().toLowerCase();
+    if (!normalized) {
+      return false;
+    }
+
+    if (!UNSAFE_IMPLICIT_PODCAST_SCRIPT_MODELS.has(normalized)) {
+      return true;
+    }
+
+    return requestedModel && !contextModel && normalized === normalizedRequestedModel;
+  }));
 }
 
 function isTransientPodcastError(error = {}) {
