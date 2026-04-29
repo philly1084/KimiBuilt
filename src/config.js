@@ -127,6 +127,26 @@ function normalizePiperVoiceDefinition(value = {}, defaults = {}) {
     };
 }
 
+function normalizeKokoroVoiceDefinition(value = {}, defaults = {}) {
+    if (!value || typeof value !== 'object') {
+        return null;
+    }
+
+    const id = String(value.id || value.voiceId || defaults.id || '').trim();
+    if (!id) {
+        return null;
+    }
+
+    return {
+        id,
+        label: String(value.label || value.voiceLabel || defaults.label || '').trim() || id,
+        description: String(value.description || value.voiceDescription || defaults.description || '').trim(),
+        aliases: Array.isArray(value.aliases)
+            ? value.aliases.map((alias) => String(alias || '').trim()).filter(Boolean)
+            : [],
+    };
+}
+
 function parsePiperVoicesPayload(rawValue = '', defaults = {}) {
     const normalized = String(rawValue || '').trim();
     if (!normalized) {
@@ -144,8 +164,29 @@ function parsePiperVoicesPayload(rawValue = '', defaults = {}) {
     }
 }
 
+function parseKokoroVoicesPayload(rawValue = '', defaults = {}) {
+    const normalized = String(rawValue || '').trim();
+    if (!normalized) {
+        return [];
+    }
+
+    try {
+        const parsed = JSON.parse(normalized);
+        return (Array.isArray(parsed) ? parsed : [])
+            .map((entry) => normalizeKokoroVoiceDefinition(entry, defaults))
+            .filter(Boolean);
+    } catch (error) {
+        console.warn(`[Config] Failed to parse Kokoro voices JSON: ${error.message}`);
+        return [];
+    }
+}
+
 function getBundledPiperRoot() {
     return path.resolve(__dirname, '../data/piper');
+}
+
+function getBundledKokoroRoot() {
+    return path.resolve(__dirname, '../data/kokoro');
 }
 
 function resolveBundledPiperBinaryPath() {
@@ -161,6 +202,16 @@ function resolveBundledPiperBinaryPath() {
 
 function resolveBundledPiperVoicesPath() {
     const bundledVoicesPath = path.join(getBundledPiperRoot(), 'voices', 'manifest.json');
+
+    try {
+        return fs.existsSync(bundledVoicesPath) ? bundledVoicesPath : '';
+    } catch (_error) {
+        return '';
+    }
+}
+
+function resolveBundledKokoroVoicesPath() {
+    const bundledVoicesPath = path.join(getBundledKokoroRoot(), 'voices', 'manifest.json');
 
     try {
         return fs.existsSync(bundledVoicesPath) ? bundledVoicesPath : '';
@@ -223,6 +274,54 @@ function loadConfiguredPiperVoices(defaults = {}) {
     };
 }
 
+function loadConfiguredKokoroVoices(defaults = {}) {
+    const candidateVoicesPaths = [
+        resolveConfigPath(process.env.KOKORO_TTS_VOICES_PATH || ''),
+        resolveBundledKokoroVoicesPath(),
+    ].filter(Boolean);
+    const seenPaths = new Set();
+
+    for (const voicesPath of candidateVoicesPaths) {
+        if (seenPaths.has(voicesPath)) {
+            continue;
+        }
+        seenPaths.add(voicesPath);
+
+        try {
+            const fileContents = fs.readFileSync(voicesPath, 'utf8');
+            const parsedVoices = parseKokoroVoicesPayload(fileContents, defaults);
+            if (parsedVoices.length > 0) {
+                return {
+                    voicesPath,
+                    voices: parsedVoices,
+                };
+            }
+        } catch (error) {
+            console.warn(`[Config] Failed to load Kokoro voices file "${voicesPath}": ${error.message}`);
+        }
+    }
+
+    const parsedVoices = parseKokoroVoicesPayload(process.env.KOKORO_TTS_VOICES_JSON || '', defaults);
+    if (parsedVoices.length > 0) {
+        return {
+            voicesPath: resolveConfigPath(process.env.KOKORO_TTS_VOICES_PATH || '') || resolveBundledKokoroVoicesPath(),
+            voices: parsedVoices,
+        };
+    }
+
+    const legacyVoice = normalizeKokoroVoiceDefinition({
+        id: defaults.id,
+        label: defaults.label,
+        description: defaults.description,
+        aliases: defaults.aliases,
+    }, defaults);
+
+    return {
+        voicesPath: resolveConfigPath(process.env.KOKORO_TTS_VOICES_PATH || '') || resolveBundledKokoroVoicesPath(),
+        voices: legacyVoice ? [legacyVoice] : [],
+    };
+}
+
 const piperVoiceDefaults = {
     id: process.env.PIPER_TTS_VOICE_ID || 'piper-female-natural',
     label: process.env.PIPER_TTS_VOICE_LABEL || 'Female natural',
@@ -235,7 +334,14 @@ const piperVoiceDefaults = {
     noiseW: parseOptionalFloat(process.env.PIPER_TTS_NOISE_W) ?? 0.68,
     sentenceSilence: parseOptionalFloat(process.env.PIPER_TTS_SENTENCE_SILENCE) ?? 0.24,
 };
+const kokoroVoiceDefaults = {
+    id: process.env.KOKORO_TTS_VOICE_ID || 'af_heart',
+    label: process.env.KOKORO_TTS_VOICE_LABEL || 'Heart Studio',
+    description: process.env.KOKORO_TTS_VOICE_DESCRIPTION || 'Primary high-quality Kokoro voice for polished local speech.',
+    aliases: [],
+};
 const configuredPiperVoices = loadConfiguredPiperVoices(piperVoiceDefaults);
+const configuredKokoroVoices = loadConfiguredKokoroVoices(kokoroVoiceDefaults);
 const configuredAudioProviders = buildAudioProviderCandidates();
 const availableParallelism = resolveAvailableParallelism();
 const normalizedPodcastResearchConcurrency = Math.max(
@@ -271,6 +377,25 @@ const normalizedPiperPodcastChunkChars = Math.max(
     Math.min(
         normalizedPiperMaxTextChars,
         parseInt(process.env.PIPER_TTS_PODCAST_CHUNK_CHARS, 10) || Math.min(760, normalizedPiperMaxTextChars),
+    ),
+);
+const normalizedKokoroMaxTextChars = Math.max(
+    200,
+    parseInt(process.env.KOKORO_TTS_MAX_TEXT_CHARS, 10) || 2400,
+);
+const normalizedKokoroTimeoutMs = Math.max(
+    1000,
+    parseInt(process.env.KOKORO_TTS_TIMEOUT_MS, 10) || 90000,
+);
+const normalizedKokoroPodcastTimeoutMs = Math.max(
+    normalizedKokoroTimeoutMs,
+    parseInt(process.env.KOKORO_TTS_PODCAST_TIMEOUT_MS, 10) || 240000,
+);
+const normalizedKokoroPodcastChunkChars = Math.max(
+    250,
+    Math.min(
+        normalizedKokoroMaxTextChars,
+        parseInt(process.env.KOKORO_TTS_PODCAST_CHUNK_CHARS, 10) || Math.min(900, normalizedKokoroMaxTextChars),
     ),
 );
 const normalizedPodcastVideoSegmentTimeoutMs = Math.max(
@@ -379,7 +504,29 @@ const config = {
     },
 
     tts: {
-        provider: 'piper',
+        provider: process.env.TTS_PROVIDER || 'kokoro',
+        fallbackProvider: process.env.TTS_FALLBACK_PROVIDER || 'piper',
+        fallbackEnabled: process.env.TTS_FALLBACK_ENABLED !== 'false',
+        kokoro: {
+            enabled: process.env.KOKORO_TTS_ENABLED !== 'false',
+            modelId: process.env.KOKORO_TTS_MODEL_ID || 'onnx-community/Kokoro-82M-v1.0-ONNX',
+            device: process.env.KOKORO_TTS_DEVICE || 'cpu',
+            dtype: process.env.KOKORO_TTS_DTYPE || 'q8',
+            voicesPath: configuredKokoroVoices.voicesPath,
+            voices: configuredKokoroVoices.voices,
+            voiceId: kokoroVoiceDefaults.id,
+            defaultVoiceId: process.env.KOKORO_TTS_DEFAULT_VOICE_ID
+                || configuredKokoroVoices.voices.find((voice) => voice.id === 'af_heart')?.id
+                || configuredKokoroVoices.voices[0]?.id
+                || kokoroVoiceDefaults.id,
+            voiceLabel: kokoroVoiceDefaults.label,
+            voiceDescription: kokoroVoiceDefaults.description,
+            speed: parseOptionalFloat(process.env.KOKORO_TTS_SPEED) ?? 1,
+            maxTextChars: normalizedKokoroMaxTextChars,
+            timeoutMs: normalizedKokoroTimeoutMs,
+            podcastTimeoutMs: normalizedKokoroPodcastTimeoutMs,
+            podcastChunkChars: normalizedKokoroPodcastChunkChars,
+        },
         piper: {
             enabled: process.env.PIPER_TTS_ENABLED !== 'false',
             binaryPath: resolveConfigPath(process.env.PIPER_TTS_BINARY_PATH || resolveBundledPiperBinaryPath() || 'piper'),

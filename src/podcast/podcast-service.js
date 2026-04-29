@@ -1,6 +1,7 @@
 const { config } = require('../config');
 const { createResponse } = require('../openai-client');
-const { piperTtsService, normalizeTextForSpeech } = require('../tts/piper-tts-service');
+const { ttsService } = require('../tts/tts-service');
+const { normalizeTextForSpeech } = require('../tts/speech-text');
 const { persistGeneratedAudio, updateGeneratedAudioSessionState } = require('../generated-audio-artifacts');
 const { audioProcessingService } = require('../audio/audio-processing-service');
 const settingsController = require('../routes/admin/settings.controller');
@@ -43,10 +44,10 @@ const DEFAULT_PODCAST_TTS_CONCURRENCY = Math.max(
 const MAX_PODCAST_RESEARCH_CONCURRENCY = 12;
 const MAX_PODCAST_TTS_CONCURRENCY = 24;
 const PODCAST_HIGH_QUALITY_VOICE_IDS = Object.freeze([
-  'lessac-high',
-  'ljspeech-high',
-  'ryan-high',
-  'cori-high',
+  'af_heart',
+  'af_bella',
+  'am_adam',
+  'bf_emma',
 ]);
 const DEFAULT_MAX_VOICE_FALLBACK_ATTEMPTS = 2;
 const MAX_PODCAST_TTS_SPLIT_DEPTH = 3;
@@ -56,28 +57,28 @@ const DEFAULT_HOST_ROSTER = Object.freeze([
     name: 'Maya',
     role: 'Lead host',
     persona: 'Warm, curious, and good at guiding the listener through the big picture.',
-    preferredVoiceIds: ['lessac-high', 'ljspeech-high'],
+    preferredVoiceIds: ['af_heart', 'af_bella'],
   },
   {
     key: 'hostB',
     name: 'Ryan',
     role: 'Co-host',
     persona: 'Grounded, calm, and precise when unpacking details, tradeoffs, and practical consequences.',
-    preferredVoiceIds: ['ryan-high', 'cori-high'],
+    preferredVoiceIds: ['am_adam', 'bf_emma'],
   },
   {
     key: 'hostC',
     name: 'June',
     role: 'Co-host',
     persona: 'Sharper, more analytical, and slightly playful when unpacking details and tradeoffs.',
-    preferredVoiceIds: ['cori-high', 'lessac-high'],
+    preferredVoiceIds: ['bf_emma', 'af_heart'],
   },
   {
     key: 'hostD',
     name: 'Elliot',
     role: 'Lead host',
     persona: 'Measured, thoughtful, and good at turning technical material into clear narrative beats.',
-    preferredVoiceIds: ['ryan-high', 'ljspeech-high'],
+    preferredVoiceIds: ['am_adam', 'af_bella'],
   },
 ]);
 const LEGACY_DEFAULT_HOSTS = Object.freeze([
@@ -86,14 +87,14 @@ const LEGACY_DEFAULT_HOSTS = Object.freeze([
     name: 'Maya',
     role: 'Lead host',
     persona: 'Warm, curious, and good at guiding the listener through the big picture.',
-    preferredVoiceIds: ['lessac-high', 'ljspeech-high', 'amy-broadcast'],
+    preferredVoiceIds: ['af_heart', 'af_bella', 'lessac-high', 'ljspeech-high'],
   },
   {
     key: 'hostB',
     name: 'June',
     role: 'Co-host',
     persona: 'Sharper, more analytical, and slightly playful when unpacking details and tradeoffs.',
-    preferredVoiceIds: ['cori-high', 'amy-broadcast', 'ryan-high'],
+    preferredVoiceIds: ['bf_emma', 'am_adam', 'cori-high', 'ryan-high'],
   },
 ]);
 
@@ -656,7 +657,7 @@ function resolveTurnVoicePlan(turns = [], hosts = [], options = {}) {
   for (const turn of Array.isArray(turns) ? turns : []) {
     const host = hostByName.get(turn.speaker);
     if (!host) {
-      throw new Error(`No Piper voice is configured for speaker "${turn.speaker}".`);
+      throw new Error(`No TTS voice is configured for speaker "${turn.speaker}".`);
     }
 
     const turnIndex = Number(hostTurnCounts.get(turn.speaker) || 0);
@@ -833,7 +834,7 @@ Open with a strong hook and end with a concise wrap-up.
 ${videoFormat ? 'Structure the episode like a YouTube information show: cold open hook, quick setup, evidence beats, why-it-matters sections, and a concrete final takeaway. Keep it conversational, but make each segment feel intentional and paced for viewers.' : ''}
 Write for speech delivery, not for reading: use contractions, shorter sentences, and natural hand-offs.
 Avoid stacked statistics, semicolons, parenthetical asides, and phrasing that sounds like a report being read aloud.
-Spell out or rephrase awkward abbreviations and symbols so Piper can read them smoothly.
+Spell out or rephrase awkward abbreviations and symbols so local TTS can read them smoothly.
 
 Return exactly this JSON shape:
 {
@@ -853,7 +854,7 @@ ${sourceText}
 class PodcastService {
   constructor(dependencies = {}) {
     this.createResponse = dependencies.createResponse || createResponse;
-    this.ttsService = dependencies.ttsService || piperTtsService;
+    this.ttsService = dependencies.ttsService || ttsService;
     this.persistGeneratedAudio = dependencies.persistGeneratedAudio || persistGeneratedAudio;
     this.updateGeneratedAudioSessionState = dependencies.updateGeneratedAudioSessionState || updateGeneratedAudioSessionState;
     this.audioProcessingService = dependencies.audioProcessingService || audioProcessingService;
@@ -1094,7 +1095,7 @@ class PodcastService {
     ].filter(Boolean));
     const resolvedHostName = String(host?.name || '').trim() || 'podcast host';
     if (candidateVoices.length === 0) {
-      throw new Error(`No Piper voice is configured for speaker "${resolvedHostName}".`);
+      throw new Error(`No TTS voice is configured for speaker "${resolvedHostName}".`);
     }
 
     const maxVoiceAttempts = Math.max(
@@ -1197,7 +1198,7 @@ class PodcastService {
       hostTurnCounts.set(turn.speaker, turnIndex + 1);
 
       if (!resolvedVoiceId) {
-        throw new Error(`No Piper voice is configured for speaker "${turn.speaker}".`);
+        throw new Error(`No TTS voice is configured for speaker "${turn.speaker}".`);
       }
 
       const hostForTurn = {
@@ -1303,6 +1304,7 @@ class PodcastService {
     const tone = sanitizePodcastText(params.tone || 'informative, conversational') || 'informative, conversational';
     const maxSources = clampNumber(params.maxSources, 2, 6, DEFAULT_MAX_SOURCES);
     const voiceConfig = this.ttsService.getPublicConfig();
+    const synthesisProvider = String(voiceConfig.provider || 'tts').trim() || 'tts';
     const hosts = resolveHosts(params, voiceConfig);
     const podcastTtsTimeoutMs = resolvePodcastTtsTimeoutMs(params, voiceConfig);
     const podcastChunkMaxChars = resolvePodcastChunkMaxChars(params, voiceConfig);
@@ -1408,9 +1410,9 @@ class PodcastService {
       text: transcript,
       title: episodeTitle,
       filename: normalizeVariantFilename(params.filename || '', 'wav'),
-      provider: 'piper',
+      provider: synthesisProvider,
       voice: {
-        provider: 'piper',
+        provider: synthesisProvider,
         episodeVoices: hosts.map((host) => ({
           speaker: host.name,
           voiceId: host.voiceId,
@@ -1439,6 +1441,7 @@ class PodcastService {
           musicBedApplied: useMusicBed,
           mp3Exported: wantsMp3,
           allowVoiceFallback,
+          ttsProvider: synthesisProvider,
           scriptRequestTimeoutMs: podcastScriptRequestTimeoutMs,
           researchConcurrency: podcastResearchConcurrency,
           ttsConcurrency: podcastTtsConcurrency,
@@ -1508,6 +1511,7 @@ class PodcastService {
             musicBedApplied: useMusicBed,
             mp3Exported: true,
             allowVoiceFallback,
+            ttsProvider: synthesisProvider,
             researchConcurrency: podcastResearchConcurrency,
             ttsConcurrency: podcastTtsConcurrency,
             ttsTimeoutMs: podcastTtsTimeoutMs,
@@ -1556,6 +1560,7 @@ class PodcastService {
         ttsTimeoutMs: podcastTtsTimeoutMs,
         ttsChunkMaxChars: podcastChunkMaxChars,
         audioProcessing: audioProcessingConfig,
+        ttsProvider: synthesisProvider,
       },
       artifact: primaryArtifact,
       artifacts: persistedArtifacts,

@@ -14,7 +14,7 @@ const { artifactService } = require('../../artifacts/artifact-service');
 const { assetManager } = require('../../asset-manager');
 const { researchBucketService } = require('../../research-buckets');
 const { publicSourceIndexService, SOURCE_KINDS, STATUSES } = require('../../public-source-index');
-const { piperTtsService } = require('../../tts/piper-tts-service');
+const { ttsService } = require('../../tts/tts-service');
 const { audioProcessingService } = require('../../audio/audio-processing-service');
 const { podcastService } = require('../../podcast/podcast-service');
 const { podcastVideoService } = require('../../video/podcast-video-service');
@@ -3533,7 +3533,7 @@ class ToolManager {
         id: 'speech-generate',
         name: 'Speech Generator',
         category: 'system',
-        description: 'Synthesize speech with Piper, save the audio into the active session, and return reusable artifact URLs for downstream agent work.',
+        description: 'Synthesize speech with the local TTS provider, save the audio into the active session, and return reusable artifact URLs for downstream agent work.',
         backend: {
           handler: async (params = {}, context = {}) => {
             const sessionId = String(context?.sessionId || '').trim();
@@ -3546,7 +3546,7 @@ class ToolManager {
               throw new Error('speech-generate requires a `text` string.');
             }
 
-            const synthesis = await piperTtsService.synthesize({
+            const synthesis = await ttsService.synthesize({
               text: requestedText,
               voiceId: params.voiceId || '',
             });
@@ -3557,7 +3557,7 @@ class ToolManager {
               text: synthesis.text,
               title: params.title || '',
               filename: params.filename || '',
-              provider: synthesis.voice?.provider || 'piper',
+              provider: synthesis.provider || synthesis.voice?.provider || 'tts',
               voice: synthesis.voice || null,
               audioBuffer: synthesis.audioBuffer,
               mimeType: synthesis.contentType || 'audio/wav',
@@ -3568,7 +3568,7 @@ class ToolManager {
             });
 
             return {
-              provider: synthesis.voice?.provider || 'piper',
+              provider: synthesis.provider || synthesis.voice?.provider || 'tts',
               voice: synthesis.voice || null,
               text: synthesis.text,
               contentType: synthesis.contentType || 'audio/wav',
@@ -3594,7 +3594,7 @@ class ToolManager {
           additionalProperties: false,
         },
         skill: {
-          triggerPatterns: ['text to speech', 'tts', 'narration', 'voiceover', 'read aloud', 'save audio', 'piper'],
+          triggerPatterns: ['text to speech', 'tts', 'narration', 'voiceover', 'read aloud', 'save audio', 'kokoro', 'piper'],
           requiresConfirmation: false,
         },
         frontend: {
@@ -3606,7 +3606,7 @@ class ToolManager {
         id: 'podcast',
         name: 'Podcast',
         category: 'system',
-        description: 'Research a topic, script a two-host episode, synthesize both voices with Piper, stitch the final podcast audio into a saved artifact, and optionally render an MP4 podcast video with scene images.',
+        description: 'Research a topic, script a two-host episode, synthesize both voices with local TTS, stitch the final podcast audio into a saved artifact, and optionally render an MP4 podcast video with scene images.',
         backend: {
           handler: async (params = {}, context = {}) => {
             const service = resolvePodcastService(context);

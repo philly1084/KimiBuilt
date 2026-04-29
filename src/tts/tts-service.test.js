@@ -1,21 +1,23 @@
 const { TtsService } = require('./tts-service');
 
-function createProvider(diagnosticsStatus = 'ready', synthesizeImpl = async () => ({
-    provider: 'piper',
-    audioBuffer: Buffer.from('piper-audio'),
+function createProvider(provider = 'kokoro', diagnosticsStatus = 'ready', synthesizeImpl = async () => ({
+    provider,
+    audioBuffer: Buffer.from(`${provider}-audio`),
 }), publicConfigOverrides = {}) {
+    const defaultVoiceId = provider === 'kokoro' ? 'af_heart' : 'hfc-female-rich';
     return {
         getPublicConfig: jest.fn(() => ({
             configured: diagnosticsStatus === 'ready',
-            provider: 'piper',
+            provider,
             voices: [{
-                id: 'hfc-female-rich',
-                label: 'HFC Rich',
-                provider: 'piper',
+                id: defaultVoiceId,
+                label: provider === 'kokoro' ? 'Heart Studio' : 'HFC Rich',
+                provider,
             }],
             diagnostics: {
                 status: diagnosticsStatus,
             },
+            defaultVoiceId,
             ...publicConfigOverrides,
         })),
         synthesize: jest.fn(synthesizeImpl),
@@ -23,80 +25,60 @@ function createProvider(diagnosticsStatus = 'ready', synthesizeImpl = async () =
 }
 
 describe('TtsService', () => {
-    test('delegates synthesis to the Piper provider', async () => {
-        const piper = createProvider('ready');
-        const service = new TtsService({}, {
+    test('delegates synthesis to the configured Kokoro provider', async () => {
+        const kokoro = createProvider('kokoro');
+        const piper = createProvider('piper');
+        const service = new TtsService({
+            provider: 'kokoro',
+            fallbackProvider: 'piper',
+        }, {
+            kokoro,
             piper,
         });
 
         const result = await service.synthesize({
             text: 'Hello there.',
-            voiceId: 'hfc-female-rich',
+            voiceId: 'af_heart',
         });
 
-        expect(piper.synthesize).toHaveBeenCalledWith({
+        expect(kokoro.synthesize).toHaveBeenCalledWith({
             text: 'Hello there.',
-            voiceId: 'hfc-female-rich',
+            voiceId: 'af_heart',
         });
-        expect(result.provider).toBe('piper');
+        expect(piper.synthesize).not.toHaveBeenCalled();
+        expect(result.provider).toBe('kokoro');
     });
 
     test('forwards timeout overrides to the active provider when supplied', async () => {
-        const piper = createProvider('ready');
-        const service = new TtsService({}, {
-            piper,
-        });
+        const kokoro = createProvider('kokoro');
+        const service = new TtsService({ provider: 'kokoro' }, { kokoro, piper: null });
 
         await service.synthesize({
             text: 'Hello there.',
-            voiceId: 'hfc-female-rich',
+            voiceId: 'af_heart',
             timeoutMs: 180000,
         });
 
-        expect(piper.synthesize).toHaveBeenCalledWith({
+        expect(kokoro.synthesize).toHaveBeenCalledWith({
             text: 'Hello there.',
-            voiceId: 'hfc-female-rich',
+            voiceId: 'af_heart',
             timeoutMs: 180000,
         });
     });
 
-    test('returns the Piper public config plus a single-provider catalog', () => {
-        const piper = createProvider('ready', undefined, {
+    test('returns Kokoro public config plus fallback provider catalog', () => {
+        const kokoro = createProvider('kokoro', 'ready', undefined, {
             maxTextChars: 2400,
-            defaultVoiceId: 'hfc-female-rich',
+            defaultVoiceId: 'af_heart',
             diagnostics: {
                 status: 'ready',
-                message: '1 Piper voice ready.',
-                binaryReachable: true,
+                message: '1 Kokoro voice ready.',
+                modelReachable: true,
                 voicesLoaded: true,
             },
         });
-        const service = new TtsService({}, {
-            piper,
-        });
-
-        expect(service.getPublicConfig()).toEqual(expect.objectContaining({
-            configured: true,
-            provider: 'piper',
-            maxTextChars: 2400,
-            defaultVoiceId: 'hfc-female-rich',
-            voices: [
-                expect.objectContaining({ id: 'hfc-female-rich', provider: 'piper' }),
-            ],
-            providers: [
-                expect.objectContaining({ provider: 'piper', configured: true }),
-            ],
-            diagnostics: expect.objectContaining({
-                status: 'ready',
-                voicesLoaded: true,
-            }),
-        }));
-    });
-
-    test('keeps Piper voices visible even when the provider is misconfigured', () => {
-        const piper = createProvider('misconfigured', undefined, {
+        const piper = createProvider('piper', 'misconfigured', undefined, {
             configured: false,
-            defaultVoiceId: 'hfc-female-rich',
             diagnostics: {
                 status: 'misconfigured',
                 message: 'Piper binary is missing.',
@@ -104,30 +86,91 @@ describe('TtsService', () => {
                 voicesLoaded: true,
             },
         });
-        const service = new TtsService({}, {
+        const service = new TtsService({
+            provider: 'kokoro',
+            fallbackProvider: 'piper',
+        }, {
+            kokoro,
             piper,
         });
 
         expect(service.getPublicConfig()).toEqual(expect.objectContaining({
-            configured: false,
-            provider: 'piper',
-            defaultVoiceId: null,
+            configured: true,
+            provider: 'kokoro',
+            maxTextChars: 2400,
+            defaultVoiceId: 'af_heart',
             voices: [
-                expect.objectContaining({ id: 'hfc-female-rich', provider: 'piper' }),
+                expect.objectContaining({ id: 'af_heart', provider: 'kokoro' }),
             ],
             providers: [
+                expect.objectContaining({ provider: 'kokoro', configured: true }),
                 expect.objectContaining({ provider: 'piper', configured: false }),
             ],
+            fallbackProvider: 'piper',
+            fallbackEnabled: true,
             diagnostics: expect.objectContaining({
-                status: 'misconfigured',
+                status: 'ready',
                 voicesLoaded: true,
             }),
         }));
     });
 
+    test('falls back to Piper when Kokoro is unavailable before synthesis', async () => {
+        const kokoro = createProvider('kokoro', 'unavailable', async () => {
+            throw new Error('Should not call unavailable provider');
+        }, {
+            configured: false,
+        });
+        const piper = createProvider('piper');
+        const service = new TtsService({
+            provider: 'kokoro',
+            fallbackProvider: 'piper',
+        }, {
+            kokoro,
+            piper,
+        });
+
+        const result = await service.synthesize({
+            text: 'Hello there.',
+            voiceId: 'af_heart',
+        });
+
+        expect(kokoro.synthesize).not.toHaveBeenCalled();
+        expect(piper.synthesize).toHaveBeenCalledWith({
+            text: 'Hello there.',
+            voiceId: '',
+        });
+        expect(result.provider).toBe('piper');
+    });
+
+    test('falls back to Piper on provider unavailable errors', async () => {
+        const unavailableError = new Error('Kokoro model failed to load.');
+        unavailableError.statusCode = 503;
+        unavailableError.code = 'tts_unavailable';
+        const kokoro = createProvider('kokoro', 'ready', async () => {
+            throw unavailableError;
+        });
+        const piper = createProvider('piper');
+        const service = new TtsService({
+            provider: 'kokoro',
+            fallbackProvider: 'piper',
+        }, {
+            kokoro,
+            piper,
+        });
+
+        const result = await service.synthesize({
+            text: 'Hello there.',
+        });
+
+        expect(kokoro.synthesize).toHaveBeenCalledTimes(1);
+        expect(piper.synthesize).toHaveBeenCalledTimes(1);
+        expect(result.provider).toBe('piper');
+    });
+
     test('returns an unavailable payload when no provider is configured', async () => {
-        const service = new TtsService({}, {
-            provider: null,
+        const service = new TtsService({ provider: 'kokoro', fallbackProvider: '' }, {
+            kokoro: null,
             piper: null,
         });
 
@@ -150,23 +193,29 @@ describe('TtsService', () => {
         });
     });
 
-    test('surfaces Piper synthesis errors without fallback behavior', async () => {
-        const piperError = new Error('Piper failed');
-        piperError.statusCode = 502;
-        piperError.code = 'tts_failed';
+    test('surfaces non-availability synthesis errors without fallback behavior', async () => {
+        const kokoroError = new Error('Kokoro failed');
+        kokoroError.statusCode = 502;
+        kokoroError.code = 'tts_failed';
 
-        const piper = createProvider('ready', async () => {
-            throw piperError;
+        const kokoro = createProvider('kokoro', 'ready', async () => {
+            throw kokoroError;
         });
-        const service = new TtsService({}, {
+        const piper = createProvider('piper');
+        const service = new TtsService({
+            provider: 'kokoro',
+            fallbackProvider: 'piper',
+        }, {
+            kokoro,
             piper,
         });
 
         await expect(service.synthesize({
             text: 'Hello there.',
-            voiceId: 'hfc-female-rich',
-        })).rejects.toThrow('Piper failed');
+            voiceId: 'af_heart',
+        })).rejects.toThrow('Kokoro failed');
 
-        expect(piper.synthesize).toHaveBeenCalledTimes(1);
+        expect(kokoro.synthesize).toHaveBeenCalledTimes(1);
+        expect(piper.synthesize).not.toHaveBeenCalled();
     });
 });

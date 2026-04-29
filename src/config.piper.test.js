@@ -2,7 +2,7 @@ const path = require('path');
 
 const ORIGINAL_ENV = process.env;
 
-describe('config bundled Piper defaults', () => {
+describe('config bundled TTS defaults', () => {
     beforeEach(() => {
         jest.resetModules();
         process.env = {
@@ -15,16 +15,30 @@ describe('config bundled Piper defaults', () => {
         delete process.env.PIPER_TTS_MODEL_PATH;
         delete process.env.PIPER_TTS_CONFIG_PATH;
         delete process.env.PIPER_TTS_DEFAULT_VOICE_ID;
+        delete process.env.TTS_PROVIDER;
+        delete process.env.TTS_FALLBACK_PROVIDER;
+        delete process.env.KOKORO_TTS_VOICES_PATH;
+        delete process.env.KOKORO_TTS_VOICES_JSON;
+        delete process.env.KOKORO_TTS_DEFAULT_VOICE_ID;
     });
 
     afterAll(() => {
         process.env = ORIGINAL_ENV;
     });
 
-    test('loads the bundled Piper voice manifest and chooses the rich default voice when explicit env overrides are absent', () => {
+    test('loads bundled Kokoro defaults while keeping Piper fallback configured', () => {
         const { config } = require('./config');
 
-        expect(config.tts.provider).toBe('piper');
+        expect(config.tts.provider).toBe('kokoro');
+        expect(config.tts.fallbackProvider).toBe('piper');
+        expect(config.tts.kokoro.voicesPath).toContain(path.join('data', 'kokoro', 'voices', 'manifest.json'));
+        expect(config.tts.kokoro.voices).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'af_heart', aliases: expect.arrayContaining(['lessac-high']) }),
+            expect.objectContaining({ id: 'af_bella', aliases: expect.arrayContaining(['ljspeech-high']) }),
+            expect.objectContaining({ id: 'am_adam', aliases: expect.arrayContaining(['ryan-high']) }),
+            expect.objectContaining({ id: 'bf_emma', aliases: expect.arrayContaining(['cori-high']) }),
+        ]));
+        expect(config.tts.kokoro.defaultVoiceId).toBe('af_heart');
         expect(
             config.tts.piper.binaryPath === 'piper'
             || config.tts.piper.binaryPath.includes(path.join('data', 'piper', 'runtime', 'piper')),

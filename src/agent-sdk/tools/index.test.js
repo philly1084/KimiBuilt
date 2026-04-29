@@ -52,18 +52,18 @@ jest.mock('../../public-source-index', () => ({
   },
 }));
 
-jest.mock('../../tts/piper-tts-service', () => ({
-  piperTtsService: {
+jest.mock('../../tts/tts-service', () => ({
+  ttsService: {
     synthesize: jest.fn(),
     getPublicConfig: jest.fn(() => ({
       configured: true,
-      provider: 'piper',
+      provider: 'kokoro',
       maxTextChars: 2400,
-      defaultVoiceId: 'piper-female-natural',
+      defaultVoiceId: 'af_heart',
       voices: [{
-        id: 'piper-female-natural',
-        label: 'Female natural',
-        provider: 'piper',
+        id: 'af_heart',
+        label: 'Heart Studio',
+        provider: 'kokoro',
       }],
     })),
   },
@@ -79,7 +79,7 @@ const { assetManager } = require('../../asset-manager');
 const { researchBucketService } = require('../../research-buckets');
 const { publicSourceIndexService } = require('../../public-source-index');
 const config = require('../../config');
-const { piperTtsService } = require('../../tts/piper-tts-service');
+const { ttsService } = require('../../tts/tts-service');
 const { persistGeneratedAudio } = require('../../generated-audio-artifacts');
 const fs = require('fs').promises;
 const os = require('os');
@@ -106,7 +106,7 @@ describe('ToolManager image tools', () => {
     publicSourceIndexService.get.mockReset();
     publicSourceIndexService.upsert.mockReset();
     publicSourceIndexService.refresh.mockReset();
-    piperTtsService.synthesize.mockReset();
+    ttsService.synthesize.mockReset();
     persistGeneratedAudio.mockReset();
     artifactService.createStoredArtifact.mockResolvedValue({
       id: 'artifact-file-write-1',
@@ -706,19 +706,20 @@ describe('ToolManager image tools', () => {
     }));
   });
 
-  test('synthesizes speech with Piper and persists the audio into the active session', async () => {
+  test('synthesizes speech with local TTS and persists the audio into the active session', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();
 
-    piperTtsService.synthesize.mockResolvedValue({
+    ttsService.synthesize.mockResolvedValue({
       audioBuffer: Buffer.from('RIFF-test-audio'),
       contentType: 'audio/wav',
       text: 'Read this status update aloud.',
       voice: {
-        id: 'piper-female-natural',
-        label: 'Female natural',
-        provider: 'piper',
+        id: 'af_heart',
+        label: 'Heart Studio',
+        provider: 'kokoro',
       },
+      provider: 'kokoro',
     });
     persistGeneratedAudio.mockResolvedValue({
       artifact: {
@@ -744,7 +745,7 @@ describe('ToolManager image tools', () => {
     });
 
     expect(result.success).toBe(true);
-    expect(piperTtsService.synthesize).toHaveBeenCalledWith({
+    expect(ttsService.synthesize).toHaveBeenCalledWith({
       text: 'Read this status update aloud.',
       voiceId: '',
     });
@@ -753,7 +754,7 @@ describe('ToolManager image tools', () => {
       sourceMode: 'chat',
       text: 'Read this status update aloud.',
       title: 'Status update',
-      provider: 'piper',
+      provider: 'kokoro',
       mimeType: 'audio/wav',
       metadata: expect.objectContaining({
         requestedText: 'Read this status update aloud.',
@@ -761,7 +762,7 @@ describe('ToolManager image tools', () => {
       }),
     }));
     expect(result.data).toEqual(expect.objectContaining({
-      provider: 'piper',
+      provider: 'kokoro',
       contentType: 'audio/wav',
       artifactIds: ['artifact-audio-1'],
       audio: expect.objectContaining({

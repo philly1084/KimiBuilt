@@ -20,19 +20,19 @@ describe('/api/tts', () => {
         jest.clearAllMocks();
         ttsService.getPublicConfig.mockReturnValue({
             configured: true,
-            provider: 'piper',
-            defaultVoiceId: 'hfc-female-rich',
+            provider: 'kokoro',
+            defaultVoiceId: 'af_heart',
             diagnostics: {
                 status: 'ready',
-                binaryReachable: true,
+                modelReachable: true,
                 voicesLoaded: true,
-                message: 'Piper voice playback is ready.',
+                message: 'Kokoro voice playback is ready.',
             },
             voices: [{
-                id: 'hfc-female-rich',
-                label: 'HFC Rich',
+                id: 'af_heart',
+                label: 'Heart Studio',
                 description: 'Warm and natural local voice.',
-                provider: 'piper',
+                provider: 'kokoro',
             }],
         });
     });
@@ -46,11 +46,10 @@ describe('/api/tts', () => {
         expect(response.status).toBe(200);
         expect(response.body).toEqual(expect.objectContaining({
             configured: true,
-            provider: 'piper',
-            defaultVoiceId: 'hfc-female-rich',
+            provider: 'kokoro',
+            defaultVoiceId: 'af_heart',
             diagnostics: expect.objectContaining({
                 status: 'ready',
-                binaryReachable: true,
                 voicesLoaded: true,
             }),
         }));
@@ -65,24 +64,24 @@ describe('/api/tts', () => {
         ttsService.synthesize.mockResolvedValue({
             audioBuffer: buffer,
             contentType: 'audio/wav',
-            provider: 'piper',
+            provider: 'kokoro',
             voice: {
-                id: 'hfc-female-rich',
-                label: 'HFC Rich',
+                id: 'af_heart',
+                label: 'Heart Studio',
             },
         });
 
         const response = await request(app)
             .post('/api/tts/synthesize')
             .send({
-                text: 'Hello from Piper.',
-                voiceId: 'hfc-female-rich',
+                text: 'Hello from Kokoro.',
+                voiceId: 'af_heart',
             });
 
         expect(response.status).toBe(200);
         expect(response.headers['content-type']).toMatch(/audio\/wav/);
-        expect(response.headers['x-tts-provider']).toBe('piper');
-        expect(response.headers['x-tts-voice-id']).toBe('hfc-female-rich');
+        expect(response.headers['x-tts-provider']).toBe('kokoro');
+        expect(response.headers['x-tts-voice-id']).toBe('af_heart');
         expect(response.body.equals(buffer)).toBe(true);
     });
 
@@ -91,7 +90,7 @@ describe('/api/tts', () => {
         app.use(express.json());
         app.use('/api/tts', ttsRouter);
 
-        const error = new Error('Piper TTS is not configured.');
+        const error = new Error('Kokoro TTS is not configured.');
         error.statusCode = 503;
         error.code = 'tts_unavailable';
         ttsService.synthesize.mockRejectedValue(error);
@@ -99,14 +98,14 @@ describe('/api/tts', () => {
         const response = await request(app)
             .post('/api/tts/synthesize')
             .send({
-                text: 'Hello from Piper.',
+                text: 'Hello from Kokoro.',
             });
 
         expect(response.status).toBe(503);
         expect(response.body).toEqual({
             error: {
                 type: 'tts_unavailable',
-                message: 'Piper TTS is not configured.',
+                message: 'Kokoro TTS is not configured.',
             },
         });
     });

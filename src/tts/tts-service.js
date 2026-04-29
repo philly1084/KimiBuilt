@@ -1,45 +1,83 @@
 const { config } = require('../config');
+const { kokoroTtsService } = require('./kokoro-tts-service');
 const { piperTtsService } = require('./piper-tts-service');
+
+function normalizeProviderId(value = '', fallback = '') {
+    return String(value || fallback || '').trim().toLowerCase();
+}
+
+function createUnavailableError() {
+    const error = new Error('No TTS providers are configured.');
+    error.statusCode = 503;
+    error.code = 'tts_unavailable';
+    return error;
+}
+
+function isProviderUnavailable(error = {}) {
+    const statusCode = Number(error.statusCode);
+    return statusCode === 503
+        || error.code === 'tts_unavailable'
+        || error.code === 'tts_binary_missing';
+}
+
+function providerSupportsVoice(publicConfig = {}, voiceId = '') {
+    const requestedVoiceId = String(voiceId || '').trim();
+    if (!requestedVoiceId) {
+        return true;
+    }
+
+    return (Array.isArray(publicConfig?.voices) ? publicConfig.voices : []).some((voice) => (
+        voice?.id === requestedVoiceId
+        || (Array.isArray(voice?.aliases) && voice.aliases.includes(requestedVoiceId))
+    ));
+}
 
 class TtsService {
     constructor(ttsConfig = config.tts || {}, providers = {}) {
         this.ttsConfig = {
             ...ttsConfig,
         };
-        if (Object.prototype.hasOwnProperty.call(providers, 'provider')) {
-            this.provider = providers.provider;
-        } else if (Object.prototype.hasOwnProperty.call(providers, 'piper')) {
-            this.provider = providers.piper;
+        this.providers = {};
+        if (Object.prototype.hasOwnProperty.call(providers, 'providers')) {
+            this.providers = providers.providers || {};
         } else {
-            this.provider = piperTtsService;
-        }
-    }
-
-    getProvider() {
-        return this.provider || null;
-    }
-
-    getPublicConfig() {
-        const publicConfig = this.getProvider()?.getPublicConfig?.();
-        if (!publicConfig || typeof publicConfig !== 'object') {
-            return {
-                configured: false,
-                provider: 'none',
-                maxTextChars: 2400,
-                defaultVoiceId: null,
-                voices: [],
-                providers: [],
-                diagnostics: {
-                    status: 'unavailable',
-                    binaryReachable: false,
-                    voicesLoaded: false,
-                    message: 'No TTS providers are configured.',
-                },
+            this.providers = {
+                kokoro: Object.prototype.hasOwnProperty.call(providers, 'kokoro')
+                    ? providers.kokoro
+                    : kokoroTtsService,
+                piper: Object.prototype.hasOwnProperty.call(providers, 'piper')
+                    ? providers.piper
+                    : piperTtsService,
             };
+            if (Object.prototype.hasOwnProperty.call(providers, 'provider')) {
+                this.providers[normalizeProviderId(this.ttsConfig.provider, 'kokoro') || 'provider'] = providers.provider;
+            }
+        }
+    }
+
+    getProvider(providerId = '') {
+        const normalizedProviderId = normalizeProviderId(providerId, this.ttsConfig.provider || 'kokoro');
+        return this.providers[normalizedProviderId] || null;
+    }
+
+    getFallbackProviderId() {
+        const primaryProviderId = normalizeProviderId(this.ttsConfig.provider, 'kokoro');
+        const fallbackProviderId = normalizeProviderId(this.ttsConfig.fallbackProvider, 'piper');
+        if (!fallbackProviderId || fallbackProviderId === primaryProviderId) {
+            return '';
+        }
+        return fallbackProviderId;
+    }
+
+    getProviderPublicConfig(providerId = '') {
+        const provider = this.getProvider(providerId);
+        const publicConfig = provider?.getPublicConfig?.();
+        if (!publicConfig || typeof publicConfig !== 'object') {
+            return null;
         }
 
+        const providerName = normalizeProviderId(publicConfig.provider, providerId) || providerId || 'unknown';
         const configured = publicConfig.configured === true;
-        const providerId = String(publicConfig.provider || 'piper').trim() || 'piper';
         const voices = Array.isArray(publicConfig.voices) ? publicConfig.voices : [];
         const maxTextChars = Math.max(200, Number(publicConfig.maxTextChars) || 2400);
         const timeoutMs = Math.max(1000, Number(publicConfig.timeoutMs) || 45000);
@@ -63,9 +101,11 @@ class TtsService {
                 voicesLoaded: voices.length > 0,
                 message: configured ? 'Voice playback is ready.' : 'Voice playback is unavailable.',
             };
-        const providerConfig = {
+
+        return {
+            ...publicConfig,
             configured,
-            provider: providerId,
+            provider: providerName,
             maxTextChars,
             timeoutMs,
             podcastTimeoutMs,
@@ -74,22 +114,48 @@ class TtsService {
             voices,
             diagnostics,
         };
+    }
+
+    getPublicConfig() {
+        const primaryProviderId = normalizeProviderId(this.ttsConfig.provider, 'kokoro');
+        const fallbackProviderId = this.getFallbackProviderId();
+        const providerConfigs = [primaryProviderId, fallbackProviderId]
+            .filter(Boolean)
+            .filter((providerId, index, items) => items.indexOf(providerId) === index)
+            .map((providerId) => this.getProviderPublicConfig(providerId))
+            .filter(Boolean);
+        const primaryConfig = providerConfigs[0] || null;
+
+        if (!primaryConfig) {
+            return {
+                configured: false,
+                provider: 'none',
+                maxTextChars: 2400,
+                defaultVoiceId: null,
+                voices: [],
+                providers: [],
+                diagnostics: {
+                    status: 'unavailable',
+                    binaryReachable: false,
+                    voicesLoaded: false,
+                    message: 'No TTS providers are configured.',
+                },
+            };
+        }
 
         return {
-            ...providerConfig,
-            providers: [providerConfig],
+            ...primaryConfig,
+            providers: providerConfigs,
+            fallbackProvider: fallbackProviderId || null,
+            fallbackEnabled: this.ttsConfig.fallbackEnabled !== false,
         };
     }
 
     async synthesize({ text = '', voiceId = '', timeoutMs } = {}) {
-        const provider = this.getProvider();
-        if (!provider?.synthesize) {
-            const error = new Error('No TTS providers are configured.');
-            error.statusCode = 503;
-            error.code = 'tts_unavailable';
-            throw error;
-        }
-
+        const primaryProviderId = normalizeProviderId(this.ttsConfig.provider, 'kokoro');
+        const fallbackProviderId = this.getFallbackProviderId();
+        const primaryProvider = this.getProvider(primaryProviderId);
+        const fallbackProvider = this.ttsConfig.fallbackEnabled === false ? null : this.getProvider(fallbackProviderId);
         const params = {
             text,
             voiceId,
@@ -98,8 +164,37 @@ class TtsService {
         if (Number.isFinite(Number(timeoutMs)) && Number(timeoutMs) > 0) {
             params.timeoutMs = Number(timeoutMs);
         }
+        const fallbackParams = () => {
+            const fallbackConfig = this.getProviderPublicConfig(fallbackProviderId);
+            if (fallbackConfig && !providerSupportsVoice(fallbackConfig, params.voiceId)) {
+                return {
+                    ...params,
+                    voiceId: '',
+                };
+            }
+            return params;
+        };
 
-        return provider.synthesize(params);
+        if (!primaryProvider?.synthesize) {
+            if (fallbackProvider?.synthesize) {
+                return fallbackProvider.synthesize(fallbackParams());
+            }
+            throw createUnavailableError();
+        }
+
+        const primaryConfig = this.getProviderPublicConfig(primaryProviderId);
+        if (primaryConfig?.configured === false && fallbackProvider?.synthesize) {
+            return fallbackProvider.synthesize(fallbackParams());
+        }
+
+        try {
+            return await primaryProvider.synthesize(params);
+        } catch (error) {
+            if (fallbackProvider?.synthesize && isProviderUnavailable(error)) {
+                return fallbackProvider.synthesize(fallbackParams());
+            }
+            throw error;
+        }
     }
 }
 

@@ -5,7 +5,7 @@
 1. Research the topic with `web-search`
 2. Verify and extract source material with `web-fetch`
 3. Generate a scripted two-host conversation with the configured model
-4. Synthesize each host with Piper using separate voices
+4. Synthesize each host with the configured local TTS provider using separate voices
 5. Optionally mix in intro/outro/music-bed audio with ffmpeg
 6. Optionally export MP3 with ffmpeg
 7. Save the final audio artifacts into the active session
@@ -24,8 +24,8 @@ Useful optional inputs:
 - `hostAVoiceId`, `hostBVoiceId`
 - `hostAVoiceIds`, `hostBVoiceIds` (ordered lists to cycle voices)
 - `cycleHostVoices` (default: false for audio-only, true for video podcasts)
-- `allowVoiceFallback` (default: true, lets a host fall through to the next curated voice on Piper failures)
-- `enhanceSpeech` (defaults to `true` when ffmpeg is available; set `false` only when you need the raw Piper WAV)
+- `allowVoiceFallback` (default: true, lets a host fall through to the next curated voice on TTS failures)
+- `enhanceSpeech` (defaults to `true` when ffmpeg is available; set `false` only when you need the raw TTS WAV)
 - `hostAPersona`, `hostBPersona`
 - `sourceUrls`
 - `searchDomains`
@@ -49,10 +49,10 @@ Notes:
 - The tool requires an active session because it persists the final audio artifact.
 - For "video podcast", "podcast video", "MP4 podcast", visual podcast, scene-image, or cover-art requests, pass `includeVideo: true`, keep `videoImageMode: "mixed"` by default, and pass `videoGenerateImages: true` unless the user explicitly asks not to use generated imagery.
 - Research quality depends on `web-search` availability and source accessibility.
-- Speech stitching is native PCM WAV concatenation, so the selected Piper voices must emit compatible WAV output.
-- Podcast renders use the curated high-quality `lessac-high`, `ljspeech-high`, `ryan-high`, and `cori-high` voice pool by default.
-- Long-form episodes use podcast-specific Piper chunking and timeout controls; override them with `ttsChunkMaxChars` or `ttsTimeoutMs` if a machine is unusually slow.
-- Each host keeps a stable primary voice unless you set `cycleHostVoices: true` or request a video podcast; when a Piper render fails, the tool falls through to the next voice in that host's pool by default.
+- Speech stitching is native PCM WAV concatenation, so the selected TTS voices must emit compatible WAV output.
+- Podcast renders use the curated high-quality Kokoro `af_heart`, `af_bella`, `am_adam`, and `bf_emma` voice pool by default, with legacy Piper aliases mapped during rollout.
+- Long-form episodes use podcast-specific TTS chunking and timeout controls; override them with `ttsChunkMaxChars` or `ttsTimeoutMs` if a machine is unusually slow.
+- Each host keeps a stable primary voice unless you set `cycleHostVoices: true` or request a video podcast; when a TTS render fails, the tool falls through to the next voice in that host's pool by default.
 - Source verification still uses bounded parallelism by default. Podcast TTS concurrency is conservative by default; only raise `ttsConcurrency` if you need speed more than render stability.
 - MP3 export and intro/outro/music-bed mixing require ffmpeg audio processing to be configured.
 - MP4 podcast video rendering also requires ffmpeg. The default video render mode is `storyboard`: 14 scene backgrounds with subtle zoom/fade treatment, encoded as H.264/AVC MP4 (`avc1`, yuv420p) with AAC audio for broad PC/browser compatibility.
@@ -61,4 +61,4 @@ Notes:
 - Long video renders use adaptive ffmpeg budgets. Override with `videoFfmpegTimeoutMs`, `videoSegmentTimeoutMs`, or `videoMuxTimeoutMs` only when the host is known to need more time.
 - Only use music beds you are licensed to use. Provide a legal audio file path or upload; do not source copyrighted music without permission.
 - Check `/api/tts/voices` for the exact `hostA` / `hostB` voice IDs supported in your current deployment before passing custom `hostAVoiceIds` and `hostBVoiceIds`.
-- Example: `hostAVoiceIds: ["lessac-high", "ljspeech-high"]` and `hostBVoiceIds: ["ryan-high", "cori-high"]` lets the same host cycle through the highest-quality bundled Piper voices per turn.
+- Example: `hostAVoiceIds: ["af_heart", "af_bella"]` and `hostBVoiceIds: ["am_adam", "bf_emma"]` lets the same host cycle through the highest-quality bundled Kokoro voices per turn.

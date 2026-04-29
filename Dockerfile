@@ -40,6 +40,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY bin/ ./bin/
 COPY src/ ./src/
 COPY frontend/ ./frontend/
+COPY data/kokoro/voices/manifest.json ./data/kokoro/voices/manifest.json
 COPY data/piper/voices/manifest.json ./data/piper/voices/manifest.json
 COPY package.json ./
 COPY package-lock.json* ./
@@ -97,6 +98,14 @@ ENV PORT=3000
 ENV ARTIFACT_BROWSER_PATH=/usr/bin/chromium
 ENV KIMIBUILT_DATA_DIR=/home/kimibuilt/.kimibuilt
 ENV KIMIBUILT_STATE_DIR=/home/kimibuilt/.kimibuilt
+ENV TTS_PROVIDER=kokoro
+ENV TTS_FALLBACK_PROVIDER=piper
+ENV KOKORO_TTS_ENABLED=true
+ENV KOKORO_TTS_MODEL_ID=onnx-community/Kokoro-82M-v1.0-ONNX
+ENV KOKORO_TTS_DEVICE=cpu
+ENV KOKORO_TTS_DTYPE=q8
+ENV KOKORO_TTS_VOICES_PATH=/app/data/kokoro/voices/manifest.json
+ENV KOKORO_TTS_DEFAULT_VOICE_ID=af_heart
 ENV PIPER_TTS_BINARY_PATH=/usr/local/bin/piper
 ENV PIPER_TTS_VOICES_PATH=/app/data/piper/voices/manifest.json
 ENV OPENCODE_ENABLED=false

@@ -209,10 +209,10 @@ const TOOL_SUPPORT = {
   'podcast': {
     status: 'stable',
     notes: [
-      'Runs researched two-host podcast generation with Piper voice synthesis and WAV stitching.',
+      'Runs researched two-host podcast generation with local Kokoro/Piper TTS synthesis and WAV stitching.',
       'Supports optional ffmpeg-backed MP3 export plus intro/outro/music-bed mixing when audio processing is configured.',
       'Supports host voice pools (`hostAVoiceIds`, `hostBVoiceIds`) with automatic cycling through each host’s configured voices.',
-      'Requires an active chat session plus working OpenAI, Piper, and web research configuration.',
+      'Requires an active chat session plus working OpenAI, local TTS, and web research configuration.',
     ],
   },
 };

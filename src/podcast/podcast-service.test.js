@@ -2,17 +2,23 @@ jest.mock('../openai-client', () => ({
   createResponse: jest.fn(),
 }));
 
-jest.mock('../tts/piper-tts-service', () => ({
-  piperTtsService: {
+jest.mock('../tts/tts-service', () => ({
+  ttsService: {
     getPublicConfig: jest.fn(() => ({
       configured: true,
-      provider: 'piper',
+      provider: 'kokoro',
       maxTextChars: 2400,
       timeoutMs: 45000,
       podcastTimeoutMs: 210000,
       podcastChunkChars: 760,
-      defaultVoiceId: 'hfc-female-rich',
+      defaultVoiceId: 'af_heart',
       voices: [
+        { id: 'af_heart', label: 'Heart Studio', provider: 'kokoro', aliases: ['lessac-high'] },
+        { id: 'af_bella', label: 'Bella Expressive', provider: 'kokoro', aliases: ['ljspeech-high'] },
+        { id: 'am_adam', label: 'Adam Narrator', provider: 'kokoro', aliases: ['ryan-high'] },
+        { id: 'am_michael', label: 'Michael Casual', provider: 'kokoro' },
+        { id: 'bf_emma', label: 'Emma Editorial', provider: 'kokoro', aliases: ['cori-high'] },
+        { id: 'bm_george', label: 'George Classic', provider: 'kokoro' },
         { id: 'lessac-high', label: 'Lessac Studio', provider: 'piper' },
         { id: 'lessac-bright', label: 'Lessac Bright', provider: 'piper' },
         { id: 'ljspeech-high', label: 'LJ Narrator', provider: 'piper' },
@@ -29,6 +35,10 @@ jest.mock('../tts/piper-tts-service', () => ({
     })),
     synthesize: jest.fn(),
   },
+  normalizeTextForSpeech: jest.fn((text) => text),
+}));
+
+jest.mock('../tts/speech-text', () => ({
   normalizeTextForSpeech: jest.fn((text) => text),
 }));
 
@@ -59,7 +69,7 @@ jest.mock('../audio/audio-processing-service', () => ({
 }));
 
 const { createResponse } = require('../openai-client');
-const { piperTtsService } = require('../tts/piper-tts-service');
+const { ttsService } = require('../tts/tts-service');
 const { persistGeneratedAudio, updateGeneratedAudioSessionState } = require('../generated-audio-artifacts');
 const { audioProcessingService } = require('../audio/audio-processing-service');
 const settingsController = require('../routes/admin/settings.controller');
@@ -104,7 +114,7 @@ describe('PodcastService', () => {
         ],
       }),
     });
-    piperTtsService.synthesize.mockResolvedValue({
+    ttsService.synthesize.mockResolvedValue({
       audioBuffer: createTestWav([1, 2, 3, 4]),
       voice: { provider: 'piper' },
       contentType: 'audio/wav',
@@ -163,7 +173,7 @@ describe('PodcastService', () => {
       query: expect.stringContaining('How grid batteries work'),
     }), expect.any(Object));
     expect(createResponse).toHaveBeenCalled();
-    expect(piperTtsService.synthesize).toHaveBeenCalled();
+    expect(ttsService.synthesize).toHaveBeenCalled();
     expect(audioProcessingService.composePodcastAudio).toHaveBeenCalledWith(expect.objectContaining({
       enhanceSpeech: true,
       includeIntro: false,
@@ -560,7 +570,7 @@ describe('PodcastService', () => {
     let active = 0;
     let maxActive = 0;
 
-    piperTtsService.synthesize.mockImplementation(async ({ text }) => {
+    ttsService.synthesize.mockImplementation(async ({ text }) => {
       active += 1;
       maxActive = Math.max(maxActive, active);
 
@@ -613,7 +623,7 @@ describe('PodcastService', () => {
     timeoutError.statusCode = 504;
     timeoutError.code = 'tts_timeout';
 
-    piperTtsService.synthesize
+    ttsService.synthesize
       .mockRejectedValueOnce(timeoutError)
       .mockResolvedValue({
         audioBuffer: createTestWav([1, 2, 3, 4]),
@@ -636,22 +646,22 @@ describe('PodcastService', () => {
     );
 
     expect(Buffer.isBuffer(result)).toBe(true);
-    expect(piperTtsService.synthesize).toHaveBeenCalledTimes(3);
-    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(1, expect.objectContaining({
+    expect(ttsService.synthesize).toHaveBeenCalledTimes(3);
+    expect(ttsService.synthesize).toHaveBeenNthCalledWith(1, expect.objectContaining({
       text: longTurn,
       voiceId: 'hfc-female-rich',
       timeoutMs: 180000,
     }));
-    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(2, expect.objectContaining({
+    expect(ttsService.synthesize).toHaveBeenNthCalledWith(2, expect.objectContaining({
       voiceId: 'hfc-female-rich',
       timeoutMs: 180000,
     }));
-    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(3, expect.objectContaining({
+    expect(ttsService.synthesize).toHaveBeenNthCalledWith(3, expect.objectContaining({
       voiceId: 'hfc-female-rich',
       timeoutMs: 180000,
     }));
-    expect(piperTtsService.synthesize.mock.calls[1][0].text.length).toBeLessThan(longTurn.length);
-    expect(piperTtsService.synthesize.mock.calls[2][0].text.length).toBeLessThan(longTurn.length);
+    expect(ttsService.synthesize.mock.calls[1][0].text.length).toBeLessThan(longTurn.length);
+    expect(ttsService.synthesize.mock.calls[2][0].text.length).toBeLessThan(longTurn.length);
   });
 
   test('retries unexpected Piper failures by splitting podcast chunks into smaller renders', async () => {
@@ -659,7 +669,7 @@ describe('PodcastService', () => {
     failedError.statusCode = 502;
     failedError.code = 'tts_failed';
 
-    piperTtsService.synthesize
+    ttsService.synthesize
       .mockRejectedValueOnce(failedError)
       .mockResolvedValue({
         audioBuffer: createTestWav([1, 2, 3, 4]),
@@ -682,14 +692,14 @@ describe('PodcastService', () => {
     );
 
     expect(Buffer.isBuffer(result)).toBe(true);
-    const [initialAttempt] = piperTtsService.synthesize.mock.calls[0];
-    expect(piperTtsService.synthesize.mock.calls.length).toBeGreaterThanOrEqual(3);
-    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(1, expect.objectContaining({
+    const [initialAttempt] = ttsService.synthesize.mock.calls[0];
+    expect(ttsService.synthesize.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(ttsService.synthesize).toHaveBeenNthCalledWith(1, expect.objectContaining({
       voiceId: 'hfc-female-rich',
       timeoutMs: 180000,
     }));
     expect(initialAttempt.text.length).toBeLessThanOrEqual(1600);
-    piperTtsService.synthesize.mock.calls.slice(1).forEach(([call]) => {
+    ttsService.synthesize.mock.calls.slice(1).forEach(([call]) => {
       expect(call.text.length).toBeLessThan(initialAttempt.text.length);
     });
   });
@@ -699,7 +709,7 @@ describe('PodcastService', () => {
     timeoutError.statusCode = 504;
     timeoutError.code = 'tts_timeout';
 
-    piperTtsService.synthesize
+    ttsService.synthesize
       .mockRejectedValueOnce(timeoutError)
       .mockResolvedValueOnce({
         audioBuffer: createTestWav([1, 2, 3, 4]),
@@ -725,12 +735,12 @@ describe('PodcastService', () => {
     );
 
     expect(Buffer.isBuffer(result)).toBe(true);
-    expect(piperTtsService.synthesize).toHaveBeenCalledTimes(2);
-    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(1, expect.objectContaining({
+    expect(ttsService.synthesize).toHaveBeenCalledTimes(2);
+    expect(ttsService.synthesize).toHaveBeenNthCalledWith(1, expect.objectContaining({
       voiceId: 'hfc-female-rich',
       timeoutMs: 180000,
     }));
-    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(2, expect.objectContaining({
+    expect(ttsService.synthesize).toHaveBeenNthCalledWith(2, expect.objectContaining({
       voiceId: 'amy-expressive',
       timeoutMs: 180000,
     }));
@@ -741,7 +751,7 @@ describe('PodcastService', () => {
     failedError.statusCode = 502;
     failedError.code = 'tts_failed';
 
-    piperTtsService.synthesize
+    ttsService.synthesize
       .mockRejectedValueOnce(failedError)
       .mockResolvedValueOnce({
         audioBuffer: createTestWav([1, 2, 3, 4]),
@@ -767,12 +777,12 @@ describe('PodcastService', () => {
     );
 
     expect(Buffer.isBuffer(result)).toBe(true);
-    expect(piperTtsService.synthesize).toHaveBeenCalledTimes(2);
-    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(1, expect.objectContaining({
+    expect(ttsService.synthesize).toHaveBeenCalledTimes(2);
+    expect(ttsService.synthesize).toHaveBeenNthCalledWith(1, expect.objectContaining({
       voiceId: 'hfc-female-rich',
       timeoutMs: 180000,
     }));
-    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(2, expect.objectContaining({
+    expect(ttsService.synthesize).toHaveBeenNthCalledWith(2, expect.objectContaining({
       voiceId: 'amy-expressive',
       timeoutMs: 180000,
     }));
@@ -799,20 +809,20 @@ describe('PodcastService', () => {
     );
 
     expect(Buffer.isBuffer(result)).toBe(true);
-    expect(piperTtsService.synthesize).toHaveBeenCalledTimes(3);
-    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(1, expect.objectContaining({
+    expect(ttsService.synthesize).toHaveBeenCalledTimes(3);
+    expect(ttsService.synthesize).toHaveBeenNthCalledWith(1, expect.objectContaining({
       voiceId: 'hfc-female-rich',
     }));
-    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(2, expect.objectContaining({
+    expect(ttsService.synthesize).toHaveBeenNthCalledWith(2, expect.objectContaining({
       voiceId: 'amy-expressive',
     }));
-    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(3, expect.objectContaining({
+    expect(ttsService.synthesize).toHaveBeenNthCalledWith(3, expect.objectContaining({
       voiceId: 'hfc-female-rich',
     }));
   });
 
   test('normalizes mixed voice wav formats before concatenating the episode audio', async () => {
-    piperTtsService.synthesize
+    ttsService.synthesize
       .mockResolvedValueOnce({
         audioBuffer: createTestWav([1, 2, 3, 4]),
         voice: { provider: 'piper' },
@@ -904,16 +914,16 @@ describe('PodcastService', () => {
       toolManager: { executeTool },
     });
 
-    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(1, expect.objectContaining({
+    expect(ttsService.synthesize).toHaveBeenNthCalledWith(1, expect.objectContaining({
       voiceId: 'hfc-female-rich',
     }));
-    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(2, expect.objectContaining({
+    expect(ttsService.synthesize).toHaveBeenNthCalledWith(2, expect.objectContaining({
       voiceId: 'kathleen-low',
     }));
-    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(3, expect.objectContaining({
+    expect(ttsService.synthesize).toHaveBeenNthCalledWith(3, expect.objectContaining({
       voiceId: 'amy-expressive',
     }));
-    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(4, expect.objectContaining({
+    expect(ttsService.synthesize).toHaveBeenNthCalledWith(4, expect.objectContaining({
       voiceId: 'hfc-female-medium',
     }));
   });
@@ -967,15 +977,15 @@ describe('PodcastService', () => {
       toolManager: { executeTool },
     });
 
-    const usedVoiceIds = piperTtsService.synthesize.mock.calls.map(([call]) => call.voiceId);
+    const usedVoiceIds = ttsService.synthesize.mock.calls.map(([call]) => call.voiceId);
     expect(usedVoiceIds).toHaveLength(4);
     expect(new Set(usedVoiceIds).size).toBeGreaterThanOrEqual(2);
     usedVoiceIds.forEach((voiceId) => {
       expect([
-        'lessac-high',
-        'ljspeech-high',
-        'ryan-high',
-        'cori-high',
+        'af_heart',
+        'af_bella',
+        'am_adam',
+        'bf_emma',
       ]).toContain(voiceId);
     });
   });
@@ -1018,16 +1028,16 @@ describe('PodcastService', () => {
       toolManager: { executeTool },
     });
 
-    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(1, expect.objectContaining({
+    expect(ttsService.synthesize).toHaveBeenNthCalledWith(1, expect.objectContaining({
       voiceId: 'hfc-female-rich',
     }));
-    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(2, expect.objectContaining({
+    expect(ttsService.synthesize).toHaveBeenNthCalledWith(2, expect.objectContaining({
       voiceId: 'kathleen-low',
     }));
-    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(3, expect.objectContaining({
+    expect(ttsService.synthesize).toHaveBeenNthCalledWith(3, expect.objectContaining({
       voiceId: 'hfc-female-rich',
     }));
-    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(4, expect.objectContaining({
+    expect(ttsService.synthesize).toHaveBeenNthCalledWith(4, expect.objectContaining({
       voiceId: 'kathleen-low',
     }));
   });

@@ -10,7 +10,7 @@ const { getToolManager } = require('../agent-sdk/tools');
 const { readToolDoc, getToolDocMetadata, REMOTE_CLI_COMMAND_CATALOG } = require('../agent-sdk/tool-docs');
 const settingsController = require('./admin/settings.controller');
 const { config } = require('../config');
-const { piperTtsService } = require('../tts/piper-tts-service');
+const { ttsService } = require('../tts/tts-service');
 const { audioProcessingService } = require('../audio/audio-processing-service');
 const { podcastVideoService } = require('../video/podcast-video-service');
 const { sessionStore } = require('../session-store');
@@ -363,12 +363,12 @@ function buildToolRuntime(toolId, options = {}) {
   }
 
   if (toolId === 'speech-generate') {
-    return piperTtsService.getPublicConfig();
+    return ttsService.getPublicConfig();
   }
 
   if (toolId === 'podcast') {
     return {
-      tts: piperTtsService.getPublicConfig(),
+      tts: ttsService.getPublicConfig(),
       audioProcessing: audioProcessingService.getPublicConfig(),
       video: podcastVideoService.getPublicConfig(),
       researchConfigured: Boolean(process.env.PERPLEXITY_API_KEY),
