@@ -263,7 +263,7 @@ function selectDefaultHostTemplates(params = {}) {
 function buildHostVoicePool(availableVoices = [], preferredVoiceIds = [], explicitVoiceIds = [], forcedVoiceId = '') {
   const availableVoiceIds = new Set(
     (Array.isArray(availableVoices) ? availableVoices : [])
-      .map((voice) => String(voice.id || '').trim())
+      .map((voice) => (voice && typeof voice === 'object' ? String(voice.id || '').trim() : ''))
       .filter(Boolean),
   );
   if (availableVoiceIds.size === 0) {
