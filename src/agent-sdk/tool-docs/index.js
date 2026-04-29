@@ -145,6 +145,27 @@ const REMOTE_CLI_COMMAND_CATALOG = Object.freeze([
     description: 'Verify rollout, service, ingress, TLS certificate objects, DNS, and public HTTPS for a deployed app.',
     command: 'set -e; ns="${NAMESPACE:-kimibuilt}"; app="${DEPLOYMENT:-backend}"; host="${PUBLIC_HOST:-demoserver2.buzz}"; export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; kubectl rollout status deployment/"$app" -n "$ns" --timeout=180s; kubectl wait --for=condition=available deployment/"$app" -n "$ns" --timeout=180s; kubectl get deploy,svc,ingress,certificate -n "$ns" -o wide || true; getent ahosts "$host" || true; curl -fsSIL --max-time 20 "https://$host"',
   },
+  {
+    id: 'ingress-plan',
+    label: 'Ingress plan',
+    profile: 'inspect',
+    description: 'Validate a guarded Traefik/cert-manager route plan with kimibuilt-ingress. Requires NAMESPACE, INGRESS_NAME, SERVICE_NAME, SERVICE_PORT, and PUBLIC_HOST or SUBDOMAIN.',
+    command: 'set -e; ns="${NAMESPACE:?NAMESPACE required}"; ingress="${INGRESS_NAME:?INGRESS_NAME required}"; service="${SERVICE_NAME:?SERVICE_NAME required}"; port="${SERVICE_PORT:?SERVICE_PORT required}"; set -- --namespace "$ns" --ingress "$ingress"; if [ -n "${PUBLIC_HOST:-}" ]; then set -- "$@" --host "$PUBLIC_HOST"; elif [ -n "${SUBDOMAIN:-}" ]; then set -- "$@" --subdomain "$SUBDOMAIN"; else echo "PUBLIC_HOST or SUBDOMAIN required" >&2; exit 2; fi; set -- "$@" --service "$service" --service-port "$port"; node bin/kimibuilt-ingress.js plan "$@"',
+  },
+  {
+    id: 'ingress-apply',
+    label: 'Ingress apply',
+    profile: 'deploy',
+    description: 'Safely upsert one Traefik/cert-manager Ingress host/path route and emit a KIMIBUILT_INGRESS_EVENT registry marker.',
+    command: 'set -e; export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; ns="${NAMESPACE:?NAMESPACE required}"; ingress="${INGRESS_NAME:?INGRESS_NAME required}"; service="${SERVICE_NAME:?SERVICE_NAME required}"; port="${SERVICE_PORT:?SERVICE_PORT required}"; set -- --namespace "$ns" --ingress "$ingress"; if [ -n "${PUBLIC_HOST:-}" ]; then set -- "$@" --host "$PUBLIC_HOST"; elif [ -n "${SUBDOMAIN:-}" ]; then set -- "$@" --subdomain "$SUBDOMAIN"; else echo "PUBLIC_HOST or SUBDOMAIN required" >&2; exit 2; fi; set -- "$@" --service "$service" --service-port "$port"; if [ -n "${EXPECT_CURRENT_SERVICE:-}" ]; then set -- "$@" --expect-current-service "$EXPECT_CURRENT_SERVICE"; fi; if [ -n "${EXPECT_CURRENT_SERVICE_PORT:-}" ]; then set -- "$@" --expect-current-service-port "$EXPECT_CURRENT_SERVICE_PORT"; fi; node bin/kimibuilt-ingress.js apply "$@"',
+  },
+  {
+    id: 'ingress-verify',
+    label: 'Ingress verify',
+    profile: 'deploy',
+    description: 'Verify a kimibuilt-ingress route, TLS secret/certificate, and public HTTPS.',
+    command: 'set -e; export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; ns="${NAMESPACE:?NAMESPACE required}"; ingress="${INGRESS_NAME:?INGRESS_NAME required}"; service="${SERVICE_NAME:?SERVICE_NAME required}"; port="${SERVICE_PORT:?SERVICE_PORT required}"; set -- --namespace "$ns" --ingress "$ingress"; if [ -n "${PUBLIC_HOST:-}" ]; then set -- "$@" --host "$PUBLIC_HOST"; elif [ -n "${SUBDOMAIN:-}" ]; then set -- "$@" --subdomain "$SUBDOMAIN"; else echo "PUBLIC_HOST or SUBDOMAIN required" >&2; exit 2; fi; set -- "$@" --service "$service" --service-port "$port"; node bin/kimibuilt-ingress.js verify "$@"',
+  },
 ]);
 
 const TOOL_SUPPORT = {

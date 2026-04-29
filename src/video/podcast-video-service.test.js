@@ -1,4 +1,6 @@
 const fs = require('fs/promises');
+const os = require('os');
+const path = require('path');
 const { PodcastVideoService, buildFallbackStoryboard } = require('./podcast-video-service');
 
 describe('PodcastVideoService', () => {
@@ -365,5 +367,49 @@ describe('PodcastVideoService', () => {
       revisedPrompt: 'usable visual',
       retryCount: 1,
     }));
+  });
+
+  test('replaces downloaded scene images that validate as black frames', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-image-validate-test-'));
+    const blackPreview = Buffer.concat([
+      Buffer.from('P6\n64 36\n255\n', 'ascii'),
+      Buffer.alloc(64 * 36 * 3, 0),
+    ]);
+    const service = new PodcastVideoService({
+      isUnsplashConfigured: () => false,
+    });
+    jest.spyOn(service, 'resolveSceneImage').mockResolvedValue({
+      buffer: Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64, 0)]),
+      mimeType: 'image/jpeg',
+      extension: 'jpg',
+      source: 'generated',
+      url: 'https://example.com/black.jpg',
+    });
+    jest.spyOn(service, 'runFfmpeg').mockImplementation(async (args) => {
+      await fs.writeFile(args[args.length - 1], blackPreview);
+      return { stdout: '', stderr: '' };
+    });
+
+    try {
+      const assets = await service.prepareSceneImages([{
+        id: 'scene-01',
+        summary: 'Opening',
+        visualPrompt: 'opening visual',
+      }], {
+        tempDir,
+        width: 1280,
+        height: 720,
+        imageMode: 'generated',
+        generateImages: true,
+      });
+
+      expect(assets[0]).toEqual(expect.objectContaining({
+        source: 'fallback',
+        replacedSource: 'generated',
+        extension: 'ppm',
+      }));
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
   });
 });

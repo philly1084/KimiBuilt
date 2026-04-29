@@ -164,7 +164,12 @@ describe('PodcastService', () => {
     }), expect.any(Object));
     expect(createResponse).toHaveBeenCalled();
     expect(piperTtsService.synthesize).toHaveBeenCalled();
-    expect(audioProcessingService.composePodcastAudio).not.toHaveBeenCalled();
+    expect(audioProcessingService.composePodcastAudio).toHaveBeenCalledWith(expect.objectContaining({
+      enhanceSpeech: true,
+      includeIntro: false,
+      includeOutro: false,
+      includeMusicBed: false,
+    }));
     expect(persistGeneratedAudio).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'session-1',
       mimeType: 'audio/wav',
@@ -179,7 +184,7 @@ describe('PodcastService', () => {
     expect(result.script.turns).toHaveLength(8);
     expect(result.hosts).toHaveLength(2);
     expect(result.hosts[0].voiceId).not.toBe(result.hosts[1].voiceId);
-    expect(result.processing.enhanced).toBe(false);
+    expect(result.processing.enhanced).toBe(true);
   });
 
   test('does not create a synthetic music bed when music is requested but no bed asset exists', async () => {
@@ -476,6 +481,7 @@ describe('PodcastService', () => {
 
     const result = await service.createPodcast({
       topic: 'How grid batteries work',
+      includeMusicBed: true,
     }, {
       sessionId: 'session-1',
       clientSurface: 'chat',

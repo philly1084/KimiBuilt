@@ -314,9 +314,9 @@ class PiperTtsService {
             '--length_scale',
             String(Number(voice.lengthScale ?? this.ttsConfig.lengthScale) || 1.02),
             '--noise_scale',
-            String(Number(voice.noiseScale ?? this.ttsConfig.noiseScale) || 0.55),
+            String(Number(voice.noiseScale ?? this.ttsConfig.noiseScale) || 0.38),
             '--noise_w',
-            String(Number(voice.noiseW ?? this.ttsConfig.noiseW) || 0.8),
+            String(Number(voice.noiseW ?? this.ttsConfig.noiseW) || 0.68),
             '--sentence_silence',
             String(Number(voice.sentenceSilence ?? this.ttsConfig.sentenceSilence) || 0.24),
         ];

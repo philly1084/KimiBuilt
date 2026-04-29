@@ -1360,7 +1360,8 @@ class PodcastService {
     const wantsMixing = requestedMixing(params) || useMusicBed;
     const wantsEnhancement = params.enhanceSpeech === false
       ? false
-      : audioProcessingConfig?.configured === true && params.enhanceSpeech === true;
+      : audioProcessingConfig?.configured === true
+        && audioProcessingConfig?.defaults?.masteringEnabled !== false;
 
     // Validate TTS compatibility before starting the full run.
     script.turns.forEach((turn) => {

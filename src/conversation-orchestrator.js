@@ -11141,6 +11141,7 @@ class ConversationOrchestrator extends EventEmitter {
         if (toolPolicy?.clusterRegistrySummary) {
             parts.push(`Cluster registry memory:\n${toolPolicy.clusterRegistrySummary}`);
             parts.push('Treat the cluster registry as durable context from earlier verified remote tool runs. Use it to avoid starting from scratch, but still re-verify rollout, ingress, TLS, and public reachability before claiming a deployment is live.');
+            parts.push('For k3s Ingress or TLS route changes, use `node bin/kimibuilt-ingress.js` through remote-command so Traefik, cert-manager, Let\'s Encrypt, and registry updates stay consistent; do not switch this cluster to nginx ingress by assumption.');
         }
 
         if (toolPolicy?.remoteCliInventorySummary) {

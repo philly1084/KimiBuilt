@@ -368,7 +368,7 @@ class SettingsController {
       this.applyAudioProcessingSettingsToRuntime();
     } catch (error) {
       // Use defaults if file doesn't exist
-      if (process.env.NODE_ENV !== 'test') {
+      if (process.env.NODE_ENV !== 'test' && process.env.KIMIBUILT_SUPPRESS_SETTINGS_LOG !== 'true') {
         console.log('Using default settings');
       }
     }

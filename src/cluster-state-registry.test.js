@@ -182,4 +182,90 @@ describe('ClusterStateRegistry', () => {
     expect(summary).toContain('traefik');
     expect(summary).toContain('cert-manager yes');
   });
+
+  test('records guarded ingress route events from remote command output', () => {
+    const event = {
+      eventType: 'kimibuilt-ingress',
+      timestamp: '2026-04-20T12:00:00.000Z',
+      action: 'apply',
+      status: 'succeeded',
+      namespace: 'demo',
+      ingressName: 'demo',
+      host: 'site.demoserver2.buzz',
+      baseDomain: 'demoserver2.buzz',
+      path: '/',
+      pathType: 'Prefix',
+      serviceName: 'web',
+      servicePort: '80',
+      deployment: 'web',
+      ingressClassName: 'traefik',
+      tlsClusterIssuer: 'letsencrypt-prod',
+      tlsSecretName: 'site-demoserver2-buzz-tls',
+      acmeEmail: 'philly1084@gmail.com',
+      verification: {
+        ingress: true,
+        tls: false,
+        certificateReady: false,
+        https: false,
+      },
+      message: 'Ingress route applied.',
+    };
+
+    registry.recordToolEvents({
+      objective: 'Expose the demo app through Traefik and cert-manager.',
+      controlState: {
+        lastSshTarget: {
+          host: 'ubuntu-32gb-fsn1-2',
+          username: 'ubuntu',
+          port: 22,
+        },
+      },
+      toolEvents: [{
+        toolCall: {
+          function: {
+            name: 'remote-command',
+            arguments: JSON.stringify({
+              workflowAction: 'ingress-apply',
+              command: 'node bin/kimibuilt-ingress.js apply --namespace demo --ingress demo --subdomain site --service web --service-port 80',
+            }),
+          },
+        },
+        result: {
+          success: true,
+          toolId: 'remote-command',
+          timestamp: '2026-04-20T12:00:00.000Z',
+          data: {
+            host: 'ubuntu-32gb-fsn1-2:22',
+            stdout: `KIMIBUILT_INGRESS_EVENT ${JSON.stringify(event)}`,
+          },
+        },
+      }],
+    });
+
+    const routes = registry.listEdgeRoutes();
+    expect(routes).toHaveLength(1);
+    expect(routes[0]).toEqual(expect.objectContaining({
+      targetHost: 'ubuntu-32gb-fsn1-2',
+      namespace: 'demo',
+      ingressName: 'demo',
+      hostName: 'site.demoserver2.buzz',
+      serviceName: 'web',
+      servicePort: '80',
+      ingressClassName: 'traefik',
+      tlsClusterIssuer: 'letsencrypt-prod',
+      acmeEmail: 'philly1084@gmail.com',
+    }));
+    expect(routes[0].verification).toEqual(expect.objectContaining({
+      ingress: true,
+      tls: false,
+      https: false,
+    }));
+
+    const summary = registry.buildPromptSummary();
+    expect(summary).toContain('Known edge route site.demoserver2.buzz/');
+    expect(summary).toContain('Use kimibuilt-ingress for changes');
+    expect(registry.getRuntimeSummary()).toEqual(expect.objectContaining({
+      edgeRouteCount: 1,
+    }));
+  });
 });

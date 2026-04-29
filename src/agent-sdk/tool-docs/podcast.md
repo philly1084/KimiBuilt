@@ -25,7 +25,7 @@ Useful optional inputs:
 - `hostAVoiceIds`, `hostBVoiceIds` (ordered lists to cycle voices)
 - `cycleHostVoices` (default: false)
 - `allowVoiceFallback` (default: true, lets a host fall through to the next curated voice on Piper failures)
-- `enhanceSpeech` (`false` by default, set `true` when you explicitly want ffmpeg mastering)
+- `enhanceSpeech` (defaults to `true` when ffmpeg is available; set `false` only when you need the raw Piper WAV)
 - `hostAPersona`, `hostBPersona`
 - `sourceUrls`
 - `searchDomains`
@@ -49,7 +49,7 @@ Notes:
 - For "video podcast", "podcast video", "MP4 podcast", visual podcast, scene-image, or cover-art requests, pass `includeVideo: true`, keep `videoImageMode: "mixed"` by default, and pass `videoGenerateImages: true` unless the user explicitly asks not to use generated imagery.
 - Research quality depends on `web-search` availability and source accessibility.
 - Speech stitching is native PCM WAV concatenation, so the selected Piper voices must emit compatible WAV output.
-- Podcast renders prefer the stable two-host voice pair first and only apply ffmpeg mastering when `enhanceSpeech` is explicitly enabled.
+- Podcast renders prefer the stable two-host voice pair first and apply ffmpeg repair/mastering by default when available.
 - Long-form episodes use podcast-specific Piper chunking and timeout controls; override them with `ttsChunkMaxChars` or `ttsTimeoutMs` if a machine is unusually slow.
 - Podcast TTS still defaults to the existing curated six-voice studio pool, but the bundled Piper catalog now includes additional high-quality `lessac`, `ljspeech`, `ryan`, and `cori` options for explicit host selection.
 - Each host keeps a stable primary voice unless you set `cycleHostVoices: true`; when a Piper render fails, the tool now falls through to the next voice in that host's pool by default.

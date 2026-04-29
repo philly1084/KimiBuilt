@@ -6,13 +6,46 @@ This playbook is the repo-local reference for remote build, kubectl, ingress, TL
 
 Unless Admin Settings override them, the backend assumes:
 - public domain: `demoserver2.buzz`
+- wildcard DNS: `*.demoserver2.buzz` points at the cluster edge
 - ingress class: `traefik`
 - TLS `ClusterIssuer`: `letsencrypt-prod`
+- ACME email: `philly1084@gmail.com`
 - namespace: `kimibuilt`
 - deployment: `backend`
 - container: `backend`
 
 Treat these as fallbacks, not proof that the live cluster already matches them.
+
+## Guarded ingress/TLS route management
+
+Agents should use `node bin/kimibuilt-ingress.js` for Traefik and Let's Encrypt route work. This prevents accidental nginx ingress creation, preserves existing paths on an Ingress, records route changes in `data/cluster-state-registry.json`, and reports exactly which required field or live-cluster check failed.
+
+```bash
+node bin/kimibuilt-ingress.js plan \
+  --namespace app-demo \
+  --ingress app-demo \
+  --subdomain demo \
+  --service web \
+  --service-port 80
+
+node bin/kimibuilt-ingress.js apply \
+  --namespace app-demo \
+  --ingress app-demo \
+  --subdomain demo \
+  --service web \
+  --service-port 80
+
+node bin/kimibuilt-ingress.js verify \
+  --namespace app-demo \
+  --ingress app-demo \
+  --subdomain demo \
+  --service web \
+  --service-port 80
+```
+
+`--subdomain demo` expands to `demo.demoserver2.buzz`. The wildcard DNS belongs at DNS, not in the Ingress rule; create concrete host rules so cert-manager can issue per-host certificates through the `letsencrypt-prod` HTTP-01 issuer. If an existing host/path points somewhere else, the CLI refuses to change it until the caller supplies `--expect-current-service` and `--expect-current-service-port`.
+
+Do not install or target nginx ingress for routine app exposure on this cluster.
 
 ## Official document locations
 

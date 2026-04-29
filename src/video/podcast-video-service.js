@@ -674,9 +674,19 @@ function isLikelyBadSceneImage(image = {}) {
     return false;
   }
 
+  return isLikelyBadPpmImage(ppm);
+}
+
+function isLikelyBadPpmImage(ppm = {}) {
+  if (!ppm || Number(ppm.width) <= 8 || Number(ppm.height) <= 8) {
+    return true;
+  }
+
+  const avgLuma = ((Number(ppm.avgR) || 0) + (Number(ppm.avgG) || 0) + (Number(ppm.avgB) || 0)) / 3;
   const mostlyBlue = ppm.avgB > 150 && ppm.avgR < 110 && ppm.avgG < 160;
   const mostlyPink = ppm.avgR > 180 && ppm.avgB > 140 && ppm.avgG < 150;
-  return ppm.width > 8 && ppm.height > 8 && (ppm.range < 12 || (ppm.range < 28 && (mostlyBlue || mostlyPink)));
+  const mostlyDark = avgLuma < 30 || (avgLuma < 45 && ppm.range < 28);
+  return ppm.range < 12 || mostlyDark || (ppm.range < 28 && (mostlyBlue || mostlyPink));
 }
 
 function isUsableSceneImage(image = {}) {
@@ -1205,12 +1215,74 @@ class PodcastVideoService {
       const image = await this.resolveSceneImage(scene, options);
       const filePath = path.join(options.tempDir, `scene-${String(index + 1).padStart(3, '0')}.${image.extension || 'png'}`);
       await fs.writeFile(filePath, image.buffer);
+
+      const usableVisual = await this.validateSceneImageFile(filePath, image, scene, {
+        ...options,
+        index,
+      });
+      if (!usableVisual.usable) {
+        const fallbackImage = {
+          buffer: buildPlaceholderFrameBuffer(options.width, options.height, scene.visualPrompt || scene.summary),
+          mimeType: 'image/x-portable-pixmap',
+          extension: 'ppm',
+          source: 'fallback',
+          url: null,
+          attribution: null,
+          replacedSource: image.source || 'unknown',
+        };
+        const fallbackPath = path.join(options.tempDir, `scene-${String(index + 1).padStart(3, '0')}-fallback.ppm`);
+        await fs.writeFile(fallbackPath, fallbackImage.buffer);
+        assets.push({
+          ...fallbackImage,
+          path: fallbackPath,
+        });
+        continue;
+      }
+
       assets.push({
         ...image,
         path: filePath,
       });
     }
     return assets;
+  }
+
+  async validateSceneImageFile(filePath = '', image = {}, scene = {}, options = {}) {
+    if (image.extension === 'ppm') {
+      return { usable: isUsableSceneImage(image), reason: 'ppm-analysis' };
+    }
+
+    if (!options.tempDir) {
+      return { usable: true, reason: 'no-temp-dir' };
+    }
+
+    const previewPath = path.join(
+      options.tempDir,
+      `scene-${String((Number(options.index) || 0) + 1).padStart(3, '0')}-preview.ppm`,
+    );
+    try {
+      await this.runFfmpeg([
+        '-y',
+        '-i', filePath,
+        '-frames:v', '1',
+        '-vf', 'scale=64:36:force_original_aspect_ratio=decrease,pad=64:36:(ow-iw)/2:(oh-ih)/2',
+        previewPath,
+      ], {
+        timeoutMs: 30000,
+        stage: `scene ${Number(options.index) + 1 || 1} image validation`,
+      });
+
+      const previewBuffer = await fs.readFile(previewPath);
+      const ppm = analyzePpmImage(previewBuffer);
+      if (ppm && isLikelyBadPpmImage(ppm)) {
+        console.warn(`[PodcastVideo] Replacing unusable scene image for ${scene.id || 'scene'} (${image.source || 'unknown'}).`);
+        return { usable: false, reason: 'dark-or-solid-image', analysis: ppm };
+      }
+    } catch (error) {
+      console.warn(`[PodcastVideo] Scene image validation failed for ${scene.id || 'scene'}: ${error.message}`);
+    }
+
+    return { usable: true, reason: 'validated' };
   }
 
   async renderStaticCardMp4({
@@ -1249,12 +1321,33 @@ class PodcastVideoService {
     });
     const imagePath = path.join(tempDir, `show-card.${image.extension || 'png'}`);
     await fs.writeFile(imagePath, image.buffer);
+    const validation = await this.validateSceneImageFile(imagePath, image, showCardScene, {
+      tempDir,
+      width: dimensions.width,
+      height: dimensions.height,
+      index: 0,
+    });
+    const finalImage = validation.usable ? image : {
+      buffer: buildPlaceholderFrameBuffer(dimensions.width, dimensions.height, showCardScene.visualPrompt || showCardScene.summary),
+      mimeType: 'image/x-portable-pixmap',
+      extension: 'ppm',
+      source: 'fallback',
+      url: null,
+      attribution: null,
+      replacedSource: image.source || 'unknown',
+    };
+    const finalImagePath = validation.usable
+      ? imagePath
+      : path.join(tempDir, 'show-card-fallback.ppm');
+    if (!validation.usable) {
+      await fs.writeFile(finalImagePath, finalImage.buffer);
+    }
 
     await this.runFfmpeg([
       '-y',
       '-loop', '1',
       '-framerate', String(DEFAULT_FPS),
-      '-i', imagePath,
+      '-i', finalImagePath,
       '-i', audioPath,
       '-vf', [
         `scale=${dimensions.width}:${dimensions.height}:force_original_aspect_ratio=increase`,
@@ -1279,10 +1372,10 @@ class PodcastVideoService {
     });
 
     return {
-      source: image.source || 'fallback',
-      url: image.url || null,
-      attribution: image.attribution || null,
-      revisedPrompt: image.revisedPrompt || null,
+      source: finalImage.source || 'fallback',
+      url: finalImage.url || null,
+      attribution: finalImage.attribution || null,
+      revisedPrompt: finalImage.revisedPrompt || null,
     };
   }
 

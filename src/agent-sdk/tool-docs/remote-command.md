@@ -94,10 +94,44 @@ These catalog entries are exposed through `/api/tools/available` so agents can s
 | `rollout` | `deploy` | Check rollout and available conditions for a deployment. |
 | `https-verify` | `inspect` | Verify DNS and public HTTPS for the deployed domain. |
 | `deploy-verify` | `deploy` | Verify rollout, service, ingress, TLS objects, DNS, and public HTTPS before claiming success. |
+| `ingress-plan` | `inspect` | Validate a guarded Traefik/cert-manager route plan with `kimibuilt-ingress`. |
+| `ingress-apply` | `deploy` | Safely upsert one host/path Ingress route and emit a registry event. |
+| `ingress-verify` | `deploy` | Verify the guarded route, TLS secret/certificate, and public HTTPS. |
 
 For repo maintenance and updates, start with `repo-map`, `changed-files`, and `dependency-check`. Then use `targeted-grep` or focused file reads for the feature area instead of walking the full repository.
 
 For k3s app delivery, use `k8s-manifest-summary`, `buildkit`, `direct-image-build`, `k8s-app-inventory`, `rollout`, and `deploy-verify` as the default progression.
+
+### Guarded ingress and TLS route changes
+
+Use the repo CLI for Traefik/cert-manager route creation or changes instead of hand-authoring ad hoc Ingress YAML:
+
+```bash
+node bin/kimibuilt-ingress.js plan \
+  --namespace app-demo \
+  --ingress app-demo \
+  --subdomain demo \
+  --service web \
+  --service-port 80
+
+node bin/kimibuilt-ingress.js apply \
+  --namespace app-demo \
+  --ingress app-demo \
+  --subdomain demo \
+  --service web \
+  --service-port 80
+
+node bin/kimibuilt-ingress.js verify \
+  --namespace app-demo \
+  --ingress app-demo \
+  --subdomain demo \
+  --service web \
+  --service-port 80
+```
+
+Defaults are hard-backed to this cluster: base domain `demoserver2.buzz`, wildcard DNS in front of the domain, ingress class `traefik`, TLS `ClusterIssuer` `letsencrypt-prod`, and ACME email `philly1084@gmail.com`. `--subdomain demo` expands to `demo.demoserver2.buzz`; create concrete host routes, not wildcard Ingress rules. If changing an existing host/path backend, pass `--expect-current-service` and `--expect-current-service-port` so the CLI can prove the intended route is the one being changed. The CLI emits `KIMIBUILT_INGRESS_EVENT` lines that update the durable cluster registry for later agents.
+
+Do not use nginx Ingress for this k3s cluster unless the operator explicitly changes the ingress class policy.
 
 ### Command construction
 

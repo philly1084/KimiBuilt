@@ -298,6 +298,9 @@ function buildToolRuntime(toolId, options = {}) {
         'rollout',
         'https-verify',
         'deploy-verify',
+        'ingress-plan',
+        'ingress-apply',
+        'ingress-verify',
       ].includes(entry.id)),
     };
   }

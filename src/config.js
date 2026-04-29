@@ -231,8 +231,8 @@ const piperVoiceDefaults = {
     configPath: process.env.PIPER_TTS_CONFIG_PATH || '',
     speakerId: parseOptionalInteger(process.env.PIPER_TTS_SPEAKER_ID),
     lengthScale: parseOptionalFloat(process.env.PIPER_TTS_LENGTH_SCALE) ?? 1.02,
-    noiseScale: parseOptionalFloat(process.env.PIPER_TTS_NOISE_SCALE) ?? 0.55,
-    noiseW: parseOptionalFloat(process.env.PIPER_TTS_NOISE_W) ?? 0.8,
+    noiseScale: parseOptionalFloat(process.env.PIPER_TTS_NOISE_SCALE) ?? 0.38,
+    noiseW: parseOptionalFloat(process.env.PIPER_TTS_NOISE_W) ?? 0.68,
     sentenceSilence: parseOptionalFloat(process.env.PIPER_TTS_SENTENCE_SILENCE) ?? 0.24,
 };
 const configuredPiperVoices = loadConfiguredPiperVoices(piperVoiceDefaults);
@@ -396,8 +396,8 @@ const config = {
             voiceDescription: piperVoiceDefaults.description,
             speakerId: parseOptionalInteger(process.env.PIPER_TTS_SPEAKER_ID),
             lengthScale: parseOptionalFloat(process.env.PIPER_TTS_LENGTH_SCALE) ?? 1.02,
-            noiseScale: parseOptionalFloat(process.env.PIPER_TTS_NOISE_SCALE) ?? 0.55,
-            noiseW: parseOptionalFloat(process.env.PIPER_TTS_NOISE_W) ?? 0.8,
+            noiseScale: parseOptionalFloat(process.env.PIPER_TTS_NOISE_SCALE) ?? 0.38,
+            noiseW: parseOptionalFloat(process.env.PIPER_TTS_NOISE_W) ?? 0.68,
             sentenceSilence: parseOptionalFloat(process.env.PIPER_TTS_SENTENCE_SILENCE) ?? 0.24,
             maxTextChars: normalizedPiperMaxTextChars,
             timeoutMs: normalizedPiperTimeoutMs,

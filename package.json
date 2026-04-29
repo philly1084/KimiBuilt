@@ -4,10 +4,12 @@
     "description": "Multi-interface AI backend with contextual memory — CLI, Web Chat, Canvas, and Notation Helper",
     "main": "src/server.js",
     "bin": {
+        "kimibuilt-ingress": "bin/kimibuilt-ingress.js",
         "kimibuilt-runner": "bin/kimibuilt-runner.js"
     },
     "scripts": {
         "start": "node src/server.js",
+        "ingress": "node bin/kimibuilt-ingress.js",
         "runner": "node bin/kimibuilt-runner.js",
         "dev": "nodemon src/server.js",
         "test": "jest --coverage",

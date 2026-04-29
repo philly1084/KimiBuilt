@@ -58,6 +58,8 @@ Preferred GitOps-style sequence:
 4. Run `k3s-deploy sync-and-apply`.
 5. Run `remote-command` to verify ingress, TLS, DNS, and public HTTPS.
 
+For route creation or route changes, use `node bin/kimibuilt-ingress.js` through `remote-command` after the workload Service exists. It is the guarded path for this cluster's Traefik, cert-manager, Let's Encrypt, and `demoserver2.buzz` wildcard DNS setup. It emits registry events so later agents know which host/path points to which Service.
+
 ## What this tool does not do
 
 - It does not build container images.
@@ -111,6 +113,7 @@ Check rollout only:
 - Prefer repo-managed manifests over ad hoc live-cluster mutation.
 - Treat the Admin deploy defaults as fallbacks, not proof that the cluster currently matches them.
 - The runtime keeps a persistent cluster registry from verified remote tool runs. Use it as durable context for host names, domains, deployment names, and previously discovered paths, but still re-verify before claiming the site is live.
+- Use `kimibuilt-ingress` for Ingress/TLS route changes. Do not hand-write nginx Ingress manifests for this k3s cluster.
 - After a failed deploy, switch to `remote-command` for `kubectl describe`, `kubectl logs`, or host-level investigation.
 - If `kubectl` context looks wrong on the host, try `export KUBECONFIG=/etc/rancher/k3s/k3s.yaml` or `k3s kubectl`.
 - For public website deploys, do not claim success until rollout, ingress, TLS, and external HTTPS all verify.

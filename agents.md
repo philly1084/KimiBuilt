@@ -191,6 +191,8 @@ When agents are using SSH or remote command tools:
 - Prefer `k3s-deploy` for standard deploy operations: repo sync, manifest apply, image update, and rollout checks.
 - Prefer `remote-command` for kubectl inspection, logs, service status, network checks, package installs, one-off fixes, and post-deploy verification.
 - Default public web domain is `demoserver2.buzz` unless Admin deploy settings override it.
+- Wildcard DNS is in front of `demoserver2.buzz`; create concrete host routes such as `app.demoserver2.buzz`, not wildcard Ingress rules.
+- Use `node bin/kimibuilt-ingress.js` for Traefik/cert-manager/Let's Encrypt Ingress route setup or changes. It defaults to ingress class `traefik`, ClusterIssuer `letsencrypt-prod`, and ACME email `philly1084@gmail.com`, refuses accidental nginx ingress, and records `KIMIBUILT_INGRESS_EVENT` updates in the cluster registry.
 - Start with a short baseline command when reconnecting:
 
 ```bash
