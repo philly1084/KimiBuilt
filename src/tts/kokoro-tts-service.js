@@ -59,6 +59,7 @@ class KokoroTtsService {
         };
         this.importKokoro = dependencies.importKokoro || (() => require('kokoro-js'));
         this.modelPromise = null;
+        this.synthesisQueue = Promise.resolve();
     }
 
     pathExists(targetPath = '') {
@@ -242,6 +243,14 @@ class KokoroTtsService {
         return this.modelPromise;
     }
 
+    enqueueSynthesis(task) {
+        const run = this.synthesisQueue
+            .catch(() => null)
+            .then(task);
+        this.synthesisQueue = run.catch(() => null);
+        return run;
+    }
+
     async synthesize({ text = '', voiceId = '', timeoutMs } = {}) {
         this.assertConfigured();
 
@@ -259,43 +268,45 @@ class KokoroTtsService {
         );
         const effectiveTimeoutMs = Math.max(1000, Number(timeoutMs) || Number(this.ttsConfig.timeoutMs) || 90000);
 
-        try {
-            const model = await withTimeout(
-                this.getModel(),
-                effectiveTimeoutMs,
-                'Kokoro TTS timed out before the model loaded.',
-            );
-            const audio = await withTimeout(
-                model.generate(speakableText, {
-                    voice: selectedVoice.id,
-                    speed: Number(this.ttsConfig.speed) || 1,
-                }),
-                effectiveTimeoutMs,
-                'Kokoro TTS timed out before audio generation completed.',
-            );
-            const wav = typeof audio?.toWav === 'function' ? audio.toWav() : null;
-            const audioBuffer = wav ? Buffer.from(wav) : Buffer.alloc(0);
-            if (!audioBuffer.length) {
-                throw createServiceError(502, 'Kokoro TTS returned an empty audio file.', 'tts_empty_audio');
-            }
+        return this.enqueueSynthesis(async () => {
+            try {
+                const model = await withTimeout(
+                    this.getModel(),
+                    effectiveTimeoutMs,
+                    'Kokoro TTS timed out before the model loaded.',
+                );
+                const audio = await withTimeout(
+                    model.generate(speakableText, {
+                        voice: selectedVoice.id,
+                        speed: Number(this.ttsConfig.speed) || 1,
+                    }),
+                    effectiveTimeoutMs,
+                    'Kokoro TTS timed out before audio generation completed.',
+                );
+                const wav = typeof audio?.toWav === 'function' ? audio.toWav() : null;
+                const audioBuffer = wav ? Buffer.from(wav) : Buffer.alloc(0);
+                if (!audioBuffer.length) {
+                    throw createServiceError(502, 'Kokoro TTS returned an empty audio file.', 'tts_empty_audio');
+                }
 
-            return {
-                provider: 'kokoro',
-                audioBuffer,
-                contentType: 'audio/wav',
-                text: speakableText,
-                voice: this.toPublicVoiceProfile(selectedVoice),
-            };
-        } catch (error) {
-            if (error?.code === 'tts_timeout') {
-                this.modelPromise = null;
-            }
-            if (error?.statusCode) {
-                throw error;
-            }
+                return {
+                    provider: 'kokoro',
+                    audioBuffer,
+                    contentType: 'audio/wav',
+                    text: speakableText,
+                    voice: this.toPublicVoiceProfile(selectedVoice),
+                };
+            } catch (error) {
+                if (error?.code === 'tts_timeout') {
+                    this.modelPromise = null;
+                }
+                if (error?.statusCode) {
+                    throw error;
+                }
 
-            throw createServiceError(502, error.message || 'Kokoro TTS failed.', 'tts_failed');
-        }
+                throw createServiceError(502, error.message || 'Kokoro TTS failed.', 'tts_failed');
+            }
+        });
     }
 }
 

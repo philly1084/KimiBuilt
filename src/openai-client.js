@@ -3094,10 +3094,10 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Ask for user input only when a tool result shows missing credentials or host details, a destructive action needs approval, or the next move depends on a real external decision.');
         guidance.push('- For reconnect or baseline remote checks, assume Ubuntu/Linux first and use a concrete command such as `hostname && uname -m && (test -f /etc/os-release && sed -n \'1,3p\' /etc/os-release || true) && uptime`.');
         guidance.push('- For Kubernetes troubleshooting, if `kubectl describe` or pod status output shows CrashLoopBackOff, an init container failure, or Exit Code > 0, follow it with `kubectl logs` for the failing container or init container instead of handing that next command back to the user.');
-        guidance.push('- For remote website or HTML updates, prefer the remote file, ConfigMap, or deployed content as the source of truth unless the user explicitly provided a local artifact or local path.');
-        guidance.push('- If the user asks for a fresh replacement page, generate the full HTML and write it remotely instead of blocking on a missing local artifact.');
-        guidance.push('- Do not infer an arbitrary live website path such as `/var/www/...` as the target. Prefer the configured deploy target directory, cluster ConfigMaps, or a path the user explicitly named.');
-        guidance.push('- Never run `git init`, create a new remote host repository, or choose a remote Git origin unless the user explicitly asked for that server-local Git workflow.');
+        guidance.push('- For remote website or HTML updates, prefer the git-backed remote workspace as the source of truth. Use live files, ConfigMaps, or deployed content only to recover context, then commit the edit before redeploying.');
+        guidance.push('- If the user asks for a fresh replacement page, generate the full HTML remotely, save it in the owning git workspace, set repo-local git identity if needed, commit it, and then roll out the change instead of blocking on a missing local artifact.');
+        guidance.push('- Do not infer an arbitrary live website path such as `/var/www/...` as the target. Prefer the configured deploy target directory, a git workspace, or a path the user explicitly named.');
+        guidance.push('- If the configured deploy target directory is not a git repo, initialize one or clone the configured origin before making deployable edits; prefer configured Gitea origins when available.');
         guidance.push('- Internal artifact references like `/api/artifacts/...` are backend-local links. Do not invent `https://api/...` from them.');
         const sshConfig = settingsController.getEffectiveSshConfig();
 

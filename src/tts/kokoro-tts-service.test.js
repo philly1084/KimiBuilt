@@ -79,6 +79,56 @@ describe('KokoroTtsService', () => {
         expect(result.audioBuffer.equals(Buffer.from('RIFF-kokoro-audio'))).toBe(true);
     });
 
+    test('serializes concurrent generation requests', async () => {
+        const events = [];
+        let releaseFirst = null;
+        let firstStarted = null;
+        const firstStartedPromise = new Promise((resolve) => {
+            firstStarted = resolve;
+        });
+        const generate = jest.fn(async (text) => {
+            events.push(`start:${text}`);
+            if (text === 'First request.') {
+                firstStarted();
+                await new Promise((resolve) => {
+                    releaseFirst = resolve;
+                });
+            }
+            events.push(`finish:${text}`);
+            return createAudio(Buffer.from(`RIFF-${text}`));
+        });
+        const service = new KokoroTtsService({
+            enabled: true,
+            modelId: 'test-model',
+            defaultVoiceId: 'af_heart',
+            voices: [{ id: 'af_heart', label: 'Heart Studio' }],
+            timeoutMs: 5000,
+        }, {
+            importKokoro: () => ({
+                KokoroTTS: {
+                    from_pretrained: jest.fn(async () => ({ generate })),
+                },
+            }),
+        });
+
+        const first = service.synthesize({ text: 'First request', voiceId: 'af_heart' });
+        await firstStartedPromise;
+        const second = service.synthesize({ text: 'Second request', voiceId: 'af_heart' });
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(generate).toHaveBeenCalledTimes(1);
+        releaseFirst();
+        await Promise.all([first, second]);
+
+        expect(events).toEqual([
+            'start:First request.',
+            'finish:First request.',
+            'start:Second request.',
+            'finish:Second request.',
+        ]);
+    });
+
     test('rejects unknown voices', async () => {
         const service = new KokoroTtsService({
             enabled: true,

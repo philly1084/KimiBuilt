@@ -110,7 +110,7 @@ Variations | Variation | What changes | |-----------|--------------| | Spicy | A
             },
         }, true).html;
 
-        expect(html).toContain('Live reasoning');
+        expect(html).toContain('Live reasoning (day dreaming answers)');
         expect(html).toContain('Checking the next useful step.');
         expect(html).toContain('assistant-progress-card__step--completed');
         expect(html).toContain('assistant-progress-card__step--in_progress');
@@ -170,7 +170,7 @@ Variations | Variation | What changes | |-----------|--------------| | Spicy | A
         }, true).html;
 
         expect(html).toContain('assistant-reasoning-ribbon__surface');
-        expect(html).toContain('Live reasoning');
+        expect(html).toContain('Live reasoning (day dreaming answers)');
         expect(html).toContain('Checking the next useful step.');
         expect(html).not.toContain('<details');
         expect(html).not.toContain('<summary');

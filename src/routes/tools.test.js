@@ -159,6 +159,6 @@ describe('/api/tools routes', () => {
             .post('/api/tools/invoke')
             .send({ tool: 'managed-app', params: { action: 'list' } });
         expect(invoke.status).toBe(400);
-        expect(invoke.body.error).toContain('remote-command');
+        expect(invoke.body.error).toContain('git-backed remote authoring');
     });
 });

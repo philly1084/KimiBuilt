@@ -2122,7 +2122,8 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(guidance).toContain('Do not use `remote-command` as a substitute scheduler');
         expect(guidance).toContain('Do not claim generic local shell or sandbox limits for Git work');
         expect(guidance).toContain('Do not infer an arbitrary live website path such as `/var/www/...` as the target');
-        expect(guidance).toContain('Never run `git init`, create a new remote host repository');
+        expect(guidance).toContain('git-backed remote workspace as the source of truth');
+        expect(guidance).toContain('prefer configured Gitea origins when available');
     });
 
     test('detects ssh as a required tool for explicit ssh prompts', () => {

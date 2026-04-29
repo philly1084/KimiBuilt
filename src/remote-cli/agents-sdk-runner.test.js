@@ -3,6 +3,7 @@
 const {
   RemoteCliAgentsSdkRunner,
   buildRemoteCliInstructions,
+  extractRemoteCliRunMetadata,
   resolveAgentsApiMode,
 } = require('./agents-sdk-runner');
 
@@ -20,9 +21,47 @@ describe('RemoteCliAgentsSdkRunner', () => {
     expect(instructions).toContain('Default cwd: /srv/apps/my-app');
     expect(instructions).toContain('repo-map');
     expect(instructions).toContain('deploy-verify');
+    expect(instructions).toContain('git-backed workspace');
+    expect(instructions).toContain('git user.name');
+    expect(instructions).toContain('GIT_COMMIT');
     expect(instructions).toContain('remote_code_status');
     expect(instructions).toContain('persistent private workbench');
     expect(instructions).toContain('sess_123');
+  });
+
+  test('includes configured Gitea context in remote CLI instructions without exposing tokens', () => {
+    const instructions = buildRemoteCliInstructions({
+      targetId: 'prod',
+      gitea: {
+        configured: true,
+        baseURL: 'https://gitea.demoserver2.buzz',
+        org: 'agent-apps',
+        hasToken: true,
+      },
+    });
+
+    expect(instructions).toContain('Configured Gitea: https://gitea.demoserver2.buzz (org: agent-apps).');
+    expect(instructions).toContain('GITEA_TOKEN');
+    expect(instructions).not.toContain('hasToken');
+  });
+
+  test('extracts remote CLI continuity markers from final output', () => {
+    expect(extractRemoteCliRunMetadata([
+      'Deployed the site.',
+      'REMOTE_CLI_SESSION_ID=rcs_123',
+      'WORKSPACE=/srv/apps/weather',
+      'GIT_REPO=https://gitea.demoserver2.buzz/agent-apps/weather.git',
+      'GIT_COMMIT=abcdef123456',
+      'DEPLOYMENT=app-weather/weather',
+      'PUBLIC_HOST=weather.demoserver2.buzz',
+    ].join('\n'))).toEqual({
+      sessionId: 'rcs_123',
+      workspace: '/srv/apps/weather',
+      gitRepo: 'https://gitea.demoserver2.buzz/agent-apps/weather.git',
+      gitCommit: 'abcdef123456',
+      deployment: 'app-weather/weather',
+      publicHost: 'weather.demoserver2.buzz',
+    });
   });
 
   test('uses chat mode automatically for custom gateway base URLs', () => {
@@ -81,7 +120,14 @@ describe('RemoteCliAgentsSdkRunner', () => {
 
       async run(_agent, input, options) {
         calls.runnerInput = { input, options };
-        return { finalOutput: 'fixed tests' };
+        return {
+          finalOutput: [
+            'fixed tests',
+            'REMOTE_CLI_SESSION_ID=remote-session-1',
+            'WORKSPACE=/srv/apps/my-app',
+            'GIT_COMMIT=abcdef123456',
+          ].join('\n'),
+        };
       }
     }
 
@@ -129,11 +175,13 @@ describe('RemoteCliAgentsSdkRunner', () => {
     expect(calls.apiModes).toEqual(['chat']);
     expect(calls.connected).toBe(true);
     expect(calls.closed).toBe(true);
+    expect(result.finalOutput).toContain('fixed tests');
     expect(result).toMatchObject({
-      finalOutput: 'fixed tests',
       mcpSessionId: 'mcp-session-1',
       targetId: 'prod',
       cwd: '/srv/apps/my-app',
+      sessionId: 'remote-session-1',
+      gitCommit: 'abcdef123456',
     });
   });
 });

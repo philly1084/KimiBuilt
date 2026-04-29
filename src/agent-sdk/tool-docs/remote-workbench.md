@@ -20,6 +20,8 @@
 
 Use `remote-command` for expert one-off shell that does not fit one of these actions. Use `remote-cli-agent` when the remote coding agent should own a longer build/deploy loop.
 
+For k3s website/app edits, use a git-backed remote workspace as the editable source of truth. Inspect `git status` and current files before editing, set repo-local git identity if needed, commit deployable changes, and then verify rollout. Prefer configured Gitea origins when available; treat live ConfigMaps or pod-mounted HTML as recovery evidence, not as the long-term source to keep editing.
+
 ## Examples
 
 ```json

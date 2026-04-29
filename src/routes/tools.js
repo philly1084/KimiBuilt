@@ -37,7 +37,7 @@ const {
 
 const registry = getUnifiedRegistry();
 const DISABLED_TOOL_IDS = new Set(['managed-app']);
-const DISABLED_TOOL_MESSAGE = 'managed-app is disabled. Use remote-command for direct remote CLI work, git-safe for repository save/push, and k3s-deploy for deployment.';
+const DISABLED_TOOL_MESSAGE = 'managed-app is disabled. Use remote-cli-agent or remote-workbench for git-backed remote authoring, prefer configured Gitea repos for k3s apps, and use k3s-deploy only after changes are committed.';
 
 function getRequestOwnerId(req) {
   return String(req.user?.username || '').trim() || null;
@@ -702,6 +702,11 @@ async function updateSessionToolMetadata(sessionId, toolId, params = {}, result 
       ...(payload?.mcpSessionId ? { mcpSessionId: payload.mcpSessionId } : {}),
       ...(payload?.targetId ? { targetId: payload.targetId } : {}),
       ...(payload?.cwd || params.cwd ? { cwd: payload?.cwd || params.cwd } : {}),
+      ...(payload?.remoteCodeSessionId ? { remoteCodeSessionId: payload.remoteCodeSessionId } : {}),
+      ...(payload?.gitRepo ? { gitRepo: payload.gitRepo } : {}),
+      ...(payload?.gitCommit ? { gitCommit: payload.gitCommit } : {}),
+      ...(payload?.deployment ? { deployment: payload.deployment } : {}),
+      ...(payload?.publicHost ? { publicHost: payload.publicHost } : {}),
       ...(payload?.model ? { model: payload.model } : {}),
     };
     const controlPatch = {

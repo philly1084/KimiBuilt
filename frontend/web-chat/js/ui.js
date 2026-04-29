@@ -8,6 +8,7 @@ const WEB_CHAT_DEFAULT_MODEL = webChatGatewayHelpers.DEFAULT_CODEX_MODEL_ID || '
 const WEB_CHAT_SHARED_THEMES = window.KimiBuiltThemePresets || {};
 const WEB_CHAT_THEME_PRESET_STORAGE_KEY = WEB_CHAT_SHARED_THEMES.storageKeys?.preset || 'kimibuilt_theme_preset';
 const WEB_CHAT_THEME_MODE_STORAGE_KEY = WEB_CHAT_SHARED_THEMES.storageKeys?.mode || 'kimibuilt_theme';
+const WEB_CHAT_SYNTHETIC_REASONING_TITLE = 'Live reasoning (day dreaming answers)';
 const WEB_CHAT_THEME_DEFAULTS = WEB_CHAT_SHARED_THEMES.defaults || Object.freeze({
     dark: 'obsidian',
     light: 'paper',
@@ -3107,7 +3108,9 @@ class UIHelpers {
             const isGenerated = displaySource === 'generated';
             return {
                 source: isGenerated ? 'generated' : 'reasoning',
-                title: displayTitle || (isGenerated ? 'Live reasoning' : 'Reasoning'),
+                title: isGenerated
+                    ? WEB_CHAT_SYNTHETIC_REASONING_TITLE
+                    : (displayTitle || 'Reasoning'),
                 icon: displayIcon || (isGenerated ? 'sparkles' : 'brain'),
                 previewText: isGenerated
                     ? displayText
@@ -3380,6 +3383,9 @@ class UIHelpers {
         );
         const reasoningIcon = reasoningState?.icon || phaseMeta.icon || 'brain';
         const reasoningAnimated = reasoningState?.animated === true && isStreaming;
+        const reasoningEyebrow = reasoningState?.source === 'generated'
+            ? WEB_CHAT_SYNTHETIC_REASONING_TITLE
+            : 'Live reasoning';
         const stepsHtml = progressState.steps.map((step, index) => {
             const isActive = index === progressState.activeStepIndex;
             const stateLabel = ({
@@ -3407,7 +3413,7 @@ class UIHelpers {
                             <i data-lucide="${this.escapeHtmlAttr(reasoningIcon)}" class="w-3.5 h-3.5"></i>
                         </span>
                         <span class="assistant-progress-card__copy">
-                            <span class="assistant-progress-card__eyebrow">Live reasoning</span>
+                            <span class="assistant-progress-card__eyebrow">${this.escapeHtml(reasoningEyebrow)}</span>
                             <span class="assistant-progress-card__summary">${this.escapeHtml(reasoningText)}${reasoningAnimated ? '<span class="streaming-cursor" aria-hidden="true"></span>' : ''}</span>
                         </span>
                     </div>

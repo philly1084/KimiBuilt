@@ -3448,10 +3448,11 @@ function buildRemoteWebsiteSourceInspectionCommand() {
         `echo "--- configured target directory: ${targetDirectory} ---"`,
         `if [ -d ${shellQuote(targetDirectory)} ]; then`,
         `  find ${shellQuote(targetDirectory)} -maxdepth 3 -type f \\( -name 'index.html' -o -name '*.html' -o -name '*.yaml' -o -name '*.yml' \\) 2>/dev/null | head -n 40`,
-        `  if [ -d ${shellQuote(`${targetDirectory}/.git`)} ]; then cd -- ${shellQuote(targetDirectory)} && git status --short --branch; fi`,
+        `  if [ -d ${shellQuote(`${targetDirectory}/.git`)} ]; then cd -- ${shellQuote(targetDirectory)} && git status --short --branch && git remote -v && git log --oneline -n 5; fi`,
         'else',
         `  echo "configured target directory not found: ${targetDirectory}"`,
         'fi',
+        "(find /srv /opt /home -maxdepth 4 -type d -name .git 2>/dev/null | sed 's#/.git$##' | head -n 20 || true)",
         "(test -f /root/website.html && echo /root/website.html || true)",
         "(find /root /srv /var/www -maxdepth 3 -type f \\( -name 'website.html' -o -name 'index.html' -o -name '*.html' -o -name '*.yaml' -o -name '*.yml' \\) 2>/dev/null | head -n 40 || true)",
         "(kubectl get configmap -A -o name 2>/dev/null | grep -Ei 'web|site|html|page|nginx|frontend' | head -n 20 || true)",
@@ -4010,7 +4011,7 @@ function buildRemoteFollowupPlanFromToolEvents({ objective = '', instructions = 
         if (missingLocalHtmlArtifact) {
             return [{
                 tool: remoteToolId,
-                reason: 'A local HTML artifact could not be read. Inspect the remote website source and cluster ConfigMaps instead of blocking on the missing local file.',
+                reason: 'A local HTML artifact could not be read. Inspect the remote git workspace and deployed source recovery points instead of blocking on the missing local file.',
                 params: {
                     command: buildRemoteWebsiteSourceInspectionCommand(),
                 },
@@ -4104,7 +4105,7 @@ function buildRemoteFollowupPlanFromToolEvents({ objective = '', instructions = 
         if (!alreadyInspectingRemoteSource && isGenericRemoteBaselineCommand(lastCommand)) {
             return [{
                 tool: remoteToolId,
-                reason: 'The generic server baseline completed. Inspect the deployed website source or ConfigMap next so the page can be updated remotely.',
+                reason: 'The generic server baseline completed. Inspect the remote git workspace and deployed source recovery points next so the page can be updated in version control.',
                 params: {
                     command: buildRemoteWebsiteSourceInspectionCommand(),
                 },
@@ -10433,10 +10434,11 @@ class ConversationOrchestrator extends EventEmitter {
             ...(executionProfile === REMOTE_BUILD_EXECUTION_PROFILE && hasRemoteWebsiteUpdateIntent(planningPrompt)
                 ? [
                     'For remote website/page/HTML updates on a server or cluster, do not require a local artifact or local file read unless the user explicitly named one.',
-                    'When the user asks to replace the page with a new file, you may generate the full replacement HTML yourself and write it remotely with `remote-command`.',
-                    'If a local HTML artifact or local file read fails, pivot to the remote file, ConfigMap, or deployed content as the source of truth instead of stopping.',
-                    'Do not infer an arbitrary live website path such as `/var/www/...` as the target. Prefer the configured deploy target directory, cluster ConfigMaps, or a path the user explicitly named.',
-                    'Never run `git init`, create a new remote host repository, or choose a remote Git origin unless the user explicitly asked for that server-local Git workflow.',
+                    'First locate the remote git workspace or repository that owns the deployed site; inspect `git status`, recent commits, and current source before editing.',
+                    'When the user asks to replace the page with a new file, you may generate the full replacement HTML remotely, but commit it in the remote git workspace before rollout; set repo-local git user.name/user.email first if needed.',
+                    'If a local HTML artifact or local file read fails, use the remote file, ConfigMap, or deployed content as recovery input, then persist the edit back to git rather than leaving the live cluster as the only source of truth.',
+                    'Do not infer an arbitrary live website path such as `/var/www/...` as the target. Prefer the configured deploy target directory, a git workspace, or a path the user explicitly named.',
+                    'If the configured deploy target directory is not a git repo, initialize one or clone the configured origin before making deployable edits; prefer configured Gitea origins when available.',
                     'Internal artifact links like `/api/artifacts/...` are backend-local references, not public hosts. Do not turn them into `https://api/...`.',
                     'Do not treat `svc` or `ingress` as deployment names. Inspect deployments, services, ingresses, pods, and ConfigMaps separately.',
                     'When verifying the deployed site, do not rely on the HTML `<title>` alone. Compare body content, mounted file content, response snippets, or content length when titles may be empty.',
@@ -11263,8 +11265,8 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('do not repeat the same command back-to-back without an intervening fix or new reason.');
             parts.push('Prefer Ubuntu/Linux standard commands and verify architecture with `uname -m` before installing binaries or choosing downloads.');
             parts.push('For Kubernetes pod failures, follow describe/status output with `kubectl logs` for the failing container or init container instead of asking the user to run that next step.');
-            parts.push('For remote website or HTML updates, prefer the remote file, ConfigMap, or deployed content as the source of truth unless the user explicitly provided a local artifact or path.');
-            parts.push('If the user asks for a fresh replacement page, generate the full HTML and write it remotely instead of blocking on a missing local artifact.');
+            parts.push('For remote website or HTML updates, prefer the git-backed remote workspace as the source of truth. Use live files, ConfigMaps, or deployed content only to recover context, then commit the edit before redeploying.');
+            parts.push('If the user asks for a fresh replacement page, generate the full HTML remotely, save it in the owning git workspace, set repo-local git identity if needed, commit it, and then roll out the change instead of blocking on a missing local artifact.');
             parts.push('Use fallbacks when common extras are missing: `find`/`grep -R` for `rg`, `ss -tulpn` for `netstat`, and `ip addr` for `ifconfig`. Prefer `kubectl` or `k3s kubectl` for host workloads and do not assume Docker exists on the host.');
         } else if (remoteToolId) {
             parts.push(`${remoteToolId} is available for this request even if the target is not currently verified in the prompt context.`);

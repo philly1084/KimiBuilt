@@ -4,6 +4,8 @@ Purpose: run restricted k3s deployment actions through the remote runner when av
 
 Lane boundary: `k3s-deploy` is the deploy-only lane. Use `remote-command` for remote CLI authoring, repo inspection, build/test loops, `kubectl describe`, logs, and HTTPS verification. Use `git-safe` for repository save/push work and `k3s-deploy` only when deployment is the next planned step.
 
+Repository sync supports GitHub clone URLs and the configured Gitea host. For generated k3s websites/apps, prefer the configured Gitea repository as the editable source of truth; at minimum, deploy from a git-backed remote workspace and commit changes before running this tool.
+
 Allowed actions:
 - `sync-repo`
 - `apply-manifests`
@@ -111,6 +113,7 @@ Check rollout only:
 
 - Prefer a healthy remote runner for deploy operations; keep SSH as the fallback and recovery path.
 - Prefer repo-managed manifests over ad hoc live-cluster mutation.
+- Do not deploy one-off website files that are not committed somewhere. If the workspace is missing git history, initialize or clone the repository before rollout.
 - Treat the Admin deploy defaults as fallbacks, not proof that the cluster currently matches them.
 - The runtime keeps a persistent cluster registry from verified remote tool runs. Use it as durable context for host names, domains, deployment names, and previously discovered paths, but still re-verify before claiming the site is live.
 - Use `kimibuilt-ingress` for Ingress/TLS route changes. Do not hand-write nginx Ingress manifests for this k3s cluster.
