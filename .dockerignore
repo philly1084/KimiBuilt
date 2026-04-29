@@ -3,6 +3,11 @@ node_modules/
 data/
 !data/
 data/*
+!data/kokoro/
+data/kokoro/*
+!data/kokoro/voices/
+data/kokoro/voices/*
+!data/kokoro/voices/manifest.json
 !data/piper/
 data/piper/*
 !data/piper/voices/
