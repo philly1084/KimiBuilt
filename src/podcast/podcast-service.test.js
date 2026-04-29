@@ -1217,4 +1217,39 @@ describe('PodcastService', () => {
     expect(requestInput).toContain('cats and dogs fighting in the house');
     expect(requestInput).not.toContain('\uD800');
   });
+  test('tolerates malformed voice entries when resolving host voice pools', async () => {
+    ttsService.getPublicConfig.mockReturnValueOnce({
+      configured: true,
+      provider: 'kokoro',
+      maxTextChars: 2400,
+      timeoutMs: 45000,
+      podcastTimeoutMs: 210000,
+      podcastChunkChars: 760,
+      defaultVoiceId: 'af_heart',
+      voices: [null, undefined, { id: 'af_heart', provider: 'kokoro' }, { id: 'bf_emma', provider: 'kokoro' }],
+    });
+
+    const service = new PodcastService();
+    const executeTool = jest.fn(async (toolId) => {
+      if (toolId === 'web-search') {
+        return { success: true, data: { results: [{ title: 'A', url: 'https://example.com/a', snippet: 'A' }] } };
+      }
+      if (toolId === 'web-fetch') {
+        return { success: true, data: { headers: { 'content-type': 'text/html' }, body: '<p>Battery systems store energy.</p>' } };
+      }
+      throw new Error(`Unexpected tool: ${toolId}`);
+    });
+
+    const result = await service.createPodcast({
+      topic: 'How grid batteries work',
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+      toolManager: { executeTool },
+    });
+
+    expect(result.hosts).toHaveLength(2);
+    expect(ttsService.synthesize).toHaveBeenCalled();
+  });
+
 });
