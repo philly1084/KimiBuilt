@@ -10265,6 +10265,7 @@ class ConversationOrchestrator extends EventEmitter {
                     'Follow role order through handoff artifacts: research evidence first when required, design brief before build, sandbox/project build for websites, then QA/integration.',
                     'Use `design-resource-search` for the design role before generating design-sensitive websites, dashboards, documents, or page artifacts unless it has already succeeded in this run.',
                     'For website, dashboard, landing-page, and frontend builds, prefer `document-workflow` with `action:"generate-suite"`, `formats:["html"]`, `buildMode:"sandbox"`, and `useSandbox:true`; direct `code-sandbox` calls must use `mode:"project"` rather than execute mode.',
+                    'For slides, slide decks, presentations, and PowerPoint requests, default the final deliverable to PPTX unless the user explicitly asks for interactive or HTML output. On web-chat, include an HTML sandbox companion preview only as a design/review stage, not as a replacement for the PPTX.',
                     'For explicit PDF/PPTX/HTML/XLSX packages or multi-format document requests, use `document-workflow generate-suite` with the requested `formats`. On web-chat, include an HTML companion preview when the main deliverable is PDF, PPTX, or XLSX.',
                 ]
                 : []),
@@ -10378,7 +10379,7 @@ class ConversationOrchestrator extends EventEmitter {
             'For research, web-search, web-fetch, or web-scrape work, avoid long scrape surveys and example-heavy intake. If clarification is truly needed, use one short choice hotlist with 2 to 4 concrete options, then continue after the answer.',
             'For routine public research and research-backed slides or documents, do not stop to ask which websites to scrape. Use Perplexity-backed `web-search` to discover candidate URLs, choose the strongest public sources yourself, verify them with `web-fetch` first, and use `web-scrape` only when a page needs rendered or structured extraction unless the user explicitly wants a constrained source list.',
             'Every `document-workflow` step must include `params.action` set to `recommend`, `plan`, `generate`, `assemble`, or `generate-suite`.',
-            'Use `document-workflow generate` for final briefs, reports, documents, HTML pages, and slide decks.',
+            'Use `document-workflow generate` for final briefs, reports, documents, HTML pages, and slide decks. For slides, slide decks, presentations, and PowerPoint requests, default the final deliverable to PPTX unless the user explicitly asks for interactive or HTML output.',
             'Use `document-workflow generate-suite` with `buildMode:"sandbox"` or `useSandbox:true` for previewable website/dashboard/front-end artifacts so the builder produces a sandbox project instead of only a template.',
             'Use `document-workflow generate-suite` for requested output packages such as PDF + PPTX + HTML, or when web-chat needs an HTML preview companion for PDF/PPTX/XLSX deliverables.',
             'Every direct `code-sandbox` website build step must use `params.mode:"project"` plus previewable files. Do not use `code-sandbox` execute mode unless a separate confirmation policy explicitly allows executable code.',
@@ -11088,6 +11089,7 @@ class ConversationOrchestrator extends EventEmitter {
             if (toolPolicy.rolePipeline.requiresSandbox && allowedToolIds.includes('code-sandbox')) {
                 parts.push('For website/dashboard/front-end outputs, produce a previewable sandbox project. Prefer `document-workflow generate-suite` with `buildMode:"sandbox"`/`useSandbox:true`, or use `code-sandbox` only in `mode:"project"` with files.');
             }
+            parts.push('For slides, slide decks, presentations, and PowerPoint requests, default the final deliverable to PPTX unless the user explicitly asks for interactive or HTML output; an HTML sandbox preview can be a companion design stage, but not the final replacement.');
             parts.push('For PDF, PPTX, HTML, XLSX, or multi-format document packages, let the builder role produce concrete `document-workflow` artifacts. Use `generate-suite` when multiple formats or an HTML preview companion are needed.');
         }
 

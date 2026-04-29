@@ -387,4 +387,34 @@ describe('orchestration rewrite policy', () => {
       }),
     }));
   });
+
+  test('keeps web-chat slide deliverables as pptx with sandbox html preview companion', () => {
+    const orchestrator = new ConversationOrchestrator({});
+    const toolManager = buildToolManager(['document-workflow']);
+    const objective = 'Can you make me slides on FGZEUM?';
+    const policy = orchestrator.buildToolPolicy({
+      objective,
+      executionProfile: 'default',
+      toolManager,
+    });
+
+    const action = orchestrator.buildDirectAction({
+      objective,
+      toolPolicy: policy,
+      toolContext: {
+        clientSurface: 'web-chat',
+      },
+    });
+
+    expect(action).toEqual(expect.objectContaining({
+      tool: 'document-workflow',
+      params: expect.objectContaining({
+        action: 'generate-suite',
+        formats: expect.arrayContaining(['pptx', 'html']),
+        buildMode: 'sandbox',
+        useSandbox: true,
+        includeContent: true,
+      }),
+    }));
+  });
 });

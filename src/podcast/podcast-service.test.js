@@ -976,7 +976,6 @@ describe('PodcastService', () => {
         'ljspeech-high',
         'ryan-high',
         'cori-high',
-        'amy-broadcast',
       ]).toContain(voiceId);
     });
   });

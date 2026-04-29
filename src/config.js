@@ -466,7 +466,8 @@ const config = {
         codecTag: 'avc1',
         renderMode: normalizedPodcastVideoRenderMode,
         defaultSceneCount: normalizedPodcastVideoDefaultSceneCount,
-        audioRepairEnabled: process.env.PODCAST_VIDEO_AUDIO_REPAIR_ENABLED !== 'false',
+        audioRepairEnabled: process.env.PODCAST_VIDEO_AUDIO_REPAIR_ENABLED === 'true',
+        visualEffectsEnabled: process.env.PODCAST_VIDEO_VISUAL_EFFECTS_ENABLED !== 'false',
     },
 
     auth: {

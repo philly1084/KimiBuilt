@@ -121,7 +121,7 @@ describe('PodcastVideoService', () => {
     }));
   });
 
-  test('defaults to multiple stable H.264 AVC scene-card renders for compatibility', async () => {
+  test('defaults to multiple subtle-effect H.264 AVC scene-card renders for compatibility', async () => {
     const service = new PodcastVideoService({
       audioProcessingService: {
         assertConfigured: jest.fn(),
@@ -168,8 +168,8 @@ describe('PodcastVideoService', () => {
       '-pix_fmt', 'yuv420p',
       '-tag:v', 'avc1',
     ]));
-    expect(ffmpegCalls[0].args.join(' ')).not.toContain('zoompan');
-    expect(ffmpegCalls[0].args.join(' ')).not.toContain('fade=t');
+    expect(ffmpegCalls[0].args.join(' ')).toContain('zoompan');
+    expect(ffmpegCalls[0].args.join(' ')).toContain('fade=t');
     expect(ffmpegCalls[2].args).toEqual(expect.arrayContaining([
       '-f', 'concat',
       '-c:v', 'copy',
@@ -184,9 +184,9 @@ describe('PodcastVideoService', () => {
     expect(result.scenes[0].image).toEqual(expect.objectContaining({
       source: 'fallback',
     }));
-  });
+  }, 10000);
 
-  test('applies podcast audio repair during the final video mux by default', async () => {
+  test('keeps video podcast audio clean by default without repair filters', async () => {
     const service = new PodcastVideoService({
       audioProcessingService: {
         assertConfigured: jest.fn(),
@@ -206,6 +206,47 @@ describe('PodcastVideoService', () => {
       audioBuffer: Buffer.from('audio'),
       title: 'Clean video audio',
       imageMode: 'fallback',
+      scenes: [{
+        start: 0,
+        end: 12,
+        summary: 'Audio cleanup',
+        visualPrompt: 'podcast studio visual',
+      }],
+    });
+
+    const muxArgs = ffmpegCalls[1].args;
+    expect(muxArgs).not.toEqual(expect.arrayContaining([
+      '-af', 'repair-filter',
+    ]));
+    expect(muxArgs).toEqual(expect.arrayContaining([
+      '-c:a', 'aac',
+      '-b:a', '192k',
+      '-ac', '2',
+      '-ar', '48000',
+    ]));
+  });
+
+  test('applies podcast audio repair when explicitly requested', async () => {
+    const service = new PodcastVideoService({
+      audioProcessingService: {
+        assertConfigured: jest.fn(),
+        getEffectiveBinaryPath: () => 'ffmpeg',
+        buildPodcastMasteringFilter: jest.fn(() => 'repair-filter'),
+      },
+      isUnsplashConfigured: () => false,
+    });
+    const ffmpegCalls = [];
+    jest.spyOn(service, 'runFfmpeg').mockImplementation(async (args, options) => {
+      ffmpegCalls.push({ args, options });
+      await fs.writeFile(args[args.length - 1], Buffer.from('mp4'));
+      return { stdout: '', stderr: '' };
+    });
+
+    await service.renderMp4({
+      audioBuffer: Buffer.from('audio'),
+      title: 'Clean video audio',
+      imageMode: 'fallback',
+      enhanceAudio: true,
       scenes: [{
         start: 0,
         end: 12,

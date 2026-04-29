@@ -300,6 +300,13 @@ describe('ai-route-utils', () => {
         expect(inferRequestedOutputFormat('Build an executive brief template as a frontend example for our web design system')).toBe('html');
     });
 
+    test('inferRequestedOutputFormat defaults slide deck requests to pptx unless html or interactive is explicit', () => {
+        expect(inferRequestedOutputFormat('Can you make me slides on FGZEUM?')).toBe('pptx');
+        expect(inferRequestedOutputFormat('Create a website slide deck for the launch story.')).toBe('pptx');
+        expect(inferRequestedOutputFormat('Create an interactive slide deck for the launch story.')).toBe('html');
+        expect(inferRequestedOutputFormat('Create slides in HTML for the launch story.')).toBe('html');
+    });
+
     test('inferRequestedOutputFormat auto-selects html for interactive research documents', () => {
         expect(inferRequestedOutputFormat('Do some research on AI browser tools and make it an interactive document with filters.')).toBe('html');
         expect(inferRequestedOutputFormat('Create a source-backed research dashboard about local robotics grants.')).toBe('html');

@@ -1721,6 +1721,15 @@ function hasExplicitArtifactGenerationIntentForPreflight(text = '') {
         || /\b(pdf|html|docx|xml|spreadsheet|excel|workbook)\s+(?:file|document|artifact|export)\b/i.test(normalized);
 }
 
+function hasExplicitStandaloneHtmlIntentForPreflight(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(standalone html|html file|downloadable html|shareable html|html artifact|html export)\b/i.test(normalized);
+}
+
 function hasExplicitMermaidArtifactIntentForPreflight(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -1745,10 +1754,11 @@ function isWebsiteDesignExampleRequestForPreflight(text = '') {
     const hasWebsiteImplementationCue = /\b(web page|webpage|website|site|frontend|ui|vite|react|nextjs|microsite|landing page)\b/.test(normalized);
     const hasDesignPrototypeCue = /\b(template|prototype|mockup|example|demo|starter|boilerplate|layout|wireframe|design system|component)\b/.test(normalized);
     const hasPresentationOrDocumentCue = /\b(slides|slide deck|deck|presentation|storyboard|report|brief|document|doc)\b/.test(normalized);
+    const hasSlideDeckCue = /\b(powerpoint|pptx?|slide deck|slides?|presentation|deck)\b/.test(normalized);
     const hasWebsiteDesignCue = /\b(website design|web design|site design|product design|ui design|design reference|design example|design template)\b/.test(normalized);
 
     return (hasWebsiteImplementationCue && hasDesignPrototypeCue)
-        || (hasPresentationOrDocumentCue && (hasWebsiteImplementationCue || hasWebsiteDesignCue));
+        || (hasPresentationOrDocumentCue && !hasSlideDeckCue && (hasWebsiteImplementationCue || hasWebsiteDesignCue));
 }
 
 function inferRequestedOutputFormatForPreflight(text = '') {
@@ -1759,6 +1769,11 @@ function inferRequestedOutputFormatForPreflight(text = '') {
 
     const hasArtifactIntent = hasExplicitArtifactGenerationIntentForPreflight(normalized);
     const hasBuildIntent = /\b(create|make|generate|build|produce|render|prepare|draft)\b/.test(normalized);
+    const hasExplicitHtmlCue = /\bhtml\b/.test(normalized);
+    const hasExplicitPptxCue = /\b(powerpoint|pptx?|\.(pptx|ppt)\b)\b/.test(normalized);
+    const hasSlideDeckSubject = /\b(slide deck|slides?|presentation|deck)\b/.test(normalized);
+    const hasInteractiveCue = /\b(interactive|clickable|animated|browser-native|web-native)\b/.test(normalized);
+    const hasFrontendTemplateCue = /\b(vite|react|nextjs|frontend template|front-end template)\b/.test(normalized);
 
     if ((/\b(power\s*query|\.(pq|m)\b)/.test(normalized) && hasArtifactIntent)
         || /\b(power\s*query)\s+(?:file|script|artifact|export)\b/.test(normalized)) {
@@ -1786,6 +1801,14 @@ function inferRequestedOutputFormatForPreflight(text = '') {
         return 'mermaid';
     }
 
+    if ((hasArtifactIntent || hasBuildIntent || hasExplicitPptxCue) && (hasSlideDeckSubject || hasExplicitPptxCue)) {
+        if (hasExplicitHtmlCue || hasInteractiveCue || hasFrontendTemplateCue || hasExplicitStandaloneHtmlIntentForPreflight(normalized)) {
+            return 'html';
+        }
+
+        return 'pptx';
+    }
+
     if ((hasArtifactIntent || hasBuildIntent)
         && (
             /\b(website|web page|webpage|landing page|homepage|microsite|marketing site|frontend demo|front-end demo|site mockup|site prototype)\b/.test(normalized)
@@ -1798,7 +1821,7 @@ function inferRequestedOutputFormatForPreflight(text = '') {
         return 'html';
     }
 
-    if (/\bhtml\b/.test(normalized) && hasArtifactIntent) {
+    if (hasExplicitHtmlCue && hasArtifactIntent) {
         return 'html';
     }
 

@@ -743,7 +743,7 @@ class DocumentService {
     const intent = this.resolveIntentFromBlueprint(normalizedType);
 
     if (normalizedType === 'website-slides') {
-      return ['html', 'pptx'];
+      return ['pptx', 'html'];
     }
 
     if (intent === 'research') {

@@ -6,7 +6,7 @@
   "icon": "🖥️",
   "tags": ["website slides", "storyboard", "creative", "narrative", "slides"],
   "blueprint": "website-slides",
-  "recommendedFormats": ["html", "pptx"],
+  "recommendedFormats": ["pptx", "html"],
   "useCases": ["website narrative", "launch story", "creative storyboard"],
   "variables": [
     {

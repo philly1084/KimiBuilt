@@ -282,7 +282,35 @@ function normalizeBooleanOption(value, fallback = false) {
 }
 
 function normalizeVideoAudioRepair(value) {
-  return normalizeBooleanOption(value, config.podcastVideo?.audioRepairEnabled !== false);
+  return normalizeBooleanOption(value, config.podcastVideo?.audioRepairEnabled === true);
+}
+
+function normalizeVisualEffects(value) {
+  return normalizeBooleanOption(value, config.podcastVideo?.visualEffectsEnabled !== false);
+}
+
+function buildBackgroundVideoFilter(dimensions = {}, scene = {}, index = 0, visualEffects = true) {
+  const width = Math.max(1, Number(dimensions.width) || DEFAULT_WIDTH);
+  const height = Math.max(1, Number(dimensions.height) || DEFAULT_HEIGHT);
+  const duration = Math.max(MIN_SCENE_SECONDS, Number(scene.duration) || DEFAULT_SCENE_SECONDS);
+  const base = [
+    `scale=${width}:${height}:force_original_aspect_ratio=increase`,
+    `crop=${width}:${height}`,
+  ];
+
+  if (visualEffects) {
+    const zoomMax = index % 2 === 0 ? 1.035 : 1.025;
+    const fadeOutStart = Math.max(0, duration - 0.55);
+    base.push(
+      `zoompan=z='min(zoom+0.00045,${zoomMax})':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=${width}x${height}:fps=${DEFAULT_FPS}`,
+      'eq=contrast=1.035:saturation=1.045',
+      'fade=t=in:st=0:d=0.35',
+      `fade=t=out:st=${fadeOutStart.toFixed(3)}:d=0.55`,
+    );
+  }
+
+  base.push('format=yuv420p');
+  return base.join(',');
 }
 
 function normalizeScene(scene = {}, index = 0) {
@@ -735,7 +763,8 @@ class PodcastVideoService {
         sceneCount: resolveDefaultStoryboardSceneCount(),
         maxScenes: MAX_SCENES,
         renderMode: runtime.renderMode,
-        audioRepairEnabled: config.podcastVideo?.audioRepairEnabled !== false,
+        audioRepairEnabled: config.podcastVideo?.audioRepairEnabled === true,
+        visualEffectsEnabled: config.podcastVideo?.visualEffectsEnabled !== false,
       },
       timeouts: {
         segmentMs: runtime.segmentTimeoutMs,
@@ -838,7 +867,7 @@ class PodcastVideoService {
     });
   }
 
-  buildPodcastVideoAudioArgs({ enhanceAudio = true } = {}) {
+  buildPodcastVideoAudioArgs({ enhanceAudio = false } = {}) {
     const args = [];
     if (normalizeVideoAudioRepair(enhanceAudio)
       && typeof this.audioProcessingService?.buildPodcastMasteringFilter === 'function') {
@@ -1297,7 +1326,8 @@ class PodcastVideoService {
     imageMode = 'mixed',
     generateImages = false,
     imageModel = null,
-    enhanceAudio = true,
+    enhanceAudio = false,
+    visualEffects = true,
     runtime,
     toolManager = null,
     toolContext = {},
@@ -1349,11 +1379,7 @@ class PodcastVideoService {
       '-framerate', String(DEFAULT_FPS),
       '-i', finalImagePath,
       '-i', audioPath,
-      '-vf', [
-        `scale=${dimensions.width}:${dimensions.height}:force_original_aspect_ratio=increase`,
-        `crop=${dimensions.width}:${dimensions.height}`,
-        'format=yuv420p',
-      ].join(','),
+      '-vf', buildBackgroundVideoFilter(dimensions, { duration: durationSeconds }, 0, visualEffects),
       '-map', '0:v:0',
       '-map', '1:a:0',
       '-shortest',
@@ -1395,7 +1421,8 @@ class PodcastVideoService {
     x264Preset = null,
     x264Crf = null,
     renderMode = null,
-    enhanceAudio = true,
+    enhanceAudio = false,
+    visualEffects = true,
     toolManager = null,
     toolContext = {},
   } = {}) {
@@ -1446,6 +1473,7 @@ class PodcastVideoService {
           generateImages,
           imageModel,
           enhanceAudio,
+          visualEffects: normalizeVisualEffects(visualEffects),
           runtime,
           toolManager,
           toolContext,
@@ -1460,6 +1488,7 @@ class PodcastVideoService {
           dimensions,
           renderMode: runtime.renderMode,
           audioRepairEnabled: normalizeVideoAudioRepair(enhanceAudio),
+          visualEffectsEnabled: normalizeVisualEffects(visualEffects),
         };
       }
 
@@ -1474,6 +1503,7 @@ class PodcastVideoService {
         toolManager,
         toolContext,
       });
+      const applyVisualEffects = normalizeVisualEffects(visualEffects);
       const segmentPaths = [];
       for (let index = 0; index < normalizedScenes.length; index += 1) {
         const scene = normalizedScenes[index];
@@ -1486,11 +1516,7 @@ class PodcastVideoService {
           '-framerate', String(DEFAULT_FPS),
           '-t', String(Math.max(MIN_SCENE_SECONDS, scene.duration).toFixed(3)),
           '-i', asset.path,
-          '-vf', [
-            `scale=${dimensions.width}:${dimensions.height}:force_original_aspect_ratio=increase`,
-            `crop=${dimensions.width}:${dimensions.height}`,
-            'format=yuv420p',
-          ].join(','),
+          '-vf', buildBackgroundVideoFilter(dimensions, scene, index, applyVisualEffects),
           '-r', String(DEFAULT_FPS),
           '-an',
           ...buildCompatibleH264VideoArgs(runtime),
@@ -1551,6 +1577,7 @@ class PodcastVideoService {
         dimensions,
         renderMode: runtime.renderMode,
         audioRepairEnabled: normalizeVideoAudioRepair(enhanceAudio),
+        visualEffectsEnabled: applyVisualEffects,
       };
     } finally {
       await fs.rm(tempDir, { recursive: true, force: true });
@@ -1686,6 +1713,7 @@ class PodcastVideoService {
       x264Crf: options.x264Crf || options.videoX264Crf || null,
       renderMode: options.renderMode || options.videoRenderMode || null,
       enhanceAudio: options.enhanceAudio ?? options.videoEnhanceAudio ?? options.repairAudio ?? options.cleanAudio,
+      visualEffects: options.visualEffects ?? options.videoVisualEffects,
       toolManager: options.toolManager || null,
       toolContext: options.toolContext || {},
     });
@@ -1704,6 +1732,7 @@ class PodcastVideoService {
         dimensions: rendered.dimensions,
         renderMode: rendered.renderMode,
         audioRepairEnabled: rendered.audioRepairEnabled,
+        visualEffectsEnabled: rendered.visualEffectsEnabled,
         imageMode,
         generatedImagesEnabled: generateImages,
       },

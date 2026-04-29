@@ -85,10 +85,11 @@
     data.set('audio', file);
     data.set('generateImages', form.elements.generateImages.checked ? 'true' : 'false');
     data.set('enhanceAudio', form.elements.enhanceAudio.checked ? 'true' : 'false');
+    data.set('visualEffects', form.elements.visualEffects.checked ? 'true' : 'false');
 
     renderButton.disabled = true;
     result.hidden = true;
-    setStatus('working', 'Rendering', 'Repairing audio, planning scenes, sourcing images, applying motion, and muxing the MP4. Long podcasts can take several minutes.');
+    setStatus('working', 'Rendering', 'Planning scenes, sourcing images, applying background fades, and muxing the MP4. Long podcasts can take several minutes.');
 
     try {
       const response = await fetch('/api/podcast/video/render', {
@@ -107,7 +108,7 @@
       artifactLink.href = payload.artifact?.downloadUrl || downloadUrl;
       result.hidden = false;
       renderStoryboard(payload.storyboard);
-      setStatus('ready', 'Render complete', 'The MP4 artifact is ready with timed scenes, motion, transitions, and audio.');
+      setStatus('ready', 'Render complete', 'The MP4 artifact is ready with timed visual backgrounds and clean speech audio.');
     } catch (error) {
       setStatus('error', 'Render failed', error.message || 'The video render could not be completed.');
     } finally {

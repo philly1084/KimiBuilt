@@ -56,42 +56,28 @@ const DEFAULT_HOST_ROSTER = Object.freeze([
     name: 'Maya',
     role: 'Lead host',
     persona: 'Warm, curious, and good at guiding the listener through the big picture.',
-    preferredVoiceIds: ['lessac-high', 'ljspeech-high', 'amy-broadcast'],
+    preferredVoiceIds: ['lessac-high', 'ljspeech-high'],
   },
   {
     key: 'hostB',
     name: 'Ryan',
     role: 'Co-host',
     persona: 'Grounded, calm, and precise when unpacking details, tradeoffs, and practical consequences.',
-    preferredVoiceIds: ['ryan-high', 'cori-high', 'ljspeech-high'],
+    preferredVoiceIds: ['ryan-high', 'cori-high'],
   },
   {
     key: 'hostC',
     name: 'June',
     role: 'Co-host',
     persona: 'Sharper, more analytical, and slightly playful when unpacking details and tradeoffs.',
-    preferredVoiceIds: ['cori-high', 'amy-broadcast', 'lessac-high'],
+    preferredVoiceIds: ['cori-high', 'lessac-high'],
   },
   {
     key: 'hostD',
     name: 'Elliot',
     role: 'Lead host',
     persona: 'Measured, thoughtful, and good at turning technical material into clear narrative beats.',
-    preferredVoiceIds: ['ryan-high', 'ljspeech-high', 'cori-high'],
-  },
-  {
-    key: 'hostE',
-    name: 'Nora',
-    role: 'Lead host',
-    persona: 'Polished, editorial, and relaxed, with an emphasis on listener trust and clean pacing.',
-    preferredVoiceIds: ['ljspeech-high', 'lessac-high', 'amy-broadcast'],
-  },
-  {
-    key: 'hostF',
-    name: 'Cori',
-    role: 'Co-host',
-    persona: 'Concise, documentary-style, and comfortable adding perspective without overexplaining.',
-    preferredVoiceIds: ['cori-high', 'lessac-high', 'ryan-high'],
+    preferredVoiceIds: ['ryan-high', 'ljspeech-high'],
   },
 ]);
 const LEGACY_DEFAULT_HOSTS = Object.freeze([
@@ -419,7 +405,6 @@ function requestedMixing(params = {}) {
   return params.includeIntro === true
     || params.includeOutro === true
     || params.includeMusicBed === true
-    || params.includeVideo === true
     || Boolean(String(params.introPath || '').trim())
     || Boolean(String(params.outroPath || '').trim())
     || Boolean(String(params.musicBedPath || '').trim());
@@ -1358,17 +1343,24 @@ class PodcastService {
     const audioProcessingConfig = this.audioProcessingService?.getPublicConfig?.() || null;
     const useMusicBed = shouldUsePodcastMusicBed(params, audioProcessingConfig);
     const wantsMixing = requestedMixing(params) || useMusicBed;
+    const defaultEnhanceSpeech = params.includeVideo === true ? false : (
+      audioProcessingConfig?.configured === true
+        && audioProcessingConfig?.defaults?.masteringEnabled !== false
+    );
     const wantsEnhancement = params.enhanceSpeech === false
       ? false
-      : audioProcessingConfig?.configured === true
-        && audioProcessingConfig?.defaults?.masteringEnabled !== false;
+      : params.enhanceSpeech === true
+        ? audioProcessingConfig?.configured === true
+        : defaultEnhanceSpeech;
 
     // Validate TTS compatibility before starting the full run.
     script.turns.forEach((turn) => {
       normalizeTextForSpeech(turn.text, Math.max(200, Number(voiceConfig.maxTextChars) || 2400));
     });
 
-    const cycleHostVoices = params.cycleHostVoices === true;
+    const cycleHostVoices = params.cycleHostVoices === true || (
+      params.includeVideo === true && params.cycleHostVoices !== false
+    );
     const allowVoiceFallback = params.allowVoiceFallback !== false;
     const speechWavBuffer = await this.synthesizeTurns(
       turnVoicePlan.plans,

@@ -454,6 +454,23 @@ describe('DocumentService', () => {
     ]));
   });
 
+  test('defaults website-slide recommendations to pptx when no format is requested', () => {
+    const service = new DocumentService({
+      responses: {
+        create: jest.fn(),
+      },
+    });
+
+    const recommendation = service.recommendDocumentWorkflow({
+      prompt: 'Build website slides for our product launch story',
+      documentType: 'website-slides',
+    });
+
+    expect(recommendation.recommendedFormat).toBe('pptx');
+    expect(recommendation.recommendedFormats).toEqual(['pptx', 'html']);
+    expect(recommendation.pipeline).toBe('presentation');
+  });
+
   test('recommends a broader pool of templates for general presentation prompts', () => {
     const service = new DocumentService({
       responses: {
