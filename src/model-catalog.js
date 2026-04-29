@@ -42,20 +42,49 @@ function isPublicChatModel(modelId = '') {
     return !NON_CHAT_MODEL_TOKENS.some((token) => normalizedId.includes(token));
 }
 
+function inferModelCapabilities(model = {}) {
+    if (Array.isArray(model.capabilities)) {
+        return [...new Set(model.capabilities.map((entry) => String(entry || '').trim()).filter(Boolean))];
+    }
+
+    const normalizedId = normalizeModelId(model.id).toLowerCase();
+    const capabilities = [];
+
+    if (!isPublicChatModel(normalizedId)) {
+        if (/\b(gpt-image|dall-e|dalle|imagen|flux|sdxl|stable-diffusion|diffusion|recraft|ideogram)\b/i.test(normalizedId)
+            || normalizedId.includes('image')) {
+            capabilities.push('image_generation');
+        }
+        if (normalizedId.includes('embed')) {
+            capabilities.push('embeddings');
+        }
+        if (normalizedId.includes('tts') || normalizedId.includes('speech')) {
+            capabilities.push('speech');
+        }
+        if (normalizedId.includes('whisper') || normalizedId.includes('transcribe')) {
+            capabilities.push('transcription');
+        }
+    } else {
+        capabilities.push('chat');
+    }
+
+    return capabilities;
+}
+
 function toPublicModelRecord(model = {}) {
     return {
         id: model.id,
         object: model.object || 'model',
         created: model.created || Math.floor(Date.now() / 1000),
         owned_by: model.owned_by || 'unknown',
+        capabilities: inferModelCapabilities(model),
     };
 }
 
-function toPublicChatModelList(models = []) {
+function uniquePublicModelList(models = []) {
     const seen = new Set();
 
     return models
-        .filter((model) => isPublicChatModel(model?.id))
         .filter((model) => {
             const normalizedId = normalizeModelId(model?.id);
             if (!normalizedId || seen.has(normalizedId)) {
@@ -68,9 +97,19 @@ function toPublicChatModelList(models = []) {
         .map((model) => toPublicModelRecord(model));
 }
 
+function toPublicModelList(models = []) {
+    return uniquePublicModelList(models);
+}
+
+function toPublicChatModelList(models = []) {
+    return uniquePublicModelList(models.filter((model) => isPublicChatModel(model?.id)));
+}
+
 module.exports = {
     NON_CHAT_MODEL_TOKENS,
+    inferModelCapabilities,
     isPublicChatModel,
     toPublicChatModelList,
+    toPublicModelList,
     toPublicModelRecord,
 };

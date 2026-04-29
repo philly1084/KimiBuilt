@@ -547,6 +547,35 @@ function normalizeProviderImageRecord(image = {}) {
     };
 }
 
+function extractImagePromptText(value, depth = 0) {
+    if (depth > 8 || value == null) {
+        return '';
+    }
+
+    if (typeof value === 'string') {
+        return value.trim();
+    }
+
+    if (typeof value === 'number' || typeof value === 'boolean') {
+        return String(value).trim();
+    }
+
+    if (Array.isArray(value)) {
+        return value.map((entry) => extractImagePromptText(entry, depth + 1)).filter(Boolean).join(' ').trim();
+    }
+
+    if (typeof value !== 'object') {
+        return '';
+    }
+
+    const promptKeys = ['text', 'input_text', 'output_text', 'content', 'value'];
+    return promptKeys
+        .map((key) => extractImagePromptText(value[key], depth + 1))
+        .filter(Boolean)
+        .join(' ')
+        .trim();
+}
+
 function extractProviderImageRecords(value, depth = 0) {
     if (depth > 5 || value == null) {
         return [];
@@ -647,6 +676,10 @@ function buildImageRequestVariants(params = {}, imageProvider = getImageProvider
         ...params,
         response_format: 'b64_json',
     };
+
+    if (Object.prototype.hasOwnProperty.call(params, 'response_format')) {
+        return [bareParams];
+    }
 
     if (providerFamily === 'openai') {
         return [bareParams, responseFormatParams];
@@ -5219,13 +5252,13 @@ async function mapWithConcurrency(items = [], concurrency = 1, worker = async ()
 
 function normalizeImagePromptList({ prompt = '', prompts = [], n = 1 } = {}) {
     const normalizedPrompts = Array.isArray(prompts)
-        ? prompts.map((entry) => String(entry || '').trim()).filter(Boolean)
+        ? prompts.filter((entry) => extractImagePromptText(entry))
         : [];
     if (normalizedPrompts.length > 0) {
         return normalizedPrompts.slice(0, 5);
     }
 
-    const normalizedPrompt = String(prompt || '').trim();
+    const normalizedPrompt = extractImagePromptText(prompt) ? prompt : '';
     const count = Math.min(Math.max(Number(n) || 1, 1), 5);
     return Array.from({ length: count }, () => normalizedPrompt).filter(Boolean);
 }
@@ -5255,6 +5288,8 @@ function buildImageParamsFromSelection({
     quality = 'auto',
     style = null,
     background = 'auto',
+    responseFormat = null,
+    user = null,
     n = 1,
 } = {}) {
     const supportedSizes = Array.isArray(selectedModel.sizes) ? selectedModel.sizes : [];
@@ -5272,16 +5307,24 @@ function buildImageParamsFromSelection({
         params.model = modelId;
     }
 
-    if (quality && supportedQualities.includes(quality)) {
+    if (quality && (supportedQualities.length === 0 || supportedQualities.includes(quality))) {
         params.quality = quality;
     }
 
-    if (style && supportedStyles.includes(style)) {
+    if (style && (supportedStyles.length === 0 || supportedStyles.includes(style))) {
         params.style = style;
     }
 
-    if (background && supportedBackgrounds.includes(background)) {
+    if (background && (supportedBackgrounds.length === 0 || supportedBackgrounds.includes(background))) {
         params.background = background;
+    }
+
+    if (responseFormat) {
+        params.response_format = responseFormat;
+    }
+
+    if (user) {
+        params.user = user;
     }
 
     return params;
@@ -5305,6 +5348,8 @@ async function generateImageWithSelection({
     quality = 'auto',
     style = null,
     background = 'auto',
+    responseFormat = null,
+    user = null,
     n = 1,
 } = {}) {
     const params = buildImageParamsFromSelection({
@@ -5315,6 +5360,8 @@ async function generateImageWithSelection({
         quality,
         style,
         background,
+        responseFormat,
+        user,
         n,
     });
 
@@ -5342,6 +5389,9 @@ async function generateImage({
     quality = 'auto',
     style = null,
     background = 'auto',
+    response_format = null,
+    responseFormat = response_format,
+    user = null,
     n = 1,
 }) {
     const { modelId, selectedModel } = await resolveImageGenerationSelection(model);
@@ -5353,6 +5403,8 @@ async function generateImage({
         quality,
         style,
         background,
+        responseFormat,
+        user,
         n,
     });
 }
@@ -5365,6 +5417,9 @@ async function generateImageBatch({
     quality = 'auto',
     style = null,
     background = 'auto',
+    response_format = null,
+    responseFormat = response_format,
+    user = null,
     n = 1,
     batchMode = 'auto',
     concurrency = config.openai.imageBatchConcurrency,
@@ -5393,6 +5448,8 @@ async function generateImageBatch({
             quality,
             style,
             background,
+            responseFormat,
+            user,
             n: 1,
         }),
     );
@@ -5435,6 +5492,8 @@ async function generateImageBatch({
                 quality,
                 style,
                 background,
+                responseFormat,
+                user,
                 n: requestedCount,
             });
 

@@ -40,16 +40,41 @@ async function updateSessionProjectMemory(sessionId, updates = {}, ownerId = nul
 }
 
 const imageSchema = {
-    prompt: { required: true, type: 'string' },
     sessionId: { required: false, type: 'string' },
     model: { required: false, type: 'string' },
     size: { required: false, type: 'string' },
     quality: { required: false, type: 'string' },
     style: { required: false, type: 'string' },
     background: { required: false, type: 'string' },
+    response_format: { required: false, type: 'string' },
+    user: { required: false, type: 'string' },
     n: { required: false, type: 'number' },
     batchMode: { required: false, type: 'string', enum: ['auto', 'single', 'parallel'] },
 };
+
+function extractPromptText(value, depth = 0) {
+    if (depth > 8 || value == null) {
+        return '';
+    }
+    if (typeof value === 'string') {
+        return value.trim();
+    }
+    if (Array.isArray(value)) {
+        return value.map((entry) => extractPromptText(entry, depth + 1)).filter(Boolean).join(' ').trim();
+    }
+    if (typeof value === 'object') {
+        return ['text', 'input_text', 'output_text', 'content', 'value']
+            .map((key) => extractPromptText(value[key], depth + 1))
+            .filter(Boolean)
+            .join(' ')
+            .trim();
+    }
+    return '';
+}
+
+function describePromptForLog(prompt) {
+    return extractPromptText(prompt).replace(/\s+/g, ' ').slice(0, 50);
+}
 
 router.post('/', validate(imageSchema), async (req, res, next) => {
     try {
@@ -60,9 +85,20 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
             quality = 'auto',
             style = null,
             background = 'auto',
+            response_format = null,
+            user = null,
             n = 1,
             batchMode = 'auto',
         } = req.body;
+        if (!extractPromptText(prompt)) {
+            return res.status(400).json({
+                error: {
+                    type: 'validation_error',
+                    message: 'Image generation requires a non-empty prompt.',
+                },
+            });
+        }
+        const promptText = extractPromptText(prompt);
         const requestedCount = Math.min(Math.max(Number(n) || 1, 1), 5);
         let { sessionId } = req.body;
         const ownerId = getRequestOwnerId(req);
@@ -88,7 +124,7 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
             clientSurface,
         }, session);
 
-        console.log(`[Images] Generating image with ${model || 'gateway-default'}: "${prompt.substring(0, 50)}..."`);
+        console.log(`[Images] Generating image with ${model || 'gateway-default'}: "${describePromptForLog(prompt)}..."`);
 
         const response = await generateImageBatch({
             prompt,
@@ -97,13 +133,15 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
             quality,
             style,
             background,
+            response_format,
+            user,
             n: requestedCount,
             batchMode,
         });
         const persistedImages = await persistGeneratedImages({
             sessionId,
             sourceMode: 'image',
-            prompt,
+            prompt: promptText,
             model: response?.model || model || null,
             images: response?.data || [],
         });
@@ -114,7 +152,7 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
 
         await sessionStore.recordResponse(sessionId, `img_${Date.now()}`);
         await updateSessionProjectMemory(sessionId, {
-            userText: prompt,
+            userText: promptText,
             assistantText: `Generated ${Array.isArray(normalizedResponse?.data) ? normalizedResponse.data.length : requestedCount} image result(s).`,
             artifacts: persistedImages.artifacts,
             toolEvents: [{

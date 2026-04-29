@@ -51,7 +51,7 @@ const {
 } = require('../foreground-request-registry');
 const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
 const { extractArtifactsFromToolEvents, mergeRuntimeArtifacts } = require('../runtime-artifacts');
-const { toPublicChatModelList } = require('../model-catalog');
+const { toPublicModelList } = require('../model-catalog');
 const {
     buildScopedMemoryMetadata,
     buildScopedSessionMetadata,
@@ -111,6 +111,26 @@ function normalizeClientNow(value = '') {
 
 function getRequestOwnerId(req) {
     return String(req.user?.username || '').trim() || null;
+}
+
+function extractImagePromptText(value, depth = 0) {
+    if (depth > 8 || value == null) {
+        return '';
+    }
+    if (typeof value === 'string') {
+        return value.trim();
+    }
+    if (Array.isArray(value)) {
+        return value.map((entry) => extractImagePromptText(entry, depth + 1)).filter(Boolean).join(' ').trim();
+    }
+    if (typeof value === 'object') {
+        return ['text', 'input_text', 'output_text', 'content', 'value']
+            .map((key) => extractImagePromptText(value[key], depth + 1))
+            .filter(Boolean)
+            .join(' ')
+            .trim();
+    }
+    return '';
 }
 
 function normalizeMessageText(content = '') {
@@ -810,7 +830,7 @@ router.get('/models', async (_req, res, next) => {
         const models = await listModels();
         res.json({
             object: 'list',
-            data: toPublicChatModelList(models),
+            data: toPublicModelList(models),
         });
     } catch (err) {
         next(err);
@@ -2421,9 +2441,20 @@ router.post('/images/generations', async (req, res, next) => {
             quality = 'auto',
             style = null,
             background = 'auto',
+            response_format = null,
+            user = null,
             batch_mode = 'auto',
             batchMode = batch_mode,
         } = req.body;
+        const promptText = extractImagePromptText(prompt);
+        if (!promptText) {
+            return res.status(400).json({
+                error: {
+                    message: 'Image generation requires a non-empty prompt.',
+                    type: 'invalid_request_error',
+                },
+            });
+        }
         const requestedCount = Math.min(Math.max(Number(n) || 1, 1), 5);
 
         let sessionId = resolveSessionId(req);
@@ -2457,13 +2488,15 @@ router.post('/images/generations', async (req, res, next) => {
             quality,
             style,
             background,
+            response_format,
+            user,
             n: requestedCount,
             batchMode,
         });
         const persistedImages = await persistGeneratedImages({
             sessionId,
             sourceMode: 'image',
-            prompt,
+            prompt: promptText,
             model: response?.model || model || null,
             images: response?.data || [],
         });
@@ -2474,7 +2507,7 @@ router.post('/images/generations', async (req, res, next) => {
 
         await sessionStore.recordResponse(sessionId, `img_${Date.now()}`);
         await updateSessionProjectMemory(sessionId, {
-            userText: prompt,
+            userText: promptText,
             assistantText: `Generated ${Array.isArray(normalizedResponse?.data) ? normalizedResponse.data.length : requestedCount} image result(s).`,
             artifacts: persistedImages.artifacts,
             toolEvents: [{

@@ -419,4 +419,53 @@ describe('openai-client image generation', () => {
         }));
         expect(global.fetch.mock.calls[0][0]).toBe('https://gateway.example/v1/images/generations');
     });
+
+    test('passes structured prompts and image passthrough fields to the configured gateway endpoint', async () => {
+        process.env.OPENAI_BASE_URL = 'https://gateway.example/openai/v1';
+        process.env.OPENAI_IMAGE_MODEL = 'gpt-image-2';
+        global.fetch = jest.fn(async (_url, init = {}) => ({
+            ok: true,
+            json: async () => ({
+                created: 123,
+                data: [{
+                    b64_json: 'aGVsbG8=',
+                }],
+            }),
+        }));
+
+        const structuredPrompt = {
+            type: 'input_text',
+            content: [
+                { type: 'text', text: 'Create a clean banner illustration.' },
+            ],
+        };
+
+        const { generateImage } = require('./openai-client');
+        const result = await generateImage({
+            prompt: structuredPrompt,
+            model: 'gpt-image-2',
+            size: '1536x1024',
+            quality: 'high',
+            style: 'vivid',
+            response_format: 'b64_json',
+            user: 'frontend-user',
+        });
+
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+        expect(global.fetch.mock.calls[0][0]).toBe('https://gateway.example/openai/v1/images/generations');
+        expect(global.fetch.mock.calls[0][1].headers.Authorization).toBe('Bearer test-key');
+        expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual(expect.objectContaining({
+            prompt: structuredPrompt,
+            model: 'gpt-image-2',
+            size: '1536x1024',
+            quality: 'high',
+            style: 'vivid',
+            response_format: 'b64_json',
+            user: 'frontend-user',
+        }));
+        expect(result.data[0]).toEqual(expect.objectContaining({
+            url: 'data:image/png;base64,aGVsbG8=',
+            b64_json: 'aGVsbG8=',
+        }));
+    });
 });

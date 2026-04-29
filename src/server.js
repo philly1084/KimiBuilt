@@ -278,6 +278,7 @@ app.use('/api/templates', templatesRouter);
 app.use('/api/design-resources', designResourcesRouter);
 app.use('/api/unsplash', unsplashRouter);
 app.use('/v1', openaiCompatRouter);
+app.use('/openai/v1', openaiCompatRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/admin', providerSessionsRouter);
 app.use('/admin', providerSessionsRouter);

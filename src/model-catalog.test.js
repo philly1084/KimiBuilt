@@ -1,6 +1,7 @@
 const {
     isPublicChatModel,
     toPublicChatModelList,
+    toPublicModelList,
 } = require('./model-catalog');
 
 describe('model-catalog', () => {
@@ -35,5 +36,26 @@ describe('model-catalog', () => {
             { id: 'gpt-4o', owned_by: 'openai' },
             { id: 'gpt-4o', owned_by: 'openai' },
         ])).toHaveLength(1);
+    });
+
+    test('keeps image models with image_generation capability in OpenAI-compatible model lists', () => {
+        expect(toPublicModelList([
+            { id: 'gpt-4o', owned_by: 'openai' },
+            { id: 'gpt-image-2', owned_by: 'openai' },
+            { id: 'custom-image-router', owned_by: 'gateway', capabilities: ['image_generation'] },
+        ])).toEqual([
+            expect.objectContaining({
+                id: 'gpt-4o',
+                capabilities: ['chat'],
+            }),
+            expect.objectContaining({
+                id: 'gpt-image-2',
+                capabilities: ['image_generation'],
+            }),
+            expect.objectContaining({
+                id: 'custom-image-router',
+                capabilities: ['image_generation'],
+            }),
+        ]);
     });
 });
