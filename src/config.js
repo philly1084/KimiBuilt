@@ -455,7 +455,7 @@ const config = {
         apiKey: process.env.OPENAI_API_KEY,
         baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
         apiMode: process.env.OPENAI_API_MODE || 'auto',
-        model: process.env.OPENAI_MODEL || 'gpt-4o',
+        model: process.env.OPENAI_MODEL || 'gpt-5.5',
         reasoningEffort: process.env.OPENAI_REASONING_EFFORT || '',
         imageModel: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2',
         imageAllowOfficialFallback: process.env.OPENAI_IMAGE_ALLOW_OFFICIAL_FALLBACK === 'true',
@@ -781,7 +781,7 @@ const config = {
             || process.env.OPENCODE_REMOTE_DEFAULT_WORKSPACE
             || process.env.KIMIBUILT_DEPLOY_TARGET_DIR
             || '',
-        agentModel: process.env.REMOTE_CLI_AGENT_MODEL || process.env.OPENAI_MODEL || 'gpt-4o',
+        agentModel: process.env.REMOTE_CLI_AGENT_MODEL || process.env.OPENAI_MODEL || 'gpt-5.5',
         agentApiKey: process.env.REMOTE_CLI_AGENT_OPENAI_API_KEY || process.env.OPENAI_API_KEY || '',
         agentBaseURL: process.env.REMOTE_CLI_AGENT_OPENAI_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
         agentApiMode: process.env.REMOTE_CLI_AGENT_OPENAI_API_MODE || process.env.OPENAI_API_MODE || 'auto',
