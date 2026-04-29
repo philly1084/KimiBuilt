@@ -8,6 +8,8 @@ const AMBIENT_REASONING_ROTATE_MIN_MS = 20000;
 const AMBIENT_REASONING_ROTATE_MAX_MS = 30000;
 const AMBIENT_REASONING_TYPE_TICK_MS = 120;
 const AMBIENT_REASONING_IDLE_THRESHOLD_MS = 20000;
+const SYNTHETIC_REASONING_TITLE = 'Agent is daydreaming the answer';
+const SYNTHETIC_REASONING_TOKEN = 'lilaques';
 const WEB_CHAT_QUEUE_MAX_SIZE = 3;
 const webChatWorkspaceHelpers = window.KimiBuiltWebChatWorkspace || null;
 const webChatWorkspaceEmbedHelpers = window.KimiBuiltWebChatWorkspaceEmbed || null;
@@ -257,7 +259,17 @@ function shuffleArray(items = []) {
 }
 
 function buildAmbientReasoningLines() {
-    return shuffleArray(AMBIENT_REASONING_LINES);
+    const starts = shuffleArray(AMBIENT_REASONING_STARTS);
+    const endings = shuffleArray(AMBIENT_REASONING_ENDINGS);
+    if (starts.length > 0 && endings.length > 0) {
+        return starts.map((start, index) => (
+            `${SYNTHETIC_REASONING_TOKEN} ${start} ${endings[index % endings.length]}.`
+        ));
+    }
+
+    return shuffleArray(AMBIENT_REASONING_LINES).map((line) => (
+        `${SYNTHETIC_REASONING_TOKEN} ${line}`
+    ));
 }
 
 function extractChatDisplayText(value = null, options = {}) {
@@ -6499,7 +6511,7 @@ curl -fsSIL --max-time 20 "https://$host"`;
 
         const nextLine = this.ambientReasoningDeck[this.ambientReasoningDeckIndex];
         this.ambientReasoningDeckIndex += 1;
-        return String(nextLine || 'Reading the conversation context and preparing the next step.').trim();
+        return String(nextLine || `${SYNTHETIC_REASONING_TOKEN} collecting context while the answer forms.`).trim();
     }
 
     createAmbientReasoningCycle(now = Date.now()) {
@@ -6541,8 +6553,7 @@ curl -fsSIL --max-time 20 "https://$host"`;
     isGeneratedReasoningFallbackPhase(phase = '') {
         const normalizedPhase = String(phase || '').trim().toLowerCase();
         return normalizedPhase === 'thinking'
-            || normalizedPhase === 'reasoning'
-            || normalizedPhase === 'checking-tools';
+            || normalizedPhase === 'reasoning';
     }
 
     startAmbientReasoningLoop() {
@@ -6605,7 +6616,7 @@ curl -fsSIL --max-time 20 "https://$host"`;
                         reasoningDisplaySource: 'stream',
                         reasoningDisplayText: liveSummary,
                         reasoningDisplayFullText: liveSummary,
-                        reasoningDisplayTitle: 'Reasoning',
+                        reasoningDisplayTitle: 'Reasoning summary',
                         reasoningDisplayIcon: 'brain',
                         reasoningDisplayAnimated: false,
                     }, {
@@ -6629,7 +6640,7 @@ curl -fsSIL --max-time 20 "https://$host"`;
                     reasoningDisplaySource: 'generated',
                     reasoningDisplayText: frame.visibleText,
                     reasoningDisplayFullText: frame.fullText,
-                    reasoningDisplayTitle: 'Live reasoning',
+                    reasoningDisplayTitle: SYNTHETIC_REASONING_TITLE,
                     reasoningDisplayIcon: 'sparkles',
                     reasoningDisplayAnimated: frame.isTyping,
                 }, {
@@ -6681,7 +6692,7 @@ curl -fsSIL --max-time 20 "https://$host"`;
             reasoningDisplaySource: 'generated',
             reasoningDisplayText: initialAmbientFrame.visibleText,
             reasoningDisplayFullText: initialAmbientFrame.fullText,
-            reasoningDisplayTitle: 'Live reasoning',
+            reasoningDisplayTitle: SYNTHETIC_REASONING_TITLE,
             reasoningDisplayIcon: 'sparkles',
             reasoningDisplayAnimated: initialAmbientFrame.isTyping,
             reasoningAvailable: false,
