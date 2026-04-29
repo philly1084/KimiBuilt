@@ -2930,7 +2930,7 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
         
         this.isProcessing = true;
         this.setStatus('thinking');
-        this.printSystem(`Generating image with ${options.model || 'backend default'}...`);
+        this.printSystem(`Generating image with ${options.model || 'gpt-image-2'}...`);
         
         try {
             const response = await api.generateImage(prompt, options);
@@ -2962,7 +2962,7 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
                     return;
                 }
 
-                this.printSystem('Image generated with ' + (response.model || options.model || 'backend default') + ' (' + (response.size || options.size || '1024x1024') + ')');
+                this.printSystem('Image generated with ' + (response.model || options.model || 'gpt-image-2') + ' (' + (response.size || options.size || '1024x1024') + ')');
                 this.printSystem('Saved ' + fileIds.length + ' image file(s): #' + fileIds.join(', #') + '. Use /download <id> or /open.');
             } else {
                 this.printError('No image data received from API');

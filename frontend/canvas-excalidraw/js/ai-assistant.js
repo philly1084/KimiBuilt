@@ -22,7 +22,7 @@ class AIAssistant {
         
         // Image generation settings
         this.imageSettings = {
-            model: '',
+            model: 'gpt-image-2',
             size: 'auto',
             quality: null,
             style: null

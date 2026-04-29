@@ -171,6 +171,14 @@ function getTokenFromRequest(req) {
         return authHeader.slice(7).trim();
     }
 
+    const apiKeyHeader = req.headers['x-api-key'];
+    const apiKey = Array.isArray(apiKeyHeader)
+        ? apiKeyHeader.find(Boolean)
+        : apiKeyHeader;
+    if (apiKey) {
+        return String(apiKey).trim();
+    }
+
     try {
         const parsedUrl = new URL(String(req.url || ''), 'http://localhost');
         const queryToken = parsedUrl.searchParams.get('access_token')
@@ -204,6 +212,13 @@ function resolveFrontendApiUsername() {
     return 'frontend-api';
 }
 
+function isOpenAICompatRoutePath(routePath = '') {
+    return routePath === '/v1'
+        || routePath.startsWith('/v1/')
+        || routePath === '/openai/v1'
+        || routePath.startsWith('/openai/v1/');
+}
+
 function isFrontendTokenRoute(req) {
     const routePath = getRequestPath(req);
     if (!routePath) {
@@ -214,7 +229,7 @@ function isFrontendTokenRoute(req) {
         return true;
     }
 
-    if (routePath.startsWith('/v1/')) {
+    if (isOpenAICompatRoutePath(routePath)) {
         return true;
     }
 
@@ -296,7 +311,7 @@ function clearAuthCookie(res, req) {
 
 function isApiRequest(req) {
     const routePath = getRequestPath(req);
-    return routePath.startsWith('/api/') || routePath.startsWith('/v1/') || routePath === '/ws';
+    return routePath.startsWith('/api/') || isOpenAICompatRoutePath(routePath) || routePath === '/ws';
 }
 
 function requireAuth(req, res, next) {
@@ -311,7 +326,7 @@ function requireAuth(req, res, next) {
         return next();
     }
 
-    if (req.path.startsWith('/v1') && isAuthorizedOpenCodeGatewayRequest(req)) {
+    if (isOpenAICompatRoutePath(getRequestPath(req)) && isAuthorizedOpenCodeGatewayRequest(req)) {
         req.user = { username: 'opencode', role: 'internal-gateway' };
         return next();
     }

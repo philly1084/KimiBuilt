@@ -5,6 +5,12 @@
 
 const CANVAS_EXCALIDRAW_TASK_TYPE = 'canvas';
 const CANVAS_EXCALIDRAW_CLIENT_SURFACE = 'canvas-excalidraw';
+const CANVAS_DEFAULT_IMAGE_MODEL = 'gpt-image-2';
+const canvasGatewayHelpers = window.KimiBuiltGatewaySSE || {};
+const buildCanvasGatewayHeaders = canvasGatewayHelpers.buildGatewayHeaders || ((headers = {}) => ({
+    ...headers,
+    Authorization: 'Bearer any-key',
+}));
 
 class OpenAICanvasAPI {
     constructor(baseUrl = 'http://localhost:3000/v1') {
@@ -188,24 +194,38 @@ class OpenAICanvasAPI {
 
     // Generate image
     async generateImage(options) {
-        const { prompt, model, size, quality, style, n } = options;
-        
+        const {
+            prompt,
+            model = CANVAS_DEFAULT_IMAGE_MODEL,
+            size,
+            quality,
+            style,
+            n,
+            response_format = 'b64_json',
+        } = options;
+
         const params = {
             prompt,
             n: n || 1,
             size: size || '1024x1024',
+            model: model || CANVAS_DEFAULT_IMAGE_MODEL,
+            response_format,
+            taskType: 'image',
+            clientSurface: CANVAS_EXCALIDRAW_CLIENT_SURFACE,
         };
 
-        if (model) params.model = model;
         if (quality) params.quality = quality;
         if (style) params.style = style;
-        if (this.sessionId) params.sessionId = this.sessionId;
+        if (this.sessionId) params.session_id = this.sessionId;
 
         try {
-            const baseUrl = this.baseURL.replace(/\/v1$/, '');
-            const response = await fetch(`${baseUrl}/api/images`, {
+            const response = await fetch(`${this.baseURL}/images/generations`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: buildCanvasGatewayHeaders({
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                }),
+                credentials: 'same-origin',
                 body: JSON.stringify(params),
             });
 
@@ -215,8 +235,8 @@ class OpenAICanvasAPI {
 
             const data = await response.json();
 
-            if (data.sessionId) {
-                this.sessionId = data.sessionId;
+            if (data.sessionId || data.session_id) {
+                this.sessionId = data.sessionId || data.session_id;
             }
 
             return data;
@@ -261,19 +281,66 @@ class OpenAICanvasAPI {
 
     // Get image models from backend
     async getImageModels() {
+        const baseUrl = this.baseURL.replace(/\/v1$/, '');
         try {
-            const baseUrl = this.baseURL.replace(/\/v1$/, '');
-            const response = await fetch(`${baseUrl}/api/images/models`);
+            const response = await fetch(`${this.baseURL}/models`, {
+                headers: buildCanvasGatewayHeaders({ 'Accept': 'application/json' }),
+                credentials: 'same-origin',
+                cache: 'no-store',
+            });
             if (!response.ok) {
                 throw await this.buildRequestError(response);
             }
 
             const data = await response.json();
-            return data.models || [];
+            const imageModels = (Array.isArray(data.data) ? data.data : [])
+                .filter((model) => Array.isArray(model.capabilities) && model.capabilities.includes('image_generation'))
+                .map((model) => this.normalizeImageModelRecord(model))
+                .filter((model) => model.id);
+
+            if (imageModels.length > 0) {
+                return imageModels;
+            }
+
+            const legacyResponse = await fetch(`${baseUrl}/api/images/models`, {
+                headers: buildCanvasGatewayHeaders({ 'Accept': 'application/json' }),
+                credentials: 'same-origin',
+                cache: 'no-store',
+            });
+            if (!legacyResponse.ok) {
+                throw await this.buildRequestError(legacyResponse);
+            }
+
+            const legacyData = await legacyResponse.json();
+            return legacyData.models || [];
         } catch (error) {
             console.warn('Failed to fetch image models:', error.message);
-            return [{ id: '', name: 'Gateway Default', description: 'Use the backend default image model' }];
+            return [this.normalizeImageModelRecord({ id: CANVAS_DEFAULT_IMAGE_MODEL })];
         }
+    }
+
+    normalizeImageModelRecord(model = {}) {
+        const id = String(model?.id || '').trim();
+        const metadata = model?.metadata && typeof model.metadata === 'object' ? model.metadata : {};
+        const lower = id.toLowerCase();
+
+        return {
+            ...metadata,
+            id,
+            name: metadata.name || id,
+            owned_by: model.owned_by || metadata.owned_by || 'openai',
+            description: metadata.description || 'OpenAI-compatible image generation',
+            sizes: Array.isArray(metadata.sizes) && metadata.sizes.length > 0
+                ? metadata.sizes
+                : (lower.includes('gpt-image')
+                    ? ['auto', '1024x1024', '1536x1024', '1024x1536']
+                    : ['1024x1024']),
+            qualities: Array.isArray(metadata.qualities) && metadata.qualities.length > 0
+                ? metadata.qualities
+                : (lower.includes('gpt-image') ? ['auto', 'low', 'medium', 'high'] : []),
+            styles: Array.isArray(metadata.styles) ? metadata.styles : [],
+            maxImages: metadata.maxImages || 5,
+        };
     }
 
     async getSessionState() {

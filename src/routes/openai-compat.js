@@ -2,7 +2,7 @@ const { Router } = require('express');
 const { config } = require('../config');
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
-const { generateImageBatch, listModels } = require('../openai-client');
+const { generateImageBatch, listImageModels, listModels } = require('../openai-client');
 const { ensureRuntimeToolManager } = require('../runtime-tool-manager');
 const { executeConversationRuntime, resolveConversationExecutorFlag, inferExecutionProfile } = require('../runtime-execution');
 const {
@@ -827,10 +827,19 @@ async function updateSessionProjectMemory(sessionId, updates = {}, ownerId = nul
 
 router.get('/models', async (_req, res, next) => {
     try {
-        const models = await listModels();
+        const [models, imageModels] = await Promise.all([
+            listModels(),
+            listImageModels(),
+        ]);
         res.json({
             object: 'list',
-            data: toPublicModelList(models),
+            data: toPublicModelList([
+                ...imageModels.map((model) => ({
+                    ...model,
+                    capabilities: ['image_generation'],
+                })),
+                ...models,
+            ]),
         });
     } catch (err) {
         next(err);

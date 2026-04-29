@@ -592,13 +592,61 @@ class OpenAIClient {
    * @returns {Promise<Array>} Array of image model objects
    */
   async getImageModels() {
-    // Fall back to legacy endpoint for image models
     try {
-      const response = await this._legacyRequest('/api/images/models', { method: 'GET', timeout: 10000 });
-      return response.models || [];
+      this.refreshClient();
+      const response = await fetch(`${this.baseURL}/models`, {
+        method: 'GET',
+        headers: this.buildApiHeaders({
+          'Accept': 'application/json',
+        }),
+      });
+
+      if (!response.ok) {
+        const responseBody = await this._parseFetchResponseBody(response);
+        const errorMessage = responseBody?.error?.message
+          || responseBody?.message
+          || `HTTP ${response.status}`;
+        throw new APIError(errorMessage, response.status, responseBody);
+      }
+
+      const data = await response.json();
+      const imageModels = (Array.isArray(data.data) ? data.data : [])
+        .filter((model) => Array.isArray(model.capabilities) && model.capabilities.includes('image_generation'))
+        .map((model) => this._normalizeImageModelRecord(model))
+        .filter((model) => model.id);
+
+      if (imageModels.length > 0) {
+        return imageModels;
+      }
+
+      const legacyResponse = await this._legacyRequest('/api/images/models', { method: 'GET', timeout: 10000 });
+      return legacyResponse.models || [];
     } catch (err) {
       throw new APIError(`Failed to fetch image models: ${err.message}`, err.statusCode);
     }
+  }
+
+  _normalizeImageModelRecord(model = {}) {
+    const id = String(model?.id || '').trim();
+    const metadata = model?.metadata && typeof model.metadata === 'object' ? model.metadata : {};
+    const lower = id.toLowerCase();
+
+    return {
+      ...metadata,
+      id,
+      name: metadata.name || id,
+      owned_by: model.owned_by || metadata.owned_by || 'openai',
+      sizes: Array.isArray(metadata.sizes) && metadata.sizes.length > 0
+        ? metadata.sizes
+        : (lower.includes('gpt-image')
+          ? ['auto', '1024x1024', '1536x1024', '1024x1536']
+          : ['1024x1024']),
+      qualities: Array.isArray(metadata.qualities) && metadata.qualities.length > 0
+        ? metadata.qualities
+        : (lower.includes('gpt-image') ? ['auto', 'low', 'medium', 'high'] : []),
+      styles: Array.isArray(metadata.styles) ? metadata.styles : [],
+      maxImages: metadata.maxImages || 5,
+    };
   }
 
   /**
@@ -608,33 +656,59 @@ class OpenAIClient {
    * @returns {Promise<Object>} Response data with image URLs
    */
   async generateImage(prompt, options = {}) {
-    const { model, size, quality, style, n, sessionId } = options;
+    const {
+      model = 'gpt-image-2',
+      size,
+      quality,
+      style,
+      n,
+      response_format = 'b64_json',
+      sessionId,
+    } = options;
     
     const params = {
       prompt,
+      model: model || 'gpt-image-2',
       size: size || '1024x1024',
+      response_format,
+      taskType: 'image',
+      clientSurface: CLI_CLIENT_SURFACE,
     };
     
-    if (model) params.model = model;
     if (n) params.n = n;
     if (quality) params.quality = quality;
     if (style) params.style = style;
-    if (sessionId) params.sessionId = sessionId;
+    if (sessionId) params.session_id = sessionId;
 
     try {
-      const response = await this._legacyRequest('/api/images', {
+      this.refreshClient();
+      const response = await fetch(`${this.baseURL}/images/generations`, {
         method: 'POST',
-        body: params,
-        timeout: 120000,
+        headers: this.buildApiHeaders({
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        }),
+        body: JSON.stringify(params),
       });
+
+      if (!response.ok) {
+        const responseBody = await this._parseFetchResponseBody(response);
+        const errorMessage = responseBody?.error?.message
+          || responseBody?.message
+          || `HTTP ${response.status}`;
+        throw new APIError(errorMessage, response.status, responseBody);
+      }
+
+      const data = await response.json();
       
       return {
-        data: response.data || [],
-        model: response.model || model || null,
-        size: response.size || params.size,
-        quality: response.quality || quality || null,
-        style: response.style || style || null,
-        sessionId: response.sessionId || sessionId,
+        data: data.data || [],
+        artifacts: Array.isArray(data.artifacts) ? data.artifacts : [],
+        model: data.model || model || null,
+        size: data.size || params.size,
+        quality: data.quality || quality || null,
+        style: data.style || style || null,
+        sessionId: data.sessionId || data.session_id || sessionId,
       };
     } catch (err) {
       throw this._handleError(err);

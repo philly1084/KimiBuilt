@@ -14,6 +14,11 @@ const API = (function() {
     const BASE_URL = localHostnames.has(currentHost)
         ? 'http://localhost:3000/v1'
         : `${currentOrigin}/v1`;
+    const notesGatewayHelpers = window.KimiBuiltGatewaySSE || {};
+    const buildGatewayHeaders = notesGatewayHelpers.buildGatewayHeaders || ((headers = {}) => ({
+        ...headers,
+        Authorization: 'Bearer any-key',
+    }));
     
     // Lazy-loaded OpenAI client
     let client = null;
@@ -203,6 +208,30 @@ const API = (function() {
         });
     }
 
+    function normalizeImageModelRecord(model = {}) {
+        const id = String(model?.id || '').trim();
+        const metadata = model?.metadata && typeof model.metadata === 'object' ? model.metadata : {};
+        const lower = id.toLowerCase();
+
+        return {
+            ...metadata,
+            id,
+            name: metadata.name || id,
+            owned_by: model.owned_by || metadata.owned_by || 'openai',
+            description: metadata.description || 'OpenAI-compatible image generation',
+            sizes: Array.isArray(metadata.sizes) && metadata.sizes.length > 0
+                ? metadata.sizes
+                : (lower.includes('gpt-image')
+                    ? ['auto', '1024x1024', '1536x1024', '1024x1536']
+                    : ['1024x1024']),
+            qualities: Array.isArray(metadata.qualities) && metadata.qualities.length > 0
+                ? metadata.qualities
+                : (lower.includes('gpt-image') ? ['auto', 'low', 'medium', 'high'] : []),
+            styles: Array.isArray(metadata.styles) ? metadata.styles : [],
+            maxImages: metadata.maxImages || 5,
+        };
+    }
+
     function buildMessages(message, context = []) {
         if (Array.isArray(context) && context.length > 0) {
             return [...context, { role: 'user', content: message }];
@@ -378,8 +407,8 @@ const API = (function() {
     async function getImageModels() {
         try {
             const baseUrl = BASE_URL.replace('/v1', '');
-            const response = await fetch(`${baseUrl}/api/images/models`, {
-                headers: { 'Accept': 'application/json' },
+            const response = await fetch(`${BASE_URL}/models`, {
+                headers: buildGatewayHeaders({ 'Accept': 'application/json' }),
                 credentials: 'same-origin',
                 cache: 'no-store',
             });
@@ -389,7 +418,27 @@ const API = (function() {
             }
 
             const data = await response.json();
-            return sortImageModelsForDisplay(data.models || []);
+            const imageModels = (Array.isArray(data.data) ? data.data : [])
+                .filter((model) => Array.isArray(model.capabilities) && model.capabilities.includes('image_generation'))
+                .map((model) => normalizeImageModelRecord(model))
+                .filter((model) => model.id);
+
+            if (imageModels.length > 0) {
+                return sortImageModelsForDisplay(imageModels);
+            }
+
+            const legacyResponse = await fetch(`${baseUrl}/api/images/models`, {
+                headers: buildGatewayHeaders({ 'Accept': 'application/json' }),
+                credentials: 'same-origin',
+                cache: 'no-store',
+            });
+
+            if (!legacyResponse.ok) {
+                throw new Error(`HTTP ${legacyResponse.status}: ${await legacyResponse.text()}`);
+            }
+
+            const legacyData = await legacyResponse.json();
+            return sortImageModelsForDisplay(legacyData.models || []);
         } catch (error) {
             console.warn('Failed to fetch image models:', error.message);
             return sortImageModelsForDisplay(getDefaultImageModels());
@@ -539,35 +588,36 @@ const API = (function() {
 
         const {
             prompt,
-            model = null,
+            model = 'gpt-image-2',
             size = 'auto',
             quality,
             style,
             n,
+            response_format = 'b64_json',
             sessionId = currentSessionId,
         } = request;
 
         const params = {
             prompt,
+            model: model || 'gpt-image-2',
             size,
+            response_format,
             taskType: 'image',
             clientSurface: NOTES_CLIENT_SURFACE,
         };
 
-        if (model) params.model = model;
-
         if (quality != null) params.quality = quality;
         if (style != null) params.style = style;
         if (n) params.n = n;
-        if (sessionId) params.sessionId = sessionId;
+        if (sessionId) params.session_id = sessionId;
         
         try {
             const response = await fetch(`${BASE_URL}/images/generations`, {
                 method: 'POST',
-                headers: {
+                headers: buildGatewayHeaders({
                     'Accept': 'application/json',
                     'Content-Type': 'application/json',
-                },
+                }),
                 credentials: 'same-origin',
                 body: JSON.stringify(params),
             });

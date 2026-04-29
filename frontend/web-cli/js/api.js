@@ -22,6 +22,10 @@ const WEB_CLI_REMOTE_BUILD_AUTONOMY_APPROVED = true;
 const WEB_CLI_SESSION_ISOLATION = true;
 const WEB_CLI_ACTIVE_SESSION_KEY = 'codecli-active-session-id';
 const gatewayStreamHelpers = window.KimiBuiltGatewaySSE || {};
+const buildGatewayHeaders = gatewayStreamHelpers.buildGatewayHeaders || ((headers = {}) => ({
+    ...headers,
+    Authorization: 'Bearer any-key',
+}));
 const streamGatewayResponse = gatewayStreamHelpers.streamGatewayResponse || null;
 const extractAssistantMetadata = gatewayStreamHelpers.extractAssistantMetadata || (() => null);
 const extractStreamMetadata = gatewayStreamHelpers.extractStreamMetadata || (() => ({}));
@@ -842,29 +846,36 @@ class WebCLIAPI {
     }
 
     async generateImage(prompt, options = {}) {
-        const baseUrl = API_BASE_URL.replace('/v1', '');
         await this.ensureSession({ title: 'Voxel Image' });
         
         const {
-            model = null,
+            model = 'gpt-image-2',
             size = '1024x1024',
             quality = null,
             style = null,
-            n = 1
+            n = 1,
+            response_format = 'b64_json',
         } = options;
-        
+
         try {
-            const response = await this.fetchWithRetry(`${baseUrl}/api/images`, {
+            const response = await this.fetchWithRetry(`${API_BASE_URL}/images/generations`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: buildGatewayHeaders({
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                }),
+                credentials: 'same-origin',
                 body: JSON.stringify({
                     prompt,
-                    model,
+                    model: model || 'gpt-image-2',
                     size,
-                    quality,
-                    style,
                     n,
-                    sessionId: this.sessionId,
+                    response_format,
+                    session_id: this.sessionId,
+                    taskType: 'image',
+                    clientSurface: WEB_CLI_CLIENT_SURFACE,
+                    ...(quality != null ? { quality } : {}),
+                    ...(style != null ? { style } : {}),
                 }),
             }, 2, IMAGE_TIMEOUT); // Images can legitimately take longer than chat responses
 
@@ -876,8 +887,8 @@ class WebCLIAPI {
             }
 
             const data = await response.json();
-            if (data.sessionId) {
-                this.persistActiveSessionId(data.sessionId);
+            if (data.sessionId || data.session_id) {
+                this.persistActiveSessionId(data.sessionId || data.session_id);
             }
             return data;
         } catch (error) {
@@ -886,21 +897,68 @@ class WebCLIAPI {
         }
     }
 
+    normalizeImageModelRecord(model = {}) {
+        const id = String(model?.id || '').trim();
+        const metadata = model?.metadata && typeof model.metadata === 'object' ? model.metadata : {};
+        const lower = id.toLowerCase();
+
+        return {
+            ...metadata,
+            id,
+            name: metadata.name || id,
+            owned_by: model.owned_by || metadata.owned_by || 'openai',
+            sizes: Array.isArray(metadata.sizes) && metadata.sizes.length > 0
+                ? metadata.sizes
+                : (lower.includes('gpt-image')
+                    ? ['auto', '1024x1024', '1536x1024', '1024x1536']
+                    : ['1024x1024']),
+            qualities: Array.isArray(metadata.qualities) && metadata.qualities.length > 0
+                ? metadata.qualities
+                : (lower.includes('gpt-image') ? ['auto', 'low', 'medium', 'high'] : []),
+            styles: Array.isArray(metadata.styles) ? metadata.styles : [],
+            maxImages: metadata.maxImages || (lower.includes('dall-e-3') ? 1 : 5),
+        };
+    }
+
     async getImageModels() {
         const baseUrl = API_BASE_URL.replace('/v1', '');
 
         try {
-            const response = await this.fetchWithRetry(`${baseUrl}/api/images/models`, {
+            const response = await this.fetchWithRetry(`${API_BASE_URL}/models`, {
                 method: 'GET',
-                headers: { 'Accept': 'application/json' },
-            }, 2, API_TIMEOUT);
+                headers: buildGatewayHeaders({ 'Accept': 'application/json' }),
+                credentials: 'same-origin',
+                cache: 'no-store',
+            }, 2, 10000);
 
             if (!response.ok) {
                 throw new Error(`Image model lookup failed: HTTP ${response.status}`);
             }
 
             const data = await response.json();
-            return Array.isArray(data.models) ? data.models : [];
+            const models = Array.isArray(data.data) ? data.data : [];
+            const imageModels = models
+                .filter((model) => Array.isArray(model.capabilities) && model.capabilities.includes('image_generation'))
+                .map((model) => this.normalizeImageModelRecord(model))
+                .filter((model) => model.id);
+
+            if (imageModels.length > 0) {
+                return imageModels;
+            }
+
+            const legacyResponse = await this.fetchWithRetry(`${baseUrl}/api/images/models`, {
+                method: 'GET',
+                headers: buildGatewayHeaders({ 'Accept': 'application/json' }),
+                credentials: 'same-origin',
+                cache: 'no-store',
+            }, 1, 10000);
+
+            if (!legacyResponse.ok) {
+                throw new Error(`Image model lookup failed: HTTP ${legacyResponse.status}`);
+            }
+
+            const legacyData = await legacyResponse.json();
+            return Array.isArray(legacyData.models) ? legacyData.models : [];
         } catch (error) {
             console.error('Image model lookup error:', error);
             throw error;

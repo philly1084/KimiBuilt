@@ -20,7 +20,10 @@ const REMOTE_BUILD_AUTONOMY_STORAGE_KEY = 'kimibuilt_remote_build_autonomy';
 const gatewayStreamHelpers = window.KimiBuiltGatewaySSE || {};
 const workspaceApiHelpers = window.KimiBuiltWebChatWorkspace || null;
 const DEFAULT_CHAT_MODEL = gatewayStreamHelpers.DEFAULT_CODEX_MODEL_ID || 'gpt-5.4-mini';
-const buildGatewayHeaders = gatewayStreamHelpers.buildGatewayHeaders || ((headers) => headers);
+const buildGatewayHeaders = gatewayStreamHelpers.buildGatewayHeaders || ((headers = {}) => ({
+    ...headers,
+    Authorization: 'Bearer any-key',
+}));
 const buildGatewayRealtimeUrl = gatewayStreamHelpers.buildGatewayRealtimeUrl
     || ((baseUrl, pathname = '/ws') => {
         const normalizedPath = `/${String(pathname || '/ws').replace(/^\/+/, '')}`;
@@ -1673,11 +1676,39 @@ class OpenAIAPIClient extends EventTarget {
         };
     }
 
+    normalizeImageModelRecord(model = {}) {
+        const id = String(model?.id || '').trim();
+        const metadata = model?.metadata && typeof model.metadata === 'object' ? model.metadata : {};
+        const lower = id.toLowerCase();
+
+        return {
+            id,
+            object: model.object || 'model',
+            created: model.created || Date.now(),
+            owned_by: model.owned_by || metadata.owned_by || 'openai',
+            metadata: {
+                ...metadata,
+                id,
+                name: metadata.name || id,
+                sizes: Array.isArray(metadata.sizes) && metadata.sizes.length > 0
+                    ? metadata.sizes
+                    : (lower.includes('gpt-image')
+                        ? ['auto', '1024x1024', '1536x1024', '1024x1536']
+                        : ['1024x1024']),
+                qualities: Array.isArray(metadata.qualities) && metadata.qualities.length > 0
+                    ? metadata.qualities
+                    : (lower.includes('gpt-image') ? ['auto', 'low', 'medium', 'high'] : []),
+                styles: Array.isArray(metadata.styles) ? metadata.styles : [],
+                maxImages: metadata.maxImages || 5,
+            },
+        };
+    }
+
     async getImageModels() {
         const baseUrl = API_BASE_URL.replace('/v1', '');
 
         try {
-            const response = await fetch(`${baseUrl}/api/images/models`, {
+            const response = await fetch(`${API_BASE_URL}/models`, {
                 headers: buildGatewayHeaders({
                     'Accept': 'application/json',
                 }),
@@ -1689,13 +1720,31 @@ class OpenAIAPIClient extends EventTarget {
             }
 
             const data = await response.json();
+            const imageModels = (Array.isArray(data.data) ? data.data : [])
+                .filter((model) => Array.isArray(model.capabilities) && model.capabilities.includes('image_generation'))
+                .map((model) => this.normalizeImageModelRecord(model))
+                .filter((model) => model.id);
+
+            if (imageModels.length > 0) {
+                return { object: 'list', data: imageModels };
+            }
+
+            const legacyResponse = await fetch(`${baseUrl}/api/images/models`, {
+                headers: buildGatewayHeaders({
+                    'Accept': 'application/json',
+                }),
+                credentials: 'same-origin',
+                cache: 'no-store',
+            });
+            if (!legacyResponse.ok) {
+                throw new Error(`HTTP ${legacyResponse.status}`);
+            }
+
+            const legacyData = await legacyResponse.json();
             return {
                 object: 'list',
-                data: (data.models || []).map((model) => ({
-                    id: model.id,
-                    object: 'model',
-                    created: Date.now(),
-                    owned_by: model.owned_by || 'openai',
+                data: (legacyData.models || []).map((model) => this.normalizeImageModelRecord({
+                    ...model,
                     metadata: model,
                 })),
             };
@@ -1725,26 +1774,26 @@ class OpenAIAPIClient extends EventTarget {
     async generateImage(options = {}) {
         const {
             prompt,
-            model = null,
+            model = 'gpt-image-2',
             size = 'auto',
             quality = null,
             style = null,
             n = 1,
             batchMode = null,
+            response_format = 'b64_json',
             sessionId = null
         } = options;
 
         const params = {
             prompt,
+            model: model || 'gpt-image-2',
             size,
             n: n || 1,
+            response_format,
             taskType: 'image',
             clientSurface: WEB_CHAT_API_CLIENT_SURFACE,
         };
 
-        if (model) {
-            params.model = model;
-        }
         if (quality != null) {
             params.quality = quality;
         }
@@ -1883,7 +1932,7 @@ class OpenAIAPIClient extends EventTarget {
 
     /**
      * Get available image generation models
-     * GET /api/images/models
+     * GET /v1/models, filtered to image_generation capabilities
      * @returns {Promise<Object>} - { models: [...] }
      */
     async getImageModelsFromAPI() {

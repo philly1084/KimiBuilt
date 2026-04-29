@@ -112,6 +112,79 @@ describe('OpenAIClient provider sessions', () => {
     );
   });
 
+  test('getImageModels filters OpenAI-compatible model capabilities', async () => {
+    global.fetch.mockResolvedValue({
+      ok: true,
+      json: jest.fn(async () => ({
+        data: [
+          { id: 'gpt-5.4-mini', capabilities: ['chat'], owned_by: 'openai' },
+          { id: 'gpt-image-2', capabilities: ['image_generation'], owned_by: 'openai' },
+        ],
+      })),
+    });
+
+    const client = new OpenAIClient();
+    const models = await client.getImageModels();
+
+    expect(models).toEqual([
+      expect.objectContaining({
+        id: 'gpt-image-2',
+        sizes: expect.arrayContaining(['1536x1024']),
+        qualities: expect.arrayContaining(['high']),
+      }),
+    ]);
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://localhost:8080/v1/models',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer config-front-key',
+        }),
+      }),
+    );
+  });
+
+  test('generateImage calls the OpenAI-compatible image endpoint with gpt-image-2 defaults', async () => {
+    global.fetch.mockResolvedValue({
+      ok: true,
+      json: jest.fn(async () => ({
+        created: 123,
+        session_id: 'session-1',
+        model: 'gpt-image-2',
+        size: '1536x1024',
+        data: [{ b64_json: 'aGVsbG8=' }],
+      })),
+    });
+
+    const client = new OpenAIClient();
+    const result = await client.generateImage('developer tools banner', {
+      size: '1536x1024',
+      quality: 'high',
+      sessionId: 'session-1',
+    });
+
+    expect(result.data).toEqual([{ b64_json: 'aGVsbG8=' }]);
+    expect(result.sessionId).toBe('session-1');
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://localhost:8080/v1/images/generations',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer config-front-key',
+          'Content-Type': 'application/json',
+        }),
+      }),
+    );
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual(expect.objectContaining({
+      prompt: 'developer tools banner',
+      model: 'gpt-image-2',
+      size: '1536x1024',
+      quality: 'high',
+      response_format: 'b64_json',
+      session_id: 'session-1',
+    }));
+  });
+
   test('chatNonStreaming enables the shared conversation executor for CLI tasks', async () => {
     mockChatCompletionsCreate.mockResolvedValue({
       id: 'resp-1',

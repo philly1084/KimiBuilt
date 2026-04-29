@@ -55,6 +55,58 @@ describe('auth service OpenCode gateway access', () => {
         expect(res.status).not.toHaveBeenCalled();
     });
 
+    test('allows OpenCode gateway x-api-key auth on /v1 requests', () => {
+        const req = {
+            path: '/v1/images/generations',
+            method: 'POST',
+            headers: {
+                'x-api-key': 'gateway-secret',
+            },
+            secure: false,
+        };
+        const res = {
+            status: jest.fn().mockReturnThis(),
+            json: jest.fn(),
+            redirect: jest.fn(),
+        };
+        const next = jest.fn();
+
+        requireAuth(req, res, next);
+
+        expect(next).toHaveBeenCalledTimes(1);
+        expect(req.user).toEqual({
+            username: 'opencode',
+            role: 'internal-gateway',
+        });
+        expect(res.status).not.toHaveBeenCalled();
+    });
+
+    test('allows OpenCode gateway auth on /openai/v1 requests', () => {
+        const req = {
+            path: '/openai/v1/images/generations',
+            method: 'POST',
+            headers: {
+                'x-api-key': 'gateway-secret',
+            },
+            secure: false,
+        };
+        const res = {
+            status: jest.fn().mockReturnThis(),
+            json: jest.fn(),
+            redirect: jest.fn(),
+        };
+        const next = jest.fn();
+
+        requireAuth(req, res, next);
+
+        expect(next).toHaveBeenCalledTimes(1);
+        expect(req.user).toEqual({
+            username: 'opencode',
+            role: 'internal-gateway',
+        });
+        expect(res.status).not.toHaveBeenCalled();
+    });
+
     test('does not allow the OpenCode gateway token outside /v1', () => {
         const req = {
             path: '/api/chat',

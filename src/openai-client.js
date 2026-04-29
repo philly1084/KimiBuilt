@@ -704,12 +704,16 @@ async function postImageGenerationToProvider(params, imageProvider) {
 
         for (let index = 0; index < requestVariants.length; index += 1) {
             const requestBody = requestVariants[index];
+            const headers = {
+                Authorization: `Bearer ${imageProvider.apiKey}`,
+                'Content-Type': 'application/json',
+            };
+            if (imageProvider.source === 'gateway') {
+                headers['x-api-key'] = imageProvider.apiKey;
+            }
             const response = await fetch(`${baseURL}/images/generations`, {
                 method: 'POST',
-                headers: {
-                    Authorization: `Bearer ${imageProvider.apiKey}`,
-                    'Content-Type': 'application/json',
-                },
+                headers,
                 body: JSON.stringify(requestBody),
             });
 
