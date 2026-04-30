@@ -129,6 +129,74 @@ describe('KokoroTtsService', () => {
         ]);
     });
 
+    test('keeps timed-out generation in the queue until the underlying work settles', async () => {
+        const events = [];
+        let releaseFirst = null;
+        let firstStarted = null;
+        const firstStartedPromise = new Promise((resolve) => {
+            firstStarted = resolve;
+        });
+        const firstGenerated = new Promise((resolve) => {
+            releaseFirst = () => {
+                events.push('finish:First request.');
+                resolve(createAudio(Buffer.from('RIFF-first')));
+            };
+        });
+        const generate = jest.fn((text) => {
+            events.push(`start:${text}`);
+            if (text === 'First request.') {
+                firstStarted();
+                return firstGenerated;
+            }
+            events.push(`finish:${text}`);
+            return Promise.resolve(createAudio(Buffer.from('RIFF-second')));
+        });
+        const service = new KokoroTtsService({
+            enabled: true,
+            modelId: 'test-model',
+            defaultVoiceId: 'af_heart',
+            voices: [{ id: 'af_heart', label: 'Heart Studio' }],
+            timeoutMs: 5000,
+        }, {
+            importKokoro: () => ({
+                KokoroTTS: {
+                    from_pretrained: jest.fn(async () => ({ generate })),
+                },
+            }),
+        });
+
+        const first = service.synthesize({
+            text: 'First request',
+            voiceId: 'af_heart',
+            timeoutMs: 1,
+        });
+        await firstStartedPromise;
+        expect(generate).toHaveBeenCalledTimes(1);
+
+        await expect(first).rejects.toMatchObject({
+            statusCode: 504,
+            code: 'tts_timeout',
+        });
+
+        const second = service.synthesize({
+            text: 'Second request',
+            voiceId: 'af_heart',
+            timeoutMs: 5000,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(generate).toHaveBeenCalledTimes(1);
+
+        releaseFirst();
+        await second;
+
+        expect(events).toEqual([
+            'start:First request.',
+            'finish:First request.',
+            'start:Second request.',
+            'finish:Second request.',
+        ]);
+    });
+
     test('rejects unknown voices', async () => {
         const service = new KokoroTtsService({
             enabled: true,

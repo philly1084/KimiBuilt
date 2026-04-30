@@ -25,7 +25,7 @@ ARG PIPER_VOICES_REF=v1.0.0
 ARG PIPER_VOICES_BASE_URL=https://huggingface.co/rhasspy/piper-voices/resolve
 
 RUN apt-get update && \
-  apt-get install -y --no-install-recommends chromium fonts-liberation ca-certificates openssh-client docker.io git curl bash python3 python3-pip && \
+  apt-get install -y --no-install-recommends chromium fonts-liberation ca-certificates openssh-client docker.io git curl bash python3 python3-pip ffmpeg && \
   python3 -m pip install --break-system-packages --no-cache-dir "piper-tts==${PIPER_TTS_VERSION}" && \
   command -v piper >/dev/null && \
   rm -rf /var/lib/apt/lists/*

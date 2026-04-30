@@ -340,9 +340,11 @@ class AudioProcessingService {
       throw createServiceError(400, 'A speech WAV buffer is required for podcast composition.', 'audio_processing_invalid_input');
     }
 
-    const shouldEnhanceSpeech = enhanceSpeech === false
-      ? false
-      : this.audioProcessingConfig.podcastMasteringEnabled !== false;
+    const shouldEnhanceSpeech = enhanceSpeech === true
+      ? true
+      : enhanceSpeech === false
+        ? false
+        : this.audioProcessingConfig.podcastMasteringEnabled !== false;
     const needsMix = includeIntro || includeOutro || includeMusicBed || introPath || outroPath || musicBedPath;
     if (!needsMix && !shouldEnhanceSpeech) {
       return speechWavBuffer;

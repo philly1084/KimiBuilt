@@ -40,7 +40,9 @@ function withTimeout(promise, timeoutMs, message) {
     let timeoutId = null;
     const timeoutPromise = new Promise((_, reject) => {
         timeoutId = setTimeout(() => {
-            reject(createServiceError(504, message, 'tts_timeout'));
+            const error = createServiceError(504, message, 'tts_timeout');
+            error.pendingOperation = Promise.resolve(promise).catch(() => null);
+            reject(error);
         }, Math.max(1000, Number(timeoutMs) || 90000));
     });
 
@@ -247,7 +249,12 @@ class KokoroTtsService {
         const run = this.synthesisQueue
             .catch(() => null)
             .then(task);
-        this.synthesisQueue = run.catch(() => null);
+        this.synthesisQueue = run.catch(async (error) => {
+            if (error?.code === 'tts_timeout' && error?.pendingOperation) {
+                await error.pendingOperation;
+            }
+            return null;
+        });
         return run;
     }
 

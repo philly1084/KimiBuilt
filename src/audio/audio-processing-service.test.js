@@ -86,4 +86,29 @@ describe('AudioProcessingService', () => {
     expect(result).toEqual(speechWavBuffer);
     expect(runFfmpeg).not.toHaveBeenCalled();
   });
+
+  test('allows explicit podcast mastering when default mastering is disabled', async () => {
+    const speechWavBuffer = createTestWav();
+    const service = new AudioProcessingService({
+      enabled: true,
+      ffmpegBinaryPath: 'ffmpeg',
+      podcastMasteringEnabled: false,
+    });
+
+    const runFfmpeg = jest.spyOn(service, 'runFfmpeg').mockImplementation(async (args) => {
+      await fs.writeFile(args[args.length - 1], speechWavBuffer);
+    });
+
+    const result = await service.composePodcastAudio({
+      speechWavBuffer,
+      enhanceSpeech: true,
+    });
+
+    expect(result).toEqual(speechWavBuffer);
+    expect(runFfmpeg).toHaveBeenCalledTimes(1);
+    expect(runFfmpeg.mock.calls[0][0]).toEqual(expect.arrayContaining([
+      '-af',
+      expect.stringContaining('loudnorm='),
+    ]));
+  });
 });
