@@ -639,13 +639,13 @@ class OpenAIClient {
       sizes: Array.isArray(metadata.sizes) && metadata.sizes.length > 0
         ? metadata.sizes
         : (lower.includes('gpt-image')
-          ? ['auto', '1024x1024', '1536x1024', '1024x1536']
+          ? ['auto', '1024x1024', '1536x1024', '1024x1536', '2048x2048', '2048x1152']
           : ['1024x1024']),
       qualities: Array.isArray(metadata.qualities) && metadata.qualities.length > 0
         ? metadata.qualities
         : (lower.includes('gpt-image') ? ['auto', 'low', 'medium', 'high'] : []),
       styles: Array.isArray(metadata.styles) ? metadata.styles : [],
-      maxImages: metadata.maxImages || 5,
+      maxImages: metadata.maxImages || (lower.includes('gpt-image') ? 10 : 5),
     };
   }
 
@@ -662,15 +662,18 @@ class OpenAIClient {
       quality,
       style,
       n,
-      response_format = 'b64_json',
+      response_format,
+      output_format,
+      output_compression,
+      moderation,
+      background,
       sessionId,
     } = options;
     
     const params = {
       prompt,
       model: model || 'gpt-image-2',
-      size: size || '1024x1024',
-      response_format,
+      size: size || 'auto',
       taskType: 'image',
       clientSurface: CLI_CLIENT_SURFACE,
     };
@@ -678,6 +681,11 @@ class OpenAIClient {
     if (n) params.n = n;
     if (quality) params.quality = quality;
     if (style) params.style = style;
+    if (background) params.background = background;
+    if (response_format) params.response_format = response_format;
+    if (output_format) params.output_format = output_format;
+    if (Number.isFinite(Number(output_compression))) params.output_compression = Number(output_compression);
+    if (moderation) params.moderation = moderation;
     if (sessionId) params.session_id = sessionId;
 
     try {
@@ -805,12 +813,13 @@ class OpenAIClient {
       waitMs: options.waitMs || 30000,
       maxTurns: options.maxTurns || 30,
       ...(options.cwd || options.workingDirectory ? { cwd: options.cwd || options.workingDirectory } : {}),
-      ...(options.targetId ? { targetId: options.targetId } : {}),
-      ...(options.sessionId ? { sessionId: options.sessionId } : {}),
-      ...(options.mcpSessionId ? { mcpSessionId: options.mcpSessionId } : {}),
-      ...(options.model ? { model: options.model } : {}),
-      ...(options.instructions ? { instructions: options.instructions } : {}),
-    }, {
+        ...(options.targetId ? { targetId: options.targetId } : {}),
+        ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+        ...(options.mcpSessionId ? { mcpSessionId: options.mcpSessionId } : {}),
+        ...(options.adminMode !== undefined ? { adminMode: options.adminMode === true } : {}),
+        ...(options.model ? { model: options.model } : {}),
+        ...(options.instructions ? { instructions: options.instructions } : {}),
+      }, {
       sessionId: options.backendSessionId,
       taskType: options.taskType || CLI_TASK_TYPE,
       clientSurface: options.clientSurface || CLI_CLIENT_SURFACE,

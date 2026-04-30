@@ -299,6 +299,7 @@ async function getRuntimeSupport(toolId) {
                 ? [
                     `Remote CLI MCP server ${publicConfig.name} is configured at ${publicConfig.url}.`,
                     `Default target is ${publicConfig.defaultTargetId}${publicConfig.defaultCwd ? ` with cwd ${publicConfig.defaultCwd}` : ''}.`,
+                    'Use adminMode for scoped remote software deployment loops that need real changes through the admin-capable CLI runner lane.',
                 ]
                 : [
                     'Remote CLI MCP needs REMOTE_CLI_MCP_URL or GATEWAY_URL.',

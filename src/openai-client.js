@@ -72,6 +72,16 @@ const OFFICIAL_OPENAI_IMAGE_MODELS = [
     'gpt-image-1-mini',
 ];
 
+const GPT_IMAGE_STANDARD_SIZES = ['auto', '1024x1024', '1536x1024', '1024x1536'];
+const GPT_IMAGE_2_POPULAR_SIZES = [
+    ...GPT_IMAGE_STANDARD_SIZES,
+    '2048x2048',
+    '2048x1152',
+    '3840x2160',
+    '2160x3840',
+];
+const GPT_IMAGE_OUTPUT_FORMATS = ['png', 'jpeg', 'webp'];
+
 function getClient() {
     if (!chatClient) {
         chatClient = new OpenAI({
@@ -84,6 +94,51 @@ function getClient() {
 
 function normalizeModelId(modelId = '') {
     return String(modelId || '').trim();
+}
+
+function isGptImageModelId(modelId = '') {
+    return /^gpt-image(?:$|-)/i.test(normalizeModelId(modelId));
+}
+
+function isGptImage2ModelId(modelId = '') {
+    return /^gpt-image-2(?:$|-)/i.test(normalizeModelId(modelId));
+}
+
+function isDallE2ModelId(modelId = '') {
+    return /^dall-e-2$/i.test(normalizeModelId(modelId));
+}
+
+function isDallE3ModelId(modelId = '') {
+    return /^dall-e-3$/i.test(normalizeModelId(modelId));
+}
+
+function isValidGptImage2Size(size = '') {
+    const normalized = String(size || '').trim().toLowerCase();
+    if (normalized === 'auto') {
+        return true;
+    }
+
+    const match = normalized.match(/^(\d+)x(\d+)$/);
+    if (!match) {
+        return false;
+    }
+
+    const width = Number.parseInt(match[1], 10);
+    const height = Number.parseInt(match[2], 10);
+    if (!Number.isFinite(width) || !Number.isFinite(height)) {
+        return false;
+    }
+
+    const longEdge = Math.max(width, height);
+    const shortEdge = Math.min(width, height);
+    const totalPixels = width * height;
+
+    return longEdge <= 3840
+        && width % 16 === 0
+        && height % 16 === 0
+        && longEdge / shortEdge <= 3
+        && totalPixels >= 655360
+        && totalPixels <= 8294400;
 }
 
 function normalizeOpenAIApiMode(mode = '') {
@@ -212,6 +267,7 @@ const AUTO_TOOL_ALLOWLIST = new Set([
     USER_CHECKPOINT_TOOL_ID,
     'ssh-execute',
     'remote-command',
+    'remote-cli-agent',
     'k3s-deploy',
     'code-sandbox',
     'security-scan',
@@ -453,17 +509,20 @@ function getImageModelMetadata(modelId, ownedBy = 'openai') {
         };
     }
 
-    if (lower.includes('gpt-image')) {
+    if (isGptImageModelId(normalized)) {
+        const isImage2 = isGptImage2ModelId(normalized);
         return {
             id: normalized,
             name: normalized,
             description: 'Official OpenAI GPT Image generation',
             owned_by: ownedBy,
-            sizes: ['auto', '1024x1024', '1536x1024', '1024x1536'],
+            sizes: isImage2 ? GPT_IMAGE_2_POPULAR_SIZES : GPT_IMAGE_STANDARD_SIZES,
             qualities: ['auto', 'low', 'medium', 'high'],
-            backgrounds: ['auto', 'transparent', 'opaque'],
+            backgrounds: isImage2 ? ['auto', 'opaque'] : ['auto', 'transparent', 'opaque'],
+            outputFormats: GPT_IMAGE_OUTPUT_FORMATS,
+            moderations: ['auto', 'low'],
             styles: [],
-            maxImages: 5,
+            maxImages: 10,
         };
     }
 
@@ -618,6 +677,14 @@ function normalizeProviderImageRecord(image = {}) {
             || imageGenerationResult.revisedPrompt
             || image.prompt
             || undefined,
+        output_format: image.output_format
+            || image.outputFormat
+            || imageGenerationResult.output_format
+            || imageGenerationResult.outputFormat
+            || undefined,
+        quality: image.quality || imageGenerationResult.quality || undefined,
+        size: image.size || imageGenerationResult.size || undefined,
+        usage: image.usage || imageGenerationResult.usage || undefined,
         mimeType: image.mimeType
             || image.mime_type
             || imageGenerationResult.mimeType
@@ -720,6 +787,55 @@ function isUnsupportedImageResponseFormatError(errorBody = '', status = 0) {
     );
 }
 
+function normalizeOfficialOpenAIImageParams(params = {}) {
+    const modelId = normalizeModelId(params.model);
+
+    if (isGptImageModelId(modelId)) {
+        delete params.response_format;
+        delete params.style;
+
+        if (isGptImage2ModelId(modelId)
+            && String(params.background || '').trim().toLowerCase() === 'transparent') {
+            console.warn('[OpenAI] gpt-image-2 does not support transparent backgrounds; using background=auto.');
+            params.background = 'auto';
+        }
+
+        const outputFormat = String(params.output_format || '').trim().toLowerCase();
+        if (outputFormat && !GPT_IMAGE_OUTPUT_FORMATS.includes(outputFormat)) {
+            delete params.output_format;
+        } else if (outputFormat && params.output_format !== outputFormat) {
+            params.output_format = outputFormat;
+        }
+
+        if (params.output_compression != null
+            && !['jpeg', 'webp'].includes(String(params.output_format || '').trim().toLowerCase())) {
+            delete params.output_compression;
+        }
+
+        const moderation = String(params.moderation || '').trim().toLowerCase();
+        if (moderation && !['auto', 'low'].includes(moderation)) {
+            delete params.moderation;
+        } else if (moderation && params.moderation !== moderation) {
+            params.moderation = moderation;
+        }
+
+        return params;
+    }
+
+    if (isDallE2ModelId(modelId) || isDallE3ModelId(modelId)) {
+        delete params.background;
+        delete params.output_format;
+        delete params.output_compression;
+        delete params.moderation;
+
+        if (!isDallE3ModelId(modelId)) {
+            delete params.style;
+        }
+    }
+
+    return params;
+}
+
 function buildImageGenerationParamsForProvider(params = {}, imageProvider = getImageProviderConfig()) {
     const nextParams = { ...params };
     const providerFamily = inferProviderFamily({
@@ -743,6 +859,7 @@ function buildImageGenerationParamsForProvider(params = {}, imageProvider = getI
         }
 
         nextParams.model = officialModel;
+        normalizeOfficialOpenAIImageParams(nextParams);
     }
 
     return nextParams;
@@ -758,8 +875,14 @@ function buildImageRequestVariants(params = {}, imageProvider = getImageProvider
         ...params,
         response_format: 'b64_json',
     };
+    const isOpenAIStyleProvider = providerFamily === 'openai'
+        || shouldUseOfficialOpenAIImageCatalogForGateway(imageProvider);
 
     if (Object.prototype.hasOwnProperty.call(params, 'response_format')) {
+        return [bareParams];
+    }
+
+    if (isOpenAIStyleProvider && isGptImageModelId(params.model || imageProvider.imageModel)) {
         return [bareParams];
     }
 
@@ -888,7 +1011,7 @@ function isOfficialOpenAIImageModelId(modelId = '') {
         return false;
     }
 
-    return /^(gpt-image(?:-[a-z0-9.]+)?|dall-e-\d+)$/i.test(normalized);
+    return isGptImageModelId(normalized) || /^dall-e-\d+$/i.test(normalized);
 }
 
 function getOfficialOpenAIConfiguredImageModel(modelId = '', fallbackModel = config.media.imageModel) {
@@ -906,10 +1029,7 @@ function shouldUseOfficialOpenAIImageCatalogForGateway(imageProvider = getImageP
         return false;
     }
 
-    return Boolean(getOfficialOpenAIConfiguredImageModel(
-        imageProvider.imageModel,
-        config.media.imageModel,
-    ));
+    return Boolean(getOfficialOpenAIConfiguredImageModel(imageProvider.imageModel, ''));
 }
 
 async function listImageModels() {
@@ -1430,6 +1550,23 @@ function hasRemoteSoftwareCreationIntent(prompt = '') {
         /\b(server|remote|ssh|gitea|cluster|k3s|kubernetes|environment|sandbox)\b[\s\S]{0,80}\b(create|develop|build|make|ship|launch|publish|scaffold|prototype)\b[\s\S]{0,60}\b(app|application|website|site|frontend|service|game|software|web app)\b/,
         /\b(this (?:server|cluster|environment|sandbox))\b[\s\S]{0,60}\b(create|develop|build|make|ship|launch|publish)\b[\s\S]{0,60}\b(app|application|website|site|frontend|service|game|software|web app)\b/,
     ].some((pattern) => pattern.test(normalized));
+}
+
+function hasRemoteSoftwareDeploymentIntent(prompt = '') {
+    const normalized = String(prompt || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    const softwareTarget = /\b(app|application|site|website|web app|web page|webpage|frontend|dashboard|service|game|software)\b/.test(normalized);
+    const remoteTarget = /\b(remote|server|host|runner|cli runner|gitea|cluster|k3s|k8s|kubernetes|domain|dns|ingress|traefik|tls|deploy|deployment|live|online)\b/.test(normalized)
+        || /\b[a-z0-9-]+(?:\.[a-z0-9-]+){1,}\b/.test(normalized);
+    const deploymentIntent = /\b(deploy|redeploy|publish|launch|ship|go live|get (?:it|the app|the site|the website) (?:live|online|deployed)|bring (?:it|the app|the site|the website) (?:live|online)|route|ingress|tls|dns|domain|rollout)\b/.test(normalized);
+    const authoringIntent = /\b(create|develop|build|make|ship|launch|publish|scaffold|prototype|implement|update|fix|edit|change|deploy|redeploy)\b/.test(normalized);
+    const infraOnly = /\b(kubectl get|kubectl describe|logs?|status|health|uptime|journalctl|systemctl status|inspect|diagnose|debug)\b/.test(normalized)
+        && !/\b(create|make|build|implement|develop|write|update|fix|deploy|redeploy|publish|launch|ship)\b/.test(normalized);
+
+    return softwareTarget && remoteTarget && deploymentIntent && authoringIntent && !infraOnly;
 }
 
 function hasExplicitLocalSandboxIntent(prompt = '') {
@@ -2641,10 +2778,13 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
     const remoteToolId = availableToolIds.has('remote-command')
         ? 'remote-command'
         : (availableToolIds.has('ssh-execute') ? 'ssh-execute' : null);
+    const remoteCliAgentToolId = availableToolIds.has('remote-cli-agent') ? 'remote-cli-agent' : null;
     const explicitLocalArtifact = hasExplicitLocalArtifactReference(prompt);
     const remoteWebsiteUpdateIntent = hasRemoteWebsiteUpdateIntent(prompt);
     const remoteSoftwareCreationIntent = executionProfile === 'remote-build'
         && hasRemoteSoftwareCreationIntent(prompt);
+    const remoteSoftwareDeploymentIntent = executionProfile === 'remote-build'
+        && hasRemoteSoftwareDeploymentIntent(prompt);
     const internalArtifactReference = hasInternalArtifactReference(prompt);
     const shouldPreferRemoteWorkspaceSource = Boolean(
         remoteToolId
@@ -2786,11 +2926,15 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
         selectedIds.add('agent-notes-write');
     }
 
-    if (remoteToolId && (promptHasExplicitSshIntent(prompt) || shouldPreferRemoteWorkspaceSource)) {
+    if (remoteCliAgentToolId && remoteSoftwareDeploymentIntent) {
+        selectedIds.add(remoteCliAgentToolId);
+    }
+
+    if (remoteToolId && (promptHasExplicitSshIntent(prompt) || (shouldPreferRemoteWorkspaceSource && !remoteSoftwareDeploymentIntent))) {
         selectedIds.add(remoteToolId);
     }
 
-    if (hasExplicitK3sDeployIntent(prompt)) {
+    if (hasExplicitK3sDeployIntent(prompt) && !remoteSoftwareDeploymentIntent) {
         selectedIds.add('k3s-deploy');
     }
 
@@ -2852,6 +2996,7 @@ function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = [], o
     const remoteToolId = availableToolIds.has('remote-command')
         ? 'remote-command'
         : (availableToolIds.has('ssh-execute') ? 'ssh-execute' : null);
+    const remoteCliAgentToolId = availableToolIds.has('remote-cli-agent') ? 'remote-cli-agent' : null;
     const explicitK3sDeployIntent = hasExplicitK3sDeployIntent(prompt);
     const explicitGitIntent = hasExplicitGitIntent(prompt);
     const explicitSubAgentIntent = hasExplicitSubAgentIntent(prompt);
@@ -2902,6 +3047,10 @@ function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = [], o
             || canonicalWorkload?.trigger?.type === 'once'
         )) {
         return 'agent-workload';
+    }
+
+    if (remoteCliAgentToolId && hasRemoteSoftwareDeploymentIntent(prompt)) {
+        return remoteCliAgentToolId;
     }
 
     if (explicitK3sDeployIntent && availableToolIds.has('k3s-deploy')) {
@@ -3061,6 +3210,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
 
     if (automaticTools.some((entry) => entry.id === DOCUMENT_WORKFLOW_TOOL_ID)) {
         guidance.push('- Use `document-workflow` for training/manual deliverables such as manuals, learner guides, facilitator guides, job aids, workbooks, HTML training pages, and multi-format PDF/HTML/XLSX packages.');
+        guidance.push('- Do not ask the user for generic "make it high quality" document prompt wording; `document-workflow` automatically applies strategy, background design, evidence, accessibility, and final polish quality passes.');
         guidance.push('- For training/manual packages, prefer documentType `training-manual`, action `plan` before generation when the request is broad, and action `generate-suite` when the user asks for multiple outputs such as PDF, XLSX, and HTML together.');
         guidance.push('- Training/manual work should ask for high-impact design choices when audience, delivery mode, format mix, duration, visual style, assessment depth, or research scope is unclear. Keep intake concise and then proceed.');
         guidance.push('- When the training subject depends on facts, procedures, standards, or current guidance, ground the package in vector memory and verified research before generating final materials.');
@@ -3102,7 +3252,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
     if (automaticTools.some((entry) => entry.id === 'file-write')) {
         guidance.push('- Use `file-write` to create or update local runtime files when the user asks for filesystem changes.');
         guidance.push('- Every `file-write` call must include both a `path` and the full file body as `content` in the same call. Do not call `file-write` with only a path.');
-        guidance.push('- For remote hosts or deployed servers, use `remote-command` or `k3s-deploy` instead of `file-write`. Do not use `docker-exec` for the host unless the user explicitly says Docker is available there.');
+        guidance.push('- For remote hosts or deployed servers, use `remote-cli-agent` for remote software creation/update/deployment loops and `remote-command` or `k3s-deploy` for narrower inspection or standard deploy actions instead of `file-write` to container-only paths. Do not use `docker-exec` for the host unless the user explicitly says Docker is available there.');
     }
 
     if (!sessionIsolation && automaticTools.some((entry) => entry.id === 'agent-notes-write')) {
@@ -3171,6 +3321,10 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         : (automaticTools.some((entry) => entry.id === 'ssh-execute') ? 'ssh-execute' : null);
 
     if (remoteGuidanceToolId) {
+        if (automaticTools.some((entry) => entry.id === 'remote-cli-agent')) {
+            guidance.push('- For most remote software deployment work that needs an app, website, service, dashboard, frontend, or game changed and put live, use `remote-cli-agent` with `adminMode:true` so the remote coding agent owns authoring, build, deploy, and verification through the configured admin-capable CLI runner lane.');
+            guidance.push('- If `remote-cli-agent` returns `USER_INPUT_REQUIRED`, forward that concise choice to the user and continue the same remote CLI session after the answer. If it repeats the same blocked command or root error twice without a changed strategy, stop that loop and surface the blocker.');
+        }
         guidance.push(`- Use \`${remoteGuidanceToolId}\` for remote server commands over SSH when the user asks you to inspect, deploy, configure, or troubleshoot a remote host.`);
         guidance.push(`- Do not use \`${remoteGuidanceToolId}\` as a substitute scheduler. If the user wants future, recurring, cron-like, or follow-up work, create it with \`agent-workload\` instead of writing host crontabs unless they explicitly asked for server-side cron management.`);
         guidance.push(`- Do not refer to internal tool names like \`run_shell_command\` or claim you lack generic shell access when \`${remoteGuidanceToolId}\` is attached.`);
@@ -5415,11 +5569,11 @@ function normalizeImagePromptList({ prompt = '', prompts = [], n = 1 } = {}) {
         ? prompts.filter((entry) => extractImagePromptText(entry))
         : [];
     if (normalizedPrompts.length > 0) {
-        return normalizedPrompts.slice(0, 5);
+        return normalizedPrompts.slice(0, 10);
     }
 
     const normalizedPrompt = extractImagePromptText(prompt) ? prompt : '';
-    const count = Math.min(Math.max(Number(n) || 1, 1), 5);
+    const count = Math.min(Math.max(Number(n) || 1, 1), 10);
     return Array.from({ length: count }, () => normalizedPrompt).filter(Boolean);
 }
 
@@ -5449,6 +5603,9 @@ function buildImageParamsFromSelection({
     style = null,
     background = 'auto',
     responseFormat = null,
+    outputFormat = null,
+    outputCompression = null,
+    moderation = null,
     user = null,
     n = 1,
 } = {}) {
@@ -5456,31 +5613,61 @@ function buildImageParamsFromSelection({
     const supportedQualities = Array.isArray(selectedModel.qualities) ? selectedModel.qualities : [];
     const supportedStyles = Array.isArray(selectedModel.styles) ? selectedModel.styles : [];
     const supportedBackgrounds = Array.isArray(selectedModel.backgrounds) ? selectedModel.backgrounds : [];
+    const supportedOutputFormats = Array.isArray(selectedModel.outputFormats) ? selectedModel.outputFormats : [];
+    const supportedModerations = Array.isArray(selectedModel.moderations) ? selectedModel.moderations : [];
+    const normalizedSize = String(size || '').trim();
+    const normalizedQuality = String(quality || '').trim().toLowerCase();
+    const normalizedStyle = String(style || '').trim().toLowerCase();
+    const normalizedBackground = String(background || '').trim().toLowerCase();
+    const effectiveBackground = isGptImage2ModelId(modelId) && normalizedBackground === 'transparent'
+        ? 'auto'
+        : (normalizedBackground || background);
+    const maxImages = Math.min(Math.max(Number(selectedModel.maxImages) || 5, 1), 10);
 
     const params = {
         prompt,
-        n: Math.min(Math.max(Number(n) || 1, 1), Math.min(selectedModel.maxImages || 5, 5)),
-        size: supportedSizes.includes(size) ? size : (supportedSizes[0] || size || '1024x1024'),
+        n: Math.min(Math.max(Number(n) || 1, 1), maxImages),
+        size: isGptImage2ModelId(modelId) && isValidGptImage2Size(normalizedSize)
+            ? normalizedSize.toLowerCase()
+            : (supportedSizes.includes(size) ? size : (supportedSizes[0] || size || '1024x1024')),
     };
 
     if (modelId) {
         params.model = modelId;
     }
 
-    if (quality && (supportedQualities.length === 0 || supportedQualities.includes(quality))) {
-        params.quality = quality;
+    if (normalizedQuality && (supportedQualities.length === 0 || supportedQualities.includes(normalizedQuality))) {
+        params.quality = normalizedQuality;
     }
 
-    if (style && (supportedStyles.length === 0 || supportedStyles.includes(style))) {
-        params.style = style;
+    if (normalizedStyle && (supportedStyles.length === 0 || supportedStyles.includes(normalizedStyle))) {
+        params.style = normalizedStyle;
     }
 
-    if (background && (supportedBackgrounds.length === 0 || supportedBackgrounds.includes(background))) {
-        params.background = background;
+    if (effectiveBackground && (supportedBackgrounds.length === 0 || supportedBackgrounds.includes(effectiveBackground))) {
+        params.background = effectiveBackground;
     }
 
     if (responseFormat) {
         params.response_format = responseFormat;
+    }
+
+    const normalizedOutputFormat = String(outputFormat || '').trim().toLowerCase();
+    if (normalizedOutputFormat
+        && (supportedOutputFormats.length === 0 || supportedOutputFormats.includes(normalizedOutputFormat))) {
+        params.output_format = normalizedOutputFormat;
+    }
+
+    const parsedOutputCompression = Number.parseInt(outputCompression, 10);
+    if (Number.isFinite(parsedOutputCompression)
+        && ['jpeg', 'webp'].includes(String(params.output_format || '').trim().toLowerCase())) {
+        params.output_compression = Math.min(Math.max(parsedOutputCompression, 0), 100);
+    }
+
+    const normalizedModeration = String(moderation || '').trim().toLowerCase();
+    if (normalizedModeration
+        && (supportedModerations.length === 0 || supportedModerations.includes(normalizedModeration))) {
+        params.moderation = normalizedModeration;
     }
 
     if (user) {
@@ -5509,6 +5696,9 @@ async function generateImageWithSelection({
     style = null,
     background = 'auto',
     responseFormat = null,
+    outputFormat = null,
+    outputCompression = null,
+    moderation = null,
     user = null,
     n = 1,
 } = {}) {
@@ -5521,6 +5711,9 @@ async function generateImageWithSelection({
         style,
         background,
         responseFormat,
+        outputFormat,
+        outputCompression,
+        moderation,
         user,
         n,
     });
@@ -5538,6 +5731,9 @@ async function generateImageWithSelection({
         quality: params.quality || null,
         style: params.style || null,
         background: params.background || null,
+        output_format: params.output_format || null,
+        output_compression: params.output_compression ?? null,
+        moderation: params.moderation || null,
         data: images,
     };
 }
@@ -5551,6 +5747,11 @@ async function generateImage({
     background = 'auto',
     response_format = null,
     responseFormat = response_format,
+    output_format = null,
+    outputFormat = output_format,
+    output_compression = null,
+    outputCompression = output_compression,
+    moderation = null,
     user = null,
     n = 1,
 }) {
@@ -5564,6 +5765,9 @@ async function generateImage({
         style,
         background,
         responseFormat,
+        outputFormat,
+        outputCompression,
+        moderation,
         user,
         n,
     });
@@ -5579,6 +5783,11 @@ async function generateImageBatch({
     background = 'auto',
     response_format = null,
     responseFormat = response_format,
+    output_format = null,
+    outputFormat = output_format,
+    output_compression = null,
+    outputCompression = output_compression,
+    moderation = null,
     user = null,
     n = 1,
     batchMode = 'auto',
@@ -5609,6 +5818,9 @@ async function generateImageBatch({
             style,
             background,
             responseFormat,
+            outputFormat,
+            outputCompression,
+            moderation,
             user,
             n: 1,
         }),
@@ -5632,6 +5844,9 @@ async function generateImageBatch({
             quality: firstResponse.quality || null,
             style: firstResponse.style || null,
             background: firstResponse.background || null,
+            output_format: firstResponse.output_format || null,
+            output_compression: firstResponse.output_compression ?? null,
+            moderation: firstResponse.moderation || null,
             data,
             batch: {
                 mode,
@@ -5653,6 +5868,9 @@ async function generateImageBatch({
                 style,
                 background,
                 responseFormat,
+                outputFormat,
+                outputCompression,
+                moderation,
                 user,
                 n: requestedCount,
             });

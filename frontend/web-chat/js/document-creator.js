@@ -598,6 +598,9 @@ class DocumentCreator {
     const recommendedTemplates = Array.isArray(plan.recommendedTemplates) ? plan.recommendedTemplates : [];
     const recommendedPacks = Array.isArray(plan.recommendedTemplatePacks) ? plan.recommendedTemplatePacks : [];
     const designOptions = Array.isArray(plan.designOptions) ? plan.designOptions : [];
+    const qualityStandard = plan.qualityStandard && typeof plan.qualityStandard === 'object'
+      ? plan.qualityStandard
+      : {};
     const selectedDesignOption = this.resolveSelectedDesignOption(plan, designOptions);
     const outline = Array.isArray(plan.outline) ? plan.outline : [];
     const outlineMarkup = outline.slice(0, 4).map((item) => {
@@ -642,6 +645,20 @@ class DocumentCreator {
     const guardrailMarkup = selectedDesignOption?.guardrails?.length
       ? `<div class="doc-plan-design-note"><strong>UI guardrails:</strong> ${selectedDesignOption.guardrails.slice(0, 2).join(' ')}</div>`
       : '';
+    const qualityPasses = Array.isArray(qualityStandard.agentPasses)
+      ? qualityStandard.agentPasses.slice(0, 5)
+      : [];
+    const qualityMarkup = qualityPasses.length
+      ? `
+        <div class="doc-plan-quality">
+          <span>Built-in quality stack</span>
+          <div class="doc-plan-quality-list">
+            ${qualityPasses.map((pass) => `<em>${pass.label || pass.id || pass}</em>`).join('')}
+          </div>
+          ${qualityStandard.backgroundDirection?.label ? `<p>${qualityStandard.backgroundDirection.label}</p>` : ''}
+        </div>
+      `
+      : '';
 
     panel.innerHTML = `
       <div class="doc-plan-header">
@@ -659,6 +676,7 @@ class DocumentCreator {
       </div>
       <div class="doc-plan-format-row">${formatButtons}</div>
       <div class="doc-plan-outline">${outlineMarkup}</div>
+      ${qualityMarkup}
       ${packMarkup ? `<div class="doc-plan-designs"><span>Suggested packs:</span><div class="doc-pack-grid">${packMarkup}</div></div>` : ''}
       ${designMarkup ? `<div class="doc-plan-designs"><span>Approved layout directions:</span><div class="doc-plan-design-grid">${designMarkup}</div>${guardrailMarkup}</div>` : ''}
       ${templateMarkup ? `<div class="doc-plan-templates"><span>Start from template:</span>${templateMarkup}</div>` : ''}
@@ -1118,7 +1136,7 @@ class DocumentCreator {
     const style = document.getElementById('doc-ai-style').value;
     const format = this.normalizeCreationFormat(document.getElementById('doc-ai-format').value || 'html');
     
-    this.showLoading('AI is generating your document...');
+    this.showLoading('AI is drafting and quality-checking your document...');
     
     try {
       const sessionId = await this.ensureBackendSession();
@@ -1830,6 +1848,43 @@ const documentCreatorStyles = `
   font-size: 12px;
   color: var(--text-secondary);
   line-height: 1.4;
+}
+
+.doc-plan-quality {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-secondary));
+}
+
+.doc-plan-quality > span {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.doc-plan-quality-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.doc-plan-quality-list em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 8px;
+}
+
+.doc-plan-quality p {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .doc-plan-templates {

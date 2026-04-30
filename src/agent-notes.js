@@ -14,6 +14,8 @@ const DEFAULT_AGENT_NOTES_MARKDOWN = `# Carryover Notes
 - Default remote workflow is: baseline -> inspect -> fix -> verify. Keep command batches small and purposeful.
 - Use \`k3s-deploy\` for standard deploy actions such as repo sync, manifest apply, image update, and rollout status.
 - Use \`remote-command\` for kubectl inspection, logs, service status, network checks, package installs, one-off repairs, and post-deploy verification.
+- Use \`remote-cli-agent\` with \`adminMode: true\` for most remote software author/build/deploy/verify loops where an app, website, service, dashboard, or frontend must be changed and put live through the configured CLI runner.
+- If the remote CLI agent needs a user decision, forward its concise request and continue the same session with the answer. Stop retrying after the same blocked command or root error happens twice without a materially different strategy.
 - Assume \`kubectl\` should talk to k3s. If context is missing, prefer \`export KUBECONFIG=/etc/rancher/k3s/k3s.yaml\` or \`k3s kubectl\`.
 - Prefer non-interactive commands. Avoid editors, interactive shells, \`watch\`, or anything that needs a TTY.
 - Do not assume \`rg\`, Docker, \`docker-compose\`, \`ifconfig\`, or \`netstat\` exist on the server. Prefer \`find\` and \`grep -R\`, \`kubectl\` or \`k3s kubectl\`, \`ip addr\`, and \`ss -tulpn\`.

@@ -108,6 +108,7 @@ const {
     hasWebsiteBuildIntent,
     inferAgentRolePipeline,
 } = require('./orchestration/agent-roles');
+const { normalizeBrowserReachableUrl } = require('./agent-sdk/tools/categories/web/internal-url');
 const {
     inferSurfaceFinisher,
     scorePerceivedIntelligence,
@@ -4749,16 +4750,19 @@ function hasRemoteCliAgentAuthoringIntent(text = '') {
     }
 
     const explicitAssistedCli = /\b(remote cli agent|remote coding agent|remote code run|remote_code_run|agents sdk remote cli|assisted cli|cli tool)\b/.test(normalized);
-    if (!explicitAssistedCli) {
-        return false;
-    }
-
     const authoringIntent = /\b(create|make|build|generate|implement|develop|write|update|fix|finish|continue|resume|complete|deploy|publish|launch|ship)\b/.test(normalized);
     const softwareTarget = /\b(app|application|site|website|web app|web page|webpage|frontend|dashboard|visualization|visualisation|viewer|map|globe|world|service)\b/.test(normalized);
     const remoteTarget = /\b(remote|server|host|k3s|k8s|kubernetes|cluster|dns|domain|ingress|traefik|tls|deploy|deployment|live)\b/.test(normalized)
         || /\b[a-z0-9-]+(?:\.[a-z0-9-]+){1,}\b/.test(normalized);
+    const deploymentIntent = /\b(deploy|redeploy|publish|launch|ship|go live|get (?:it|the app|the site|the website) (?:live|online|deployed)|bring (?:it|the app|the site|the website) (?:live|online)|route|ingress|tls|dns|domain|rollout)\b/.test(normalized);
+    const infraOnly = /\b(kubectl get|kubectl describe|logs?|status|health|uptime|journalctl|systemctl status|inspect|diagnose|debug)\b/.test(normalized)
+        && !/\b(create|make|build|implement|develop|write|update|fix|deploy|redeploy|publish|launch|ship)\b/.test(normalized);
 
-    return authoringIntent && softwareTarget && remoteTarget;
+    if (explicitAssistedCli) {
+        return authoringIntent && softwareTarget && remoteTarget;
+    }
+
+    return authoringIntent && softwareTarget && remoteTarget && deploymentIntent && !infraOnly;
 }
 
 function hasManagedAppIntentText(text = '') {
@@ -5601,6 +5605,299 @@ function summarizeToolEventsForPlanner(toolEvents = []) {
             error: event?.result?.error || '',
             data: event?.result?.data || null,
         }));
+}
+
+const PLAN_TEMPLATE_PATTERN = /\{\{([^{}]+)\}\}/g;
+const PLAN_URL_PARAM_NAMES = new Set([
+    'url',
+    'previewUrl',
+    'preview_url',
+    'sandboxUrl',
+    'sandbox_url',
+    'workspacePreviewUrl',
+    'workspace_preview_url',
+    'workspaceSandboxUrl',
+    'workspace_sandbox_url',
+    'publicUrl',
+    'public_url',
+]);
+const PLAN_PREVIEW_URL_KEYS = [
+    'previewUrl',
+    'preview_url',
+    'sandboxUrl',
+    'sandbox_url',
+    'workspaceSandboxUrl',
+    'workspace_sandbox_url',
+    'workspacePreviewUrl',
+    'workspace_preview_url',
+    'publicUrl',
+    'public_url',
+];
+
+function parsePlanTemplatePath(pathValue = '') {
+    const pathText = String(pathValue || '').trim();
+    if (!pathText) {
+        return [];
+    }
+
+    const tokens = [];
+    const tokenPattern = /([^[.\]]+)|\[(?:"([^"]+)"|'([^']+)'|(\d+))\]/g;
+    let match;
+    while ((match = tokenPattern.exec(pathText)) !== null) {
+        const rawToken = match[1] ?? match[2] ?? match[3] ?? match[4];
+        if (rawToken === undefined || rawToken === '') {
+            continue;
+        }
+        tokens.push(/^\d+$/.test(rawToken) ? Number(rawToken) : rawToken);
+    }
+
+    return tokens;
+}
+
+function readPlanPath(root, tokens = []) {
+    let value = root;
+    for (const token of tokens) {
+        if (value == null) {
+            return undefined;
+        }
+        value = value[token];
+    }
+    return value;
+}
+
+function readPlanPathWithStepIndexFallback(root, tokens = []) {
+    const direct = readPlanPath(root, tokens);
+    if (direct !== undefined) {
+        return direct;
+    }
+
+    if (tokens[0] === 'steps' && Number.isInteger(tokens[1]) && tokens[1] > 0) {
+        const oneBasedTokens = [...tokens];
+        oneBasedTokens[1] = oneBasedTokens[1] - 1;
+        return readPlanPath(root, oneBasedTokens);
+    }
+
+    return undefined;
+}
+
+function isPreviewUrlPath(pathValue = '') {
+    return /(?:^|[.[_])(preview|sandbox|public)?_?url(?:\]|$)/i.test(String(pathValue || ''));
+}
+
+function isPlanUrlParamKey(keyPath = []) {
+    const key = String(keyPath[keyPath.length - 1] || '').trim();
+    return PLAN_URL_PARAM_NAMES.has(key);
+}
+
+function isLikelyPlanUrlCandidate(value = '') {
+    const normalized = String(value || '').trim();
+    return /^https?:\/\//i.test(normalized)
+        || /^\/?api\/.+/i.test(normalized)
+        || /^\/?artifacts\/.+/i.test(normalized)
+        || /^(localhost|127\.0\.0\.1|\[?::1\]?)(?::\d+)?(?:\/|$)/i.test(normalized)
+        || /^[a-z0-9.-]+\.[a-z]{2,}(?::\d+)?(?:\/|$)/i.test(normalized);
+}
+
+function normalizePlanUrlCandidate(value = '') {
+    const normalized = String(value || '').trim();
+    PLAN_TEMPLATE_PATTERN.lastIndex = 0;
+    const hasTemplate = PLAN_TEMPLATE_PATTERN.test(normalized);
+    PLAN_TEMPLATE_PATTERN.lastIndex = 0;
+    if (!normalized || hasTemplate || !isLikelyPlanUrlCandidate(normalized)) {
+        return '';
+    }
+    return normalizeBrowserReachableUrl(normalized);
+}
+
+function extractPreviewUrlFromValue(value = null, depth = 0) {
+    if (depth > 5 || value == null) {
+        return '';
+    }
+
+    if (typeof value === 'string') {
+        return normalizePlanUrlCandidate(value);
+    }
+
+    if (Array.isArray(value)) {
+        for (const entry of value) {
+            const found = extractPreviewUrlFromValue(entry, depth + 1);
+            if (found) {
+                return found;
+            }
+        }
+        return '';
+    }
+
+    if (typeof value !== 'object') {
+        return '';
+    }
+
+    for (const key of PLAN_PREVIEW_URL_KEYS) {
+        const found = normalizePlanUrlCandidate(value[key]);
+        if (found) {
+            return found;
+        }
+    }
+
+    for (const [key, entry] of Object.entries(value)) {
+        if (key === 'screenshot' || key === 'imageCapture') {
+            continue;
+        }
+        const found = extractPreviewUrlFromValue(entry, depth + 1);
+        if (found) {
+            return found;
+        }
+    }
+
+    return '';
+}
+
+function extractPreviewUrlFromToolEvent(event = {}) {
+    const data = event?.result?.data || {};
+    const artifactCandidates = extractArtifactsFromToolEvents([event]);
+    const candidates = [
+        data?.sandboxBuild,
+        data,
+        data?.artifact,
+        ...(Array.isArray(data?.artifacts) ? data.artifacts : []),
+        ...artifactCandidates,
+    ];
+
+    for (const candidate of candidates) {
+        const found = extractPreviewUrlFromValue(candidate);
+        if (found) {
+            return found;
+        }
+    }
+
+    return '';
+}
+
+function buildPlanTemplateStepRecords(toolEvents = []) {
+    return (Array.isArray(toolEvents) ? toolEvents : []).map((event, index) => {
+        const params = parseToolCallArguments(event?.toolCall?.function?.arguments || '{}');
+        const data = event?.result?.data || null;
+        const previewUrl = extractPreviewUrlFromToolEvent(event);
+
+        return {
+            index,
+            tool: event?.toolCall?.function?.name || event?.result?.toolId || '',
+            reason: event?.reason || '',
+            success: event?.result?.success !== false,
+            error: event?.result?.error || '',
+            params,
+            result: event?.result || null,
+            data,
+            output: data,
+            ...(previewUrl ? { previewUrl, url: previewUrl } : {}),
+        };
+    });
+}
+
+function buildPlanTemplateContext(toolEvents = []) {
+    const events = Array.isArray(toolEvents) ? toolEvents : [];
+    const steps = buildPlanTemplateStepRecords(events);
+    const lastStep = steps.length > 0 ? steps[steps.length - 1] : null;
+    const latestPreviewStep = [...steps].reverse().find((step) => step.previewUrl);
+    const latestPreviewUrl = latestPreviewStep?.previewUrl || '';
+
+    return {
+        toolEvents: events,
+        steps,
+        stepResults: steps,
+        results: {
+            lastStep,
+            lastPreviewUrl: latestPreviewUrl,
+            previewUrl: latestPreviewUrl,
+        },
+        lastStep,
+        lastPreviewUrl: latestPreviewUrl,
+        previewUrl: latestPreviewUrl,
+        latestPreviewUrl,
+        artifacts: extractArtifactsFromToolEvents(events),
+    };
+}
+
+function stringifyPlanTemplateValue(value) {
+    if (value == null) {
+        return '';
+    }
+    return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
+function resolvePlanTemplatePath(pathValue = '', templateContext = {}) {
+    const tokens = parsePlanTemplatePath(pathValue);
+    const value = readPlanPathWithStepIndexFallback(templateContext, tokens);
+    if (value !== undefined && value !== null && value !== '') {
+        return value;
+    }
+
+    if (isPreviewUrlPath(pathValue) && templateContext.latestPreviewUrl) {
+        return templateContext.latestPreviewUrl;
+    }
+
+    return value;
+}
+
+function resolvePlanTemplateString(template = '', templateContext = {}) {
+    const source = String(template || '');
+    const exactMatch = source.match(/^\{\{([^{}]+)\}\}$/);
+    if (exactMatch) {
+        const resolved = resolvePlanTemplatePath(exactMatch[1].trim(), templateContext);
+        return resolved === undefined || resolved === null ? source : resolved;
+    }
+
+    return source.replace(PLAN_TEMPLATE_PATTERN, (_match, pathValue) => {
+        const resolved = resolvePlanTemplatePath(String(pathValue || '').trim(), templateContext);
+        return stringifyPlanTemplateValue(resolved);
+    });
+}
+
+function resolvePlanParamTemplates(value, templateContext = {}, keyPath = [], options = {}) {
+    if (typeof value === 'string') {
+        const resolved = resolvePlanTemplateString(value, templateContext);
+        return options.browserReachableUrls === true && isPlanUrlParamKey(keyPath) && typeof resolved === 'string'
+            ? normalizeBrowserReachableUrl(resolved)
+            : resolved;
+    }
+
+    if (Array.isArray(value)) {
+        return value.map((entry, index) => resolvePlanParamTemplates(entry, templateContext, [...keyPath, index], options));
+    }
+
+    if (value && typeof value === 'object') {
+        return Object.fromEntries(
+            Object.entries(value).map(([key, entry]) => [
+                key,
+                resolvePlanParamTemplates(entry, templateContext, [...keyPath, key], options),
+            ]),
+        );
+    }
+
+    return value;
+}
+
+function findUnresolvedUrlTemplates(value, keyPath = [], found = []) {
+    if (typeof value === 'string') {
+        if (isPlanUrlParamKey(keyPath) && /\{\{[^{}]+\}\}/.test(value)) {
+            found.push({
+                path: keyPath.join('.'),
+                value,
+            });
+        }
+        return found;
+    }
+
+    if (Array.isArray(value)) {
+        value.forEach((entry, index) => findUnresolvedUrlTemplates(entry, [...keyPath, index], found));
+        return found;
+    }
+
+    if (value && typeof value === 'object') {
+        Object.entries(value).forEach(([key, entry]) => findUnresolvedUrlTemplates(entry, [...keyPath, key], found));
+    }
+
+    return found;
 }
 
 function toIsoTimestamp(value, fallback = null) {
@@ -8224,6 +8521,7 @@ class ConversationOrchestrator extends EventEmitter {
                     objective,
                     session,
                     recentMessages: resolvedRecentMessages,
+                    previousToolEvents: toolEvents,
                     autonomyDeadline: (autonomyApproved || hasCustomToolBudget) ? budgetState.autonomyDeadline : null,
                     executionTrace,
                     round,
@@ -9811,6 +10109,7 @@ class ConversationOrchestrator extends EventEmitter {
                 params: {
                     task: objective,
                     waitMs: 30000,
+                    adminMode: true,
                     ...(cwd ? { cwd } : {}),
                     ...(priorAgentState.sessionId ? { sessionId: priorAgentState.sessionId } : {}),
                     ...(priorAgentState.mcpSessionId ? { mcpSessionId: priorAgentState.mcpSessionId } : {}),
@@ -10351,7 +10650,10 @@ class ConversationOrchestrator extends EventEmitter {
             'Every `remote-command` step must include a non-empty `params.command` string.',
             'Every `remote-workbench` step must include `params.action`; use action names such as `repo-map`, `changed-files`, `grep`, `read-file`, `write-file`, `apply-patch`, `build`, `test`, `logs`, `rollout`, or `deploy-verify`.',
             'Treat "remote CLI", "direct CLI", and "remote command" as aliases for `remote-command`; do not route those phrases to a local shell or code sandbox.',
-            'For remote server, SSH, host, k3s, Kubernetes, and kubectl work, use `remote-command` as the primary remote CLI lane. Do not choose legacy raw SSH tooling when `remote-command` is available.',
+            'For most remote software creation, update, and deployment requests where an app, website, service, dashboard, or frontend must be changed and put live, prefer `remote-cli-agent` with `params.adminMode:true` so the remote coding agent owns authoring, build, deploy, and verification through the configured admin-capable CLI runner lane.',
+            'Use `remote-command` for quick non-interactive host inspection, kubectl/log checks, one-off admin repairs, and post-deploy verification. Do not choose legacy raw SSH tooling when `remote-command` is available.',
+            'If `remote-cli-agent` asks for user input or emits `USER_INPUT_REQUIRED`, forward that concise decision to the user; after the user answers, continue the same remote CLI session with their choice.',
+            'If `remote-cli-agent` hits the same blocked command or root error twice without a materially changed strategy, stop that retry loop and report the blocker plus the next distinct recovery option.',
             'When a remote task matches a `remote-workbench` action, prefer that structured action over hand-writing equivalent shell in `remote-command`.',
             'When remote CLI runtime inventory is present, prefer commands and fallbacks that match the actual CLI tools reported by the online remote runner.',
             'Keep `remote-command` for kubectl, host inspection, package installs, logs, restarts, deployments, DNS, TLS, and other infrastructure operations.',
@@ -10396,9 +10698,11 @@ class ConversationOrchestrator extends EventEmitter {
             'For routine public research and research-backed slides or documents, do not stop to ask which websites to scrape. Use Perplexity-backed `web-search` to discover candidate URLs, choose the strongest public sources yourself, verify them with `web-fetch` first, and use `web-scrape` only when a page needs rendered or structured extraction unless the user explicitly wants a constrained source list.',
             'Every `document-workflow` step must include `params.action` set to `recommend`, `plan`, `generate`, `assemble`, or `generate-suite`.',
             'Use `document-workflow generate` for final briefs, reports, documents, HTML pages, and slide decks. For slides, slide decks, presentations, and PowerPoint requests, default the final deliverable to PPTX unless the user explicitly asks for interactive or HTML output.',
+            'Do not ask the user to supply generic design-prompt quality wording for documents; document-workflow already applies built-in strategy, background design, evidence, accessibility, and final polish passes.',
             'Use `document-workflow generate-suite` with `buildMode:"sandbox"` or `useSandbox:true` for previewable website/dashboard/front-end artifacts so the builder produces a sandbox project instead of only a template.',
             'Use `document-workflow generate-suite` for requested output packages such as PDF + PPTX + HTML, or when web-chat needs an HTML preview companion for PDF/PPTX/XLSX deliverables.',
             'Every direct `code-sandbox` website build step must use `params.mode:"project"` plus previewable files. Do not use `code-sandbox` execute mode unless a separate confirmation policy explicitly allows executable code.',
+            'For screenshot QA after a sandbox build, set `web-scrape.params.url` to the verified preview/public URL. If the URL is produced earlier in the same plan, use `{{lastPreviewUrl}}`; the runtime also resolves legacy `{{steps[n].previewUrl}}` placeholders before browser execution.',
             'When the user wants a research-backed deliverable, prefer `web-search` and `web-fetch` first, then use `web-scrape` only when a page needs rendered or structured extraction before `document-workflow` with grounded `sources` derived from the verified tool results.',
             'Set `document-workflow.params.includeContent` to `true` only when a later step needs the full textual body for `file-write`; otherwise prefer the stored document download URL.',
             'Use `deep-research-presentation` when the user wants a research-backed deck handled as one ordered plan -> research -> images -> presentation workflow.',
@@ -10419,7 +10723,7 @@ class ConversationOrchestrator extends EventEmitter {
             'If a multi-job cron request omits exact times, you may pass one derived sub-request per job with conservative defaults in local time, such as daily at 9:00 AM for checks and every Monday at 2:00 AM for updates.',
             'Use `remote-command` for host cron only when the user explicitly asks to inspect or modify the server\'s own crontab.',
             'Every `file-write` step must include both `params.path` and the full file body as `params.content` in the same step.',
-            '`file-write` is for local runtime files only. For remote hosts or deployed servers, use `remote-command` or `k3s-deploy` instead. Do not use `docker-exec` for the host unless the user explicitly says Docker is available there.',
+            '`file-write` is for local runtime files only. For remote hosts or deployed servers, use `remote-cli-agent` for remote software author/build/deploy loops, and use `remote-command` or `k3s-deploy` for narrower inspection or standard deploy actions. Do not use `docker-exec` for the host unless the user explicitly says Docker is available there.',
             'Do not return a `file-write` step that only points at a previous artifact or earlier file. If the full content is not already available in the prompt or recent transcript, choose a different tool or return no `file-write` step.',
             ...(toolPolicy.sessionIsolation
                 ? [
@@ -10570,6 +10874,7 @@ class ConversationOrchestrator extends EventEmitter {
         objective = '',
         session = null,
         recentMessages = [],
+        previousToolEvents = [],
         autonomyDeadline = null,
         executionTrace = [],
         round = null,
@@ -10598,6 +10903,71 @@ class ConversationOrchestrator extends EventEmitter {
                 recentMessages,
                 toolContext,
             });
+            const templateContext = buildPlanTemplateContext([
+                ...(Array.isArray(previousToolEvents) ? previousToolEvents : []),
+                ...toolEvents,
+            ]);
+            step.params = resolvePlanParamTemplates(step.params || {}, templateContext, [], {
+                browserReachableUrls: step.tool === 'web-scrape',
+            });
+            const unresolvedUrlTemplates = findUnresolvedUrlTemplates(step.params || {});
+            if (unresolvedUrlTemplates.length > 0) {
+                const unresolvedText = unresolvedUrlTemplates
+                    .map((entry) => `${entry.path || 'params'}=${entry.value}`)
+                    .join(', ');
+                const error = new Error(`Unresolved plan URL template(s): ${unresolvedText}`);
+                const toolEndedAt = new Date().toISOString();
+                const normalizedResult = normalizeToolResult({
+                    success: false,
+                    toolId: step.tool,
+                    error: error.message,
+                    startedAt: toolEndedAt,
+                    endedAt: toolEndedAt,
+                }, step.tool);
+                const toolCall = {
+                    id: `tool_call_${index + 1}`,
+                    type: 'function',
+                    function: {
+                        name: step.tool,
+                        arguments: JSON.stringify(step.params || {}),
+                    },
+                };
+                const toolEvent = {
+                    toolCall,
+                    result: normalizedResult,
+                    reason: step.reason,
+                };
+                const classification = classifyToolExecutionResult(toolEvent, {
+                    executionProfile,
+                    budgetExceeded: false,
+                });
+                toolEvents.push(toolEvent);
+                harnessRun?.recordToolEvent?.(toolEvent, { round, classification });
+                executionTrace.push(createExecutionTraceEntry({
+                    type: 'tool_call',
+                    name: `Tool call (${step.tool})`,
+                    startedAt: normalizedResult.startedAt,
+                    endedAt: normalizedResult.endedAt,
+                    status: 'error',
+                    details: {
+                        round,
+                        reason: step.reason,
+                        paramKeys: Object.keys(step.params || {}).sort(),
+                        error: normalizedResult.error,
+                        classification,
+                        stateChanged: false,
+                    },
+                }));
+                emitConversationProgress(onProgress, {
+                    phase: 'blocked',
+                    detail: normalizedResult.error,
+                    plan,
+                    activePlanIndex: -1,
+                    completedPlanSteps: index,
+                    failedPlanStepIndex: index,
+                });
+                break;
+            }
             const toolCall = {
                 id: `tool_call_${index + 1}`,
                 type: 'function',
@@ -11108,6 +11478,7 @@ class ConversationOrchestrator extends EventEmitter {
             }
             if (toolPolicy.rolePipeline.requiresSandbox && allowedToolIds.includes('web-scrape')) {
                 parts.push('For website/dashboard/front-end QA, use Playwright-backed `web-scrape` with `browser:true`, `captureScreenshot:true`, and desktop plus mobile `viewport` values once a preview or public URL exists.');
+                parts.push('When a QA screenshot step follows a sandbox build, use the actual preview/public URL from the tool result, or `{{lastPreviewUrl}}` only for a URL produced earlier in the same runtime plan.');
             }
             parts.push('For slides, slide decks, presentations, and PowerPoint requests, default the final deliverable to PPTX unless the user explicitly asks for interactive or HTML output; an HTML sandbox preview can be a companion design stage, but not the final replacement.');
             parts.push('For PDF, PPTX, HTML, XLSX, or multi-format document packages, let the builder role produce concrete `document-workflow` artifacts. Use `generate-suite` when multiple formats or an HTML preview companion are needed.');
@@ -11169,6 +11540,10 @@ class ConversationOrchestrator extends EventEmitter {
         if (toolPolicy?.remoteCliInventorySummary) {
             parts.push(`Remote CLI runtime inventory:\n${toolPolicy.remoteCliInventorySummary}`);
             parts.push('Use `remote-command` to run commands through the online remote runner and prefer commands that match the reported remote CLI inventory.');
+            if (allowedToolIds.includes('remote-cli-agent')) {
+                parts.push('For remote app, website, service, dashboard, or frontend work that needs changes deployed, prefer `remote-cli-agent` with `adminMode:true` so the remote coding agent can use the configured admin-capable CLI runner lane for the scoped deployment.');
+                parts.push('If a remote CLI agent run requests a user choice, forward the concise question and continue the same session with the answer. If it repeats the same blocked command or root error twice without a changed strategy, stop that loop and surface the blocker.');
+            }
             if (/Browser visual QA:/i.test(toolPolicy.remoteCliInventorySummary)) {
                 parts.push('For remote website builds, the runner can execute Playwright visual QA. Use the reported UI screenshot command against the local preview or public URL and inspect the JSON report before finalizing.');
             }

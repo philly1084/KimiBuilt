@@ -1680,7 +1680,8 @@ Session Statistics:
   /image <prompt>    Generate an image
                      Defaults to the backend image model (official OpenAI if configured)
                      Options: --model gpt-image-2|gpt-image-1.5|gpt-image-1|gpt-image-1-mini
-                     --size 1024x1024 --quality auto|low|medium|high
+                     --size auto|1024x1024|1536x1024|1024x1536 --quality auto|low|medium|high
+                     --format png|jpeg|webp --compression 0-100 --background auto|opaque
   /image-models      List available image models
   /unsplash <query>  Search Unsplash for stock images
                      Options: --orientation landscape|portrait|squarish
@@ -2036,6 +2037,7 @@ Raw expert access remains available:
                     cwd: remoteAgent?.runtime?.defaultCwd || runtime?.remoteRunner?.defaultWorkspace || '',
                     waitMs: 30000,
                     maxTurns: 30,
+                    adminMode: true,
                 }, {
                     executionProfile: 'remote-build',
                     timeout: 900000,
@@ -2916,7 +2918,7 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
     
     async generateImage(input) {
         if (!input) {
-            this.printError('Please provide a prompt. Usage: /image <prompt> [--model gpt-image-2] [--size 1024x1024] [--quality auto]');
+            this.printError('Please provide a prompt. Usage: /image <prompt> [--model gpt-image-2] [--size auto] [--quality auto]');
             return;
         }
         
@@ -2924,7 +2926,7 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
         const { prompt, options } = this.parseImageArgs(input);
         
         if (!prompt) {
-            this.printError('Please provide a prompt. Usage: /image <prompt> [--model gpt-image-2] [--size 1024x1024] [--quality auto]');
+            this.printError('Please provide a prompt. Usage: /image <prompt> [--model gpt-image-2] [--size auto] [--quality auto]');
             return;
         }
         
@@ -2962,7 +2964,7 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
                     return;
                 }
 
-                this.printSystem('Image generated with ' + (response.model || options.model || 'gpt-image-2') + ' (' + (response.size || options.size || '1024x1024') + ')');
+                this.printSystem('Image generated with ' + (response.model || options.model || 'gpt-image-2') + ' (' + (response.size || options.size || 'auto') + ')');
                 this.printSystem('Saved ' + fileIds.length + ' image file(s): #' + fileIds.join(', #') + '. Use /download <id> or /open.');
             } else {
                 this.printError('No image data received from API');
@@ -2979,14 +2981,18 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
     
     /**
      * Parse image command arguments
-     * Supports: --model, --size, --quality, --style
+     * Supports: --model, --size, --quality, --style, --format, --compression, --background, --moderation
      */
     parseImageArgs(input) {
         const options = {
             model: null,
-            size: '1024x1024',
+            size: 'auto',
             quality: null,
-            style: null
+            style: null,
+            output_format: null,
+            output_compression: null,
+            background: null,
+            moderation: null
         };
         
         let prompt = input;
@@ -3017,6 +3023,30 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
         if (styleMatch) {
             options.style = styleMatch[1];
             prompt = prompt.replace(styleMatch[0], '').trim();
+        }
+
+        const formatMatch = input.match(/--(?:output-)?format\s+(\S+)/);
+        if (formatMatch) {
+            options.output_format = formatMatch[1];
+            prompt = prompt.replace(formatMatch[0], '').trim();
+        }
+
+        const compressionMatch = input.match(/--compression\s+(\S+)/);
+        if (compressionMatch) {
+            options.output_compression = Number(compressionMatch[1]);
+            prompt = prompt.replace(compressionMatch[0], '').trim();
+        }
+
+        const backgroundMatch = input.match(/--background\s+(\S+)/);
+        if (backgroundMatch) {
+            options.background = backgroundMatch[1];
+            prompt = prompt.replace(backgroundMatch[0], '').trim();
+        }
+
+        const moderationMatch = input.match(/--moderation\s+(\S+)/);
+        if (moderationMatch) {
+            options.moderation = moderationMatch[1];
+            prompt = prompt.replace(moderationMatch[0], '').trim();
         }
         
         return { prompt: prompt.trim(), options };

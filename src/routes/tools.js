@@ -196,6 +196,7 @@ function buildToolRuntime(toolId, options = {}) {
       agentModel: publicConfig.agentModel,
       timeoutMs: publicConfig.timeoutMs,
       maxTurns: publicConfig.maxTurns,
+      adminModeSupported: true,
       serverSideOnly: true,
     };
   }

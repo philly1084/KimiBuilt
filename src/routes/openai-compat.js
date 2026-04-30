@@ -2451,6 +2451,9 @@ router.post('/images/generations', async (req, res, next) => {
             style = null,
             background = 'auto',
             response_format = null,
+            output_format = null,
+            output_compression = null,
+            moderation = null,
             user = null,
             batch_mode = 'auto',
             batchMode = batch_mode,
@@ -2464,7 +2467,7 @@ router.post('/images/generations', async (req, res, next) => {
                 },
             });
         }
-        const requestedCount = Math.min(Math.max(Number(n) || 1, 1), 5);
+        const requestedCount = Math.min(Math.max(Number(n) || 1, 1), 10);
 
         let sessionId = resolveSessionId(req);
         const ownerId = getRequestOwnerId(req);
@@ -2498,6 +2501,9 @@ router.post('/images/generations', async (req, res, next) => {
             style,
             background,
             response_format,
+            output_format,
+            output_compression,
+            moderation,
             user,
             n: requestedCount,
             batchMode,

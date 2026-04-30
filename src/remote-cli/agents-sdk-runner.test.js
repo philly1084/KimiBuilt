@@ -4,7 +4,9 @@ const {
   RemoteCliAgentsSdkRunner,
   buildRemoteCliInstructions,
   extractRemoteCliRunMetadata,
+  hasRemoteSoftwareDeploymentIntent,
   resolveAgentsApiMode,
+  resolveAdminMode,
 } = require('./agents-sdk-runner');
 
 describe('RemoteCliAgentsSdkRunner', () => {
@@ -30,6 +32,28 @@ describe('RemoteCliAgentsSdkRunner', () => {
     expect(instructions).toContain('remote_code_status');
     expect(instructions).toContain('persistent private workbench');
     expect(instructions).toContain('sess_123');
+  });
+
+  test('adds admin runner guidance for real remote deployment work', () => {
+    const instructions = buildRemoteCliInstructions({
+      targetId: 'prod',
+      cwd: '/srv/apps/status-dashboard',
+      waitMs: 30000,
+      adminMode: true,
+    });
+
+    expect(instructions).toContain('Admin runner mode is enabled');
+    expect(instructions).toContain('do not retry the same blocked command');
+    expect(instructions).toContain('USER_INPUT_REQUIRED');
+  });
+
+  test('infers admin mode for remote software deployments but not inspections', () => {
+    expect(hasRemoteSoftwareDeploymentIntent(
+      'Build a new dashboard on the server and deploy it to k3s at status.demoserver2.buzz with ingress and TLS.',
+    )).toBe(true);
+    expect(resolveAdminMode({}, 'Inspect the k3s deployment logs for the backend service.')).toBe(false);
+    expect(resolveAdminMode({ adminMode: false }, 'Build and deploy a site on the server.')).toBe(false);
+    expect(resolveAdminMode({ runnerAdmin: true }, 'Inspect cluster status.')).toBe(true);
   });
 
   test('includes configured Gitea context in remote CLI instructions without exposing tokens', () => {
@@ -170,6 +194,7 @@ describe('RemoteCliAgentsSdkRunner', () => {
     const result = await runner.run({
       task: 'Fix the failing tests',
       waitMs: 30000,
+      adminMode: true,
     });
 
     expect(calls.mcpOptions).toMatchObject({
@@ -181,6 +206,7 @@ describe('RemoteCliAgentsSdkRunner', () => {
     expect(calls.mcpOptions.requestInit.headers.Authorization).toBe('Bearer gateway-secret');
     expect(calls.agentConfig.mcpServers).toHaveLength(1);
     expect(calls.agentConfig.instructions).toContain('Default targetId: prod');
+    expect(calls.agentConfig.instructions).toContain('Admin runner mode is enabled');
     expect(calls.runnerConfig.model).toBe('gpt-4o');
     expect(calls.runnerInput.input).toContain('Fix the failing tests');
     expect(calls.runnerInput.options.maxTurns).toBe(20);

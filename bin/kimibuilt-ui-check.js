@@ -27,7 +27,7 @@ function printUsage() {
   console.error([
     'Usage: kimibuilt-ui-check <url> [--out ui-checks] [--wait selector] [--timeout ms] [--viewports desktop:1440x960,mobile:390x844]',
     '',
-    'Captures Playwright screenshots and writes a JSON UI/UX check report.',
+    'Captures Playwright screenshots and writes a JSON UI/UX check report with layout, image, error, and text-contrast checks.',
   ].join('\n'));
 }
 
@@ -108,7 +108,7 @@ function normalizeUrl(value = '') {
   if (!normalized) {
     return '';
   }
-  return /^[a-z]+:\/\//i.test(normalized) ? normalized : `https://${normalized}`;
+  return /^[a-z][a-z0-9+.-]*:/i.test(normalized) ? normalized : `https://${normalized}`;
 }
 
 async function fileExists(filePath = '') {
@@ -133,6 +133,20 @@ async function resolveBrowserExecutable() {
     '/usr/bin/google-chrome-stable',
     '/snap/bin/chromium',
   ].map((entry) => normalizeText(entry)).filter(Boolean);
+
+  if (process.platform === 'win32') {
+    const programFiles = process.env.ProgramFiles || '';
+    const programFilesX86 = process.env['ProgramFiles(x86)'] || '';
+    const localAppData = process.env.LOCALAPPDATA || '';
+    candidates.push(
+      path.join(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      path.join(programFilesX86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      path.join(programFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+      path.join(programFilesX86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+      path.join(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      path.join(localAppData, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    );
+  }
 
   for (const candidate of candidates) {
     if (await fileExists(candidate)) {
@@ -177,6 +191,135 @@ function slugify(value = 'page') {
 async function collectUiMetrics(page) {
   return page.evaluate(() => {
     const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+    const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+    const parseCssColor = (value) => {
+      const normalized = String(value || '').trim().toLowerCase();
+      if (!normalized || normalized === 'transparent') {
+        return { r: 0, g: 0, b: 0, a: 0 };
+      }
+
+      const match = normalized.match(/^rgba?\(([^)]+)\)$/);
+      if (!match) {
+        return null;
+      }
+
+      const parts = match[1].split(',').map((part) => part.trim());
+      const parseChannel = (part) => {
+        const numeric = Number.parseFloat(part);
+        if (!Number.isFinite(numeric)) {
+          return 0;
+        }
+        return part.endsWith('%') ? (numeric / 100) * 255 : numeric;
+      };
+
+      const alpha = parts[3] === undefined ? 1 : Number.parseFloat(parts[3]);
+      return {
+        r: clamp(parseChannel(parts[0]), 0, 255),
+        g: clamp(parseChannel(parts[1]), 0, 255),
+        b: clamp(parseChannel(parts[2]), 0, 255),
+        a: clamp(Number.isFinite(alpha) ? alpha : 1, 0, 1),
+      };
+    };
+    const blendColor = (top, bottom) => {
+      const topAlpha = clamp(top?.a ?? 1, 0, 1);
+      const bottomAlpha = clamp(bottom?.a ?? 1, 0, 1);
+      const alpha = topAlpha + bottomAlpha * (1 - topAlpha);
+      if (alpha <= 0) {
+        return { r: 255, g: 255, b: 255, a: 1 };
+      }
+      return {
+        r: ((top.r * topAlpha) + (bottom.r * bottomAlpha * (1 - topAlpha))) / alpha,
+        g: ((top.g * topAlpha) + (bottom.g * bottomAlpha * (1 - topAlpha))) / alpha,
+        b: ((top.b * topAlpha) + (bottom.b * bottomAlpha * (1 - topAlpha))) / alpha,
+        a: alpha,
+      };
+    };
+    const relativeLuminance = (color) => {
+      const channel = (value) => {
+        const normalizedValue = clamp(value, 0, 255) / 255;
+        return normalizedValue <= 0.03928
+          ? normalizedValue / 12.92
+          : ((normalizedValue + 0.055) / 1.055) ** 2.4;
+      };
+      return (0.2126 * channel(color.r)) + (0.7152 * channel(color.g)) + (0.0722 * channel(color.b));
+    };
+    const contrastRatio = (foreground, background) => {
+      const first = relativeLuminance(foreground);
+      const second = relativeLuminance(background);
+      const lighter = Math.max(first, second);
+      const darker = Math.min(first, second);
+      return (lighter + 0.05) / (darker + 0.05);
+    };
+    const colorToHex = (color) => {
+      const toHex = (value) => Math.round(clamp(value, 0, 255)).toString(16).padStart(2, '0');
+      return `#${toHex(color.r)}${toHex(color.g)}${toHex(color.b)}`;
+    };
+    const getEffectiveBackground = (element) => {
+      const colors = [];
+      let current = element;
+      while (current && current.nodeType === 1) {
+        const parsed = parseCssColor(window.getComputedStyle(current).backgroundColor);
+        if (parsed && parsed.a > 0) {
+          colors.push(parsed);
+        }
+        current = current.parentElement;
+      }
+
+      let background = { r: 255, g: 255, b: 255, a: 1 };
+      for (let index = colors.length - 1; index >= 0; index -= 1) {
+        background = blendColor(colors[index], background);
+      }
+      return background;
+    };
+    const hasDirectText = (element) => Array.from(element.childNodes || [])
+      .some((node) => node.nodeType === Node.TEXT_NODE && normalize(node.textContent).length > 0);
+    const isTextContrastCandidate = (element) => {
+      const tag = element.tagName.toLowerCase();
+      if (['script', 'style', 'noscript', 'template', 'svg', 'path'].includes(tag) || element.closest('svg')) {
+        return false;
+      }
+      if (['input', 'textarea', 'select', 'button'].includes(tag)) {
+        return true;
+      }
+      return hasDirectText(element);
+    };
+    const measureTextContrast = (element) => {
+      const style = window.getComputedStyle(element);
+      const opacity = Number.parseFloat(style.opacity);
+      if (Number.isFinite(opacity) && opacity < 0.5) {
+        return null;
+      }
+
+      const textColor = parseCssColor(style.color);
+      if (!textColor || textColor.a <= 0) {
+        return null;
+      }
+
+      const background = getEffectiveBackground(element);
+      const visibleTextColor = textColor.a < 1 ? blendColor(textColor, background) : textColor;
+      const ratio = contrastRatio(visibleTextColor, background);
+      const fontSize = Number.parseFloat(style.fontSize) || 16;
+      const fontWeight = Number.parseInt(style.fontWeight, 10) || 400;
+      const isLargeText = fontSize >= 24 || (fontSize >= 18.66 && fontWeight >= 700);
+      const required = isLargeText ? 3 : 4.5;
+      const rect = element.getBoundingClientRect();
+
+      return {
+        tag: element.tagName.toLowerCase(),
+        id: element.id || '',
+        className: normalize(element.className || '').slice(0, 80),
+        text: normalize(element.innerText || element.textContent || element.getAttribute('aria-label') || element.getAttribute('placeholder') || '').slice(0, 120),
+        contrast: Math.round(ratio * 100) / 100,
+        required,
+        color: colorToHex(visibleTextColor),
+        background: colorToHex(background),
+        fontSize: Math.round(fontSize * 10) / 10,
+        fontWeight,
+        largeText: isLargeText,
+        top: Math.round(rect.top),
+        left: Math.round(rect.left),
+      };
+    };
     const viewportWidth = window.innerWidth;
     const doc = document.documentElement;
     const body = document.body;
@@ -209,6 +352,13 @@ async function collectUiMetrics(page) {
           width: Math.round(rect.width),
         };
       });
+    const textContrastSamples = visibleElements
+      .filter(isTextContrastCandidate)
+      .map(measureTextContrast)
+      .filter(Boolean);
+    const lowContrastText = textContrastSamples
+      .filter((sample) => sample.contrast < sample.required)
+      .slice(0, 16);
     const images = Array.from(document.querySelectorAll('img'))
       .map((element) => ({
         src: element.currentSrc || element.src || '',
@@ -237,6 +387,11 @@ async function collectUiMetrics(page) {
         .filter(Boolean)
         .slice(0, 16),
       interactiveControls: document.querySelectorAll('a[href], button, input, select, textarea, [role="button"], [tabindex]').length,
+      textContrast: {
+        checked: textContrastSamples.length,
+        lowContrastCount: textContrastSamples.filter((sample) => sample.contrast < sample.required).length,
+        lowContrast: lowContrastText,
+      },
       images: {
         count: images.length,
         broken: images.filter((image) => image.complete === false || image.naturalWidth <= 0).slice(0, 8),
@@ -338,6 +493,7 @@ async function run() {
           issues: [
             ...(metrics.horizontalOverflow ? ['horizontal-overflow'] : []),
             ...(metrics.bodyTextLength === 0 ? ['empty-body-text'] : []),
+            ...(metrics.textContrast?.lowContrastCount > 0 ? ['low-contrast-text'] : []),
             ...(pageErrors.length > 0 ? ['page-errors'] : []),
             ...(failedRequests.length > 0 ? ['failed-requests'] : []),
           ],

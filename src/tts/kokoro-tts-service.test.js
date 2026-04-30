@@ -1,4 +1,7 @@
 const { KokoroTtsService } = require('./kokoro-tts-service');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 function createAudio(wav = Buffer.from('RIFF-kokoro-audio')) {
     return {
@@ -77,6 +80,44 @@ describe('KokoroTtsService', () => {
             voice: expect.objectContaining({ id: 'af_heart', provider: 'kokoro' }),
         }));
         expect(result.audioBuffer.equals(Buffer.from('RIFF-kokoro-audio'))).toBe(true);
+    });
+
+    test('configures Transformers runtime before loading the model', async () => {
+        const transformersEnv = {};
+        const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimibuilt-kokoro-cache-'));
+        const fromPretrained = jest.fn(async () => ({ generate: jest.fn() }));
+        const service = new KokoroTtsService({
+            enabled: true,
+            modelId: 'test-model',
+            defaultVoiceId: 'af_heart',
+            voices: [{ id: 'af_heart', label: 'Heart Studio' }],
+            cacheDir,
+            localModelPath: '/models',
+            allowRemoteModels: false,
+        }, {
+            importTransformers: () => ({ env: transformersEnv }),
+            importKokoro: () => ({
+                KokoroTTS: {
+                    from_pretrained: fromPretrained,
+                },
+            }),
+        });
+
+        try {
+            await service.getModel();
+        } finally {
+            fs.rmSync(cacheDir, { recursive: true, force: true });
+        }
+
+        expect(transformersEnv).toEqual(expect.objectContaining({
+            cacheDir,
+            localModelPath: '/models',
+            allowRemoteModels: false,
+        }));
+        expect(fromPretrained).toHaveBeenCalledWith('test-model', {
+            dtype: 'q8',
+            device: 'cpu',
+        });
     });
 
     test('serializes concurrent generation requests', async () => {

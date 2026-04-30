@@ -23,6 +23,12 @@ WORKDIR /app
 ARG PIPER_TTS_VERSION=1.4.2
 ARG PIPER_VOICES_REF=v1.0.0
 ARG PIPER_VOICES_BASE_URL=https://huggingface.co/rhasspy/piper-voices/resolve
+ARG KOKORO_TTS_MODEL_ID=onnx-community/Kokoro-82M-v1.0-ONNX
+ARG KOKORO_TTS_DEVICE=cpu
+ARG KOKORO_TTS_DTYPE=q8
+ARG KOKORO_TTS_DEFAULT_VOICE_ID=af_heart
+ARG KOKORO_TTS_CACHE_DIR=/app/data/kokoro/cache
+ARG KOKORO_TTS_PORT=3001
 
 RUN apt-get update && \
   apt-get install -y --no-install-recommends chromium fonts-liberation ca-certificates openssh-client docker.io git curl bash python3 python3-pip ffmpeg && \
@@ -90,8 +96,27 @@ RUN mkdir -p /app/data/piper/voices && \
     "${PIPER_VOICES_BASE_URL}/${PIPER_VOICES_REF}/en/en_GB/cori/high/en_GB-cori-high.onnx.json" \
     --output /app/data/piper/voices/en_GB-cori-high.onnx.json
 
+RUN printf 'KimiBuilt Piper build check.\n' | piper \
+    --model /app/data/piper/voices/en_US-hfc_female-medium.onnx \
+    --config /app/data/piper/voices/en_US-hfc_female-medium.onnx.json \
+    --output_file /tmp/piper-check.wav \
+    --length_scale 1 \
+    --noise_scale 0.4 \
+    --noise_w 0.68 \
+    --sentence_silence 0.28 && \
+  test -s /tmp/piper-check.wav && \
+  rm -f /tmp/piper-check.wav
+
+RUN mkdir -p "${KOKORO_TTS_CACHE_DIR}" && \
+  KOKORO_TTS_MODEL_ID="${KOKORO_TTS_MODEL_ID}" \
+  KOKORO_TTS_DEVICE="${KOKORO_TTS_DEVICE}" \
+  KOKORO_TTS_DTYPE="${KOKORO_TTS_DTYPE}" \
+  KOKORO_TTS_DEFAULT_VOICE_ID="${KOKORO_TTS_DEFAULT_VOICE_ID}" \
+  KOKORO_TTS_CACHE_DIR="${KOKORO_TTS_CACHE_DIR}" \
+  node bin/kimibuilt-verify-tts-build.js
+
 RUN mkdir -p /home/kimibuilt/.kimibuilt && \
-  chmod 0755 /app/bin/kimibuilt-ingress.js /app/bin/kimibuilt-runner.js /app/bin/kimibuilt-ui-check.js && \
+  chmod 0755 /app/bin/kimibuilt-ingress.js /app/bin/kimibuilt-runner.js /app/bin/kimibuilt-ui-check.js /app/bin/kimibuilt-verify-tts-build.js && \
   chown -R kimibuilt:kimibuilt /home/kimibuilt /app
 
 ENV NODE_ENV=production
@@ -104,11 +129,14 @@ ENV KIMIBUILT_STATE_DIR=/home/kimibuilt/.kimibuilt
 ENV TTS_PROVIDER=kokoro
 ENV TTS_FALLBACK_PROVIDER=piper
 ENV KOKORO_TTS_ENABLED=true
-ENV KOKORO_TTS_MODEL_ID=onnx-community/Kokoro-82M-v1.0-ONNX
-ENV KOKORO_TTS_DEVICE=cpu
-ENV KOKORO_TTS_DTYPE=q8
+ENV KOKORO_TTS_MODEL_ID=${KOKORO_TTS_MODEL_ID}
+ENV KOKORO_TTS_DEVICE=${KOKORO_TTS_DEVICE}
+ENV KOKORO_TTS_DTYPE=${KOKORO_TTS_DTYPE}
 ENV KOKORO_TTS_VOICES_PATH=/app/data/kokoro/voices/manifest.json
-ENV KOKORO_TTS_DEFAULT_VOICE_ID=af_heart
+ENV KOKORO_TTS_DEFAULT_VOICE_ID=${KOKORO_TTS_DEFAULT_VOICE_ID}
+ENV KOKORO_TTS_CACHE_DIR=${KOKORO_TTS_CACHE_DIR}
+ENV KOKORO_TTS_ALLOW_REMOTE_MODELS=false
+ENV KOKORO_TTS_PORT=${KOKORO_TTS_PORT}
 ENV PIPER_TTS_BINARY_PATH=/usr/local/bin/piper
 ENV PIPER_TTS_VOICES_PATH=/app/data/piper/voices/manifest.json
 ENV OPENCODE_ENABLED=false

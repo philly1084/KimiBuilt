@@ -48,6 +48,23 @@ Clients (CLI / Web Chat / Canvas / Notation)
 
 ---
 
+## Generated HTML and Document Design Guardrails
+
+When an agent or program creates HTML, PDF-oriented HTML, DOCX, slide decks, dashboards, reports, or other visual artifacts:
+
+- Treat readability as a release requirement, not polish. Never ship white or near-white text on white, transparent, or pale backgrounds; never ship dark text on dark backgrounds.
+- Define explicit color pairs for each surface: page background, cards, panels, dark bands, image overlays, buttons, links, muted text, tables, callouts, and captions.
+- Target WCAG AA contrast: 4.5:1 for normal body text and 3:1 for large or bold display text. If unsure, make the contrast stronger.
+- For text over images, use a solid or strongly translucent overlay/panel and set both `color` and `background-color`; do not rely on the image staying dark enough.
+- Avoid one-note palettes. Use a small set of named design tokens such as `--text`, `--muted`, `--surface`, `--panel`, `--accent`, `--border`, and verify every token is readable where used.
+- Check responsive layout for clipped labels, text spilling out of buttons/cards, overlapping sections, horizontal overflow, and sticky elements covering content.
+- For print/PDF output, include print-safe styles with dark text on light backgrounds unless a dark printed panel is explicitly defined.
+- For generated HTML previews, run `node bin/kimibuilt-ui-check.js <url-or-file-url> --out ui-checks/<name>` before delivery when a browser is available. Treat `low-contrast-text`, `horizontal-overflow`, `empty-body-text`, broken images, and page errors as blockers to fix.
+- For generated DOCX/PDF/PPTX, render or preview the artifact and do a visual pass before delivery. Confirm titles, captions, tables, and callouts remain readable after export, not just in source HTML.
+- If a user gives a broken example, fix the design tokens and surface-level CSS first, then re-check the artifact instead of only rewriting prose.
+
+---
+
 ## Build and Test Commands
 
 ```bash
@@ -188,8 +205,10 @@ npx wscat -c ws://localhost:3000/ws
 The common remote operations target for this project is an Ubuntu Linux ARM64 server running k3s.
 
 When agents are using SSH or remote command tools:
+- Prefer `remote-cli-agent` for most remote software creation, update, and deployment work where an app, website, service, dashboard, or frontend must be changed and put live. Use `adminMode: true` for these scoped deployment loops so the remote agent can use the configured admin-capable CLI runner lane.
 - Prefer `k3s-deploy` for standard deploy operations: repo sync, manifest apply, image update, and rollout checks.
 - Prefer `remote-command` for kubectl inspection, logs, service status, network checks, package installs, one-off fixes, and post-deploy verification.
+- If `remote-cli-agent` asks for user input or emits `USER_INPUT_REQUIRED`, forward that concise decision to the user and continue the same remote CLI session with the answer. If it repeats the same blocked command or root error twice without a materially changed strategy, stop that loop and report the blocker plus the next distinct recovery path.
 - Default public web domain is `demoserver2.buzz` unless Admin deploy settings override it.
 - Wildcard DNS is in front of `demoserver2.buzz`; create concrete host routes such as `app.demoserver2.buzz`, not wildcard Ingress rules.
 - Use `node bin/kimibuilt-ingress.js` for Traefik/cert-manager/Let's Encrypt Ingress route setup or changes. It defaults to ingress class `traefik`, ClusterIssuer `letsencrypt-prod`, and ACME email `philly1084@gmail.com`, refuses accidental nginx ingress, and records `KIMIBUILT_INGRESS_EVENT` updates in the cluster registry.

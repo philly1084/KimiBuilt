@@ -17,11 +17,16 @@ const {
 } = require('./document-design-blueprints');
 const {
   buildDocumentDesignPlan,
+  buildDocumentBackgroundSpec,
   resolveDocumentTheme,
 } = require('./document-design-engine');
 const {
   buildDocumentCreativityPacket,
 } = require('./document-creativity');
+const {
+  buildDocumentQualityPlan,
+  summarizeDocumentQualityPlan,
+} = require('./document-quality');
 const {
   getDocumentLayoutOptions,
   findDocumentLayout,
@@ -327,11 +332,19 @@ class DocumentService {
       theme: options.theme || options.style || '',
       designOptionId: options.designOptionId || '',
     });
+    const qualityStandard = summarizeDocumentQualityPlan(
+      designPlan?.qualityStandard || buildDocumentQualityPlan({
+        documentType: designPlan?.inferredType || options.documentType || 'document',
+        format,
+        designPlan,
+      }),
+    );
 
     if (this.shouldUsePresentationPipeline(options.documentType, format)) {
       return this.generatePresentation(prompt, {
         ...options,
         format,
+        designPlan,
       });
     }
 
@@ -365,6 +378,7 @@ class DocumentService {
         themeSuggestion: designPlan?.themeSuggestion || '',
         designOptionId: designPlan?.selectedDesignOption?.id || '',
         designOptionLabel: designPlan?.selectedDesignOption?.label || '',
+        qualityStandard,
         designPlan,
         ...content.metadata,
         ...document.metadata
@@ -604,6 +618,15 @@ class DocumentService {
     const previewDeck = this.renderPresentationDeck(presentationContent, options);
     const previewHtml = String(previewDeck.content || '');
     const extractedText = stripHtml(previewHtml);
+    const qualityStandard = typeof presentationContent.metadata?.qualityStandard === 'object'
+      ? presentationContent.metadata.qualityStandard
+      : summarizeDocumentQualityPlan(
+        designPlan?.qualityStandard || buildDocumentQualityPlan({
+          documentType: designPlan?.inferredType || options.documentType || 'presentation',
+          format,
+          designPlan,
+        }),
+      );
 
     if (format === 'html') {
       document = this.renderPresentationDeck(presentationContent, options);
@@ -636,6 +659,8 @@ class DocumentService {
         format,
         generatedAt: new Date().toISOString(),
         aiGenerated: typeof content === 'string',
+        ...(presentationContent.metadata || {}),
+        qualityStandard,
         designPlan,
         slideCount: presentationContent.slides?.length,
         theme: presentationContent.theme || options.theme || 'editorial',
@@ -1300,29 +1325,30 @@ class DocumentService {
     const common = {
       customGeneration: true,
       templateUse: 'Templates provide structure and constraints; final artifacts are generated through the active render pipeline.',
-      supportingTools: ['document-design-engine', 'document-layout-catalog'],
+      supportingTools: ['document-design-engine', 'document-layout-catalog', 'document-quality-standard'],
+      qualityPasses: ['strategy-architect', 'background-art-director', 'evidence-editor', 'accessibility-reviewer', 'final-polish-editor'],
     };
 
     const toolchains = {
       html: {
         ...common,
-        renderPipeline: ['ai-document-generator', 'document-design-engine', 'html-renderer'],
+        renderPipeline: ['ai-document-generator', 'multi-agent-quality-pass', 'document-design-engine', 'html-renderer'],
         computeTools: ['graph-diagram', 'code-sandbox'],
-        visualCapabilities: ['curated layout shells', 'section images', 'inline charts', 'Mermaid-ready HTML'],
+        visualCapabilities: ['background surface system', 'curated layout shells', 'section images', 'inline charts', 'Mermaid-ready HTML'],
         packageTargets: ['static-html', 'vite-preview-bundle'],
       },
       pdf: {
         ...common,
-        renderPipeline: ['html-renderer', 'headless-browser-pdf', 'pdfmake-fallback'],
+        renderPipeline: ['ai-document-generator', 'multi-agent-quality-pass', 'html-renderer', 'headless-browser-pdf', 'pdfmake-fallback'],
         computeTools: ['graph-diagram', 'artifact-renderer'],
-        visualCapabilities: ['browser-rendered layout fidelity', 'embedded images', 'charts', 'tables'],
+        visualCapabilities: ['background surface system', 'browser-rendered layout fidelity', 'embedded images', 'charts', 'tables'],
         packageTargets: ['pdf'],
       },
       pptx: {
         ...common,
-        renderPipeline: ['ai-presentation-structure', 'pptxgenjs'],
+        renderPipeline: ['ai-presentation-structure', 'multi-agent-quality-pass', 'pptxgenjs'],
         computeTools: ['image-generation', 'graph-diagram'],
-        visualCapabilities: ['custom slide layouts', 'image slides', 'metric cards', 'chart slides'],
+        visualCapabilities: ['background surface system', 'custom slide layouts', 'image slides', 'metric cards', 'chart slides'],
         packageTargets: ['pptx', 'html-deck-preview'],
       },
       xlsx: {
@@ -1365,7 +1391,8 @@ class DocumentService {
       ],
       policy: {
         templateUse: 'Use templates as curated starting structures, not final canned output.',
-        visualDocuments: 'Prefer generated charts, diagrams, verified images, browser-rendered PDFs, and Vite/static preview bundles when they materially improve the deliverable.',
+        visualDocuments: 'Prefer generated charts, diagrams, verified images, intentional background systems, browser-rendered PDFs, and Vite/static preview bundles when they materially improve the deliverable.',
+        qualityStandard: 'AI document generation includes built-in strategy, background design, evidence, accessibility, and final polish passes unless explicitly disabled.',
       },
     };
   }
@@ -1413,6 +1440,15 @@ class DocumentService {
     });
     const selectedDesignOption = designOptions[0] || null;
     const themeSuggestion = theme || selectedDesignOption?.defaultTheme || creativity.themeSuggestion;
+    const qualityStandard = buildDocumentQualityPlan({
+      documentType: recommendation.inferredType,
+      format: recommendation.recommendedFormat || format,
+      designPlan: {
+        selectedDesignOption,
+        creativeDirection: creativity.direction,
+        themeSuggestion,
+      },
+    });
 
     return {
       ...recommendation,
@@ -1430,6 +1466,7 @@ class DocumentService {
         label: creativity.direction.label,
         rationale: creativity.direction.rationale,
       },
+      qualityStandard,
       humanizationNotes: creativity.humanizationNotes,
       sampleHandling: creativity.sampleSignals.guidance,
       contextSignals: {
@@ -1609,6 +1646,10 @@ class DocumentService {
           design: {
             blueprint: designPlan.blueprint.id,
             theme: designPlan.theme.id,
+            background: designPlan.background ? {
+              id: designPlan.background.id,
+              label: designPlan.background.label,
+            } : null,
             outlineItems: designPlan.outline.length,
             layout: designPlan.layoutChoice?.id || null,
           },
@@ -1642,6 +1683,10 @@ class DocumentService {
             design: {
               blueprint: designPlan.blueprint.id,
               theme: designPlan.theme.id,
+              background: designPlan.background ? {
+                id: designPlan.background.id,
+                label: designPlan.background.label,
+              } : null,
               outlineItems: designPlan.outline.length,
               layout: designPlan.layoutChoice?.id || null,
             },
@@ -1753,7 +1798,10 @@ class DocumentService {
       ].join('\n');
 
       return {
-        content: ensureHtmlDocument(`${this.renderDocumentStyles(plan.theme)}${body}`, title),
+        content: ensureHtmlDocument(
+          `<html><head>${this.renderDocumentStyles(plan.theme, plan.background)}</head><body>${body}</body></html>`,
+          title,
+        ),
         mimeType: 'text/html',
       };
     }
@@ -2521,8 +2569,8 @@ class DocumentService {
     const slides = Array.isArray(presentation.slides) ? presentation.slides : [];
     const title = presentation.title || 'Presentation';
     const subtitle = presentation.subtitle ? `<p class="deck-subtitle">${this.escapeHtml(presentation.subtitle)}</p>` : '';
+    const styles = this.renderPresentationStyles(theme);
     const html = [
-      this.renderPresentationStyles(theme),
       `<div class="presentation-deck theme-${theme.id}">`,
       `<header class="deck-meta"><span>Website Slides</span><span>${slides.length} slides</span></header>`,
       `<main class="deck-track">`,
@@ -2533,7 +2581,10 @@ class DocumentService {
     ].join('\n');
 
     return {
-      content: ensureHtmlDocument(html, title),
+      content: ensureHtmlDocument(
+        `<html><head>${styles}</head><body>${html}</body></html>`,
+        title,
+      ),
       mimeType: 'text/html',
       metadata: {
         format: 'html',
@@ -2697,14 +2748,23 @@ class DocumentService {
     return resolveDocumentTheme(theme);
   }
 
-  renderDocumentStyles(theme) {
+  renderDocumentStyles(theme, background = null) {
+    const resolvedBackground = background || buildDocumentBackgroundSpec({ theme });
+
     return `
       <style>
         :root {
           --doc-bg: ${theme.background};
+          --doc-bg-end: ${resolvedBackground.canvasEnd || theme.background};
+          --doc-bg-wash: ${resolvedBackground.wash || theme.accentSoft};
+          --doc-bg-wash-soft: ${resolvedBackground.washSoft || theme.panelAlt};
+          --doc-bg-grid: ${resolvedBackground.gridLine || 'rgba(15, 23, 42, 0.04)'};
+          --doc-bg-texture: ${resolvedBackground.textureLine || 'rgba(15, 23, 42, 0.03)'};
+          --doc-shadow: ${resolvedBackground.shadow || 'rgba(15, 23, 42, 0.12)'};
           --doc-page: ${theme.page};
           --doc-panel: ${theme.panel};
           --doc-panel-alt: ${theme.panelAlt};
+          --doc-chip-bg: ${theme.panelAlt};
           --doc-text: ${theme.text};
           --doc-muted: ${theme.muted};
           --doc-accent: ${theme.accent};
@@ -2712,10 +2772,24 @@ class DocumentService {
           --doc-border: ${theme.border};
           --doc-chart-start: ${theme.chartStart};
           --doc-chart-end: ${theme.chartEnd};
+          --doc-print-bg: ${resolvedBackground.print?.background || '#ffffff'};
+          --doc-print-text: ${resolvedBackground.print?.text || '#111827'};
+          --doc-print-muted: ${resolvedBackground.print?.muted || '#374151'};
+          --doc-print-border: ${resolvedBackground.print?.border || '#d1d5db'};
         }
-        body { background: radial-gradient(circle at top, var(--doc-accent-soft), var(--doc-bg) 42%); color: var(--doc-text); font-family: "Aptos", "Segoe UI", sans-serif; margin: 0; }
+        body {
+          background:
+            linear-gradient(135deg, var(--doc-bg-wash) 0, transparent 28rem),
+            linear-gradient(180deg, var(--doc-bg-wash-soft) 0, transparent 18rem),
+            repeating-linear-gradient(90deg, var(--doc-bg-grid) 0 1px, transparent 1px 104px),
+            repeating-linear-gradient(0deg, var(--doc-bg-texture) 0 1px, transparent 1px 104px),
+            linear-gradient(180deg, var(--doc-bg), var(--doc-bg-end));
+          color: var(--doc-text);
+          font-family: "Aptos", "Segoe UI", sans-serif;
+          margin: 0;
+        }
         .document-shell { max-width: 1040px; margin: 0 auto; padding: 36px 24px 72px; }
-        .document-hero { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 20px; background: var(--doc-page); border: 1px solid var(--doc-border); border-radius: 28px; padding: 30px; box-shadow: 0 24px 70px rgba(15, 23, 42, 0.10); }
+        .document-hero { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 20px; background: var(--doc-page); border: 1px solid var(--doc-border); border-radius: 28px; padding: 30px; box-shadow: 0 24px 70px var(--doc-shadow); }
         .document-eyebrow, .section-layout, .summary-panel-label, .insight-card span { color: var(--doc-accent); text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.78rem; font-weight: 700; }
         .document-hero h1 { font-size: clamp(2.4rem, 5vw, 4.6rem); line-height: 0.94; margin: 0; max-width: 11ch; }
         .document-subtitle, .document-hero-narrative, .summary-panel-label + strong + p, .insight-card p, .document-outline em, .document-stat p { color: var(--doc-muted); }
@@ -2724,9 +2798,9 @@ class DocumentService {
         .document-summary-panel { border-radius: 22px; background: linear-gradient(180deg, var(--doc-panel-alt), var(--doc-panel)); padding: 18px; border: 1px solid var(--doc-border); display: flex; flex-direction: column; gap: 10px; }
         .document-summary-panel strong { font-size: 1.1rem; }
         .summary-panel-ideas { display: flex; flex-wrap: wrap; gap: 8px; }
-        .summary-panel-ideas span { font-size: 0.82rem; color: var(--doc-muted); background: rgba(255,255,255,0.65); border: 1px solid var(--doc-border); border-radius: 999px; padding: 6px 9px; }
+        .summary-panel-ideas span { font-size: 0.82rem; color: var(--doc-text); background: var(--doc-chip-bg); border: 1px solid var(--doc-border); border-radius: 999px; padding: 6px 9px; }
         .document-insight-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin: 18px 0; }
-        .insight-card { border-radius: 20px; background: rgba(255,255,255,0.72); border: 1px solid var(--doc-border); padding: 18px; backdrop-filter: blur(8px); }
+        .insight-card { border-radius: 20px; background: var(--doc-page); border: 1px solid var(--doc-border); padding: 18px; box-shadow: 0 12px 38px var(--doc-shadow); }
         .insight-card strong { display: block; font-size: 1.3rem; margin-top: 8px; }
         .document-layout-frame { display: grid; gap: 18px; }
         .document-outline { background: var(--doc-page); border: 1px solid var(--doc-border); border-radius: 22px; padding: 22px; margin: 14px 0 20px; }
@@ -2795,27 +2869,77 @@ class DocumentService {
           .document-outline a, .chart-row { grid-template-columns: 1fr; }
           .document-layout-field-guide-rail .document-outline { position: static; }
         }
+        @media print {
+          body { background: var(--doc-print-bg) !important; color: var(--doc-print-text) !important; }
+          .document-shell { max-width: none; padding: 0; }
+          .document-hero,
+          .document-summary-panel,
+          .insight-card,
+          .document-outline,
+          .document-section,
+          .section-chrome,
+          .section-content,
+          .document-stat,
+          .document-callout,
+          table {
+            background: var(--doc-print-bg) !important;
+            color: var(--doc-print-text) !important;
+            border-color: var(--doc-print-border) !important;
+            box-shadow: none !important;
+          }
+          .document-subtitle,
+          .document-hero-narrative,
+          .summary-panel-label + strong + p,
+          .insight-card p,
+          .document-outline em,
+          .document-stat p,
+          .document-image figcaption {
+            color: var(--doc-print-muted) !important;
+          }
+        }
       </style>
     `;
   }
 
   renderPresentationStyles(theme) {
+    const background = buildDocumentBackgroundSpec({
+      theme,
+      layoutChoice: { id: 'presentation-deck', label: 'Presentation Deck' },
+      format: 'html',
+    });
+
     return `
       <style>
         :root {
           --deck-bg: ${theme.background};
+          --deck-bg-end: ${background.canvasEnd || theme.background};
+          --deck-bg-wash: ${background.wash || theme.accentSoft};
+          --deck-bg-wash-soft: ${background.washSoft || theme.panelAlt};
+          --deck-bg-grid: ${background.gridLine || 'rgba(15, 23, 42, 0.04)'};
+          --deck-shadow: ${background.shadow || 'rgba(15, 23, 42, 0.14)'};
           --deck-panel: ${theme.panel};
+          --deck-card: ${theme.panelAlt};
+          --deck-border: ${theme.border || 'rgba(15,23,42,0.12)'};
           --deck-text: ${theme.text};
           --deck-muted: ${theme.muted};
           --deck-accent: ${theme.accent};
           --deck-accent-soft: ${theme.accentSoft};
         }
-        body { margin: 0; background: linear-gradient(180deg, var(--deck-bg), #dfe7f1); color: var(--deck-text); font-family: "Space Grotesk", "Segoe UI", sans-serif; }
+        body {
+          margin: 0;
+          background:
+            linear-gradient(135deg, var(--deck-bg-wash) 0, transparent 30rem),
+            linear-gradient(180deg, var(--deck-bg-wash-soft) 0, transparent 20rem),
+            repeating-linear-gradient(90deg, var(--deck-bg-grid) 0 1px, transparent 1px 112px),
+            linear-gradient(180deg, var(--deck-bg), var(--deck-bg-end));
+          color: var(--deck-text);
+          font-family: "Space Grotesk", "Segoe UI", sans-serif;
+        }
         .presentation-deck { padding: 28px; }
         .deck-meta, .deck-footer { max-width: 1180px; margin: 0 auto 18px; display: flex; justify-content: space-between; color: var(--deck-muted); font-size: 0.92rem; letter-spacing: 0.08em; text-transform: uppercase; }
         .deck-track { max-width: 1180px; margin: 0 auto; display: grid; gap: 28px; }
-        .deck-slide { min-height: 88vh; background: var(--deck-panel); border-radius: 32px; padding: 48px; position: relative; overflow: hidden; box-shadow: 0 30px 80px rgba(15, 23, 42, 0.12); }
-        .deck-slide::before { content: ""; position: absolute; inset: 0 auto auto 0; width: 220px; height: 220px; background: radial-gradient(circle, var(--deck-accent-soft), transparent 70%); opacity: 0.9; }
+        .deck-slide { min-height: 88vh; background: var(--deck-panel); border: 1px solid var(--deck-border); border-radius: 32px; padding: 48px; position: relative; overflow: hidden; box-shadow: 0 30px 80px var(--deck-shadow); }
+        .deck-slide::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 8px; background: linear-gradient(90deg, var(--deck-accent), transparent 76%); opacity: 0.9; }
         .deck-slide h2 { font-size: clamp(2.4rem, 5vw, 4.4rem); line-height: 0.95; margin: 0 0 12px; max-width: 10ch; position: relative; }
         .slide-index { position: absolute; top: 32px; right: 36px; color: var(--deck-muted); font-size: 0.9rem; letter-spacing: 0.08em; }
         .slide-kicker { color: var(--deck-accent); text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.8rem; margin: 0 0 16px; position: relative; }
@@ -2826,7 +2950,7 @@ class DocumentService {
         .slide-figure figcaption { margin-top: 10px; color: var(--deck-muted); font-size: 0.9rem; }
         .slide-bullets { max-width: 58ch; display: grid; gap: 10px; padding-left: 1.25rem; }
         .slide-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-top: 24px; }
-        .stat-card, .column-card { padding: 18px; border-radius: 18px; background: rgba(255,255,255,0.6); border: 1px solid rgba(15,23,42,0.08); backdrop-filter: blur(8px); }
+        .stat-card, .column-card { padding: 18px; border-radius: 18px; background: var(--deck-card); border: 1px solid var(--deck-border); }
         .stat-card span { display: block; color: var(--deck-muted); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.08em; }
         .stat-card strong { display: block; font-size: 1.8rem; margin-top: 6px; }
         .slide-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
@@ -2837,12 +2961,30 @@ class DocumentService {
         .layout-title { display: flex; flex-direction: column; justify-content: center; }
         .layout-section { background: linear-gradient(135deg, var(--deck-accent), #111827); color: #fff; }
         .layout-section .slide-kicker, .layout-section .slide-subtitle, .layout-section .slide-visual-note, .layout-section .slide-index { color: rgba(255,255,255,0.78); }
-        .layout-section::before { background: radial-gradient(circle, rgba(255,255,255,0.12), transparent 70%); }
+        .layout-section::before { background: linear-gradient(90deg, rgba(255,255,255,0.44), transparent 76%); }
         @media (max-width: 768px) {
           .presentation-deck { padding: 12px; }
           .deck-slide { min-height: auto; padding: 28px 22px; border-radius: 24px; }
           .slide-columns, .slide-stats { grid-template-columns: 1fr; }
           .chart-row { grid-template-columns: 1fr; }
+        }
+        @media print {
+          body { background: #ffffff !important; color: #111827 !important; }
+          .presentation-deck { padding: 0; }
+          .deck-slide,
+          .stat-card,
+          .column-card {
+            background: #ffffff !important;
+            color: #111827 !important;
+            border-color: #d1d5db !important;
+            box-shadow: none !important;
+          }
+          .slide-subtitle,
+          .slide-visual-note,
+          .deck-footer p,
+          .stat-card span {
+            color: #374151 !important;
+          }
         }
       </style>
     `;

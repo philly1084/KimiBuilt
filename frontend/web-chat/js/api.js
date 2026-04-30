@@ -2155,6 +2155,7 @@ class OpenAIAPIClient extends EventTarget {
 
     async invokeRemoteCliAgent(task, options = {}) {
         const normalizedTask = String(task || '').trim();
+        const normalizedModel = String(options.model || '').trim();
         if (!normalizedTask) {
             throw new Error('Remote agent task is required.');
         }
@@ -2163,11 +2164,13 @@ class OpenAIAPIClient extends EventTarget {
             task: normalizedTask,
             waitMs: options.waitMs || 30000,
             maxTurns: options.maxTurns || 30,
-            ...(options.cwd ? { cwd: options.cwd } : {}),
-            ...(options.targetId ? { targetId: options.targetId } : {}),
-            ...(options.sessionId ? { sessionId: options.sessionId } : {}),
-            ...(options.mcpSessionId ? { mcpSessionId: options.mcpSessionId } : {}),
-        }, {
+            ...(normalizedModel ? { model: normalizedModel } : {}),
+              ...(options.cwd ? { cwd: options.cwd } : {}),
+              ...(options.targetId ? { targetId: options.targetId } : {}),
+              ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+              ...(options.mcpSessionId ? { mcpSessionId: options.mcpSessionId } : {}),
+              ...(options.adminMode !== undefined ? { adminMode: options.adminMode === true } : {}),
+          }, {
             executionProfile: 'remote-build',
             metadata: {
                 remoteBuildAutonomyApproved: true,

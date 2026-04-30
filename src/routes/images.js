@@ -47,6 +47,9 @@ const imageSchema = {
     style: { required: false, type: 'string' },
     background: { required: false, type: 'string' },
     response_format: { required: false, type: 'string' },
+    output_format: { required: false, type: 'string' },
+    output_compression: { required: false, type: 'number' },
+    moderation: { required: false, type: 'string' },
     user: { required: false, type: 'string' },
     n: { required: false, type: 'number' },
     batchMode: { required: false, type: 'string', enum: ['auto', 'single', 'parallel'] },
@@ -86,6 +89,9 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
             style = null,
             background = 'auto',
             response_format = null,
+            output_format = null,
+            output_compression = null,
+            moderation = null,
             user = null,
             n = 1,
             batchMode = 'auto',
@@ -99,7 +105,7 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
             });
         }
         const promptText = extractPromptText(prompt);
-        const requestedCount = Math.min(Math.max(Number(n) || 1, 1), 5);
+        const requestedCount = Math.min(Math.max(Number(n) || 1, 1), 10);
         let { sessionId } = req.body;
         const ownerId = getRequestOwnerId(req);
         const requestedClientSurface = resolveClientSurface(req.body || {}, null, 'image');
@@ -134,6 +140,9 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
             style,
             background,
             response_format,
+            output_format,
+            output_compression,
+            moderation,
             user,
             n: requestedCount,
             batchMode,
@@ -183,6 +192,9 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
             quality: normalizedResponse.quality,
             style: normalizedResponse.style,
             background: normalizedResponse.background,
+            output_format: normalizedResponse.output_format,
+            output_compression: normalizedResponse.output_compression,
+            moderation: normalizedResponse.moderation,
             batch: normalizedResponse.batch,
         });
     } catch (err) {

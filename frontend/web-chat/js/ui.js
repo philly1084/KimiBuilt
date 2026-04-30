@@ -7748,6 +7748,24 @@ class UIHelpers {
                             <div class="command-item-desc">List remote command catalog entries</div>
                         </div>
                     </div>
+                    <div class="command-item" data-action="insert-tool-command:/remote agent " role="option" tabindex="0">
+                        <div class="command-item-icon">
+                            <i data-lucide="bot"></i>
+                        </div>
+                        <div class="command-item-content">
+                            <div class="command-item-title">Remote CLI Agent</div>
+                            <div class="command-item-desc">Insert /remote agent &lt;task&gt; using the selected router model</div>
+                        </div>
+                    </div>
+                    <div class="command-item" data-action="open-model-selector" role="option" tabindex="0">
+                        <div class="command-item-icon">
+                            <i data-lucide="cpu"></i>
+                        </div>
+                        <div class="command-item-content">
+                            <div class="command-item-title">Remote CLI Agent Model</div>
+                            <div class="command-item-desc">Choose the router model used by chat and /remote agent</div>
+                        </div>
+                    </div>
                     <div class="command-item" data-action="insert-tool-command:/remote run " role="option" tabindex="0">
                         <div class="command-item-icon">
                             <i data-lucide="square-terminal"></i>
@@ -7839,8 +7857,10 @@ class UIHelpers {
             { category: 'Actions', icon: 'plus', title: 'New Chat', description: 'Start a new conversation', action: 'new-chat', shortcut: 'Ctrl+N' },
             { category: 'Actions', icon: 'image', title: 'Create Image', description: 'Generate AI images or search Unsplash', action: 'open-image-modal', shortcut: 'Ctrl+I' },
             { category: 'Actions', icon: 'camera', title: 'Search Unsplash', description: 'Find free stock photos', action: 'open-image-modal:unsplash' },
-            { category: 'Actions', icon: 'terminal', title: 'Remote Status', description: 'Insert the /remote status command into chat', action: 'insert-tool-command:/remote status' },
-            { category: 'Actions', icon: 'square-terminal', title: 'Run Remote Command', description: 'Insert the /remote run command into chat', action: 'insert-tool-command:/remote run ' },
+            { category: 'Remote CLI', icon: 'terminal', title: 'Remote Status', description: 'Insert the /remote status command into chat', action: 'insert-tool-command:/remote status' },
+            { category: 'Remote CLI', icon: 'bot', title: 'Remote CLI Agent', description: 'Insert /remote agent using the selected router model', action: 'insert-tool-command:/remote agent ' },
+            { category: 'Remote CLI', icon: 'cpu', title: 'Remote CLI Agent Model', description: 'Choose the router model used by chat and /remote agent', action: 'open-model-selector' },
+            { category: 'Remote CLI', icon: 'square-terminal', title: 'Run Remote Command', description: 'Insert the /remote run command into chat', action: 'insert-tool-command:/remote run ' },
             { category: 'Actions', icon: 'wrench', title: 'List Tools', description: 'Insert the /tools command into chat', action: 'insert-tool-command:/tools' },
             { category: 'Actions', icon: 'folder-open', title: 'Open File Manager', description: 'View and manage session files', action: 'open-file-manager', shortcut: 'Ctrl+Shift+F' },
             { category: 'Actions', icon: 'search', title: 'Search Messages', description: 'Search in current conversation', action: 'search', shortcut: 'Ctrl+F' },

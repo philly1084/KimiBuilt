@@ -10,6 +10,11 @@ const {
 const {
   renderDocumentLayoutPromptContext,
 } = require('./document-layout-catalog');
+const {
+  buildDocumentQualityPlan,
+  renderDocumentQualityPromptContext,
+  summarizeDocumentQualityPlan,
+} = require('./document-quality');
 
 const TOOL_PROCESS_TEXT_PATTERNS = [
   /\b(?:web-search|web-fetch|web-scrape|document-workflow|tool call|tool step|function call)\b/i,
@@ -483,13 +488,20 @@ class AIDocumentGenerator {
         });
       }
 
-      return normalizedContent;
+      return this.applyDocumentQualityPass(prompt, normalizedContent, {
+        ...options,
+        documentType: options.documentType || 'document',
+      });
     } catch (error) {
       console.error('[AIDocumentGenerator] Generation failed:', error);
       if (error?.responseText) {
-        return this.normalizeDocumentStructure(
+        const fallbackContent = this.normalizeDocumentStructure(
           this.buildFallbackDocumentFromText(error.responseText, prompt, options),
         );
+        return this.applyDocumentQualityPass(prompt, fallbackContent, {
+          ...options,
+          documentType: options.documentType || 'document',
+        });
       }
       throw new Error(`AI generation failed: ${error.message}`);
     }
@@ -527,6 +539,100 @@ class AIDocumentGenerator {
     });
 
     return isHeadingScaffolded;
+  }
+
+  shouldRunQualityPass(options = {}) {
+    return options.qualityPass !== false && options.disableQualityPass !== true;
+  }
+
+  buildDocumentQualityRevisionPrompt(prompt = '', content = {}, options = {}) {
+    const qualityPlan = buildDocumentQualityPlan({
+      documentType: options.documentType || 'document',
+      format: options.format || 'html',
+      designPlan: options.designPlan || null,
+    });
+
+    return [
+      renderDocumentQualityPromptContext(qualityPlan),
+      '<source_request>',
+      String(prompt || '').trim(),
+      '</source_request>',
+      options.templateContext ? '<template_context>' : null,
+      options.templateContext || null,
+      options.templateContext ? '</template_context>' : null,
+      this.renderDesignPlanPrompt(options.designPlan),
+      '<current_document_json>',
+      JSON.stringify(content, null, 2),
+      '</current_document_json>',
+      '<revision_instructions>',
+      '- Return only the revised JSON object using the same document schema.',
+      '- Preserve accurate facts, numbers, citations, URLs, names, and constraints from the current draft and source request.',
+      '- Improve document architecture, heading specificity, background/design readiness, evidence interpretation, and final prose polish.',
+      '- Prefer small precise improvements over rewriting good content into generic prose.',
+      '- Keep title, subtitle, theme, sections, and metadata valid for the renderer.',
+      '- Add metadata.qualityStandard and metadata.qualityNotes summarizing the revision, but do not expose internal pass names in visible copy.',
+      '- Do not output markdown fences, commentary, or any text outside the JSON object.',
+      '</revision_instructions>',
+    ].filter(Boolean).join('\n');
+  }
+
+  async applyDocumentQualityPass(prompt = '', content = {}, options = {}) {
+    const qualityPlan = buildDocumentQualityPlan({
+      documentType: options.documentType || 'document',
+      format: options.format || 'html',
+      designPlan: options.designPlan || null,
+    });
+    const qualitySummary = summarizeDocumentQualityPlan(qualityPlan);
+
+    if (!this.shouldRunQualityPass(options)) {
+      return {
+        ...content,
+        metadata: {
+          ...(content.metadata || {}),
+          qualityStandard: qualitySummary,
+          qualityPassApplied: false,
+          qualityPassSkipped: true,
+        },
+      };
+    }
+
+    try {
+      const revised = await this.requestJson({
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a document quality council. Run the specialist review passes silently, then return only corrected JSON.',
+          },
+          {
+            role: 'user',
+            content: this.buildDocumentQualityRevisionPrompt(prompt, content, options),
+          },
+        ],
+        model: options.qualityModel || options.model || 'gpt-4o',
+        reasoningEffort: options.qualityReasoningEffort || options.reasoningEffort || null,
+      });
+      const normalized = this.normalizeDocumentStructure(revised);
+
+      return {
+        ...normalized,
+        metadata: {
+          ...(normalized.metadata || {}),
+          qualityStandard: normalized.metadata?.qualityStandard || qualitySummary,
+          qualityPassApplied: true,
+        },
+      };
+    } catch (error) {
+      console.warn('[AIDocumentGenerator] Quality pass failed:', error.message);
+      return {
+        ...content,
+        metadata: {
+          ...(content.metadata || {}),
+          qualityStandard: qualitySummary,
+          qualityPassApplied: false,
+          qualityPassError: String(error.message || 'Quality pass failed').slice(0, 180),
+        },
+      };
+    }
   }
 
   /**
@@ -709,6 +815,11 @@ Return JSON:
       format: options.format || '',
       designPlan: options.designPlan,
     });
+    const qualityPlan = buildDocumentQualityPlan({
+      documentType,
+      format: options.format || 'html',
+      designPlan: options.designPlan || null,
+    });
     const planPrompt = this.renderDesignPlanPrompt(options.designPlan);
 
     const lengthGuidance = {
@@ -741,7 +852,15 @@ Return JSON:
         format: options.format || '',
       }),
       renderDocumentLayoutPromptContext(options.designPlan, options.format),
+      renderDocumentQualityPromptContext(qualityPlan),
       planPrompt,
+      '<visual_safety>',
+      '- Treat the page background, content surface, panels, dark bands, table headers, chart areas, captions, and muted text as explicit color-paired surfaces.',
+      '- Choose theme, callout, table, chart, and image treatments that keep text readable against their backgrounds.',
+      '- Avoid white or near-white text unless the surface behind it is explicitly dark.',
+      '- Avoid dark text on dark panels; normal body text should have strong contrast and muted text must still be readable.',
+      '- For HTML, PDF, and presentation-oriented outputs, assume the renderer will be visually checked on desktop and mobile and keep layouts free of overlapping or clipped text.',
+      '</visual_safety>',
       '<output_contract>',
       'Return a JSON object with this exact structure:',
       '{',
@@ -783,7 +902,8 @@ Return JSON:
       '  "metadata": {',
       '    "wordCount": 1234,',
       '    "estimatedPages": 5,',
-      '    "keywords": ["keyword1", "keyword2"]',
+      '    "keywords": ["keyword1", "keyword2"],',
+      `    "qualityStandard": "${qualityPlan.version}"`,
       '  }',
       '}',
       '</output_contract>',
@@ -1098,6 +1218,11 @@ Return JSON:
     const pageTarget = normalizePageTarget(options.pageTarget || options.maxPages || options.pages);
     const blueprint = resolveDocumentBlueprint(options.documentType || 'presentation');
     const designPlan = options.designPlan || null;
+    const qualityPlan = buildDocumentQualityPlan({
+      documentType: options.documentType || 'presentation',
+      format: options.format || 'pptx',
+      designPlan,
+    });
 
     const prompt = [
       `<task>Create a ${blueprint.label} about: ${topic}</task>`,
@@ -1117,6 +1242,7 @@ Return JSON:
       this.renderPresentationTemplateGuidance(designPlan),
       options.templateContext || null,
       renderBlueprintPrompt(blueprint),
+      renderDocumentQualityPromptContext(qualityPlan),
       this.renderDesignPlanPrompt(designPlan),
       '<output_contract>',
       'Return JSON with this structure:',
@@ -1124,6 +1250,7 @@ Return JSON:
       '  "title": "Presentation Title",',
       '  "subtitle": "Subtitle or tagline",',
       '  "theme": "editorial|executive|product|bold",',
+      '  "metadata": { "qualityStandard": "document-quality-standard-version" },',
       '  "slides": [',
       '    {',
       '      "layout": "title|content|section|image|two-column|chart",',
@@ -1168,6 +1295,7 @@ Return JSON:
       '- If the request would benefit from a hybrid structure, combine patterns from multiple templates into one coherent deck.',
       '- Keep bullet points concise, roughly 10-15 words max.',
       '- Image prompts should be vivid, specific, and visually directive.',
+      '- Background direction matters: each slide should have a clear surface system for canvas, panel, image area, chart area, and caption text.',
       '- Slides should feel presentation-ready, not like a memo split into pages.',
       '- Do not output markdown fences, prose commentary, or anything outside the JSON object.',
       '</rules>',
@@ -1180,10 +1308,17 @@ Return JSON:
         reasoningEffort: options.reasoningEffort || null,
       });
 
-      return this.normalizePresentationStructure(result, {
+      const normalized = this.normalizePresentationStructure(result, {
         ...options,
         defaultTitle: topic,
         includeImages,
+      });
+
+      return this.applyPresentationQualityPass(topic, normalized, {
+        ...options,
+        designPlan,
+        documentType: options.documentType || 'presentation',
+        format: options.format || 'pptx',
       });
     } catch (error) {
       console.error('[AIDocumentGenerator] Presentation generation failed:', error);
@@ -1203,6 +1338,100 @@ Return JSON:
     }
   }
 
+  buildPresentationQualityRevisionPrompt(topic = '', presentation = {}, options = {}) {
+    const qualityPlan = buildDocumentQualityPlan({
+      documentType: options.documentType || 'presentation',
+      format: options.format || 'pptx',
+      designPlan: options.designPlan || null,
+    });
+    const slides = Array.isArray(presentation.slides) ? presentation.slides : [];
+
+    return [
+      renderDocumentQualityPromptContext(qualityPlan),
+      '<source_request>',
+      String(topic || '').trim(),
+      '</source_request>',
+      options.templateContext ? '<template_context>' : null,
+      options.templateContext || null,
+      options.templateContext ? '</template_context>' : null,
+      this.renderDesignPlanPrompt(options.designPlan),
+      '<current_presentation_json>',
+      JSON.stringify(presentation, null, 2),
+      '</current_presentation_json>',
+      '<revision_instructions>',
+      '- Return only the revised JSON object using the same presentation schema.',
+      `- Preserve exactly ${slides.length || options.slideCount || 'the requested number of'} slides unless the current draft has the wrong count.`,
+      '- Keep one dominant idea per slide and improve title specificity, pacing, visual/background direction, charts, and image prompts.',
+      '- Preserve factual claims and numeric values unless the current draft clearly contradicts the source request.',
+      '- Add metadata.qualityStandard and metadata.qualityNotes summarizing the revision.',
+      '- Do not output markdown fences, commentary, or any text outside the JSON object.',
+      '</revision_instructions>',
+    ].filter(Boolean).join('\n');
+  }
+
+  async applyPresentationQualityPass(topic = '', presentation = {}, options = {}) {
+    const qualityPlan = buildDocumentQualityPlan({
+      documentType: options.documentType || 'presentation',
+      format: options.format || 'pptx',
+      designPlan: options.designPlan || null,
+    });
+    const qualitySummary = summarizeDocumentQualityPlan(qualityPlan);
+
+    if (!this.shouldRunQualityPass(options)) {
+      return {
+        ...presentation,
+        metadata: {
+          ...(presentation.metadata || {}),
+          qualityStandard: qualitySummary,
+          qualityPassApplied: false,
+          qualityPassSkipped: true,
+        },
+      };
+    }
+
+    try {
+      const revised = await this.requestJson({
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a presentation quality council. Run the specialist review passes silently, then return only corrected JSON.',
+          },
+          {
+            role: 'user',
+            content: this.buildPresentationQualityRevisionPrompt(topic, presentation, options),
+          },
+        ],
+        model: options.qualityModel || options.model || 'gpt-4o',
+        reasoningEffort: options.qualityReasoningEffort || options.reasoningEffort || null,
+      });
+
+      const normalized = this.normalizePresentationStructure(revised, {
+        ...options,
+        defaultTitle: presentation.title || topic,
+      });
+
+      return {
+        ...normalized,
+        metadata: {
+          ...(normalized.metadata || {}),
+          qualityStandard: normalized.metadata?.qualityStandard || qualitySummary,
+          qualityPassApplied: true,
+        },
+      };
+    } catch (error) {
+      console.warn('[AIDocumentGenerator] Presentation quality pass failed:', error.message);
+      return {
+        ...presentation,
+        metadata: {
+          ...(presentation.metadata || {}),
+          qualityStandard: qualitySummary,
+          qualityPassApplied: false,
+          qualityPassError: String(error.message || 'Quality pass failed').slice(0, 180),
+        },
+      };
+    }
+  }
+
   normalizePresentationStructure(content = {}, options = {}) {
     const includeImages = options.includeImages !== false;
     const slides = Array.isArray(content.slides) ? content.slides : [];
@@ -1211,6 +1440,9 @@ Return JSON:
       title: content.title || options.defaultTitle || 'Presentation',
       subtitle: content.subtitle || '',
       theme: content.theme || options.theme || options.style || 'editorial',
+      metadata: {
+        ...(content.metadata || {}),
+      },
       slides: slides.map((slide, index) => ({
         layout: slide.layout || (index === 0 ? 'title' : 'content'),
         kicker: slide.kicker || '',

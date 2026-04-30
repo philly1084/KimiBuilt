@@ -857,6 +857,19 @@ function buildDocumentImageInstructions() {
     ].join('\n');
 }
 
+function buildVisualSafetyInstructions() {
+    return [
+        '[Artifact visual safety]',
+        'Define explicit readable text/background pairs for every major surface; do not rely on inherited colors across dark and light sections.',
+        'Never place white or near-white text on white, transparent, or pale backgrounds, and never place dark text on dark backgrounds.',
+        'Target WCAG AA contrast: at least 4.5:1 for normal text and 3:1 for large or bold display text.',
+        'When text sits on imagery, place it on a solid or strongly translucent overlay/panel and set both text color and background color.',
+        'Use named CSS variables for text, muted text, surfaces, panels, accents, borders, and warning states so palette changes remain coherent.',
+        'Check desktop and mobile composition for clipped text, overlapping cards, unreadable buttons, and horizontal overflow.',
+        'For PDF-oriented HTML, keep print styles high-contrast and avoid white text unless the printed background is explicitly dark.',
+    ].join('\n');
+}
+
 function buildDashboardHtmlInstructions(requestPrompt = '', existingContent = '') {
     const dashboardContext = buildDashboardTemplatePromptContext({
         prompt: requestPrompt,
@@ -1460,6 +1473,7 @@ function buildFrontendBundleGenerationInstructions({
         'Never expose internal template labels, archetype names, or planning language in visible copy.',
         'Keep the content grounded, concrete, and production-like.',
         'The preview runs inside a sandbox that allows scripts but withholds same-origin privileges. Keep interactive behavior client-side, static-safe, and resilient without cookies or server mutation.',
+        buildVisualSafetyInstructions(),
         buildDocumentImageInstructions(),
         dashboardInstructions,
         interactiveInstructions,
@@ -1899,6 +1913,9 @@ class ArtifactService {
         const interactiveInstructions = normalizedFormat === 'html'
             ? renderInteractiveArtifactInstructions(requestPrompt, existingContent)
             : '';
+        const visualSafetyInstructions = ['html', 'pdf'].includes(normalizedFormat)
+            ? buildVisualSafetyInstructions()
+            : '';
         const researchBackedRequest = isResearchBackedArtifactRequest(requestPrompt, normalizedFormat);
         const diagramHeavyRequest = isDiagramHeavyArtifactRequest(requestPrompt, normalizedFormat);
         const baseContext = [
@@ -1913,6 +1930,7 @@ class ArtifactService {
             allowToolOrchestration && diagramHeavyRequest
                 ? 'For graph-heavy or diagram-heavy documents, use graph-diagram to create native graph JSON plus reusable SVG image artifacts, then embed those SVG artifact URLs or inline SVGs in the final document. If the active model is GPT-5.5 or newer, prefer custom SVG diagrams over plain Mermaid-only output while preserving native graph data when useful.'
                 : '',
+            visualSafetyInstructions,
             'Do not mention environment limitations, permissions, API keys, or inability to create files.',
             'The platform will render, store, and deliver the file artifact for the user.',
             promptContext,

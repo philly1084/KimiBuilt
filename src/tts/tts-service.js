@@ -1,6 +1,11 @@
 const { config } = require('../config');
+const { KokoroHttpTtsService } = require('./kokoro-http-tts-service');
 const { kokoroTtsService } = require('./kokoro-tts-service');
 const { piperTtsService } = require('./piper-tts-service');
+
+const defaultKokoroProvider = config.tts?.kokoro?.baseURL
+    ? new KokoroHttpTtsService(config.tts.kokoro)
+    : kokoroTtsService;
 
 function normalizeProviderId(value = '', fallback = '') {
     return String(value || fallback || '').trim().toLowerCase();
@@ -13,9 +18,17 @@ function createUnavailableError() {
     return error;
 }
 
-function isProviderUnavailable(error = {}) {
+function isProviderRetryable(error = {}) {
     const statusCode = Number(error.statusCode);
+    const code = String(error.code || '').trim();
     return statusCode === 503
+        || statusCode === 504
+        || statusCode === 502
+        || statusCode === 429
+        || statusCode >= 500
+        || code === 'tts_timeout'
+        || code === 'tts_failed'
+        || code === 'tts_empty_audio'
         || error.code === 'tts_unavailable'
         || error.code === 'tts_binary_missing';
 }
@@ -44,7 +57,7 @@ class TtsService {
             this.providers = {
                 kokoro: Object.prototype.hasOwnProperty.call(providers, 'kokoro')
                     ? providers.kokoro
-                    : kokoroTtsService,
+                    : defaultKokoroProvider,
                 piper: Object.prototype.hasOwnProperty.call(providers, 'piper')
                     ? providers.piper
                     : piperTtsService,
@@ -190,7 +203,7 @@ class TtsService {
         try {
             return await primaryProvider.synthesize(params);
         } catch (error) {
-            if (fallbackProvider?.synthesize && isProviderUnavailable(error)) {
+            if (fallbackProvider?.synthesize && isProviderRetryable(error)) {
                 return fallbackProvider.synthesize(fallbackParams());
             }
             throw error;

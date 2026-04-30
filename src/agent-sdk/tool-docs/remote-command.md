@@ -5,8 +5,9 @@ Purpose: run non-interactive commands on the configured remote host through the 
 Aliases: `remote CLI`, `direct CLI`, `remote command`, and `remote runner` all refer to this `remote-command` tool. These phrases should not be routed to the local execution sandbox.
 
 Remote CLI agent pipeline:
-- Treat this tool as the default programming lane for remote inspect, edit, build, test, deploy verification, and cluster troubleshooting.
-- Route remote server, SSH, host, k3s, Kubernetes, and kubectl work through this `remote-command` remote CLI lane when it is available. Legacy raw SSH tools should be a compatibility fallback, not the planner's first choice.
+- Treat `remote-cli-agent` as the default owner for remote software creation/update/deployment loops when an app, website, service, dashboard, frontend, or game must be changed and put live.
+- Treat this tool as the default lane for quick remote inspect, one-off command execution, deploy verification, admin repairs, and cluster troubleshooting.
+- Route remote server, SSH, host, k3s, Kubernetes, and kubectl checks through this `remote-command` remote CLI lane when it is available. Legacy raw SSH tools should be a compatibility fallback, not the planner's first choice.
 - Prefer the remote runner whenever a healthy runner exists. Use SSH only when no healthy runner exists or an explicit host override is required.
 - When the runner reports a default workspace, treat that path as the remote desktop/workbench. The direct CLI runner defaults to `/workspace`.
 - Build and creation work should happen inside the persistent workspace unless the user names another target.
@@ -16,6 +17,12 @@ Remote CLI agent pipeline:
 - Continue automatically while the action remains on the approved plan: inspect, search, edit planned files, build, test, deploy, rollout, and verify.
 - Stop and report when the work falls off plan: repeated failures, missing credentials, sudo/package install, Kubernetes Secret mutation, destructive delete, force push, unknown host, or recovery that needs a new strategy.
 - Keep batches small and purposeful: baseline -> inspect -> fix -> verify.
+
+Admin runner control:
+- Runner capability profile `admin` is available for explicitly approved privileged operations.
+- Use `profile: "admin"` plus `approval: { "approved": true, "reason": "..." }` only when the user has approved the privileged action and the command is directly required for the deployment objective.
+- If the runner blocks a privileged command, do not retry the same command. Switch to a narrower non-privileged path or report the exact capability, sudoers rule, credential, or approval that is missing.
+- Do not mutate Kubernetes Secrets, wipe data, force-push, or change unrelated host services from routine deployment work.
 
 Project defaults:
 - The common remote target is Ubuntu Linux on ARM64 (`aarch64`) running k3s.
@@ -36,6 +43,7 @@ Use `remote-command` when:
 - installing packages or making one-off host fixes
 - verifying a deployment after `k3s-deploy`
 - deploying directly from a remote workspace on the same host
+- running a narrowly scoped admin repair after explicit user approval
 
 Use `k3s-deploy` instead when:
 - syncing the GitHub repo on the server

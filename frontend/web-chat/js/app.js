@@ -4739,10 +4739,13 @@ curl -fsSIL --max-time 20 "https://$host"`;
                         throw new Error('Usage: /remote agent <coding/build/deploy task>');
                     }
                     const remoteAgent = remoteCatalog.tools?.find((tool) => tool.id === 'remote-cli-agent') || null;
+                    const selectedModel = String(uiHelpers.getCurrentModel?.() || '').trim();
                     const invocation = await apiClient.invokeRemoteCliAgent(rest, {
                         cwd: remoteAgent?.runtime?.defaultCwd || remoteCatalog.runtime?.remoteRunner?.defaultWorkspace || '',
                         waitMs: 30000,
                         maxTurns: 30,
+                        adminMode: true,
+                        ...(selectedModel ? { model: selectedModel } : {}),
                     });
                     if (invocation?.sessionId) {
                         this.syncBackendSession(invocation.sessionId);

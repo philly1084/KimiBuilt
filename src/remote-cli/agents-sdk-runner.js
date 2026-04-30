@@ -126,6 +126,32 @@ function resolveConfiguredGiteaContext() {
   };
 }
 
+function hasRemoteSoftwareDeploymentIntent(text = '') {
+  const normalized = String(text || '').trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  const softwareTarget = /\b(app|application|site|website|web app|web page|webpage|frontend|dashboard|visualization|visualisation|viewer|map|globe|world|service|game|software)\b/.test(normalized);
+  const remoteTarget = /\b(remote|server|host|runner|cli runner|k3s|k8s|kubernetes|cluster|dns|domain|ingress|traefik|tls|deploy|deployment|live|online|gitea)\b/.test(normalized)
+    || /\b[a-z0-9-]+(?:\.[a-z0-9-]+){1,}\b/.test(normalized);
+  const authoringIntent = /\b(create|make|build|generate|implement|develop|write|update|fix|finish|continue|resume|complete|deploy|redeploy|publish|launch|ship|route|rollout)\b/.test(normalized);
+  const deploymentIntent = /\b(deploy|redeploy|publish|launch|ship|go live|get (?:it|the app|the site|the website) (?:live|online|deployed)|bring (?:it|the app|the site|the website) (?:live|online)|route|ingress|tls|dns|domain|rollout)\b/.test(normalized);
+  const infraOnly = /\b(kubectl get|kubectl describe|logs?|status|health|uptime|journalctl|systemctl status|inspect|diagnose|debug)\b/.test(normalized)
+    && !/\b(create|make|build|implement|develop|write|update|fix|deploy|redeploy|publish|launch|ship)\b/.test(normalized);
+
+  return softwareTarget && remoteTarget && authoringIntent && deploymentIntent && !infraOnly;
+}
+
+function resolveAdminMode(input = {}, task = '') {
+  const explicit = input.adminMode ?? input.admin_mode ?? input.runnerAdmin ?? input.runner_admin ?? input.adminControl ?? input.admin_control;
+  if (explicit !== undefined && explicit !== null && String(explicit).trim() !== '') {
+    return /^(?:1|true|yes|on|approved|admin)$/i.test(String(explicit).trim());
+  }
+
+  return hasRemoteSoftwareDeploymentIntent(task);
+}
+
 function loadAgentsSdk() {
   return require('@openai/agents');
 }
@@ -135,6 +161,7 @@ function buildRemoteCliInstructions({
   cwd,
   sessionId = '',
   waitMs = 30000,
+  adminMode = false,
   extraInstructions = '',
   gitea = resolveConfiguredGiteaContext(),
 } = {}) {
@@ -157,6 +184,11 @@ function buildRemoteCliInstructions({
     'Before committing in a fresh remote workspace, set repo-local git user.name and user.email if they are missing.',
     'For follow-up edits, inspect git status, git log, and the current source files first. Patch the existing source, preserve prior content/assets unless explicitly replacing them, commit the change, then rebuild/redeploy.',
     'Use live Kubernetes resources, mounted files, or ConfigMaps as diagnostics or recovery input only; do not leave them as the only editable source of truth for a deployed site.',
+    adminMode ? 'Admin runner mode is enabled for this task because the user asked for real remote software change/deployment. You may use the configured admin-capable CLI runner or remote target for repository edits, builds, image pushes, Kubernetes apply/rollout, ingress, TLS, and verification that are directly required by the task.' : '',
+    adminMode ? 'Keep admin use narrow: stay inside the owning workspace, namespace, domain, and deployment path; do not mutate Kubernetes Secrets, wipe data, force-push, perform broad package upgrades, or change unrelated host services unless the user explicitly approved that exact action.' : '',
+    adminMode ? 'If a command is blocked by runner policy, sudo policy, missing credentials, or missing admin capability, do not retry the same blocked command. Switch to a non-privileged supported path when one exists; otherwise stop and report the exact approval, capability, credential, or sudoers change needed.' : '',
+    'Track repeated errors. If the same command shape or root error fails twice without a materially different fix, stop that loop, summarize the blocker, and name the next distinct recovery option instead of wasting time retrying.',
+    'If you need a user decision to finish the work, emit a concise marker line USER_INPUT_REQUIRED=<question/options> and stop; the KimiBuilt-side agent will forward that request and can steer a follow-up remote-cli-agent run with the user choice.',
     'For website, dashboard, or frontend work, include visual QA in the build package: run Playwright/Chromium screenshots for desktop and mobile states when the target exposes a local preview or public URL.',
     'If the KimiBuilt runner helper is present, prefer `node /app/bin/kimibuilt-ui-check.js <url> --out ui-checks` and inspect its JSON report before claiming the UI is ready.',
     'Report screenshot and report paths with marker lines when known: UI_CHECK_REPORT=<path> and UI_SCREENSHOTS=<comma-separated paths>.',
@@ -176,6 +208,7 @@ function buildRemoteCliPrompt({
   cwd,
   sessionId = '',
   waitMs = 30000,
+  adminMode = false,
 } = {}) {
   return [
     `Task: ${task}`,
@@ -185,6 +218,7 @@ function buildRemoteCliPrompt({
     cwd ? `- cwd: ${cwd}` : '',
     sessionId ? `- continue remote CLI sessionId: ${sessionId}` : '',
     `- waitMs: ${waitMs}`,
+    adminMode ? '- admin runner mode: enabled for real remote change/deploy work; keep privilege use scoped to the task and stop on repeated blocked commands.' : '',
   ].filter(Boolean).join('\n');
 }
 
@@ -276,6 +310,7 @@ class RemoteCliAgentsSdkRunner {
     const waitMs = normalizePositiveInteger(input.waitMs || input.wait_ms, 30000, { min: 1000, max: 300000 });
     const maxTurns = normalizePositiveInteger(input.maxTurns || input.max_turns || this.config.maxTurns, 20, { min: 1, max: 80 });
     const model = normalizeText(input.model || this.config.agentModel) || 'gpt-4o';
+    const adminMode = resolveAdminMode(input, task);
     const apiMode = resolveAgentsApiMode({
       requestedMode: this.config.agentApiMode,
       baseURL: this.config.agentBaseURL,
@@ -291,6 +326,7 @@ class RemoteCliAgentsSdkRunner {
       cwd,
       sessionId,
       waitMs,
+      adminMode,
       extraInstructions: input.instructions || input.extraInstructions || '',
     });
     const agent = new Agent({
@@ -314,6 +350,7 @@ class RemoteCliAgentsSdkRunner {
         cwd,
         sessionId,
         waitMs,
+        adminMode,
       }), {
         maxTurns,
       });
@@ -355,5 +392,7 @@ module.exports = {
   remoteCliAgentsSdkRunner,
   resolveConfiguredGiteaContext,
   resolveAgentsApiMode,
+  hasRemoteSoftwareDeploymentIntent,
+  resolveAdminMode,
   trimTrailingSlash,
 };

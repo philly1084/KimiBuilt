@@ -5,6 +5,7 @@ const { execFile } = require('child_process');
 const { promisify } = require('util');
 const { config } = require('../../../../config');
 const { artifactService } = require('../../../../artifacts/artifact-service');
+const { normalizeBrowserReachableUrl } = require('./internal-url');
 
 const execFileAsync = promisify(execFile);
 
@@ -148,7 +149,7 @@ function normalizeViewport(value = null) {
 }
 
 function normalizeUrl(url) {
-  const value = String(url || '').trim();
+  const value = normalizeBrowserReachableUrl(url);
   if (!value) {
     throw new Error('URL is required');
   }

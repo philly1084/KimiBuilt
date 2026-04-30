@@ -81,6 +81,109 @@ function resolveDocumentTheme(theme = 'editorial') {
   return DOCUMENT_THEMES[normalized] || DOCUMENT_THEMES.editorial;
 }
 
+function parseHexColor(value = '') {
+  const normalized = String(value || '').trim().replace(/^#/, '');
+  if (!/^[0-9a-f]{6}$/i.test(normalized)) {
+    return null;
+  }
+
+  return {
+    r: parseInt(normalized.slice(0, 2), 16),
+    g: parseInt(normalized.slice(2, 4), 16),
+    b: parseInt(normalized.slice(4, 6), 16),
+  };
+}
+
+function toHexChannel(value) {
+  return Math.max(0, Math.min(255, Math.round(value)))
+    .toString(16)
+    .padStart(2, '0');
+}
+
+function mixHexColor(color, mixWith, weight = 0.5) {
+  const source = parseHexColor(color);
+  const target = parseHexColor(mixWith);
+  if (!source || !target) {
+    return color || mixWith || '#ffffff';
+  }
+
+  const clampedWeight = Math.max(0, Math.min(1, Number(weight)));
+  const mixed = {
+    r: source.r * (1 - clampedWeight) + target.r * clampedWeight,
+    g: source.g * (1 - clampedWeight) + target.g * clampedWeight,
+    b: source.b * (1 - clampedWeight) + target.b * clampedWeight,
+  };
+
+  return `#${toHexChannel(mixed.r)}${toHexChannel(mixed.g)}${toHexChannel(mixed.b)}`;
+}
+
+function alphaColor(color, alpha = 1) {
+  const parsed = parseHexColor(color);
+  if (!parsed) {
+    return color || 'transparent';
+  }
+
+  const clampedAlpha = Math.max(0, Math.min(1, Number(alpha)));
+  return `rgba(${parsed.r}, ${parsed.g}, ${parsed.b}, ${clampedAlpha})`;
+}
+
+function colorLuminance(color) {
+  const parsed = parseHexColor(color);
+  if (!parsed) {
+    return 1;
+  }
+
+  const normalize = (channel) => {
+    const value = channel / 255;
+    return value <= 0.03928
+      ? value / 12.92
+      : ((value + 0.055) / 1.055) ** 2.4;
+  };
+
+  return (0.2126 * normalize(parsed.r)) + (0.7152 * normalize(parsed.g)) + (0.0722 * normalize(parsed.b));
+}
+
+function isDarkColor(color) {
+  return colorLuminance(color) < 0.35;
+}
+
+function buildDocumentBackgroundSpec({
+  theme = DOCUMENT_THEMES.editorial,
+  layoutChoice = null,
+  blueprint = null,
+  format = 'html',
+} = {}) {
+  const resolvedTheme = theme?.id ? theme : resolveDocumentTheme(theme);
+  const dark = isDarkColor(resolvedTheme.background);
+  const layoutId = layoutChoice?.id || 'document';
+  const accent = resolvedTheme.accent || resolvedTheme.chartStart || '#2563eb';
+  const soft = resolvedTheme.accentSoft || resolvedTheme.panelAlt || resolvedTheme.panel;
+
+  return {
+    id: `${resolvedTheme.id}-${layoutId}-background`,
+    label: `${resolvedTheme.label || resolvedTheme.id} ${layoutChoice?.label || blueprint?.label || 'document'} background`,
+    format,
+    canvas: resolvedTheme.background,
+    canvasEnd: dark
+      ? mixHexColor(resolvedTheme.background, '#000000', 0.22)
+      : mixHexColor(resolvedTheme.background, '#ffffff', 0.28),
+    pageSurface: resolvedTheme.page,
+    panelSurface: resolvedTheme.panel,
+    wash: alphaColor(accent, dark ? 0.18 : 0.13),
+    washSoft: alphaColor(soft, dark ? 0.2 : 0.55),
+    gridLine: dark ? 'rgba(255, 255, 255, 0.045)' : 'rgba(15, 23, 42, 0.042)',
+    textureLine: dark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(15, 23, 42, 0.028)',
+    shadow: dark ? 'rgba(0, 0, 0, 0.34)' : 'rgba(15, 23, 42, 0.12)',
+    print: {
+      background: '#ffffff',
+      pageSurface: '#ffffff',
+      text: '#111827',
+      muted: '#374151',
+      border: '#d1d5db',
+    },
+  };
+}
+
 function normalizeSections(sections = []) {
   if (!Array.isArray(sections)) {
     return [];
@@ -206,6 +309,12 @@ function buildDocumentDesignPlan({
     || layoutChoice?.defaultTheme
     || 'editorial',
   );
+  const background = buildDocumentBackgroundSpec({
+    theme,
+    layoutChoice,
+    blueprint,
+    format,
+  });
   const sections = normalizeSections(content.sections);
   const outline = buildOutlineItems(sections);
   const insightCards = buildInsightCards({
@@ -225,6 +334,7 @@ function buildDocumentDesignPlan({
       narrative: blueprint.narrative,
     },
     theme,
+    background,
     format,
     tone,
     length,
@@ -257,6 +367,7 @@ function buildDocumentDesignPlan({
 
 module.exports = {
   DOCUMENT_THEMES,
+  buildDocumentBackgroundSpec,
   buildDocumentDesignPlan,
   resolveDocumentTheme,
 };

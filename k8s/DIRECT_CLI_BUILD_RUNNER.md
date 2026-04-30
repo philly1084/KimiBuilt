@@ -1,6 +1,6 @@
 # Direct CLI Build Runner
 
-This path bypasses Gitea and ACT. KimiBuilt agents use `remote-command` to talk to a remote runner pod, the runner uses BuildKit to build and push images, then the runner uses in-cluster `kubectl` to deploy to k3s.
+This path bypasses Gitea and ACT. KimiBuilt agents can use `remote-command` for one-off runner jobs, and `remote-cli-agent` for full remote author -> build -> deploy -> verify loops. The runner uses BuildKit to build and push images, then in-cluster `kubectl` to deploy to k3s.
 
 ## Components
 
@@ -17,6 +17,7 @@ The runner is configured as the default remote CLI workbench:
 - commands run through Bash when it is available
 - runner metadata reports the default workspace, shell, BuildKit, Kubernetes, and image prefix back to the backend tool catalog
 - runner metadata reports Playwright/Chromium readiness for website UI screenshot checks
+- runner capability `admin` is enabled for explicitly approved privileged deployment operations; this does not grant Secret mutation in the provided RBAC
 
 ## Backend Settings
 
@@ -82,6 +83,11 @@ kubectl -n agent-platform rollout restart deployment/kimibuilt-direct-runner
 
 ## Build and Deploy Flow
 
+For most app/site/service deployment requests, route the task through
+`remote-cli-agent` with `adminMode: true` so the remote coding agent owns the
+full loop. Use direct `remote-command` runner jobs when you need a narrow
+inspection, repair, or verification command.
+
 Agents should work in `/workspace`:
 
 ```bash
@@ -134,3 +140,8 @@ The helper captures desktop and mobile screenshots and reports browser errors, f
 Routine planned actions can continue automatically: inspect, search, edit planned files, build, test, image build, deploy, rollout, and verify.
 
 Stop for the user on privilege or strategy changes: package installs, `sudo`, Kubernetes Secret mutation, destructive deletes, force pushes, missing registry credentials, unknown hosts, or repeated unexplained failures.
+
+If a privileged command is blocked by runner policy, do not retry it repeatedly.
+Switch to a narrower supported command or report the exact approval, capability,
+credential, or sudoers change required. After the same root error happens twice
+without a materially changed strategy, stop that loop.

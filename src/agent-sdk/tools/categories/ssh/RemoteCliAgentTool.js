@@ -50,6 +50,11 @@ class RemoteCliAgentTool extends ToolBase {
             default: 20,
             description: 'Maximum inner Agents SDK turns for this remote task.',
           },
+          adminMode: {
+            type: 'boolean',
+            default: false,
+            description: 'Allow the remote CLI agent to use the configured admin-capable runner lane for real remote change/deploy work. Privileged use remains scoped by runner policy and task instructions.',
+          },
           model: {
             type: 'string',
             description: 'Optional model override for the inner OpenAI Agents SDK agent.',

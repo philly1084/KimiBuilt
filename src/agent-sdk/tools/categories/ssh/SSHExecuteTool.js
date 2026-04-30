@@ -75,8 +75,12 @@ class SSHExecuteTool extends ToolBase {
           },
           profile: {
             type: 'string',
-            enum: ['inspect', 'build', 'deploy'],
-            description: 'Remote runner capability profile required for this command. Use inspect for read-only checks, build for build/test/edit work, and deploy for rollout/deployment operations.'
+            enum: ['inspect', 'build', 'deploy', 'admin'],
+            description: 'Remote runner capability profile required for this command. Use inspect for read-only checks, build for build/test/edit work, deploy for rollout/deployment operations, and admin only for explicitly approved privileged runner operations.'
+          },
+          approval: {
+            type: 'object',
+            description: 'Explicit approval metadata for runner-gated privileged commands, for example { "approved": true, "reason": "User approved admin deployment change" }. Use only when the user has approved the privileged action.'
           },
           artifactIds: {
             type: 'array',

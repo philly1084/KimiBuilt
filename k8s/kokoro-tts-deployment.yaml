@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kokoro-tts
+  namespace: kimibuilt
+  labels:
+    app: kokoro-tts
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kokoro-tts
+  template:
+    metadata:
+      labels:
+        app: kokoro-tts
+    spec:
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      securityContext:
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: kokoro-tts
+          image: ghcr.io/philly1084/kimibuilt:latest
+          imagePullPolicy: Always
+          command:
+            - node
+            - src/kokoro-tts-server.js
+          ports:
+            - containerPort: 3001
+              name: http
+          envFrom:
+            - configMapRef:
+                name: kimibuilt-config
+          env:
+            - name: PORT
+              value: "3001"
+            - name: KOKORO_TTS_BASE_URL
+              value: ""
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 3001
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 18
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: 3001
+            initialDelaySeconds: 45
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 10
+          resources:
+            requests:
+              memory: "768Mi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kokoro-tts
+  namespace: kimibuilt
+  labels:
+    app: kokoro-tts
+spec:
+  selector:
+    app: kokoro-tts
+  ports:
+    - port: 3001
+      targetPort: 3001
+      name: http
+  type: ClusterIP

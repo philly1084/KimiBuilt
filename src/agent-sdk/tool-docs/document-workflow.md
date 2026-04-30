@@ -10,6 +10,12 @@ Core actions:
 - `assemble`: combine source material into one document.
 - `generate-suite`: create a multi-format package such as PDF + HTML + PPTX + XLSX, with optional graph assets and a Vite/static preview bundle.
 
+Quality defaults:
+
+- Every AI-backed generation request receives the built-in document quality standard: strategy architecture, background art direction, evidence editing, accessibility review, and final polish.
+- Background creation is automatic. The workflow should define readable canvas, page, panel, dark band, table, chart, caption, and image-overlay surfaces without making the user ask for visual prompt details.
+- Pass `qualityPass:false` only for explicit cost or latency-sensitive calls where the caller accepts lower polish.
+
 Training and Manuals:
 
 - Use `documentType: "training-manual"` for manuals, learner guides, facilitator guides, job aids, workbooks, SOP training, curriculum plans, and training packages.

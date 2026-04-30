@@ -28,7 +28,7 @@ KIMIBUILT_BACKEND_URL=https://kimibuilt.demoserver2.buzz
 KIMIBUILT_REMOTE_RUNNER_TOKEN=<same-long-random-token>
 KIMIBUILT_RUNNER_ID=demoserver2-builder
 KIMIBUILT_RUNNER_NAME=Demoserver2 Builder
-KIMIBUILT_RUNNER_CAPABILITIES=inspect,deploy,build
+KIMIBUILT_RUNNER_CAPABILITIES=inspect,deploy,build,admin
 KIMIBUILT_RUNNER_ALLOWED_ROOTS=/workspace,/opt,/srv,/var/www,/tmp
 KIMIBUILT_RUNNER_DEFAULT_CWD=/workspace
 KIMIBUILT_RUNNER_SHELL=/bin/bash
@@ -108,6 +108,27 @@ curl -X POST https://kimibuilt.demoserver2.buzz/api/runners/demoserver2-builder/
 ```
 
 Expected: output includes `UI_CHECK_REPORT=...` and `UI_SCREENSHOT=...` lines.
+
+## Admin Runner Mode
+
+`admin` is an explicit runner capability profile for real deployment work that
+needs privileged operations. Enable it only on a runner account that has the
+narrow permissions you want agents to use.
+
+Recommended pattern:
+
+- keep the service user non-root
+- grant narrow passwordless sudoers entries only for intended deployment
+  operations
+- require job approval metadata for privileged commands
+- keep `KIMIBUILT_RUNNER_ALLOWED_ROOTS` limited to deployment workspaces
+- use `remote-cli-agent` with `adminMode: true` for app/site/service
+  author -> build -> deploy -> verify loops
+
+The runner still blocks dangerous command shapes unless the job includes
+`approval.approved=true` or `metadata.approved=true`. If a command is blocked,
+the agent should change strategy or report the missing approval/capability
+instead of retrying the same command.
 
 ## Policy Notes
 

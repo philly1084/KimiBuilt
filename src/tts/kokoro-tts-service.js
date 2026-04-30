@@ -60,8 +60,10 @@ class KokoroTtsService {
             ...ttsConfig,
         };
         this.importKokoro = dependencies.importKokoro || (() => require('kokoro-js'));
+        this.importTransformers = dependencies.importTransformers || (() => require('@huggingface/transformers'));
         this.modelPromise = null;
         this.synthesisQueue = Promise.resolve();
+        this.transformersRuntimeConfigured = false;
     }
 
     pathExists(targetPath = '') {
@@ -190,6 +192,11 @@ class KokoroTtsService {
             modelId: String(this.ttsConfig.modelId || DEFAULT_MODEL_ID).trim() || DEFAULT_MODEL_ID,
             device: toNodeDevice(this.ttsConfig.device),
             dtype: toDtype(this.ttsConfig.dtype),
+            cacheDir: String(this.ttsConfig.cacheDir || '').trim() || null,
+            localModelPath: String(this.ttsConfig.localModelPath || '').trim() || null,
+            allowRemoteModels: typeof this.ttsConfig.allowRemoteModels === 'boolean'
+                ? this.ttsConfig.allowRemoteModels
+                : null,
             maxTextChars,
             timeoutMs,
             podcastTimeoutMs,
@@ -213,11 +220,46 @@ class KokoroTtsService {
         );
     }
 
+    configureTransformersRuntime() {
+        if (this.transformersRuntimeConfigured) {
+            return;
+        }
+
+        const cacheDir = String(this.ttsConfig.cacheDir || '').trim();
+        const localModelPath = String(this.ttsConfig.localModelPath || '').trim();
+        const allowRemoteModels = this.ttsConfig.allowRemoteModels;
+
+        if (!cacheDir && !localModelPath && typeof allowRemoteModels !== 'boolean') {
+            this.transformersRuntimeConfigured = true;
+            return;
+        }
+
+        const moduleExports = this.importTransformers();
+        const transformersEnv = moduleExports?.env;
+        if (!transformersEnv || typeof transformersEnv !== 'object') {
+            throw createServiceError(503, 'Transformers.js did not expose an env object.', 'tts_unavailable');
+        }
+
+        if (cacheDir) {
+            fsSync.mkdirSync(cacheDir, { recursive: true });
+            transformersEnv.cacheDir = cacheDir;
+        }
+        if (localModelPath) {
+            transformersEnv.localModelPath = localModelPath;
+        }
+        if (typeof allowRemoteModels === 'boolean') {
+            transformersEnv.allowRemoteModels = allowRemoteModels;
+        }
+
+        this.transformersRuntimeConfigured = true;
+    }
+
     async getModel() {
         this.assertConfigured();
         if (!this.modelPromise) {
             const modelId = String(this.ttsConfig.modelId || DEFAULT_MODEL_ID).trim() || DEFAULT_MODEL_ID;
             this.modelPromise = Promise.resolve()
+                .then(() => this.configureTransformersRuntime())
                 .then(() => this.importKokoro())
                 .then((moduleExports) => {
                     const KokoroTTS = moduleExports?.KokoroTTS;

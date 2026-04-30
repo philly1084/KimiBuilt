@@ -70,6 +70,79 @@ describe('AIDocumentGenerator', () => {
     expect(prompt).toContain('Use concrete, request-specific section headings');
   });
 
+  test('document system prompt includes built-in quality and background guidance', () => {
+    const generator = new AIDocumentGenerator({
+      createResponse: jest.fn(),
+    });
+
+    const prompt = generator.buildSystemPrompt({
+      prompt: 'Create a designed PDF brief for a launch decision',
+      documentType: 'executive-brief',
+      format: 'pdf',
+      designPlan: {
+        selectedDesignOption: {
+          id: 'briefing-grid',
+          label: 'Briefing Grid',
+        },
+      },
+    });
+
+    expect(prompt).toContain('<quality_standard version="document-quality-2026-04">');
+    expect(prompt).toContain('<background_creation>');
+    expect(prompt).toContain('Background Art Director');
+    expect(prompt).toContain('<multi_agent_design_pass>');
+    expect(prompt).toContain('The user should not need to ask for better design prompts');
+  });
+
+  test('applies the built-in document quality pass after generation', async () => {
+    const createResponse = jest.fn()
+      .mockResolvedValueOnce(buildResponse(JSON.stringify({
+        title: 'Launch Brief',
+        sections: [
+          {
+            heading: 'Decision',
+            content: 'Approve the launch plan because the operating risks are manageable and the upside is clear.',
+          },
+          {
+            heading: 'Evidence',
+            content: 'Pipeline coverage is improving and support capacity is staffed for the first release wave.',
+          },
+        ],
+      })))
+      .mockResolvedValueOnce(buildResponse(JSON.stringify({
+        title: 'Launch Brief',
+        sections: [
+          {
+            heading: 'Approve the focused launch path',
+            content: 'Approve the launch plan because the operating risks are manageable, the upside is clear, and owners are assigned.',
+          },
+          {
+            heading: 'The evidence supports a controlled release',
+            content: 'Pipeline coverage is improving and support capacity is staffed for the first release wave.',
+          },
+        ],
+        metadata: {
+          qualityNotes: ['Sharpened decision heading and evidence framing.'],
+        },
+      })));
+    const generator = new AIDocumentGenerator({ createResponse });
+
+    const result = await generator.generate('Create an executive launch brief', {
+      documentType: 'executive-brief',
+      format: 'html',
+      retryOnScaffold: false,
+    });
+
+    expect(createResponse).toHaveBeenCalledTimes(2);
+    expect(createResponse.mock.calls[1][0].input[1].content).toContain('<multi_agent_design_pass>');
+    expect(result.sections[0].heading).toBe('Approve the focused launch path');
+    expect(result.metadata.qualityPassApplied).toBe(true);
+    expect(result.metadata.qualityStandard).toEqual(expect.objectContaining({
+      version: 'document-quality-2026-04',
+      agentPasses: expect.arrayContaining(['background-art-director', 'accessibility-reviewer']),
+    }));
+  });
+
   test('scrubs tool diagnostics from visible document sections', async () => {
     const generator = new AIDocumentGenerator({
       createResponse: jest.fn(async () => buildResponse(JSON.stringify({

@@ -522,9 +522,20 @@ describe('DocumentService', () => {
     }));
     expect(plan.themeSuggestion).toEqual(expect.any(String));
     expect(plan.humanizationNotes.length).toBeGreaterThan(0);
+    expect(plan.qualityStandard).toEqual(expect.objectContaining({
+      version: 'document-quality-2026-04',
+      agentPasses: expect.arrayContaining([
+        expect.objectContaining({ id: 'background-art-director' }),
+        expect.objectContaining({ id: 'accessibility-reviewer' }),
+      ]),
+      backgroundDirection: expect.objectContaining({
+        label: expect.stringContaining('background'),
+      }),
+    }));
     expect(plan.productionToolchain).toEqual(expect.objectContaining({
       customGeneration: true,
       computeTools: expect.arrayContaining(['graph-diagram', 'code-sandbox']),
+      qualityPasses: expect.arrayContaining(['background-art-director', 'final-polish-editor']),
       packageTargets: expect.arrayContaining(['vite-preview-bundle']),
     }));
     expect(plan.productionCapabilities.suiteActions).toEqual(expect.arrayContaining([
@@ -545,12 +556,14 @@ describe('DocumentService', () => {
     const capabilities = service.getDocumentProductionCapabilities();
 
     expect(capabilities.policy.templateUse).toContain('not final canned output');
+    expect(capabilities.policy.qualityStandard).toContain('built-in strategy');
     expect(capabilities.formats).toEqual(expect.arrayContaining([
       expect.objectContaining({
         id: 'pdf',
         generator: 'browser-html-pdf',
         toolchain: expect.objectContaining({
           renderPipeline: expect.arrayContaining(['headless-browser-pdf']),
+          qualityPasses: expect.arrayContaining(['background-art-director']),
         }),
       }),
       expect.objectContaining({
@@ -617,8 +630,12 @@ describe('DocumentService', () => {
     });
 
     expect(String(document.content)).toContain('document-layout-briefing-grid');
+    expect(String(document.content)).toContain('--doc-bg-grid');
     expect(document.metadata.design).toEqual(expect.objectContaining({
       layout: 'briefing-grid',
+      background: expect.objectContaining({
+        id: expect.stringContaining('executive-briefing-grid-background'),
+      }),
     }));
   });
 

@@ -591,10 +591,14 @@ function handleImgModels() {
 function parseImageOptions(args) {
   const options = {
     model: null,
-    size: '1024x1024',
+    size: 'auto',
     quality: null,
     style: null,
     n: 1,
+    output_format: null,
+    output_compression: null,
+    background: null,
+    moderation: null,
     output: null,
   };
   
@@ -615,6 +619,19 @@ function parseImageOptions(args) {
         break;
       case '--style':
         options.style = args[++i];
+        break;
+      case '--format':
+      case '--output-format':
+        options.output_format = args[++i];
+        break;
+      case '--compression':
+        options.output_compression = parseInt(args[++i], 10);
+        break;
+      case '--background':
+        options.background = args[++i];
+        break;
+      case '--moderation':
+        options.moderation = args[++i];
         break;
       case '--n':
       case '-n':
@@ -710,7 +727,7 @@ async function handleDownloadImageCommand(args) {
  */
 async function handleImage(args) {
   if (!args.trim()) {
-    console.log(chalk.yellow('⚠ Usage: /image <prompt> [--model model-id] [--size 1024x1024] [--quality auto|low|medium|high]'));
+    console.log(chalk.yellow('⚠ Usage: /image <prompt> [--model model-id] [--size auto] [--quality auto|low|medium|high] [--format png|jpeg|webp]'));
     return;
   }
   

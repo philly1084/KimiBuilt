@@ -228,6 +228,15 @@ class RemoteWorkbenchTool extends ToolBase {
             default: false,
             description: 'Require the online remote runner and do not fall back to SSH.',
           },
+          sudo: {
+            type: 'boolean',
+            default: false,
+            description: 'Request sudo execution through the selected transport. Requires explicit approval and runner/SSH policy support.',
+          },
+          approval: {
+            type: 'object',
+            description: 'Explicit approval metadata for runner-gated privileged commands. Use only for user-approved admin operations.',
+          },
         },
       },
       outputSchema: {

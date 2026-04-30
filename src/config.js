@@ -42,6 +42,20 @@ function parseOptionalFloat(value) {
     return Number.isFinite(parsed) ? parsed : null;
 }
 
+function parseOptionalBoolean(value) {
+    const normalized = String(value ?? '').trim().toLowerCase();
+    if (!normalized) {
+        return null;
+    }
+    if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+        return true;
+    }
+    if (['0', 'false', 'no', 'off'].includes(normalized)) {
+        return false;
+    }
+    return null;
+}
+
 function parseOptionalStringList(value) {
     const normalized = String(value || '').trim();
     if (!normalized) {
@@ -509,9 +523,13 @@ const config = {
         fallbackEnabled: process.env.TTS_FALLBACK_ENABLED !== 'false',
         kokoro: {
             enabled: process.env.KOKORO_TTS_ENABLED !== 'false',
+            baseURL: String(process.env.KOKORO_TTS_BASE_URL || '').trim().replace(/\/+$/, ''),
             modelId: process.env.KOKORO_TTS_MODEL_ID || 'onnx-community/Kokoro-82M-v1.0-ONNX',
             device: process.env.KOKORO_TTS_DEVICE || 'cpu',
             dtype: process.env.KOKORO_TTS_DTYPE || 'q8',
+            cacheDir: resolveConfigPath(process.env.KOKORO_TTS_CACHE_DIR || ''),
+            localModelPath: resolveConfigPath(process.env.KOKORO_TTS_LOCAL_MODEL_PATH || ''),
+            allowRemoteModels: parseOptionalBoolean(process.env.KOKORO_TTS_ALLOW_REMOTE_MODELS),
             voicesPath: configuredKokoroVoices.voicesPath,
             voices: configuredKokoroVoices.voices,
             voiceId: kokoroVoiceDefaults.id,

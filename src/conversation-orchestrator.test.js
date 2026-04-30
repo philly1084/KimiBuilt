@@ -7909,6 +7909,7 @@ describe('ConversationOrchestrator', () => {
             params: {
                 task: objective,
                 waitMs: 30000,
+                adminMode: true,
                 cwd: '/srv/apps/world-dashboard',
             },
         });
@@ -7975,7 +7976,69 @@ describe('ConversationOrchestrator', () => {
             params: {
                 task: objective,
                 waitMs: 30000,
+                adminMode: true,
                 cwd: '/srv/apps/weather',
+            },
+        });
+    });
+
+    test('routes remote software deployment requests to remote-cli-agent with admin runner mode', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+        settingsController.getEffectiveOpencodeConfig.mockReturnValue({
+            enabled: true,
+            remoteDefaultWorkspace: '/srv/apps/kimibuilt',
+            allowedWorkspaceRoots: ['C:/Users/phill/KimiBuilt'],
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['remote-cli-agent', 'remote-command', 'git-safe', 'k3s-deploy', 'web-search', 'tool-doc-read']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Build a new status dashboard site on the server and deploy it to k3s at status.demoserver2.buzz with ingress and TLS.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            session: {
+                metadata: {},
+            },
+            toolPolicy,
+            toolContext: {
+                remoteWorkspacePath: '/srv/apps/status-dashboard',
+            },
+        });
+
+        expect(toolPolicy.workflow).toBeNull();
+        expect(toolPolicy.candidateToolIds).toContain('remote-cli-agent');
+        expect(directAction).toEqual({
+            tool: 'remote-cli-agent',
+            reason: 'The request asks an assisted remote CLI agent to own the coding, build, deploy, and verification loop.',
+            params: {
+                task: objective,
+                waitMs: 30000,
+                adminMode: true,
+                cwd: '/srv/apps/status-dashboard',
             },
         });
     });

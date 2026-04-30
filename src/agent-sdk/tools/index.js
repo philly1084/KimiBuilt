@@ -2583,6 +2583,8 @@ class ToolManager {
                   slideCount: params.slideCount,
                   generateImages: params.generateImages,
                   reasoningEffort: params.reasoningEffort || context.reasoningEffort || undefined,
+                  qualityPass: params.qualityPass,
+                  disableQualityPass: params.disableQualityPass,
                 });
 
                 return {
@@ -2639,6 +2641,8 @@ class ToolManager {
                 maxPages: pageTarget,
                 slideCount: params.slideCount,
                 generateImages: params.generateImages,
+                qualityPass: params.qualityPass,
+                disableQualityPass: params.disableQualityPass,
               });
 
               return {
@@ -2741,6 +2745,8 @@ class ToolManager {
                   maxPages: pageTarget,
                   slideCount: params.slideCount,
                   generateImages: params.generateImages,
+                  qualityPass: params.qualityPass,
+                  disableQualityPass: params.disableQualityPass,
                 });
 
                 documents.push({
@@ -2876,6 +2882,9 @@ class ToolManager {
             slideCount: { type: 'integer' },
             generateImages: { type: 'boolean' },
             model: { type: 'string' },
+            reasoningEffort: { type: 'string' },
+            qualityPass: { type: 'boolean' },
+            disableQualityPass: { type: 'boolean' },
             presentation: { type: 'object' },
             includeContent: { type: 'boolean' },
             limit: { type: 'integer' },
@@ -4633,6 +4642,12 @@ class ToolManager {
         'streamable http mcp',
         'mcp remote cli',
         'build on remote server',
+        'deploy on remote server',
+        'deploy app remotely',
+        'remote software deployment',
+        'remote website deployment',
+        'remote app deployment',
+        'admin runner deployment',
         'remote server coding task',
       ],
       'docker-exec': ['docker', 'container', 'run in container', 'docker exec'],

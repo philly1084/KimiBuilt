@@ -850,11 +850,15 @@ class WebCLIAPI {
         
         const {
             model = 'gpt-image-2',
-            size = '1024x1024',
+            size = 'auto',
             quality = null,
             style = null,
             n = 1,
-            response_format = 'b64_json',
+            response_format = null,
+            output_format = null,
+            output_compression = null,
+            moderation = null,
+            background = null,
         } = options;
 
         try {
@@ -870,12 +874,16 @@ class WebCLIAPI {
                     model: model || 'gpt-image-2',
                     size,
                     n,
-                    response_format,
                     session_id: this.sessionId,
                     taskType: 'image',
                     clientSurface: WEB_CLI_CLIENT_SURFACE,
+                    ...(response_format != null ? { response_format } : {}),
                     ...(quality != null ? { quality } : {}),
                     ...(style != null ? { style } : {}),
+                    ...(background != null ? { background } : {}),
+                    ...(output_format != null ? { output_format } : {}),
+                    ...(Number.isFinite(Number(output_compression)) ? { output_compression: Number(output_compression) } : {}),
+                    ...(moderation != null ? { moderation } : {}),
                 }),
             }, 2, IMAGE_TIMEOUT); // Images can legitimately take longer than chat responses
 
@@ -910,13 +918,13 @@ class WebCLIAPI {
             sizes: Array.isArray(metadata.sizes) && metadata.sizes.length > 0
                 ? metadata.sizes
                 : (lower.includes('gpt-image')
-                    ? ['auto', '1024x1024', '1536x1024', '1024x1536']
+                    ? ['auto', '1024x1024', '1536x1024', '1024x1536', '2048x2048', '2048x1152']
                     : ['1024x1024']),
             qualities: Array.isArray(metadata.qualities) && metadata.qualities.length > 0
                 ? metadata.qualities
                 : (lower.includes('gpt-image') ? ['auto', 'low', 'medium', 'high'] : []),
             styles: Array.isArray(metadata.styles) ? metadata.styles : [],
-            maxImages: metadata.maxImages || (lower.includes('dall-e-3') ? 1 : 5),
+            maxImages: metadata.maxImages || (lower.includes('dall-e-3') ? 1 : (lower.includes('gpt-image') ? 10 : 5)),
         };
     }
 

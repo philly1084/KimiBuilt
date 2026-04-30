@@ -78,9 +78,61 @@ describe('openai-client image generation', () => {
         ]);
     });
 
+    test('normalizes gpt-image-2 parameters for the OpenAI image API', async () => {
+        process.env.OPENAI_IMAGE_MODEL = 'gpt-image-2';
+        global.fetch = jest.fn(async (_url, init = {}) => {
+            const body = JSON.parse(init.body);
+            return {
+                ok: true,
+                json: async () => ({
+                    created: 123,
+                    output_format: body.output_format,
+                    data: [{
+                        b64_json: 'aGVsbG8=',
+                        output_format: body.output_format,
+                    }],
+                }),
+            };
+        });
+
+        const { generateImage } = require('./openai-client');
+        const result = await generateImage({
+            prompt: 'Generate a product poster',
+            model: 'gpt-image-2',
+            size: '2048x1152',
+            quality: 'HIGH',
+            background: 'transparent',
+            style: 'vivid',
+            response_format: 'b64_json',
+            output_format: 'JPEG',
+            output_compression: 42,
+            moderation: 'LOW',
+            n: 10,
+        });
+
+        const body = JSON.parse(global.fetch.mock.calls[0][1].body);
+        expect(body).toEqual(expect.objectContaining({
+            prompt: 'Generate a product poster',
+            model: 'gpt-image-2',
+            size: '2048x1152',
+            background: 'auto',
+            output_format: 'jpeg',
+            output_compression: 42,
+            moderation: 'low',
+            n: 10,
+        }));
+        expect(body).not.toHaveProperty('response_format');
+        expect(body).not.toHaveProperty('style');
+        expect(result).toEqual(expect.objectContaining({
+            output_format: 'jpeg',
+            output_compression: 42,
+            moderation: 'low',
+        }));
+    });
+
     test('retries without response_format when a provider rejects that parameter', async () => {
         process.env.OPENAI_BASE_URL = 'https://gateway.example/v1';
-        process.env.OPENAI_IMAGE_MODEL = 'gpt-image-2';
+        process.env.OPENAI_IMAGE_MODEL = 'gateway-image-model';
         global.fetch = jest.fn()
             .mockResolvedValueOnce({
                 ok: false,
@@ -104,7 +156,7 @@ describe('openai-client image generation', () => {
         const { generateImage } = require('./openai-client');
         const result = await generateImage({
             prompt: 'Generate a hero image',
-            model: 'gpt-image-1',
+            model: 'gateway-image-model',
         });
 
         expect(global.fetch).toHaveBeenCalledTimes(2);
@@ -446,8 +498,8 @@ describe('openai-client image generation', () => {
 
         expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual(expect.objectContaining({
             model: 'gpt-image-2',
-            response_format: 'b64_json',
         }));
+        expect(JSON.parse(global.fetch.mock.calls[0][1].body)).not.toHaveProperty('response_format');
         expect(global.fetch.mock.calls[0][0]).toBe('https://gateway.example/v1/images/generations');
     });
 
@@ -490,10 +542,10 @@ describe('openai-client image generation', () => {
             model: 'gpt-image-2',
             size: '1536x1024',
             quality: 'high',
-            style: 'vivid',
-            response_format: 'b64_json',
             user: 'frontend-user',
         }));
+        expect(JSON.parse(global.fetch.mock.calls[0][1].body)).not.toHaveProperty('style');
+        expect(JSON.parse(global.fetch.mock.calls[0][1].body)).not.toHaveProperty('response_format');
         expect(result.data[0]).toEqual(expect.objectContaining({
             url: 'data:image/png;base64,aGVsbG8=',
             b64_json: 'aGVsbG8=',

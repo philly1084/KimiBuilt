@@ -180,9 +180,9 @@ describe('OpenAIClient provider sessions', () => {
       model: 'gpt-image-2',
       size: '1536x1024',
       quality: 'high',
-      response_format: 'b64_json',
       session_id: 'session-1',
     }));
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body)).not.toHaveProperty('response_format');
   });
 
   test('chatNonStreaming enables the shared conversation executor for CLI tasks', async () => {

@@ -168,6 +168,35 @@ describe('TtsService', () => {
         expect(result.provider).toBe('piper');
     });
 
+    test('falls back to Piper on retryable Kokoro generation failures', async () => {
+        const timeoutError = new Error('Kokoro generation timed out.');
+        timeoutError.statusCode = 504;
+        timeoutError.code = 'tts_timeout';
+        const kokoro = createProvider('kokoro', 'ready', async () => {
+            throw timeoutError;
+        });
+        const piper = createProvider('piper');
+        const service = new TtsService({
+            provider: 'kokoro',
+            fallbackProvider: 'piper',
+        }, {
+            kokoro,
+            piper,
+        });
+
+        const result = await service.synthesize({
+            text: 'Hello there.',
+            voiceId: 'af_heart',
+        });
+
+        expect(kokoro.synthesize).toHaveBeenCalledTimes(1);
+        expect(piper.synthesize).toHaveBeenCalledWith({
+            text: 'Hello there.',
+            voiceId: '',
+        });
+        expect(result.provider).toBe('piper');
+    });
+
     test('returns an unavailable payload when no provider is configured', async () => {
         const service = new TtsService({ provider: 'kokoro', fallbackProvider: '' }, {
             kokoro: null,
@@ -193,10 +222,10 @@ describe('TtsService', () => {
         });
     });
 
-    test('surfaces non-availability synthesis errors without fallback behavior', async () => {
+    test('surfaces validation synthesis errors without fallback behavior', async () => {
         const kokoroError = new Error('Kokoro failed');
-        kokoroError.statusCode = 502;
-        kokoroError.code = 'tts_failed';
+        kokoroError.statusCode = 400;
+        kokoroError.code = 'unknown_voice';
 
         const kokoro = createProvider('kokoro', 'ready', async () => {
             throw kokoroError;
