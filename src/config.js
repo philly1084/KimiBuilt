@@ -161,6 +161,28 @@ function normalizeKokoroVoiceDefinition(value = {}, defaults = {}) {
     };
 }
 
+function normalizeOpenAiVoiceDefinition(value = {}, defaults = {}) {
+    if (!value || typeof value !== 'object') {
+        return null;
+    }
+
+    const id = String(value.id || value.voiceId || defaults.id || '').trim();
+    if (!id) {
+        return null;
+    }
+
+    return {
+        id,
+        label: String(value.label || value.voiceLabel || defaults.label || '').trim() || id,
+        description: String(value.description || value.voiceDescription || defaults.description || '').trim(),
+        instructions: String(value.instructions || value.styleInstructions || defaults.instructions || '').trim(),
+        custom: value.custom === true || String(value.type || '').trim().toLowerCase() === 'custom',
+        aliases: Array.isArray(value.aliases)
+            ? value.aliases.map((alias) => String(alias || '').trim()).filter(Boolean)
+            : [],
+    };
+}
+
 function parsePiperVoicesPayload(rawValue = '', defaults = {}) {
     const normalized = String(rawValue || '').trim();
     if (!normalized) {
@@ -191,6 +213,23 @@ function parseKokoroVoicesPayload(rawValue = '', defaults = {}) {
             .filter(Boolean);
     } catch (error) {
         console.warn(`[Config] Failed to parse Kokoro voices JSON: ${error.message}`);
+        return [];
+    }
+}
+
+function parseOpenAiVoicesPayload(rawValue = '', defaults = {}) {
+    const normalized = String(rawValue || '').trim();
+    if (!normalized) {
+        return [];
+    }
+
+    try {
+        const parsed = JSON.parse(normalized);
+        return (Array.isArray(parsed) ? parsed : [])
+            .map((entry) => normalizeOpenAiVoiceDefinition(entry, defaults))
+            .filter(Boolean);
+    } catch (error) {
+        console.warn(`[Config] Failed to parse OpenAI TTS voices JSON: ${error.message}`);
         return [];
     }
 }
@@ -336,6 +375,15 @@ function loadConfiguredKokoroVoices(defaults = {}) {
     };
 }
 
+function loadConfiguredOpenAiVoices(defaults = {}) {
+    const parsedVoices = parseOpenAiVoicesPayload(process.env.OPENAI_TTS_VOICES_JSON || '', defaults);
+    if (parsedVoices.length > 0) {
+        return parsedVoices;
+    }
+
+    return [];
+}
+
 const piperVoiceDefaults = {
     id: process.env.PIPER_TTS_VOICE_ID || 'piper-female-natural',
     label: process.env.PIPER_TTS_VOICE_LABEL || 'Female natural',
@@ -354,10 +402,24 @@ const kokoroVoiceDefaults = {
     description: process.env.KOKORO_TTS_VOICE_DESCRIPTION || 'Primary high-quality Kokoro voice for polished local speech.',
     aliases: [],
 };
+const openAiVoiceDefaults = {
+    id: process.env.OPENAI_TTS_VOICE_ID || 'coral',
+    label: process.env.OPENAI_TTS_VOICE_LABEL || 'Coral Host',
+    description: process.env.OPENAI_TTS_VOICE_DESCRIPTION || 'Warm, polished OpenAI podcast host voice.',
+    instructions: process.env.OPENAI_TTS_VOICE_INSTRUCTIONS || '',
+    aliases: [],
+};
 const configuredPiperVoices = loadConfiguredPiperVoices(piperVoiceDefaults);
 const configuredKokoroVoices = loadConfiguredKokoroVoices(kokoroVoiceDefaults);
+const configuredOpenAiVoices = loadConfiguredOpenAiVoices(openAiVoiceDefaults);
 const configuredAudioProviders = buildAudioProviderCandidates();
 const availableParallelism = resolveAvailableParallelism();
+const requestedTtsProvider = String(process.env.TTS_PROVIDER || 'openai').trim().toLowerCase() || 'openai';
+const requestedTtsFallbackProvider = String(
+    process.env.TTS_FALLBACK_PROVIDER
+        || (requestedTtsProvider === 'openai' ? 'kokoro,piper' : 'piper'),
+).trim();
+const requestedTtsFallbackProviders = parseOptionalStringList(requestedTtsFallbackProvider);
 const normalizedPodcastResearchConcurrency = Math.max(
     1,
     Math.min(

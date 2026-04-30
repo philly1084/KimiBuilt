@@ -724,6 +724,53 @@ describe('ai-route-utils', () => {
         });
     });
 
+    test('resolveSshRequestContext ignores public Git provider hosts in failure transcripts and uses the corrected server target', () => {
+        const sshContext = resolveSshRequestContext([
+            'I tried again, but the remote CLI is still pointed at the wrong SSH target.',
+            'Exact failure: root@github.com: Permission denied (publickey).',
+            'That means the tool attempted to SSH into github.com as root, instead of the server target we need.',
+            'The next real unblock is to retarget the remote CLI session back to the server, likely root@162.55.163.199, then inspect /opt/calan-calendar.',
+        ].join(' '));
+
+        expect(sshContext.shouldTreatAsSsh).toBe(true);
+        expect(sshContext.target).toEqual({
+            host: '162.55.163.199',
+            username: 'root',
+            port: null,
+        });
+        expect(sshContext.directParams).toBeNull();
+    });
+
+    test('resolveSshRequestContext does not reuse a public Git provider as a sticky SSH target', () => {
+        const sshContext = resolveSshRequestContext(
+            'try again to remote command',
+            {
+                metadata: {
+                    lastToolIntent: 'remote-command',
+                    lastSshTarget: {
+                        host: 'github.com',
+                        username: 'root',
+                        port: 22,
+                    },
+                    remoteWorkingState: {
+                        lastUpdated: new Date().toISOString(),
+                        target: {
+                            host: 'github.com',
+                            username: 'root',
+                            port: 22,
+                        },
+                        lastCommand: 'hostname && uptime',
+                    },
+                },
+            },
+        );
+
+        expect(sshContext.shouldTreatAsSsh).toBe(true);
+        expect(sshContext.target).toBeNull();
+        expect(sshContext.effectivePrompt).toBe('try again to remote command');
+        expect(sshContext.directParams).toBeNull();
+    });
+
     test('resolveSshRequestContext reuses the previous remote command for retry-style continuation prompts', () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
@@ -991,6 +1038,61 @@ describe('ai-route-utils', () => {
                     success: false,
                     toolId: 'remote-command',
                     error: 'ssh: Could not resolve hostname web-fetch.body: Name or service not known',
+                    data: {},
+                },
+            },
+        ]);
+
+        expect(metadata).toMatchObject({
+            lastToolIntent: 'remote-command',
+            lastSshTarget: {
+                host: '162.55.163.199',
+                username: 'root',
+                port: 22,
+            },
+        });
+    });
+
+    test('extractSshSessionMetadataFromToolEvents does not replace the last good host with github.com after SSH auth failure', () => {
+        const metadata = extractSshSessionMetadataFromToolEvents([
+            {
+                toolCall: {
+                    function: {
+                        name: 'remote-command',
+                        arguments: JSON.stringify({
+                            host: '162.55.163.199',
+                            username: 'root',
+                            port: 22,
+                            command: 'hostname',
+                        }),
+                    },
+                },
+                result: {
+                    success: true,
+                    toolId: 'remote-command',
+                    data: {
+                        host: '162.55.163.199:22',
+                        stdout: 'ubuntu-32gb-fsn1-2',
+                        stderr: '',
+                    },
+                },
+            },
+            {
+                toolCall: {
+                    function: {
+                        name: 'remote-command',
+                        arguments: JSON.stringify({
+                            host: 'github.com',
+                            username: 'root',
+                            port: 22,
+                            command: 'hostname',
+                        }),
+                    },
+                },
+                result: {
+                    success: false,
+                    toolId: 'remote-command',
+                    error: 'root@github.com: Permission denied (publickey).',
                     data: {},
                 },
             },

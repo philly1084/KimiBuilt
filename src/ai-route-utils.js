@@ -758,6 +758,21 @@ function isFileLikeSshTargetHost(host = '') {
     return blockedExtensions.has(lastLabel);
 }
 
+function isPublicGitProviderSshHost(host = '') {
+    const normalized = String(host || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        'github.com',
+        'ssh.github.com',
+        'gist.github.com',
+        'gitlab.com',
+        'bitbucket.org',
+    ].includes(normalized);
+}
+
 function hasImmediateSshTargetContext(text = '', matchIndex = 0) {
     const source = String(text || '');
     const prefix = source.slice(Math.max(0, matchIndex - 48), Math.max(0, matchIndex)).toLowerCase();
@@ -874,7 +889,8 @@ function isSuspiciousSshTargetHost(host = '') {
         return true;
     }
 
-    return /^(?:web-fetch|web-search|web-scrape|file-read|file-search|file-write|remote-command|ssh-execute|docker-exec|tool-doc-read|code-sandbox)(?:\.[a-z0-9_-]+)+$/i.test(normalized)
+    return isPublicGitProviderSshHost(normalized)
+        || /^(?:web-fetch|web-search|web-scrape|file-read|file-search|file-write|remote-command|ssh-execute|docker-exec|tool-doc-read|code-sandbox)(?:\.[a-z0-9_-]+)+$/i.test(normalized)
         || /^(?:result|results|data|response|output|tool)(?:\.[a-z0-9_-]+)+$/i.test(normalized);
 }
 
@@ -1030,12 +1046,13 @@ function resolveSshRequestContext(text = '', session = null) {
     const explicitTarget = extractExplicitSshTarget(prompt);
     const configuredTarget = getConfiguredSshTarget();
     const sessionTarget = controlState.lastSshTarget || null;
+    const safeSessionTarget = sessionTarget?.host && !isSuspiciousSshTargetHost(sessionTarget.host)
+        ? sessionTarget
+        : null;
     const target = explicitTarget
-        || (sessionTarget?.host && !isSuspiciousSshTargetHost(sessionTarget.host)
-            ? sessionTarget
-            : null)
+        || safeSessionTarget
         || configuredTarget
-        || sessionTarget;
+        || null;
     const stickySsh = isRemoteCommandToolId(controlState.lastToolIntent);
     const continuation = !explicitIntent
         && stickySsh

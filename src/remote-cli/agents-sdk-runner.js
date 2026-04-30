@@ -18,6 +18,50 @@ function cleanMarkerValue(value = '') {
     .replace(/^'+|'+$/g, '');
 }
 
+function isPublicGitProviderHost(value = '') {
+  const normalized = normalizeText(value).toLowerCase();
+  return [
+    'github.com',
+    'ssh.github.com',
+    'gist.github.com',
+    'gitlab.com',
+    'bitbucket.org',
+  ].includes(normalized);
+}
+
+function isUnsafeRemoteCliTargetId(value = '') {
+  const normalized = normalizeText(value);
+  if (!normalized) {
+    return false;
+  }
+
+  if (/^https?:\/\//i.test(normalized) || /^ssh:\/\//i.test(normalized) || /\.git(?:[#?].*)?$/i.test(normalized)) {
+    return true;
+  }
+
+  const sshStyleMatch = normalized.match(/^(?:[^@\s]+@)?(?<host>[a-z0-9.-]+\.[a-z]{2,}|(?:\d{1,3}\.){3}\d{1,3})(?::\d{2,5})?$/i);
+  if (sshStyleMatch?.groups?.host) {
+    return normalized.includes('@')
+      || /^(?:\d{1,3}\.){3}\d{1,3}$/.test(sshStyleMatch.groups.host)
+      || isPublicGitProviderHost(sshStyleMatch.groups.host);
+  }
+
+  return false;
+}
+
+function resolveRemoteCliTargetId(value = '', fallback = 'prod') {
+  const normalized = normalizeText(value);
+  const fallbackCandidate = normalizeText(fallback);
+  const safeFallback = fallbackCandidate && !isUnsafeRemoteCliTargetId(fallbackCandidate)
+    ? fallbackCandidate
+    : 'prod';
+  if (!normalized || isUnsafeRemoteCliTargetId(normalized)) {
+    return safeFallback;
+  }
+
+  return normalized;
+}
+
 function readMarkerLine(text = '', keys = []) {
   const keyPattern = keys
     .map((key) => String(key || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
@@ -172,6 +216,8 @@ function buildRemoteCliInstructions({
     `Default targetId: ${targetId}`,
     cwd ? `Default cwd: ${cwd}` : 'Default cwd: use the gateway target default.',
     '',
+    'The targetId is the remote-cli gateway target identifier, not a Git remote, URL, or raw user@host SSH string. Use the configured default targetId unless the user explicitly names another configured gateway target.',
+    'Public Git hosts such as github.com, gitlab.com, and bitbucket.org are repository endpoints, never deployment SSH targets. If a transcript mentions a root@github.com permission failure, treat that as the previous mistake and retarget to the real server/gateway target described by the user.',
     'Treat the target as a persistent private workbench for the user: create project files, inspect state, build, test, deploy, and verify from the remote workspace when the task calls for it.',
     'Keep autonomy bounded by the task and existing safety rules. Do not mutate secrets, perform destructive deletes, force-push, install privileged packages, or leave the approved workspace without a clear user request.',
     'Start with compact discovery before edits: repo-map, changed-files, k8s-manifest-summary, and targeted-grep style commands are preferred over reading the whole codebase.',
@@ -234,7 +280,7 @@ class RemoteCliAgentsSdkRunner {
       configured: Boolean(normalizeText(this.config.url) && normalizeText(this.config.apiKey)),
       url: normalizeText(this.config.url),
       name: normalizeText(this.config.name) || 'remote-cli',
-      defaultTargetId: normalizeText(this.config.defaultTargetId) || 'prod',
+      defaultTargetId: resolveRemoteCliTargetId('', this.config.defaultTargetId || 'prod'),
       defaultCwd: normalizeText(this.config.defaultCwd),
       agentModel: normalizeText(this.config.agentModel),
       timeoutMs: normalizePositiveInteger(this.config.timeoutMs, 60000, { min: 1000 }),
@@ -304,7 +350,10 @@ class RemoteCliAgentsSdkRunner {
       throw new Error('@openai/agents is installed but did not expose the expected Agents SDK classes.');
     }
 
-    const targetId = normalizeText(input.targetId || input.target_id || this.config.defaultTargetId) || 'prod';
+    const targetId = resolveRemoteCliTargetId(
+      input.targetId || input.target_id,
+      this.config.defaultTargetId || 'prod',
+    );
     const cwd = normalizeText(input.cwd || input.workingDirectory || input.working_directory || this.config.defaultCwd);
     const sessionId = normalizeText(input.sessionId || input.session_id || input.remoteSessionId || input.remote_session_id);
     const waitMs = normalizePositiveInteger(input.waitMs || input.wait_ms, 30000, { min: 1000, max: 300000 });
@@ -390,6 +439,7 @@ module.exports = {
   buildRemoteCliPrompt,
   extractRemoteCliRunMetadata,
   remoteCliAgentsSdkRunner,
+  resolveRemoteCliTargetId,
   resolveConfiguredGiteaContext,
   resolveAgentsApiMode,
   hasRemoteSoftwareDeploymentIntent,

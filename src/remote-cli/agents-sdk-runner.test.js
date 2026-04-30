@@ -7,6 +7,7 @@ const {
   hasRemoteSoftwareDeploymentIntent,
   resolveAgentsApiMode,
   resolveAdminMode,
+  resolveRemoteCliTargetId,
 } = require('./agents-sdk-runner');
 
 describe('RemoteCliAgentsSdkRunner', () => {
@@ -31,7 +32,19 @@ describe('RemoteCliAgentsSdkRunner', () => {
     expect(instructions).toContain('GIT_COMMIT');
     expect(instructions).toContain('remote_code_status');
     expect(instructions).toContain('persistent private workbench');
+    expect(instructions).toContain('not a Git remote, URL, or raw user@host SSH string');
+    expect(instructions).toContain('root@github.com permission failure');
     expect(instructions).toContain('sess_123');
+  });
+
+  test('normalizes unsafe remote CLI target ids back to the configured gateway target', () => {
+    expect(resolveRemoteCliTargetId('github.com', 'prod')).toBe('prod');
+    expect(resolveRemoteCliTargetId('root@github.com', 'prod')).toBe('prod');
+    expect(resolveRemoteCliTargetId('root@162.55.163.199', 'prod')).toBe('prod');
+    expect(resolveRemoteCliTargetId('162.55.163.199', 'prod')).toBe('prod');
+    expect(resolveRemoteCliTargetId('https://github.com/example/app.git', 'prod')).toBe('prod');
+    expect(resolveRemoteCliTargetId('', 'github.com')).toBe('prod');
+    expect(resolveRemoteCliTargetId('staging', 'prod')).toBe('staging');
   });
 
   test('adds admin runner guidance for real remote deployment work', () => {
