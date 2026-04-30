@@ -33,7 +33,7 @@ This platform provides a unified system where:
 |------|-----|-------------|
 | Web Fetch | `web-fetch` | HTTP requests with caching |
 | Web Scrape | `web-scrape` | Structured data extraction |
-| Web Search | `web-search` | Perplexity raw search plus preset research modes |
+| Web Search | `web-search` | Perplexity raw search, Sonar grounded answers/media, and Agent preset research modes |
 
 ### SSH Tools (`/ssh`)
 | Tool | ID | Description |

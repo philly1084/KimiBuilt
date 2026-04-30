@@ -1,3 +1,4 @@
+const { WebSocket } = require('ws');
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { config } = require('../config');
@@ -152,21 +153,26 @@ function normalizeClientNow(value = '') {
     return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
-function sendWsProgressPayload(ws, sessionId, progress = {}) {
+function safeWsSend(ws, payload) {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
         return false;
     }
 
     try {
-        ws.send(JSON.stringify({
-            type: 'progress',
-            sessionId,
-            progress,
-        }));
+        ws.send(typeof payload === 'string' ? payload : JSON.stringify(payload));
         return true;
-    } catch (_error) {
+    } catch (error) {
+        console.warn(`[WS] Failed to send message: ${error.message}`);
         return false;
     }
+}
+
+function sendWsProgressPayload(ws, sessionId, progress = {}) {
+    return safeWsSend(ws, {
+        type: 'progress',
+        sessionId,
+        progress,
+    });
 }
 
 function setupWebSocket(wss, app = null) {
@@ -197,13 +203,13 @@ function setupWebSocket(wss, app = null) {
 
                 if (type === 'session_subscribe') {
                     registerSessionConnection(ws, payload?.sessionId || sessionId);
-                    ws.send(JSON.stringify({ type: 'session_subscribed', sessionId: payload?.sessionId || sessionId }));
+                    safeWsSend(ws, { type: 'session_subscribed', sessionId: payload?.sessionId || sessionId });
                     return;
                 }
 
                 if (type === 'session_unsubscribe') {
                     unregisterSessionConnection(ws, payload?.sessionId || sessionId);
-                    ws.send(JSON.stringify({ type: 'session_unsubscribed', sessionId: payload?.sessionId || sessionId }));
+                    safeWsSend(ws, { type: 'session_unsubscribed', sessionId: payload?.sessionId || sessionId });
                     return;
                 }
 
@@ -235,12 +241,12 @@ function setupWebSocket(wss, app = null) {
                         ? await sessionStore.getOrCreate(requestedSessionId, requestedSessionMetadata)
                         : await sessionStore.create(requestedSessionMetadata);
                 if (!session) {
-                    ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }));
+                    safeWsSend(ws, { type: 'error', message: 'Session not found' });
                     return;
                 }
                 sessionId = session.id;
                 if (!requestedSessionId) {
-                    ws.send(JSON.stringify({ type: 'session_created', sessionId }));
+                    safeWsSend(ws, { type: 'session_created', sessionId });
                 }
 
                 switch (type) {
@@ -257,11 +263,11 @@ function setupWebSocket(wss, app = null) {
                         await handleNotation(ws, session, payload, ownerId);
                         break;
                     default:
-                        ws.send(JSON.stringify({ type: 'error', message: `Unknown type: ${type}` }));
+                        safeWsSend(ws, { type: 'error', message: `Unknown type: ${type}` });
                 }
             } catch (err) {
                 console.error('[WS] Error:', err.message);
-                ws.send(JSON.stringify({ type: 'error', message: err.message }));
+                safeWsSend(ws, { type: 'error', message: err.message });
             }
         });
 
@@ -302,7 +308,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
         ...(memoryKeywords.length > 0 ? { memoryKeywords } : {}),
     };
     if (!message) {
-        ws.send(JSON.stringify({ type: 'error', message: "'message' is required" }));
+        safeWsSend(ws, { type: 'error', message: "'message' is required" });
         return;
     }
     session = await persistSessionModel(session.id, session, model);
@@ -533,16 +539,16 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                 },
             });
 
-            ws.send(JSON.stringify({ type: 'delta', content: generation.assistantMessage }));
-                ws.send(JSON.stringify({
-                    type: 'done',
-                    sessionId: session.id,
-                    responseId: generation.responseId,
-                    artifacts: responseArtifacts,
-                    toolEvents: preparedImages.toolEvents,
-                    assistant_metadata: buildFrontendAssistantMetadata({ artifacts: responseArtifacts }),
-                    assistantMetadata: buildFrontendAssistantMetadata({ artifacts: responseArtifacts }),
-                }));
+            safeWsSend(ws, { type: 'delta', content: generation.assistantMessage });
+            safeWsSend(ws, {
+                type: 'done',
+                sessionId: session.id,
+                responseId: generation.responseId,
+                artifacts: responseArtifacts,
+                toolEvents: preparedImages.toolEvents,
+                assistant_metadata: buildFrontendAssistantMetadata({ artifacts: responseArtifacts }),
+                assistantMetadata: buildFrontendAssistantMetadata({ artifacts: responseArtifacts }),
+            });
             return;
         }
 
@@ -604,7 +610,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
         for await (const event of response) {
             if (event.type === 'response.output_text.delta') {
                 fullText += event.delta;
-                ws.send(JSON.stringify({ type: 'delta', content: event.delta }));
+                safeWsSend(ws, { type: 'delta', content: event.delta });
             }
 
             if (event.type === 'response.completed') {
@@ -612,7 +618,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                 const missingDelta = getMissingCompletionDelta(fullText, completedText);
                 if (missingDelta) {
                     fullText = completedText;
-                    ws.send(JSON.stringify({ type: 'delta', content: missingDelta }));
+                    safeWsSend(ws, { type: 'delta', content: missingDelta });
                 } else {
                     fullText = completedText;
                 }
@@ -701,7 +707,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                     duration: Date.now() - startedAt,
                     metadata: event.response?.metadata || {},
                 });
-                ws.send(JSON.stringify({
+                safeWsSend(ws, {
                     type: 'done',
                     sessionId: session.id,
                     responseId: event.response.id,
@@ -715,7 +721,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                         ...(event.response?.metadata || {}),
                         artifacts,
                     }),
-                }));
+                });
             }
         }
     } catch (error) {
@@ -755,7 +761,7 @@ async function handleCanvas(ws, session, payload = {}, ownerId = null) {
     const sessionIsolation = isSessionIsolationEnabled(payload?.metadata || {}, session);
 
     if (!message) {
-        ws.send(JSON.stringify({ type: 'error', message: "'message' is required" }));
+        safeWsSend(ws, { type: 'error', message: "'message' is required" });
         return;
     }
 
@@ -880,14 +886,14 @@ async function handleCanvas(ws, session, payload = {}, ownerId = null) {
             },
         });
 
-        ws.send(JSON.stringify({
+        safeWsSend(ws, {
             type: 'done',
             sessionId: session.id,
             responseId: response.id,
             canvasType,
             content: outputText,
             artifacts,
-        }));
+        });
     } catch (error) {
         failRuntimeTask(runtimeTask?.id, {
             error,
@@ -926,7 +932,7 @@ async function handleNotation(ws, session, payload = {}, ownerId = null) {
     const sessionIsolation = isSessionIsolationEnabled(payload?.metadata || {}, session);
 
     if (!notation) {
-        ws.send(JSON.stringify({ type: 'error', message: "'notation' is required" }));
+        safeWsSend(ws, { type: 'error', message: "'notation' is required" });
         return;
     }
 
@@ -1054,7 +1060,7 @@ async function handleNotation(ws, session, payload = {}, ownerId = null) {
             },
         });
 
-        ws.send(JSON.stringify({
+        safeWsSend(ws, {
             type: 'done',
             sessionId: session.id,
             responseId: response.id,
@@ -1063,7 +1069,7 @@ async function handleNotation(ws, session, payload = {}, ownerId = null) {
             artifacts,
             assistant_metadata: assistantMetadata,
             assistantMetadata,
-        }));
+        });
     } catch (error) {
         failRuntimeTask(runtimeTask?.id, {
             error,
@@ -1081,10 +1087,10 @@ function handleAdminSubscribe(ws) {
     ws.isAdmin = true;
     
     // Send initial stats
-    ws.send(JSON.stringify({
+    safeWsSend(ws, {
         type: 'admin_connected',
         timestamp: new Date().toISOString()
-    }));
+    });
     
     console.log('[WS] Admin client subscribed.');
 }

@@ -22,6 +22,8 @@ const DEFAULT_MAX_SOURCES = 4;
 const DEFAULT_SILENCE_MS = 325;
 const DEFAULT_MINIMUM_VALID_TURNS = 4;
 const DEFAULT_PODCAST_SEARCH_TIMEOUT_MS = 45000;
+const MAX_PODCAST_SOURCE_SNIPPET_CHARS = 800;
+const MAX_PODCAST_SOURCE_EXCERPT_CHARS = 1400;
 const DEFAULT_PODCAST_SCRIPT_REQUEST_TIMEOUT_MS = Math.max(
   30000,
   Number(config?.podcast?.scriptRequestTimeoutMs) || (5 * 60 * 1000),
@@ -306,6 +308,37 @@ function sanitizePodcastText(value = '', { preserveNewlines = false } = {}) {
     : normalized.replace(/\s+/g, ' ').trim();
 
   return whitespaceNormalized.trim();
+}
+
+function truncatePodcastSourceText(value = '', maxChars = MAX_PODCAST_SOURCE_EXCERPT_CHARS) {
+  const limit = Math.max(80, Number(maxChars) || MAX_PODCAST_SOURCE_EXCERPT_CHARS);
+  const normalized = sanitizePodcastText(value, { preserveNewlines: true });
+  if (normalized.length <= limit) {
+    return normalized;
+  }
+
+  const truncated = normalized
+    .slice(0, limit)
+    .replace(/\s+\S*$/, '')
+    .trim();
+  return `${truncated} ...`;
+}
+
+function looksLikeAccessDeniedContent(value = '') {
+  const normalized = sanitizePodcastText(value)
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+  if (!normalized) {
+    return false;
+  }
+
+  return normalized.includes('access denied')
+    && (
+      normalized.includes("you don't have permission to access")
+      || normalized.includes('you do not have permission to access')
+      || normalized.includes('reference #')
+      || normalized.includes('errors.edgesuite.net')
+    );
 }
 
 function estimateWordBudget(durationMinutes = DEFAULT_DURATION_MINUTES) {
@@ -606,7 +639,7 @@ function getResponseText(response = {}) {
   return '';
 }
 
-function extractFetchedText(fetchData = {}, maxChars = 2200) {
+function extractFetchedText(fetchData = {}, maxChars = MAX_PODCAST_SOURCE_EXCERPT_CHARS) {
   const body = sanitizePodcastText(fetchData?.body || '', { preserveNewlines: true });
   if (!body) {
     return '';
@@ -615,7 +648,10 @@ function extractFetchedText(fetchData = {}, maxChars = 2200) {
   const contentType = String(fetchData?.headers?.['content-type'] || fetchData?.headers?.['Content-Type'] || '').toLowerCase();
   const plain = contentType.includes('html') ? stripHtml(body) : body;
   const normalized = sanitizePodcastText(plain, { preserveNewlines: true }).replace(/\n{2,}/g, '\n');
-  return normalized.slice(0, maxChars).trim();
+  if (looksLikeAccessDeniedContent(normalized)) {
+    return '';
+  }
+  return truncatePodcastSourceText(normalized, maxChars);
 }
 
 function buildTranscript(turns = []) {
@@ -824,8 +860,8 @@ function buildResearchPrompt({
   const sourceText = sources.map((source, index) => [
     `Source ${index + 1}: ${sanitizePodcastText(source.title || 'Untitled source')}`,
     `URL: ${sanitizePodcastText(source.url)}`,
-    source.snippet ? `Snippet: ${sanitizePodcastText(source.snippet, { preserveNewlines: true })}` : '',
-    source.content ? `Excerpt: ${sanitizePodcastText(source.content, { preserveNewlines: true })}` : '',
+    source.snippet ? `Snippet: ${truncatePodcastSourceText(source.snippet, MAX_PODCAST_SOURCE_SNIPPET_CHARS)}` : '',
+    source.content ? `Excerpt: ${truncatePodcastSourceText(source.content, MAX_PODCAST_SOURCE_EXCERPT_CHARS)}` : '',
   ].filter(Boolean).join('\n')).join('\n\n');
 
   return `
@@ -993,14 +1029,14 @@ class PodcastService {
         return {
           title: String(candidate?.title || url).trim() || url,
           url,
-          snippet: String(candidate?.snippet || '').trim(),
+          snippet: truncatePodcastSourceText(candidate?.snippet || '', MAX_PODCAST_SOURCE_SNIPPET_CHARS),
           content: extractFetchedText(fetched),
         };
       } catch (_error) {
         return {
           title: String(candidate?.title || url).trim() || url,
           url,
-          snippet: String(candidate?.snippet || '').trim(),
+          snippet: truncatePodcastSourceText(candidate?.snippet || '', MAX_PODCAST_SOURCE_SNIPPET_CHARS),
           content: '',
         };
       }

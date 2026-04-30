@@ -521,19 +521,89 @@ function toImageUrl(image = {}) {
     return null;
 }
 
+function isImageGenerationResponseRecord(value = {}) {
+    const type = String(value?.type || value?.object || value?.kind || '').trim().toLowerCase();
+    if (!type) {
+        return false;
+    }
+
+    return type === 'image_generation_call'
+        || type === 'image_generation'
+        || type === 'image_generation.partial_image'
+        || type === 'output_image'
+        || type === 'generated_image'
+        || type.includes('image_generation')
+        || type.includes('generated_image');
+}
+
+function isDirectImageReference(value = '') {
+    return /^(?:https?:\/\/|data:image\/|file:|sandbox:)/i.test(String(value || '').trim());
+}
+
+function normalizeImageGenerationResultPayload(value = {}) {
+    if (!isImageGenerationResponseRecord(value)) {
+        return {};
+    }
+
+    const result = value.result;
+    if (typeof result === 'string' && result.trim()) {
+        const trimmed = result.trim();
+        return isDirectImageReference(trimmed)
+            ? { url: trimmed }
+            : { b64_json: trimmed };
+    }
+
+    if (result && typeof result === 'object') {
+        return result;
+    }
+
+    return {};
+}
+
+function hasImageGenerationResultPayload(value = {}) {
+    const payload = normalizeImageGenerationResultPayload(value);
+    return Boolean(
+        payload.url
+        || payload.image_url
+        || payload.imageUrl
+        || payload.file_uri
+        || payload.fileUri
+        || payload.b64_json
+        || payload.b64
+        || payload.base64
+        || payload.image_base64
+        || payload.imageBase64
+        || payload.data
+        || payload.inline_data?.data
+        || payload.inlineData?.data,
+    );
+}
+
 function normalizeProviderImageRecord(image = {}) {
-    const inlineData = image.inline_data || image.inlineData || null;
+    const imageGenerationResult = normalizeImageGenerationResultPayload(image);
+    const inlineData = image.inline_data
+        || image.inlineData
+        || imageGenerationResult.inline_data
+        || imageGenerationResult.inlineData
+        || null;
     const imageUrl = image.image_url && typeof image.image_url === 'object'
         ? image.image_url.url
-        : image.image_url;
+        : (image.image_url || imageGenerationResult.image_url || imageGenerationResult.imageUrl);
     const b64Json = image.b64_json
         || image.b64
         || image.base64
         || image.image_base64
         || image.imageBase64
+        || imageGenerationResult.b64_json
+        || imageGenerationResult.b64
+        || imageGenerationResult.base64
+        || imageGenerationResult.image_base64
+        || imageGenerationResult.imageBase64
+        || imageGenerationResult.data
         || inlineData?.data
         || null;
     const url = toImageUrl({
+        ...imageGenerationResult,
         ...image,
         image_url: imageUrl,
         b64_json: b64Json,
@@ -542,8 +612,19 @@ function normalizeProviderImageRecord(image = {}) {
     return {
         url,
         b64_json: b64Json || undefined,
-        revised_prompt: image.revised_prompt || image.revisedPrompt || image.prompt || undefined,
-        mimeType: image.mimeType || image.mime_type || inlineData?.mime_type || inlineData?.mimeType || undefined,
+        revised_prompt: image.revised_prompt
+            || image.revisedPrompt
+            || imageGenerationResult.revised_prompt
+            || imageGenerationResult.revisedPrompt
+            || image.prompt
+            || undefined,
+        mimeType: image.mimeType
+            || image.mime_type
+            || imageGenerationResult.mimeType
+            || imageGenerationResult.mime_type
+            || inlineData?.mime_type
+            || inlineData?.mimeType
+            || undefined,
     };
 }
 
@@ -601,13 +682,14 @@ function extractProviderImageRecords(value, depth = 0) {
         || value.image_base64
         || value.imageBase64
         || value.inline_data?.data
-        || value.inlineData?.data,
+        || value.inlineData?.data
+        || hasImageGenerationResultPayload(value),
     );
     if (hasDirectImage) {
         return [normalizeProviderImageRecord(value)];
     }
 
-    const nestedKeys = ['data', 'images', 'generated_images', 'generatedImages', 'output', 'content', 'parts', 'candidates'];
+    const nestedKeys = ['data', 'images', 'generated_images', 'generatedImages', 'output', 'result', 'content', 'parts', 'candidates'];
     return nestedKeys.flatMap((key) => extractProviderImageRecords(value[key], depth + 1));
 }
 
@@ -2928,10 +3010,14 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Use `web-search` for finding current or relevant pages before answering.');
         guidance.push('- When the user explicitly asks for research, call `web-search` first. This backend routes it through the configured Perplexity provider.');
         guidance.push('- Treat strong `web-search` results as approved candidate sources for routine research, best-practice lookups, and news gathering. Do not stop to ask the user to pre-approve normal public domains unless they explicitly want a specific source list.');
+        guidance.push('- For URL discovery, scraping prep, Playwright candidate pages, and routine public research, use `web-search` with `researchMode: "search"` first. It uses Perplexity raw Search without an LLM pass.');
+        guidance.push('- For a one-shot grounded answer with citations, use `web-search` with `researchMode: "sonar"` or `"sonar-pro"`; use `"sonar-pro"` for complex comparisons.');
+        guidance.push('- For image URL hotlisting, use `web-search` with `researchMode: "sonar"`, `returnImages: true`, and optional `imageDomains` / `imageFormats` filters. Use `returnVideos: true` only when videos materially help.');
+        guidance.push('- For autonomous one-call research that should plan, search, and fetch itself, use `researchMode: "pro-search"`; for explicit long-form deep research use `researchMode: "sonar-deep-research"` and keep it reserved for requests that justify the extra cost.');
         guidance.push('- For research-backed slides, reports, and deep-research work, use Perplexity-backed `web-search` to discover candidate source URLs yourself. Choose the strongest sites yourself, verify them with `web-fetch` first, and only use `web-scrape` when a page needs rendered or structured extraction instead of asking the user which websites to scrape.');
         guidance.push('- Use `domains` on `web-search` when the user wants official docs, a known publisher family, or a tighter authoritative source set.');
         guidance.push('- For explicit research requests, do not stop at search snippets. Verify the strongest search results with `web-fetch` first and only escalate to `web-scrape` when simple retrieval is insufficient.');
-        guidance.push('- For deep research, prefer broader Perplexity passes over single-source synthesis so the answer is grounded in multiple current sources.');
+        guidance.push('- For deep research, prefer the dedicated Perplexity deep-research mode over manually chaining many small search/fetch passes, but do not use it for short factual lookups.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'web-fetch')) {
@@ -4989,6 +5075,53 @@ async function* synthesizeStreamResponse(response, metadata = {}, streamMode = '
     };
 }
 
+function estimateOpenAIRequestTextChars(value, seen = null) {
+    if (typeof value === 'string') {
+        return value.length;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean' || value == null) {
+        return 0;
+    }
+    if (typeof value !== 'object') {
+        return 0;
+    }
+
+    const visited = seen || new WeakSet();
+    if (visited.has(value)) {
+        return 0;
+    }
+    visited.add(value);
+
+    if (Array.isArray(value)) {
+        return value.reduce((sum, entry) => sum + estimateOpenAIRequestTextChars(entry, visited), 0);
+    }
+
+    return Object.values(value).reduce((sum, entry) => sum + estimateOpenAIRequestTextChars(entry, visited), 0);
+}
+
+function summarizeResponsesInputShape(input = []) {
+    const items = Array.isArray(input) ? input : [input];
+    return items.slice(0, 8).map((item) => {
+        if (!item || typeof item !== 'object') {
+            return typeof item;
+        }
+        return [item.type, item.role].filter(Boolean).join(':') || 'object';
+    });
+}
+
+function summarizeOpenAIRequestParamsForLog(params = {}) {
+    const inputItems = Array.isArray(params.input) ? params.input.length : (params.input == null ? 0 : 1);
+    return {
+        model: params.model || null,
+        stream: params.stream === true,
+        inputItems,
+        inputChars: estimateOpenAIRequestTextChars(params.input),
+        inputShape: summarizeResponsesInputShape(params.input),
+        reasoning: params.reasoning ? { effort: params.reasoning.effort || null } : null,
+        previousResponseId: Boolean(params.previous_response_id),
+    };
+}
+
 async function createResponse({
     input,
     previousResponseId = null,
@@ -5055,7 +5188,7 @@ async function createResponse({
     const prompt = getLastUserText(messages);
 
     console.log(`[OpenAI] Creating response: model=${params.model}, stream=${stream}, messages=${messages.length}, reasoning=${normalizedReasoningEffort || 'default'}, apiMode=${apiMode}, promptReuse=${promptState.canReuseThreadedPrompt}`);
-    console.log('[OpenAI] Full params:', JSON.stringify(params, null, 2));
+    console.log('[OpenAI] Request params summary:', JSON.stringify(summarizeOpenAIRequestParamsForLog(params)));
     const kimibuiltMetadata = {
         promptState: {
             instructionsFingerprint: promptState.instructionsFingerprint,
@@ -5620,6 +5753,7 @@ module.exports = {
         runAutomaticToolLoopWithResponses,
         sanitizeToolSchema,
         selectAutomaticToolDefinitions,
+        summarizeOpenAIRequestParamsForLog,
         inferRequiredAutomaticToolId,
         shouldSendReasoningEffort,
         shouldAutoUseTool,

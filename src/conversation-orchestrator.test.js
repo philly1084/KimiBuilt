@@ -4873,7 +4873,7 @@ describe('ConversationOrchestrator', () => {
             params: expect.objectContaining({
                 engine: 'perplexity',
                 query: 'managed Postgres providers for startups',
-                researchMode: 'pro-search',
+                researchMode: 'search',
             }),
         });
     });
@@ -5338,7 +5338,7 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
-    test('upgrades explicit deep research requests to the deep-research Perplexity mode', () => {
+    test('upgrades explicit deep research requests to the Sonar Deep Research Perplexity mode', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {
                 createResponse: jest.fn(),
@@ -5368,7 +5368,7 @@ describe('ConversationOrchestrator', () => {
             tool: 'web-search',
             params: expect.objectContaining({
                 engine: 'perplexity',
-                researchMode: 'deep-research',
+                researchMode: 'sonar-deep-research',
             }),
         }));
     });
@@ -6367,7 +6367,7 @@ describe('ConversationOrchestrator', () => {
                 params: expect.objectContaining({
                     engine: 'perplexity',
                     query: expect.stringContaining('managed Postgres providers for startups'),
-                    researchMode: 'pro-search',
+                    researchMode: 'search',
                 }),
             }),
         ]);

@@ -21,16 +21,29 @@ Key params:
 - `updatedAfter` / `updatedBefore`
 - `maxTokens`
 - `maxTokensPerPage`
+- `maxOutputTokens`
 - `userLocation`
 - `maxSteps`
 - `instructions`
+- `returnImages`
+- `imageDomains`
+- `imageFormats`
+- `returnVideos`
+- `searchMode`
+- `searchContextSize`
+- `reasoningEffort`
 
 Notes:
 - `perplexity` is the working engine in this backend.
 - Requires `PERPLEXITY_API_KEY` in the backend environment.
 - `researchMode: "search"` uses Perplexity's raw `/search` endpoint for ranked results.
-- `researchMode: "fast-search" | "pro-search" | "deep-research" | "advanced-deep-research"` uses Perplexity's `/v1/agent` presets for researched answers plus source results.
-- Use `pro-search` for ordinary research requests and `deep-research` for explicit deep or comprehensive research.
+- `researchMode: "sonar" | "sonar-pro" | "sonar-reasoning-pro" | "sonar-deep-research"` uses Perplexity Sonar `/v1/sonar` for grounded answers, citations, search results, and optional media.
+- `researchMode: "fast-search" | "pro-search" | "deep-research" | "advanced-deep-research"` uses Perplexity's `/v1/agent` presets for autonomous searched answers plus source results.
+- Use `search` for URL hotlisting, scraping prep, Playwright candidate pages, and routine public research when the local agent can fetch/verify pages itself.
+- Use `sonar` or `sonar-pro` for one-shot grounded answers. Use `sonar-pro` for complex comparisons.
+- Use `returnImages: true` with optional `imageDomains` and `imageFormats` for image URL hotlisting. Use `returnVideos: true` only when video sources materially help.
+- Use `pro-search` when a single Perplexity call should plan, search, and fetch autonomously.
+- Use `sonar-deep-research` only when the user explicitly asks for deep, comprehensive, or long-form research that justifies higher cost.
 - Use `domains` to bias Perplexity toward official docs, publishers, or an approved source family.
 - Use `web-fetch` first on a result URL for direct verification.
 - Use `web-scrape` only when deeper rendered or structured extraction is needed.

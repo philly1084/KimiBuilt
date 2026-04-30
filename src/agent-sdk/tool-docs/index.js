@@ -170,7 +170,7 @@ const REMOTE_CLI_COMMAND_CATALOG = Object.freeze([
 
 const TOOL_SUPPORT = {
   'web-fetch': { status: 'stable', notes: ['Static HTTP/HTTPS fetch with retries and caching.'] },
-  'web-search': { status: 'stable', notes: ['Perplexity-backed raw search and preset research modes are implemented.', 'Requires PERPLEXITY_API_KEY in the backend environment.'] },
+  'web-search': { status: 'stable', notes: ['Perplexity-backed raw Search, Sonar grounded answers/media, and Agent preset research modes are implemented.', 'Requires PERPLEXITY_API_KEY in the backend environment.'] },
   'web-scrape': { status: 'stable', notes: ['Supports static fetch and backend Chromium rendering for dynamic pages.'] },
   'security-scan': { status: 'stable', notes: ['Pattern-based source scanning for secrets and common issues.'] },
   'schema-generate': { status: 'stable', notes: ['Generates DDL, ORM schemas, and ER diagrams from entity specs.'] },

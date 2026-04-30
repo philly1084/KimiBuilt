@@ -227,6 +227,29 @@ describe('openai-client response threading', () => {
         expect(response.metadata.tokenUsage).toEqual(response.metadata.usage);
     });
 
+    test('logs request summaries without dumping prompt content', async () => {
+        const { createResponse } = require('./openai-client');
+        const secretPrompt = `confidential podcast research ${'source excerpt '.repeat(300)}`;
+        const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+        let logs = '';
+
+        try {
+            await createResponse({
+                input: secretPrompt,
+                stream: false,
+            });
+            logs = logSpy.mock.calls
+                .map((args) => args.map((entry) => String(entry)).join(' '))
+                .join('\n');
+        } finally {
+            logSpy.mockRestore();
+        }
+
+        expect(logs).toContain('Request params summary');
+        expect(logs).not.toContain('Full params');
+        expect(logs).not.toContain(secretPrompt.slice(0, 80));
+    });
+
     test('summarizes direct artifact tool outputs instead of dumping raw payload JSON', async () => {
         const { __testUtils } = require('./openai-client');
 

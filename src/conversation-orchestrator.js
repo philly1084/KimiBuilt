@@ -1905,11 +1905,15 @@ function inferPerplexityResearchModeFromText(text = '') {
     }
 
     if (/\b(deep research|in-depth research|comprehensive research|exhaustive research|thorough research)\b/.test(normalized)) {
-        return 'deep-research';
+        return 'sonar-deep-research';
     }
 
-    if (hasExplicitWebResearchIntentText(normalized)) {
+    if (/\b(pro search|agentic research|autonomous research|multi-tool research|plan\s*\+\s*search\s*\+\s*fetch|one-call research|one call research)\b/.test(normalized)) {
         return 'pro-search';
+    }
+
+    if (/\b(grounded answer|answer with citations|one-shot answer|one shot answer|with citations)\b/.test(normalized)) {
+        return 'sonar-pro';
     }
 
     return 'search';

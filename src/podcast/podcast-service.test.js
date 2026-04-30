@@ -440,6 +440,56 @@ describe('PodcastService', () => {
     ]));
   });
 
+  test('caps source text and drops access-denied fetch bodies before script generation', async () => {
+    const service = new PodcastService();
+    const longSnippet = 'Good managers set clear expectations and coach people through tradeoffs. '.repeat(80);
+    const deniedBody = `
+      <html><body>
+        <h1>Access Denied</h1>
+        <p>You don't have permission to access this page on this server.</p>
+        <p>Reference #18.abc errors.edgesuite.net</p>
+      </body></html>
+    `;
+    const executeTool = jest.fn(async (toolId) => {
+      if (toolId === 'web-search') {
+        return {
+          success: true,
+          data: {
+            results: [
+              { title: 'Manager research', url: 'https://example.com/managers', snippet: longSnippet },
+            ],
+          },
+        };
+      }
+
+      if (toolId === 'web-fetch') {
+        return {
+          success: true,
+          data: {
+            headers: { 'content-type': 'text/html' },
+            body: deniedBody,
+          },
+        };
+      }
+
+      throw new Error(`Unexpected tool: ${toolId}`);
+    });
+
+    await service.createPodcast({
+      topic: 'What makes a good manager',
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+      toolManager: { executeTool },
+    });
+
+    const [{ input: prompt }] = createResponse.mock.calls[0];
+    expect(prompt).toContain('Good managers set clear expectations');
+    expect(prompt).not.toContain(longSnippet);
+    expect(prompt).not.toContain("You don't have permission");
+    expect(prompt).not.toContain('errors.edgesuite.net');
+  });
+
   test('exports mp3 and applies optional audio mixing when requested', async () => {
     persistGeneratedAudio
       .mockResolvedValueOnce({
