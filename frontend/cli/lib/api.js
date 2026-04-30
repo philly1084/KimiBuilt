@@ -712,6 +712,7 @@ class OpenAIClient {
       return {
         data: data.data || [],
         artifacts: Array.isArray(data.artifacts) ? data.artifacts : [],
+        diagnostics: data.diagnostics || null,
         model: data.model || model || null,
         size: data.size || params.size,
         quality: data.quality || quality || null,

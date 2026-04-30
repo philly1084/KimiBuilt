@@ -19,6 +19,7 @@ jest.mock('../../agent-sdk/registry/UnifiedRegistry', () => ({
 
 const DashboardController = require('./dashboard.controller');
 const tracesController = require('./traces.controller');
+const logsController = require('./logs.controller');
 
 describe('DashboardController', () => {
   beforeEach(() => {
@@ -260,6 +261,50 @@ describe('DashboardController', () => {
       totalTokens: 0,
       inferred: false,
     });
+  });
+
+  test('surfaces image diagnostics in admin logs and trace timelines', () => {
+    const controller = new DashboardController(null);
+    const task = controller.recordRuntimeTaskStart({
+      sessionId: 'session-image-1',
+      input: 'Generate an image of a dashboard',
+      model: 'gpt-image-2',
+      mode: 'image',
+      transport: 'http',
+      metadata: {},
+    });
+    const diagnostics = {
+      imageGeneration: {
+        code: 'provider_response_not_parsable',
+        status: 'failed',
+        stage: 'provider_response_parse',
+        counts: {
+          parsedImageRecords: 0,
+          returnedImageRecords: 0,
+          usableReturnedImageRecords: 0,
+          artifacts: 0,
+        },
+      },
+    };
+
+    controller.recordRuntimeTaskError(task.id, {
+      error: 'No usable image data received from API',
+      model: 'gpt-image-2',
+      duration: 450,
+      metadata: {
+        diagnostics,
+      },
+    });
+
+    expect(logsController.addLog).toHaveBeenCalledWith(expect.objectContaining({
+      route: 'image',
+      status: 'error',
+      diagnostics,
+    }));
+
+    const trace = tracesController.addTrace.mock.calls[0][0];
+    const failedModelStep = trace.timeline.find((step) => step.type === 'model_call');
+    expect(failedModelStep.details.diagnostics).toEqual(diagnostics);
   });
 
   test('reports optional admin capabilities in health without treating them as core service failures', async () => {

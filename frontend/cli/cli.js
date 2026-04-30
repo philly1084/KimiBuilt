@@ -646,6 +646,33 @@ function parseImageOptions(args) {
   
   return options;
 }
+
+function formatImageDiagnostics(diagnostics = null) {
+  const imageDiagnostics = diagnostics?.imageGeneration || diagnostics;
+  if (!imageDiagnostics || typeof imageDiagnostics !== 'object') {
+    return '';
+  }
+
+  const counts = imageDiagnostics.counts || {};
+  const flags = imageDiagnostics.flags || {};
+  const provider = imageDiagnostics.provider || {};
+  const parts = [
+    imageDiagnostics.code || 'image_diagnostics',
+    imageDiagnostics.stage ? `stage=${imageDiagnostics.stage}` : '',
+    provider.source ? `provider=${provider.source}` : '',
+    provider.status ? `providerStatus=${provider.status}` : '',
+    `parsed=${Number(counts.parsedImageRecords || 0)}`,
+    `returned=${Number(counts.returnedImageRecords || 0)}`,
+    `usable=${Number(counts.usableReturnedImageRecords || 0)}`,
+    `artifacts=${Number(counts.artifacts || 0)}`,
+  ].filter(Boolean);
+  const likely = flags.likelyFrontendReceiveOrParserIssue
+    ? 'Backend sent usable image data; inspect the CLI receive/parser path.'
+    : (imageDiagnostics.likelyCause || '');
+
+  return `${parts.join(' | ')}${likely ? ` | ${likely}` : ''}`;
+}
+
 function parseImageUrlsFromText(text) {
   const source = String(text || '');
   const urls = new Set();
@@ -793,6 +820,7 @@ async function handleImage(args) {
       console.log(chalk.gray(`  Style: ${chalk.cyan(result.style || imageOptions.style)}`));
     }
     
+    let usableImages = 0;
     if (result.data && result.data.length > 0) {
       lastImageUrls = [];
       for (let i = 0; i < result.data.length; i++) {
@@ -805,6 +833,7 @@ async function handleImage(args) {
         
         // Save image if URL or base64 is provided
         if (img.url || img.b64_json) {
+          usableImages += 1;
           const outputDir = config.getImageOutputDir();
           
           // Ensure output directory exists
@@ -829,7 +858,15 @@ async function handleImage(args) {
         }
       }
     }
-    
+
+    if (!result.data || result.data.length === 0 || usableImages === 0) {
+      const diagnostics = formatImageDiagnostics(result.diagnostics);
+      console.log(chalk.red('\n  No usable image data received from API.'));
+      if (diagnostics) {
+        console.log(chalk.gray(`  Diagnostics: ${diagnostics}`));
+      }
+    }
+
     console.log(chalk.cyan.bold('└───────────────────────────────────────┘\n'));
   } catch (err) {
     spinner.fail(chalk.red(`Image generation failed: ${err.message}`));

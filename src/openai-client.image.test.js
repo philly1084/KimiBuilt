@@ -236,6 +236,45 @@ describe('openai-client image generation', () => {
         ]);
     });
 
+    test('returns diagnostics when a successful provider response has no parsable image payload', async () => {
+        process.env.OPENAI_BASE_URL = 'https://gateway.example/v1';
+        process.env.OPENAI_IMAGE_MODEL = 'gateway-image-model';
+        global.fetch = jest.fn(async () => ({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                created: 123,
+                data: [{
+                    type: 'message',
+                    content: 'I cannot create that image.',
+                }],
+            }),
+        }));
+
+        const { generateImage } = require('./openai-client');
+        const result = await generateImage({
+            prompt: 'Generate a restricted image',
+            model: 'gateway-image-model',
+        });
+
+        expect(result.data).toEqual([]);
+        expect(result.diagnostics.imageGeneration).toEqual(expect.objectContaining({
+            code: 'provider_response_not_parsable',
+            status: 'failed',
+            flags: expect.objectContaining({
+                providerResponseReceived: true,
+                likelyBackendParserIssue: true,
+            }),
+            counts: expect.objectContaining({
+                parsedImageRecords: 0,
+                usableReturnedImageRecords: 0,
+            }),
+            responseShape: expect.objectContaining({
+                keys: expect.arrayContaining(['created', 'data']),
+            }),
+        }));
+    });
+
     test('keeps gateway/router image requests on the configured OpenAI endpoint by default', async () => {
         process.env.OPENAI_BASE_URL = 'https://gateway.example/v1';
         process.env.OPENAI_IMAGE_MODEL = 'gpt-image-2';

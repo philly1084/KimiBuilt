@@ -6131,6 +6131,32 @@ curl -fsSIL --max-time 20 "https://$host"`;
         };
     }
 
+    getImageDiagnosticSummary(response) {
+        const diagnostics = response?.diagnostics?.imageGeneration || response?.imageDiagnostics || null;
+        if (!diagnostics || typeof diagnostics !== 'object') {
+            return '';
+        }
+
+        const counts = diagnostics.counts || {};
+        const flags = diagnostics.flags || {};
+        const provider = diagnostics.provider || {};
+        const parts = [
+            diagnostics.code || 'image_diagnostics',
+            diagnostics.stage ? `stage=${diagnostics.stage}` : '',
+            provider.source ? `provider=${provider.source}` : '',
+            provider.status ? `providerStatus=${provider.status}` : '',
+            `parsed=${Number(counts.parsedImageRecords || 0)}`,
+            `returned=${Number(counts.returnedImageRecords || 0)}`,
+            `usable=${Number(counts.usableReturnedImageRecords || 0)}`,
+            `artifacts=${Number(counts.artifacts || 0)}`,
+        ].filter(Boolean);
+        const likely = flags.likelyFrontendReceiveOrParserIssue
+            ? 'Backend sent usable image data; inspect the web chat receive/parser path.'
+            : (diagnostics.likelyCause || '');
+
+        return `${parts.join(' | ')}${likely ? ` | ${likely}` : ''}`;
+    }
+
     normalizeArtifactImage(image, fallbackPrompt = '', fallbackHost = '') {
         if (!image || typeof image !== 'object') {
             return null;
@@ -7664,7 +7690,10 @@ curl -fsSIL --max-time 20 "https://$host"`;
 
                 uiHelpers.showToast('Image generated successfully', 'success');
             } else {
-                throw new Error('No image data received from API');
+                const diagnosticSummary = this.getImageDiagnosticSummary(result);
+                throw new Error(diagnosticSummary
+                    ? `No image data received from API. ${diagnosticSummary}`
+                    : 'No image data received from API');
             }
         } catch (error) {
             console.error('Image generation failed:', error);

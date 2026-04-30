@@ -2095,6 +2095,15 @@ class Dashboard {
         
         const modal = document.getElementById('logDetailsModal');
         const container = document.getElementById('logDetails');
+        const diagnostics = this.stringifyAdminPayload(log.diagnostics);
+        const diagnosticsSection = log.diagnostics
+            ? `
+                <div class="log-detail-section">
+                    <h4>Diagnostics</h4>
+                    <div class="log-detail-content">${this.escapeHtml(diagnostics)}</div>
+                </div>
+            `
+            : '';
         
         if (container) {
             container.innerHTML = `
@@ -2106,6 +2115,7 @@ class Dashboard {
                     <h4>Response</h4>
                     <div class="log-detail-content">${this.escapeHtml(log.response || 'N/A')}</div>
                 </div>
+                ${diagnosticsSection}
                 <div class="log-detail-grid">
                     <div class="log-detail-item">
                         <span class="log-detail-label">Model</span>

@@ -2915,6 +2915,37 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
     }
     
     // ==================== Image Generation ====================
+
+    getImageDiagnosticSummary(response) {
+        const diagnostics = response?.diagnostics?.imageGeneration || response?.imageDiagnostics || null;
+        if (!diagnostics || typeof diagnostics !== 'object') {
+            return '';
+        }
+
+        const counts = diagnostics.counts || {};
+        const flags = diagnostics.flags || {};
+        const provider = diagnostics.provider || {};
+        const parts = [
+            diagnostics.code || 'image_diagnostics',
+            diagnostics.stage ? `stage=${diagnostics.stage}` : '',
+            provider.source ? `provider=${provider.source}` : '',
+            provider.status ? `providerStatus=${provider.status}` : '',
+            `parsed=${Number(counts.parsedImageRecords || 0)}`,
+            `returned=${Number(counts.returnedImageRecords || 0)}`,
+            `usable=${Number(counts.usableReturnedImageRecords || 0)}`,
+            `artifacts=${Number(counts.artifacts || 0)}`,
+        ].filter(Boolean);
+        const likely = flags.likelyFrontendReceiveOrParserIssue
+            ? 'Backend sent usable image data; inspect the web CLI receive/parser path.'
+            : (diagnostics.likelyCause || '');
+
+        return `${parts.join(' | ')}${likely ? ` | ${likely}` : ''}`;
+    }
+
+    printImageDiagnosticError(message, response) {
+        const summary = this.getImageDiagnosticSummary(response);
+        this.printError(summary ? `${message}\n${summary}` : message);
+    }
     
     async generateImage(input) {
         if (!input) {
@@ -2955,11 +2986,12 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
                             'image'
                         );
                     })
+                    .filter((file) => file && file.id)
                     .map((file) => file.id)
                     .filter((fileId) => fileId !== null);
 
                 if (fileIds.length === 0) {
-                    this.printError('No usable image data received from API');
+                    this.printImageDiagnosticError('No usable image data received from API', response);
                     this.setStatus('error');
                     return;
                 }
@@ -2967,7 +2999,7 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
                 this.printSystem('Image generated with ' + (response.model || options.model || 'gpt-image-2') + ' (' + (response.size || options.size || 'auto') + ')');
                 this.printSystem('Saved ' + fileIds.length + ' image file(s): #' + fileIds.join(', #') + '. Use /download <id> or /open.');
             } else {
-                this.printError('No image data received from API');
+                this.printImageDiagnosticError('No image data received from API', response);
             }
             
             this.setStatus('ready');

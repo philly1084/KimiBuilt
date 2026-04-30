@@ -34,6 +34,11 @@ const { stripNullCharacters } = require('../utils/text');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 const { persistGeneratedImages } = require('../generated-image-artifacts');
+const {
+    buildImageGenerationDiagnostics,
+    countUsableImageRecords,
+    formatImageDiagnosticsSummary,
+} = require('../image-generation-diagnostics');
 const { buildContinuityInstructions: buildBaseContinuityInstructions } = require('../runtime-prompts');
 const { buildHumanCentricResponseInstructions } = require('../session-instructions');
 const { getSessionControlState } = require('../runtime-control-state');
@@ -2441,6 +2446,13 @@ router.post('/responses', async (req, res, next) => {
 });
 
 router.post('/images/generations', async (req, res, next) => {
+    let runtimeTask = null;
+    const startedAt = Date.now();
+    let promptText = '';
+    let sessionIdForFailure = null;
+    let modelForFailure = req.body?.model || null;
+    let requestedCountForFailure = Math.min(Math.max(Number(req.body?.n) || 1, 1), 10);
+
     try {
         const {
             prompt,
@@ -2458,7 +2470,8 @@ router.post('/images/generations', async (req, res, next) => {
             batch_mode = 'auto',
             batchMode = batch_mode,
         } = req.body;
-        const promptText = extractImagePromptText(prompt);
+        modelForFailure = model;
+        promptText = extractImagePromptText(prompt);
         if (!promptText) {
             return res.status(400).json({
                 error: {
@@ -2468,13 +2481,15 @@ router.post('/images/generations', async (req, res, next) => {
             });
         }
         const requestedCount = Math.min(Math.max(Number(n) || 1, 1), 10);
+        requestedCountForFailure = requestedCount;
 
         let sessionId = resolveSessionId(req);
         const ownerId = getRequestOwnerId(req);
+        const requestedClientSurface = resolveClientSurface(req.body, null) || 'image';
         const requestedSessionMetadata = buildScopedSessionMetadata({
             mode: 'image',
             taskType: 'image',
-            clientSurface: resolveClientSurface(req.body, null) || 'image',
+            clientSurface: requestedClientSurface,
         });
         const session = await sessionStore.resolveOwnedSession(
             sessionId,
@@ -2492,6 +2507,23 @@ router.post('/images/generations', async (req, res, next) => {
                 },
             });
         }
+        sessionIdForFailure = sessionId;
+        const clientSurface = resolveClientSurface(req.body, session) || requestedClientSurface;
+
+        runtimeTask = startRuntimeTask({
+            sessionId,
+            input: promptText,
+            model: model || 'gateway-default',
+            mode: 'image',
+            transport: 'openai-compatible-http',
+            metadata: {
+                route: '/v1/images/generations',
+                clientSurface,
+                requestedCount,
+                size,
+                quality,
+            },
+        });
 
         const response = await generateImageBatch({
             prompt,
@@ -2519,12 +2551,32 @@ router.post('/images/generations', async (req, res, next) => {
             ...response,
             data: persistedImages.images,
         };
-
-        await sessionStore.recordResponse(sessionId, `img_${Date.now()}`);
-        await updateSessionProjectMemory(sessionId, {
-            userText: promptText,
-            assistantText: `Generated ${Array.isArray(normalizedResponse?.data) ? normalizedResponse.data.length : requestedCount} image result(s).`,
-            artifacts: persistedImages.artifacts,
+        const diagnostics = buildImageGenerationDiagnostics({
+            route: '/v1/images/generations',
+            stage: 'route_response_build',
+            source: 'backend-route',
+            upstreamDiagnostics: response?.diagnostics?.imageGeneration,
+            parsedImages: response?.data || [],
+            returnedImages: normalizedResponse.data || [],
+            artifacts: persistedImages.artifacts || [],
+            requestedCount,
+            model: normalizedResponse.model || model || null,
+            size: normalizedResponse.size || size,
+            quality: normalizedResponse.quality || quality,
+            prompt: promptText,
+        });
+        normalizedResponse.diagnostics = {
+            ...(response?.diagnostics || {}),
+            imageGeneration: diagnostics,
+        };
+        const usableImageCount = countUsableImageRecords(normalizedResponse.data || []);
+        const diagnosticSummary = formatImageDiagnosticsSummary(diagnostics);
+        const responseId = `img_${Date.now()}`;
+        const runtimeMetadata = {
+            diagnostics: {
+                imageGeneration: diagnostics,
+            },
+            imageDiagnostics: diagnostics,
             toolEvents: [{
                 toolCall: {
                     function: {
@@ -2532,15 +2584,47 @@ router.post('/images/generations', async (req, res, next) => {
                     },
                 },
                 result: {
-                    success: true,
+                    success: usableImageCount > 0,
                     toolId: 'image-generate',
-                    data: normalizedResponse,
-                    error: null,
+                    data: {
+                        model: normalizedResponse.model,
+                        counts: diagnostics.counts,
+                        flags: diagnostics.flags,
+                    },
+                    error: usableImageCount > 0 ? null : diagnosticSummary,
                 },
                 reason: 'Image generation request',
             }],
+        };
+
+        await sessionStore.recordResponse(sessionId, responseId);
+        await updateSessionProjectMemory(sessionId, {
+            userText: promptText,
+            assistantText: usableImageCount > 0
+                ? `Generated ${usableImageCount} usable image result(s).`
+                : `Image generation returned no usable image data. ${diagnosticSummary}`,
+            artifacts: persistedImages.artifacts,
+            toolEvents: runtimeMetadata.toolEvents,
         }, ownerId);
         setSessionHeaders(res, sessionId);
+
+        const duration = Date.now() - startedAt;
+        if (usableImageCount > 0) {
+            completeRuntimeTask(runtimeTask?.id, {
+                responseId,
+                output: `Generated ${usableImageCount} usable image result(s).`,
+                model: normalizedResponse.model || model || 'gateway-default',
+                duration,
+                metadata: runtimeMetadata,
+            });
+        } else {
+            failRuntimeTask(runtimeTask?.id, {
+                error: diagnosticSummary || 'Image generation returned no usable image data.',
+                model: normalizedResponse.model || model || 'gateway-default',
+                duration,
+                metadata: runtimeMetadata,
+            });
+        }
 
         res.json({
             ...normalizedResponse,
@@ -2548,6 +2632,27 @@ router.post('/images/generations', async (req, res, next) => {
             artifacts: persistedImages.artifacts,
         });
     } catch (err) {
+        const diagnostics = buildImageGenerationDiagnostics({
+            route: '/v1/images/generations',
+            stage: 'route_error',
+            source: 'backend-route',
+            requestedCount: requestedCountForFailure,
+            model: modelForFailure,
+            prompt: promptText,
+            error: err,
+        });
+        failRuntimeTask(runtimeTask?.id, {
+            error: err,
+            model: modelForFailure || 'gateway-default',
+            duration: Date.now() - startedAt,
+            metadata: {
+                diagnostics: {
+                    imageGeneration: diagnostics,
+                },
+                imageDiagnostics: diagnostics,
+                sessionId: sessionIdForFailure,
+            },
+        });
         next(err);
     }
 });

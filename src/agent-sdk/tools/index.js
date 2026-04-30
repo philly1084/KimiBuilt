@@ -9,6 +9,11 @@ const { readToolDoc, getToolDocMetadata } = require('../tool-docs');
 const { generateImageBatch } = require('../../openai-client');
 const { searchImages, isConfigured: isUnsplashConfigured } = require('../../unsplash-client');
 const { persistGeneratedImages } = require('../../generated-image-artifacts');
+const {
+  buildImageGenerationDiagnostics,
+  countUsableImageRecords,
+  formatImageDiagnosticsSummary,
+} = require('../../image-generation-diagnostics');
 const { persistGeneratedAudio } = require('../../generated-audio-artifacts');
 const { artifactService } = require('../../artifacts/artifact-service');
 const { assetManager } = require('../../asset-manager');
@@ -3403,6 +3408,20 @@ class ToolManager {
               model: response.model || params.model || null,
               images: response.data || [],
             });
+            const diagnostics = buildImageGenerationDiagnostics({
+              route: 'agent-tool:image-generate',
+              stage: 'tool_response_build',
+              source: 'agent-tool',
+              upstreamDiagnostics: response?.diagnostics?.imageGeneration,
+              parsedImages: response?.data || [],
+              returnedImages: persistedImages.images || [],
+              artifacts: persistedImages.artifacts || [],
+              requestedCount,
+              model: response.model || params.model || null,
+              size: response.size || params.size || 'auto',
+              quality: response.quality || params.quality || 'auto',
+              prompt: params.prompt,
+            });
 
             const images = (persistedImages.images || []).map((image, index) => ({
               url: image.url,
@@ -3413,17 +3432,24 @@ class ToolManager {
               inlinePath: image.inlinePath || null,
               alt: params.alt || `${params.prompt} ${index + 1}`.trim(),
             }));
+            const usableImageCount = countUsableImageRecords(images);
+            const diagnosticSummary = formatImageDiagnosticsSummary(diagnostics);
 
             return {
               source: 'generated',
               prompt: params.prompt,
               model: response.model,
               count: images.length,
+              usableCount: usableImageCount,
               requestedCount,
               image: images[0] || null,
               images,
               artifacts: persistedImages.artifacts || [],
               artifactIds: (persistedImages.artifactIds || []).slice(),
+              diagnostics: {
+                imageGeneration: diagnostics,
+              },
+              diagnosticSummary,
               markdownImage: images[0]?.url
                 ? `![${images[0].alt}](${images[0].url})`
                 : null,

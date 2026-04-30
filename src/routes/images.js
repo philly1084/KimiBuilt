@@ -5,6 +5,12 @@ const { generateImageBatch, listImageModels } = require('../openai-client');
 const { searchImages, isConfigured: isUnsplashConfigured } = require('../unsplash-client');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 const { persistGeneratedImages } = require('../generated-image-artifacts');
+const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
+const {
+    buildImageGenerationDiagnostics,
+    countUsableImageRecords,
+    formatImageDiagnosticsSummary,
+} = require('../image-generation-diagnostics');
 const {
     buildScopedSessionMetadata,
     resolveClientSurface,
@@ -80,6 +86,13 @@ function describePromptForLog(prompt) {
 }
 
 router.post('/', validate(imageSchema), async (req, res, next) => {
+    let runtimeTask = null;
+    const startedAt = Date.now();
+    let promptText = '';
+    let sessionIdForFailure = null;
+    let modelForFailure = req.body?.model || null;
+    let requestedCountForFailure = Math.min(Math.max(Number(req.body?.n) || 1, 1), 10);
+
     try {
         const {
             prompt,
@@ -96,6 +109,7 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
             n = 1,
             batchMode = 'auto',
         } = req.body;
+        modelForFailure = model;
         if (!extractPromptText(prompt)) {
             return res.status(400).json({
                 error: {
@@ -104,8 +118,9 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
                 },
             });
         }
-        const promptText = extractPromptText(prompt);
+        promptText = extractPromptText(prompt);
         const requestedCount = Math.min(Math.max(Number(n) || 1, 1), 10);
+        requestedCountForFailure = requestedCount;
         let { sessionId } = req.body;
         const ownerId = getRequestOwnerId(req);
         const requestedClientSurface = resolveClientSurface(req.body || {}, null, 'image');
@@ -124,11 +139,27 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
         sessionId = session.id;
+        sessionIdForFailure = sessionId;
         const clientSurface = resolveClientSurface(req.body || {}, session, 'image');
         const memoryScope = resolveSessionScope({
             ...requestedSessionMetadata,
             clientSurface,
         }, session);
+
+        runtimeTask = startRuntimeTask({
+            sessionId,
+            input: promptText,
+            model: model || 'gateway-default',
+            mode: 'image',
+            transport: 'http',
+            metadata: {
+                route: '/api/images',
+                clientSurface,
+                requestedCount,
+                size,
+                quality,
+            },
+        });
 
         console.log(`[Images] Generating image with ${model || 'gateway-default'}: "${describePromptForLog(prompt)}..."`);
 
@@ -158,22 +189,56 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
             ...response,
             data: persistedImages.images,
         };
-
-        await sessionStore.recordResponse(sessionId, `img_${Date.now()}`);
-        await updateSessionProjectMemory(sessionId, {
-            userText: promptText,
-            assistantText: `Generated ${Array.isArray(normalizedResponse?.data) ? normalizedResponse.data.length : requestedCount} image result(s).`,
-            artifacts: persistedImages.artifacts,
+        const diagnostics = buildImageGenerationDiagnostics({
+            route: '/api/images',
+            stage: 'route_response_build',
+            source: 'backend-route',
+            upstreamDiagnostics: response?.diagnostics?.imageGeneration,
+            parsedImages: response?.data || [],
+            returnedImages: normalizedResponse.data || [],
+            artifacts: persistedImages.artifacts || [],
+            requestedCount,
+            model: normalizedResponse.model || model || null,
+            size: normalizedResponse.size || size,
+            quality: normalizedResponse.quality || quality,
+            prompt: promptText,
+        });
+        normalizedResponse.diagnostics = {
+            ...(response?.diagnostics || {}),
+            imageGeneration: diagnostics,
+        };
+        const usableImageCount = countUsableImageRecords(normalizedResponse.data || []);
+        const diagnosticSummary = formatImageDiagnosticsSummary(diagnostics);
+        const responseId = `img_${Date.now()}`;
+        const runtimeMetadata = {
+            diagnostics: {
+                imageGeneration: diagnostics,
+            },
+            imageDiagnostics: diagnostics,
             toolEvents: [{
                 toolCall: { function: { name: 'image-generate' } },
                 result: {
-                    success: true,
+                    success: usableImageCount > 0,
                     toolId: 'image-generate',
-                    data: normalizedResponse,
-                    error: null,
+                    data: {
+                        model: normalizedResponse.model,
+                        counts: diagnostics.counts,
+                        flags: diagnostics.flags,
+                    },
+                    error: usableImageCount > 0 ? null : diagnosticSummary,
                 },
                 reason: 'Image generation request',
             }],
+        };
+
+        await sessionStore.recordResponse(sessionId, responseId);
+        await updateSessionProjectMemory(sessionId, {
+            userText: promptText,
+            assistantText: usableImageCount > 0
+                ? `Generated ${usableImageCount} usable image result(s).`
+                : `Image generation returned no usable image data. ${diagnosticSummary}`,
+            artifacts: persistedImages.artifacts,
+            toolEvents: runtimeMetadata.toolEvents,
         }, ownerId);
         await sessionStore.update(sessionId, {
             metadata: {
@@ -181,6 +246,24 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
                 memoryScope,
             },
         });
+
+        const duration = Date.now() - startedAt;
+        if (usableImageCount > 0) {
+            completeRuntimeTask(runtimeTask?.id, {
+                responseId,
+                output: `Generated ${usableImageCount} usable image result(s).`,
+                model: normalizedResponse.model || model || 'gateway-default',
+                duration,
+                metadata: runtimeMetadata,
+            });
+        } else {
+            failRuntimeTask(runtimeTask?.id, {
+                error: diagnosticSummary || 'Image generation returned no usable image data.',
+                model: normalizedResponse.model || model || 'gateway-default',
+                duration,
+                metadata: runtimeMetadata,
+            });
+        }
 
         res.json({
             sessionId,
@@ -196,8 +279,30 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
             output_compression: normalizedResponse.output_compression,
             moderation: normalizedResponse.moderation,
             batch: normalizedResponse.batch,
+            diagnostics: normalizedResponse.diagnostics,
         });
     } catch (err) {
+        const diagnostics = buildImageGenerationDiagnostics({
+            route: '/api/images',
+            stage: 'route_error',
+            source: 'backend-route',
+            requestedCount: requestedCountForFailure,
+            model: modelForFailure,
+            prompt: promptText,
+            error: err,
+        });
+        failRuntimeTask(runtimeTask?.id, {
+            error: err,
+            model: modelForFailure || 'gateway-default',
+            duration: Date.now() - startedAt,
+            metadata: {
+                diagnostics: {
+                    imageGeneration: diagnostics,
+                },
+                imageDiagnostics: diagnostics,
+                sessionId: sessionIdForFailure,
+            },
+        });
         console.error('[Images] Error:', err.message);
         next(err);
     }

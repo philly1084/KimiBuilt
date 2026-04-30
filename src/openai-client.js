@@ -37,6 +37,9 @@ const {
     mergeUsageMetadata,
 } = require('./utils/token-usage');
 const {
+    buildImageGenerationDiagnostics,
+} = require('./image-generation-diagnostics');
+const {
     hasExplicitPodcastIntent,
     extractExplicitPodcastTopic,
     hasExplicitPodcastVideoIntent,
@@ -278,6 +281,7 @@ const AUTO_TOOL_ALLOWLIST = new Set([
 const AUTO_TOOL_MAX_ROUNDS = 6;
 const SYNTHETIC_STREAM_CHUNK_SIZE = 120;
 const TERMINAL_FINISH_REASONS = new Set(['stop', 'length', 'content_filter']);
+const IMAGE_PROVIDER_METADATA = Symbol('kimibuilt.imageProviderMetadata');
 const PROVIDER_WARMUP_RETRY_ATTEMPTS = 2;
 const PROVIDER_WARMUP_RETRY_DELAY_MS = 1500;
 
@@ -893,10 +897,40 @@ function buildImageRequestVariants(params = {}, imageProvider = getImageProvider
     return [responseFormatParams, bareParams];
 }
 
+function attachImageProviderMetadata(response, metadata = {}) {
+    if (!response || typeof response !== 'object') {
+        return response;
+    }
+
+    try {
+        Object.defineProperty(response, IMAGE_PROVIDER_METADATA, {
+            value: metadata,
+            enumerable: false,
+            configurable: true,
+        });
+    } catch (_error) {
+        // Non-extensible provider objects still flow through without metadata.
+    }
+
+    return response;
+}
+
+function getImageProviderMetadata(response = null) {
+    if (!response || typeof response !== 'object') {
+        return {};
+    }
+
+    return response[IMAGE_PROVIDER_METADATA] || {};
+}
+
 async function postImageGenerationToProvider(params, imageProvider) {
     const configuredBaseURL = String(imageProvider.baseURL || 'https://api.openai.com/v1').replace(/\/$/, '');
     const candidateBaseURLs = [configuredBaseURL];
     const providerParams = buildImageGenerationParamsForProvider(params, imageProvider);
+    const providerFamily = inferProviderFamily({
+        baseURL: imageProvider.baseURL,
+        model: imageProvider.imageModel || params.model,
+    });
 
     if (/\/v1$/i.test(configuredBaseURL) && imageProvider.source !== 'official-openai') {
         candidateBaseURLs.push(configuredBaseURL.replace(/\/v1$/i, ''));
@@ -923,7 +957,17 @@ async function postImageGenerationToProvider(params, imageProvider) {
             });
 
             if (response.ok) {
-                return response.json();
+                const responseBody = await response.json();
+                return attachImageProviderMetadata(responseBody, {
+                    providerSource: imageProvider.source,
+                    providerFamily,
+                    baseURL,
+                    endpoint: `${baseURL}/images/generations`,
+                    status: response.status,
+                    requestVariant: index,
+                    requestHadResponseFormat: Object.prototype.hasOwnProperty.call(requestBody, 'response_format'),
+                    model: requestBody.model || params.model || imageProvider.imageModel || '',
+                });
             }
 
             const errorBody = await response.text();
@@ -5736,6 +5780,23 @@ async function generateImageWithSelection({
     const response = await postImageGeneration(params);
 
     const images = extractProviderImageRecords(response);
+    const providerMetadata = getImageProviderMetadata(response);
+    const diagnostics = buildImageGenerationDiagnostics({
+        route: 'openai-client',
+        stage: images.length > 0 ? 'provider_response_parsed' : 'provider_response_parse',
+        source: 'backend',
+        providerSource: providerMetadata.providerSource || getImageProviderConfig().source,
+        providerBaseUrl: providerMetadata.baseURL || getImageProviderConfig().baseURL,
+        providerMetadata,
+        response,
+        parsedImages: images,
+        returnedImages: images,
+        requestedCount: params.n,
+        model: params.model,
+        size: params.size,
+        quality: params.quality,
+        prompt: extractImagePromptText(prompt),
+    });
 
     return {
         created: response.created,
@@ -5748,6 +5809,9 @@ async function generateImageWithSelection({
         output_compression: params.output_compression ?? null,
         moderation: params.moderation || null,
         data: images,
+        diagnostics: {
+            imageGeneration: diagnostics,
+        },
     };
 }
 
@@ -5849,6 +5913,28 @@ async function generateImageBatch({
         ));
         const firstResponse = responses[0] || {};
         const responseCreatedTimes = responses.map((response) => Number(response.created) || 0).filter(Boolean);
+        const diagnostics = buildImageGenerationDiagnostics({
+            route: 'openai-client-batch',
+            stage: data.length > 0 ? 'batch_response_assembled' : 'provider_response_parse',
+            source: 'backend',
+            upstreamDiagnostics: responses.map((response) => response?.diagnostics?.imageGeneration).filter(Boolean),
+            response: {
+                batchMode: mode,
+                responses: responses.map((response) => ({
+                    created: response?.created,
+                    model: response?.model,
+                    dataCount: Array.isArray(response?.data) ? response.data.length : 0,
+                    diagnosticCode: response?.diagnostics?.imageGeneration?.code || null,
+                })),
+            },
+            parsedImages: data,
+            returnedImages: data,
+            requestedCount,
+            model: firstResponse.model || modelId,
+            size: firstResponse.size || size,
+            quality: firstResponse.quality || quality,
+            prompt: promptsForResponses.join(' | '),
+        });
 
         return {
             created: responseCreatedTimes.length > 0 ? Math.max(...responseCreatedTimes) : firstResponse.created,
@@ -5866,6 +5952,9 @@ async function generateImageBatch({
                 concurrency: Math.min(Math.max(Number(concurrency) || 1, 1), Math.max(promptsForResponses.length, 1)),
                 requestedCount,
                 prompts: promptList,
+            },
+            diagnostics: {
+                imageGeneration: diagnostics,
             },
         };
     };
@@ -5905,27 +5994,52 @@ async function generateImageBatch({
             const remainingResponses = await generateParallelResponses(remainingPrompts);
             const remainingResult = buildParallelResult(remainingResponses, remainingPrompts, 'auto-fill-parallel');
             const responseCreatedTimes = [response, ...remainingResponses].map((entry) => Number(entry.created) || 0).filter(Boolean);
+            const combinedData = [
+                ...responseData.map((image, index) => ({
+                    ...image,
+                    prompt: promptList[index],
+                    option_index: index,
+                })),
+                ...remainingResult.data.map((image, index) => ({
+                    ...image,
+                    option_index: responseData.length + index,
+                })),
+            ];
+            const diagnostics = buildImageGenerationDiagnostics({
+                route: 'openai-client-batch',
+                stage: combinedData.length > 0 ? 'batch_response_assembled' : 'provider_response_parse',
+                source: 'backend',
+                upstreamDiagnostics: [
+                    response?.diagnostics?.imageGeneration,
+                    remainingResult?.diagnostics?.imageGeneration,
+                ].filter(Boolean),
+                response: {
+                    batchMode: 'auto-fill-parallel',
+                    initialCount: responseData.length,
+                    remainingCount: remainingResult.data.length,
+                },
+                parsedImages: combinedData,
+                returnedImages: combinedData,
+                requestedCount,
+                model: response.model || modelId,
+                size: response.size || size,
+                quality: response.quality || quality,
+                prompt: promptList.join(' | '),
+            });
 
             return {
                 ...response,
                 created: responseCreatedTimes.length > 0 ? Math.max(...responseCreatedTimes) : response.created,
-                data: [
-                    ...responseData.map((image, index) => ({
-                        ...image,
-                        prompt: promptList[index],
-                        option_index: index,
-                    })),
-                    ...remainingResult.data.map((image, index) => ({
-                        ...image,
-                        option_index: responseData.length + index,
-                    })),
-                ],
+                data: combinedData,
                 batch: {
                     mode: 'auto-fill-parallel',
                     requestedCount,
                     prompts: promptList,
                     initialCount: responseData.length,
                     concurrency: remainingResult.batch.concurrency,
+                },
+                diagnostics: {
+                    imageGeneration: diagnostics,
                 },
             };
         } catch (error) {

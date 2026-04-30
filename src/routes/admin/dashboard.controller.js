@@ -137,9 +137,21 @@ class DashboardController {
     return steps.map((step) => this.normalizeExecutionTraceStep(step, fallbackStartTime, fallbackEndTime));
   }
 
+  extractDiagnostics(metadata = {}) {
+    if (!metadata || typeof metadata !== 'object') {
+      return null;
+    }
+
+    return metadata.diagnostics
+      || (metadata.imageDiagnostics ? { imageGeneration: metadata.imageDiagnostics } : null)
+      || metadata.imageGenerationDiagnostics
+      || null;
+  }
+
   buildTimeline(task, toolUsage, metadata = {}, { completed = true, responseId = null, output = '', duration = 0, error = '' } = {}) {
     const endTime = completed ? task.completedAt : task.failedAt;
     const executionTrace = this.extractExecutionTrace(metadata, task.createdAt, endTime);
+    const diagnostics = this.extractDiagnostics(metadata);
     const hasExplicitToolCalls = executionTrace.some((step) => step.type === 'tool_call');
     const hasExplicitModelCall = executionTrace.some((step) => step.type === 'model_call');
     const fallbackToolSteps = hasExplicitToolCalls
@@ -171,6 +183,7 @@ class DashboardController {
             details: {
               responseId,
               outputPreview: String(output || '').slice(0, 200),
+              diagnostics,
             },
           }
           : {
@@ -182,6 +195,7 @@ class DashboardController {
             status: 'error',
             details: {
               error,
+              diagnostics,
             },
           },
       ];
@@ -661,6 +675,7 @@ class DashboardController {
 
     const tokenUsage = this.inferTokenUsage(task.input, output, tokensUsed, metadata?.usage || metadata?.tokenUsage || {});
     const toolUsage = this.extractToolUsage(metadata);
+    const diagnostics = this.extractDiagnostics(metadata);
 
     task.status = 'completed';
     task.model = model || task.model;
@@ -696,6 +711,7 @@ class DashboardController {
       responseId,
       toolCalls: toolUsage.toolCallCount,
       toolsUsed: toolUsage.skillsUsed,
+      diagnostics,
     });
 
     tracesController.addTrace({
@@ -735,6 +751,7 @@ class DashboardController {
       responseId,
       toolsUsed: toolUsage.skillsUsed,
       toolCalls: toolUsage.toolCallCount,
+      diagnostics,
     });
 
     return task;
@@ -748,6 +765,7 @@ class DashboardController {
 
     const tokenUsage = this.inferTokenUsage(task.input, '', 0, metadata?.usage || metadata?.tokenUsage || {});
     const toolUsage = this.extractToolUsage(metadata);
+    const diagnostics = this.extractDiagnostics(metadata);
 
     task.status = 'failed';
     task.model = model || task.model;
@@ -783,6 +801,7 @@ class DashboardController {
       error: task.error,
       toolCalls: toolUsage.toolCallCount,
       toolsUsed: toolUsage.skillsUsed,
+      diagnostics,
     });
 
     tracesController.addTrace({
@@ -820,6 +839,7 @@ class DashboardController {
       error: task.error,
       toolsUsed: toolUsage.skillsUsed,
       toolCalls: toolUsage.toolCallCount,
+      diagnostics,
     });
 
     return task;
