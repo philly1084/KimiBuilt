@@ -264,7 +264,7 @@ For static HTML served from nginx, create the ConfigMap from a real file and mou
 
 ### 7. Direct CLI image build with BuildKit
 
-This is the preferred path when Gitea/ACT is not part of the build lane. The remote runner executes the commands in `/workspace`, talks to the private BuildKit service through `BUILDKIT_HOST`, pushes with the mounted Docker config, then deploys with in-cluster `kubectl`.
+This is the preferred path when the GitLab CI runner is not part of the build lane. The remote runner executes the commands in `/workspace`, talks to the private BuildKit service through `BUILDKIT_HOST`, pushes with the mounted Docker config, then deploys with in-cluster `kubectl`.
 
 Check the runner has the required tools:
 

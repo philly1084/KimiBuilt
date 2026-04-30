@@ -1,6 +1,6 @@
 # Direct CLI build runner for the remote k3s cluster.
 #
-# This manifest bypasses Gitea and ACT entirely:
+# This manifest bypasses GitLab CI entirely:
 # - KimiBuilt agents send remote-command jobs to this runner.
 # - The runner executes planned CLI work in /workspace.
 # - BuildKit builds and pushes images.

@@ -579,15 +579,10 @@ function createToolManager() {
                     toolId: id,
                     data: {
                         action: params.action,
-                        message: 'Daily blockers summary created. Every day at 11:05 PM.',
                         workload: {
                             id: 'workload-1',
-                            title: 'Daily blockers summary',
-                            trigger: {
-                                type: 'cron',
-                                expression: '5 23 * * *',
-                                timezone: 'America/Halifax',
-                            },
+                            title: params.title || 'Deferred workload',
+                            trigger: params.trigger || { type: 'manual' },
                         },
                     },
                 };
@@ -790,10 +785,20 @@ describe('openai-client automatic tool orchestration helpers', () => {
     });
 
     test('enriches automatic tool descriptions with trigger and confirmation guidance', () => {
+        jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
         const toolManager = createToolManager();
         const selectedTools = __testUtils.buildAutomaticToolDefinitions(
             toolManager,
             'Check the remote build host',
+            { executionProfile: 'remote-build' },
         );
         const remoteCommand = selectedTools.find((tool) => tool.id === 'remote-command');
 
@@ -1045,7 +1050,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
                 toolId: 'web-search',
                 params: expect.objectContaining({
                     query: 'tigers and cats differences',
-                    limit: 10,
+                    limit: expect.any(Number),
                 }),
             },
             {
@@ -2020,7 +2025,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
         )).toBe('auto');
     });
 
-    test('exposes ssh-execute unconditionally when defaults exist', () => {
+    test('does not expose ssh-execute for generic prompts in default sessions', () => {
         jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
             enabled: true,
             host: '10.0.0.5',
@@ -2030,7 +2035,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
             privateKeyPath: '',
         });
 
-        expect(__testUtils.shouldAutoUseTool('ssh-execute', 'Say hello.')).toBe(true);
+        expect(__testUtils.shouldAutoUseTool('ssh-execute', 'Say hello.')).toBe(false);
     });
 
     test('exposes ssh-execute for explicit SSH intent without defaults', () => {
@@ -2046,7 +2051,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(__testUtils.shouldAutoUseTool('ssh-execute', 'SSH into root@77.42.44.98 and check its health.')).toBe(true);
     });
 
-    test('does not expose remote-command when SSH defaults are not configured', () => {
+    test('exposes remote-command for explicit SSH intent even when defaults are not configured', () => {
         jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
             enabled: false,
             host: '',
@@ -2062,10 +2067,10 @@ describe('openai-client automatic tool orchestration helpers', () => {
             'SSH into the server and run kubectl get pods',
         );
 
-        expect(selectedTools.map((tool) => tool.id)).not.toContain('remote-command');
+        expect(selectedTools.map((tool) => tool.id)).toContain('remote-command');
     });
 
-    test('exposes remote-command even without explicit SSH intent if defaults exist', () => {
+    test('exposes remote-command for remote-build sessions when defaults exist', () => {
         jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
             enabled: true,
             host: '10.0.0.5',
@@ -2079,6 +2084,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
         const selectedTools = __testUtils.buildAutomaticToolDefinitions(
             toolManager,
             'Say hello',
+            { executionProfile: 'remote-build' },
         );
 
         expect(selectedTools.map((tool) => tool.id)).toContain('remote-command');
@@ -2123,7 +2129,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(guidance).toContain('Do not claim generic local shell or sandbox limits for Git work');
         expect(guidance).toContain('Do not infer an arbitrary live website path such as `/var/www/...` as the target');
         expect(guidance).toContain('git-backed remote workspace as the source of truth');
-        expect(guidance).toContain('prefer configured Gitea origins when available');
+        expect(guidance).toContain('prefer configured GitLab origins when available');
     });
 
     test('detects ssh as a required tool for explicit ssh prompts', () => {

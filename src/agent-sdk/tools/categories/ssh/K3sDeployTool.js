@@ -243,21 +243,32 @@ class K3sDeployTool extends ToolBase {
     ].join('\n');
   }
 
-  getGiteaDefaults() {
+  getGitProviderDefaults() {
+    if (typeof settingsController.getEffectiveGitProviderConfig === 'function') {
+      return settingsController.getEffectiveGitProviderConfig();
+    }
+    if (typeof settingsController.getEffectiveGitLabConfig === 'function') {
+      return settingsController.getEffectiveGitLabConfig();
+    }
     return typeof settingsController.getEffectiveGiteaConfig === 'function'
-      ? settingsController.getEffectiveGiteaConfig()
+      ? { ...settingsController.getEffectiveGiteaConfig(), provider: 'gitea' }
       : {};
+  }
+
+  getGiteaDefaults() {
+    return this.getGitProviderDefaults();
   }
 
   buildRemoteEnvironment(params = {}) {
     const deployDefaults = this.getDeployDefaults();
     const repositoryUrl = String(params.repositoryUrl || deployDefaults.repositoryUrl || '').trim();
-    const gitea = this.getGiteaDefaults();
-    if (this.isConfiguredGiteaRepositoryUrl(repositoryUrl) && String(gitea.token || '').trim()) {
+    const gitProvider = this.getGitProviderDefaults();
+    if (this.isConfiguredGitProviderRepositoryUrl(repositoryUrl) && String(gitProvider.token || '').trim()) {
       return buildGitCredentialEnvironment(process.env, {
-        GITEA_TOKEN: String(gitea.token || '').trim(),
-        KIMIBUILT_GIT_USERNAME: String(gitea.username || gitea.registryUsername || process.env.GITEA_USERNAME || 'git').trim() || 'git',
-        KIMIBUILT_GIT_PASSWORD: String(gitea.token || '').trim(),
+        GITLAB_TOKEN: gitProvider.provider === 'gitlab' ? String(gitProvider.token || '').trim() : '',
+        GITEA_TOKEN: gitProvider.provider === 'gitea' ? String(gitProvider.token || '').trim() : '',
+        KIMIBUILT_GIT_USERNAME: String(gitProvider.username || gitProvider.registryUsername || process.env.GITLAB_USERNAME || process.env.GITEA_USERNAME || 'git').trim() || 'git',
+        KIMIBUILT_GIT_PASSWORD: String(gitProvider.token || '').trim(),
       });
     }
 
@@ -378,7 +389,7 @@ class K3sDeployTool extends ToolBase {
     }
 
     if (!this.isAllowedRepositoryUrl(normalized)) {
-      throw new Error(`Unsupported repository URL '${normalized}'. Only GitHub clone URLs or the configured Gitea host are allowed.`);
+      throw new Error(`Unsupported repository URL '${normalized}'. Only GitHub clone URLs or the configured Git provider host are allowed.`);
     }
 
     return normalized;
@@ -386,7 +397,7 @@ class K3sDeployTool extends ToolBase {
 
   isAllowedRepositoryUrl(repositoryUrl = '') {
     return this.isGitHubRepositoryUrl(repositoryUrl)
-      || this.isConfiguredGiteaRepositoryUrl(repositoryUrl);
+      || this.isConfiguredGitProviderRepositoryUrl(repositoryUrl);
   }
 
   isGitHubRepositoryUrl(repositoryUrl = '') {
@@ -394,9 +405,9 @@ class K3sDeployTool extends ToolBase {
     return /^(https:\/\/github\.com\/[^/\s]+\/[^/\s]+(?:\.git)?|git@github\.com:[^/\s]+\/[^/\s]+(?:\.git)?)$/i.test(normalized);
   }
 
-  getConfiguredGiteaHost() {
-    const gitea = this.getGiteaDefaults();
-    const baseURL = String(gitea.baseURL || '').trim();
+  getConfiguredGitProviderHost() {
+    const gitProvider = this.getGitProviderDefaults();
+    const baseURL = String(gitProvider.baseURL || '').trim();
     if (!baseURL) {
       return '';
     }
@@ -408,10 +419,14 @@ class K3sDeployTool extends ToolBase {
     }
   }
 
-  isConfiguredGiteaRepositoryUrl(repositoryUrl = '') {
+  getConfiguredGiteaHost() {
+    return this.getConfiguredGitProviderHost();
+  }
+
+  isConfiguredGitProviderRepositoryUrl(repositoryUrl = '') {
     const normalized = String(repositoryUrl || '').trim();
-    const giteaHost = this.getConfiguredGiteaHost();
-    if (!normalized || !giteaHost) {
+    const gitProviderHost = this.getConfiguredGitProviderHost();
+    if (!normalized || !gitProviderHost) {
       return false;
     }
 
@@ -419,13 +434,17 @@ class K3sDeployTool extends ToolBase {
       const parsed = new URL(normalized);
       const pathParts = parsed.pathname.split('/').filter(Boolean);
       return ['http:', 'https:', 'ssh:'].includes(parsed.protocol)
-        && parsed.host.toLowerCase() === giteaHost
+        && parsed.host.toLowerCase() === gitProviderHost
         && pathParts.length === 2
         && /^[^/\s]+(?:\.git)?$/i.test(pathParts[1]);
     } catch (_error) {
       const scpLike = normalized.match(/^git@([^:\s]+):([^/\s]+\/[^/\s]+(?:\.git)?)$/i);
-      return Boolean(scpLike && scpLike[1].toLowerCase() === giteaHost);
+      return Boolean(scpLike && scpLike[1].toLowerCase() === gitProviderHost);
     }
+  }
+
+  isConfiguredGiteaRepositoryUrl(repositoryUrl = '') {
+    return this.isConfiguredGitProviderRepositoryUrl(repositoryUrl);
   }
 
   normalizeRepositoryUrlForCredential(repositoryUrl = '') {
@@ -434,21 +453,21 @@ class K3sDeployTool extends ToolBase {
       return normalizeGitHubRepositoryUrlForToken(normalized, process.env);
     }
 
-    if (!this.isConfiguredGiteaRepositoryUrl(normalized)) {
+    if (!this.isConfiguredGitProviderRepositoryUrl(normalized)) {
       return normalized;
     }
 
-    const gitea = this.getGiteaDefaults();
-    if (!String(gitea.token || '').trim()) {
+    const gitProvider = this.getGitProviderDefaults();
+    if (!String(gitProvider.token || '').trim()) {
       return normalized;
     }
 
-    const httpsBase = String(gitea.baseURL || '').trim().replace(/\/+$/, '');
-    const repoPath = this.extractConfiguredGiteaRepoPath(normalized);
+    const httpsBase = String(gitProvider.baseURL || '').trim().replace(/\/+$/, '');
+    const repoPath = this.extractConfiguredGitProviderRepoPath(normalized);
     return httpsBase && repoPath ? `${httpsBase}/${repoPath}` : normalized;
   }
 
-  extractConfiguredGiteaRepoPath(repositoryUrl = '') {
+  extractConfiguredGitProviderRepoPath(repositoryUrl = '') {
     const normalized = String(repositoryUrl || '').trim();
     try {
       const parsed = new URL(normalized);
@@ -457,6 +476,10 @@ class K3sDeployTool extends ToolBase {
       const scpLike = normalized.match(/^git@[^:\s]+:([^/\s]+\/[^/\s]+(?:\.git)?)$/i);
       return scpLike?.[1] || '';
     }
+  }
+
+  extractConfiguredGiteaRepoPath(repositoryUrl = '') {
+    return this.extractConfiguredGitProviderRepoPath(repositoryUrl);
   }
 
   sanitizeRef(ref = '') {

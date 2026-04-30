@@ -3371,7 +3371,7 @@ function inferFallbackSshCommand(text = '', executionProfile = DEFAULT_EXECUTION
     const hasInspectionIntent = /\b(check|inspect|verify|diagnose|debug|troubleshoot|status|state|health|healthy|look at|show|list|what'?s running|see what'?s wrong)\b/.test(normalized);
 
     const firstUrl = extractFirstUrl(source);
-    if (firstUrl && /\b(curl|reach|reachable|endpoint|url|auth|login|gitea)\b/.test(normalized)) {
+    if (firstUrl && /\b(curl|reach|reachable|endpoint|url|auth|login|gitlab|gitea)\b/.test(normalized)) {
         return `hostname && uname -m && curl -IkfsS --max-time 20 ${shellQuote(firstUrl)}`;
     }
 
@@ -4776,7 +4776,7 @@ function hasManagedAppIntentText(text = '') {
         /\bmanaged[- ]app\b/i,
         /\bmanaged\b[\s\S]{0,20}\b(app|apps|catalog|control plane|platform)\b/i,
         /\b(app|apps)\b[\s\S]{0,20}\b(managed catalog|managed-app|control plane)\b/i,
-        /\b(gitea|act[-_ ]runner|gitea actions?|managed app catalog|managed-app catalog|build events webhook)\b/i,
+        /\b(gitlab|gitlab[-_ ]runner|gitlab ci|gitea|act[-_ ]runner|gitea actions?|managed app catalog|managed-app catalog|build events webhook)\b/i,
         /\b(managed-app|managed app)\b[\s\S]{0,40}\b(create|build|deploy|publish|launch|ship|update|redeploy|inspect|check|verify|diagnose|debug|troubleshoot|status|show|list|doctor|reconcile|repair)\b/i,
     ].some((pattern) => pattern.test(normalized));
 }
@@ -4794,7 +4794,7 @@ function hasManagedAppAuthoringIntent(text = '', options = {}) {
     const changeIntent = /\b(create|build|deploy|publish|launch|ship|update|fix|edit|modify|rewrite|refactor|patch|develop|make)\b/.test(normalized);
     const remoteContext = executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
         || hasRemoteManagedAppTargetIntent(normalized)
-        || /\b(gitea|k3s|k8s|kubernetes|cluster|dns|domain|tls|traefik|cert-manager)\b/.test(normalized);
+        || /\b(gitlab|gitea|k3s|k8s|kubernetes|cluster|dns|domain|tls|traefik|cert-manager)\b/.test(normalized);
 
     return explicitManagedAppContext && appContext && changeIntent && remoteContext;
 }
@@ -4820,8 +4820,8 @@ function hasRemoteManagedAppTargetIntent(text = '') {
         /\bssh\b/,
         /\bremote build\b/,
         /\bremote-build\b/,
-        /\b(remote|server|host)\b[\s\S]{0,40}\b(gitea|k3s|k8s|kubernetes|cluster)\b/,
-        /\b(gitea|k3s|k8s|kubernetes|cluster)\b[\s\S]{0,40}\b(remote|server|host|ssh)\b/,
+        /\b(remote|server|host)\b[\s\S]{0,40}\b(gitlab|gitea|k3s|k8s|kubernetes|cluster)\b/,
+        /\b(gitlab|gitea|k3s|k8s|kubernetes|cluster)\b[\s\S]{0,40}\b(remote|server|host|ssh)\b/,
         /\b(build|deploy|run)\b[\s\S]{0,30}\b(on the server|on server|remotely|via ssh)\b/,
     ].some((pattern) => pattern.test(normalized));
 }
@@ -5039,7 +5039,7 @@ function buildManagedAppDirectAction(objective = '', options = {}) {
     const hasInspectIntent = /\b(inspect|show|status|details?|check|verify|diagnose|debug|troubleshoot|health|healthy|state)\b/i.test(normalized);
     const hasListIntent = /\blist\b/i.test(normalized);
     const hasDeployIntent = /\b(deploy|redeploy|publish|launch|ship|go live|live)\b/i.test(normalized);
-    const hasPlatformCue = /\b(gitea|runner|runners|actions?|buildkit|platform|control plane|queued|queue|waiting|k3s|cluster|deploy host|remote server)\b/i.test(normalized);
+    const hasPlatformCue = /\b(gitlab|gitea|runner|runners|actions?|buildkit|platform|control plane|queued|queue|waiting|k3s|cluster|deploy host|remote server)\b/i.test(normalized);
     const hasDoctorIntent = hasPlatformCue && /\b(doctor|diagnose|diagnostic|diagnostics|check|verify|debug|troubleshoot|health|healthy|state|status)\b/i.test(normalized);
     const hasReconcileIntent = hasPlatformCue && /\b(reconcile|repair|fix|unstick|restart|recover|heal)\b/i.test(normalized);
     const hasAuthoringWorkflow = workflowLane === 'repo-only' || workflowLane === 'repo-then-deploy';
@@ -10702,7 +10702,7 @@ class ConversationOrchestrator extends EventEmitter {
             'Use `document-workflow generate-suite` with `buildMode:"sandbox"` or `useSandbox:true` for previewable website/dashboard/front-end artifacts so the builder produces a sandbox project instead of only a template.',
             'Use `document-workflow generate-suite` for requested output packages such as PDF + PPTX + HTML, or when web-chat needs an HTML preview companion for PDF/PPTX/XLSX deliverables.',
             'Every direct `code-sandbox` website build step must use `params.mode:"project"` plus previewable files. Do not use `code-sandbox` execute mode unless a separate confirmation policy explicitly allows executable code.',
-            'For screenshot QA after a sandbox build, set `web-scrape.params.url` to the verified preview/public URL. If the URL is produced earlier in the same plan, use `{{lastPreviewUrl}}`; the runtime also resolves legacy `{{steps[n].previewUrl}}` placeholders before browser execution.',
+            'For screenshot QA after a sandbox build, set `web-scrape.params.url` to the verified preview/public URL. Use `browser:true` and `captureScreenshot:true`, omit `selectors` unless extracting fields, and never send `selectors` as an array. If the URL is produced earlier in the same plan, use `{{lastPreviewUrl}}`; the runtime also resolves legacy `{{steps[n].previewUrl}}` placeholders before browser execution.',
             'When the user wants a research-backed deliverable, prefer `web-search` and `web-fetch` first, then use `web-scrape` only when a page needs rendered or structured extraction before `document-workflow` with grounded `sources` derived from the verified tool results.',
             'Set `document-workflow.params.includeContent` to `true` only when a later step needs the full textual body for `file-write`; otherwise prefer the stored document download URL.',
             'Use `deep-research-presentation` when the user wants a research-backed deck handled as one ordered plan -> research -> images -> presentation workflow.',
@@ -10757,7 +10757,7 @@ class ConversationOrchestrator extends EventEmitter {
                     'When the user asks to replace the page with a new file, you may generate the full replacement HTML remotely, but commit it in the remote git workspace before rollout; set repo-local git user.name/user.email first if needed.',
                     'If a local HTML artifact or local file read fails, use the remote file, ConfigMap, or deployed content as recovery input, then persist the edit back to git rather than leaving the live cluster as the only source of truth.',
                     'Do not infer an arbitrary live website path such as `/var/www/...` as the target. Prefer the configured deploy target directory, a git workspace, or a path the user explicitly named.',
-                    'If the configured deploy target directory is not a git repo, initialize one or clone the configured origin before making deployable edits; prefer configured Gitea origins when available.',
+                    'If the configured deploy target directory is not a git repo, initialize one or clone the configured origin before making deployable edits; prefer configured GitLab origins when available.',
                     'Internal artifact links like `/api/artifacts/...` are backend-local references, not public hosts. Do not turn them into `https://api/...`.',
                     'Do not treat `svc` or `ingress` as deployment names. Inspect deployments, services, ingresses, pods, and ConfigMaps separately.',
                     'When verifying the deployed site, do not rely on the HTML `<title>` alone. Compare body content, mounted file content, response snippets, or content length when titles may be empty.',
@@ -11477,7 +11477,7 @@ class ConversationOrchestrator extends EventEmitter {
                 parts.push('For website/dashboard/front-end outputs, produce a previewable sandbox project. Prefer `document-workflow generate-suite` with `buildMode:"sandbox"`/`useSandbox:true`, or use `code-sandbox` only in `mode:"project"` with files.');
             }
             if (toolPolicy.rolePipeline.requiresSandbox && allowedToolIds.includes('web-scrape')) {
-                parts.push('For website/dashboard/front-end QA, use Playwright-backed `web-scrape` with `browser:true`, `captureScreenshot:true`, and desktop plus mobile `viewport` values once a preview or public URL exists.');
+                parts.push('For website/dashboard/front-end QA, use Playwright-backed `web-scrape` with `browser:true`, `captureScreenshot:true`, and desktop plus mobile `viewport` values once a preview or public URL exists. Omit `selectors` for screenshot-only QA.');
                 parts.push('When a QA screenshot step follows a sandbox build, use the actual preview/public URL from the tool result, or `{{lastPreviewUrl}}` only for a URL produced earlier in the same runtime plan.');
             }
             parts.push('For slides, slide decks, presentations, and PowerPoint requests, default the final deliverable to PPTX unless the user explicitly asks for interactive or HTML output; an HTML sandbox preview can be a companion design stage, but not the final replacement.');
@@ -11603,6 +11603,7 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('For search-follow-up research, treat the selected search-result host as approved by default and use `researchSafe: true` plus `approvedDomains` so bot-blocked pages are skipped automatically instead of turning source selection back into a user task.');
             parts.push('When browser rendering is enabled, `web-scrape` can execute `actions` such as click, fill, type, press, wait_for_selector, wait_for_timeout, hover, scroll, and select_option before extracting the final page state.');
             parts.push('Use `captureScreenshot: true` in browser mode when a visual snapshot of the rendered page would help later review or UI verification.');
+            parts.push('For `web-scrape`, omit `selectors` when only capturing screenshots. If selectors are needed, send an object keyed by field name, not an array.');
             parts.push('For responsive UI/UX self-checks, call `web-scrape` separately with desktop `viewport:{width:1440,height:960}` and mobile `viewport:{width:390,height:844}` so both screenshot artifacts are available for review.');
             parts.push('When the user wants page images from sensitive or adult sites without exposing the model to the content, use `web-scrape` with `captureImages: true` and `blindImageCapture: true` so the backend stores opaque binary artifacts and only returns safe metadata.');
         }

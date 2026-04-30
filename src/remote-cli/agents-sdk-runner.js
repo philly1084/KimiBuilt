@@ -154,21 +154,27 @@ function resolveAgentsApiMode({ requestedMode = '', baseURL = '' } = {}) {
   return isOfficialOpenAIBaseURL(baseURL) ? 'responses' : 'chat';
 }
 
-function resolveConfiguredGiteaContext() {
-  const gitea = typeof settingsController.getEffectiveGiteaConfig === 'function'
-    ? settingsController.getEffectiveGiteaConfig()
-    : config.gitea || {};
+function resolveConfiguredGitProviderContext() {
+  const gitProvider = typeof settingsController.getEffectiveGitProviderConfig === 'function'
+    ? settingsController.getEffectiveGitProviderConfig()
+    : (typeof settingsController.getEffectiveGitLabConfig === 'function'
+      ? settingsController.getEffectiveGitLabConfig()
+      : (config.gitlab || config.gitea || {}));
 
-  const baseURL = normalizeText(gitea.baseURL);
-  const org = normalizeText(gitea.org) || 'agent-apps';
+  const provider = normalizeText(gitProvider.provider || 'gitlab') || 'gitlab';
+  const baseURL = normalizeText(gitProvider.baseURL);
+  const org = normalizeText(gitProvider.org) || 'agent-apps';
   return {
-    configured: Boolean(gitea.enabled !== false && baseURL),
+    provider,
+    configured: Boolean(gitProvider.enabled !== false && baseURL),
     baseURL,
     org,
-    registryHost: normalizeText(gitea.registryHost),
-    hasToken: Boolean(normalizeText(gitea.token || process.env.GITEA_TOKEN)),
+    registryHost: normalizeText(gitProvider.registryHost),
+    hasToken: Boolean(normalizeText(gitProvider.token || process.env.GITLAB_TOKEN || process.env.GITEA_TOKEN)),
   };
 }
+
+const resolveConfiguredGiteaContext = resolveConfiguredGitProviderContext;
 
 function hasRemoteSoftwareDeploymentIntent(text = '') {
   const normalized = String(text || '').trim().toLowerCase();
@@ -177,7 +183,7 @@ function hasRemoteSoftwareDeploymentIntent(text = '') {
   }
 
   const softwareTarget = /\b(app|application|site|website|web app|web page|webpage|frontend|dashboard|visualization|visualisation|viewer|map|globe|world|service|game|software)\b/.test(normalized);
-  const remoteTarget = /\b(remote|server|host|runner|cli runner|k3s|k8s|kubernetes|cluster|dns|domain|ingress|traefik|tls|deploy|deployment|live|online|gitea)\b/.test(normalized)
+  const remoteTarget = /\b(remote|server|host|runner|cli runner|k3s|k8s|kubernetes|cluster|dns|domain|ingress|traefik|tls|deploy|deployment|live|online|gitlab|gitea)\b/.test(normalized)
     || /\b[a-z0-9-]+(?:\.[a-z0-9-]+){1,}\b/.test(normalized);
   const authoringIntent = /\b(create|make|build|generate|implement|develop|write|update|fix|finish|continue|resume|complete|deploy|redeploy|publish|launch|ship|route|rollout)\b/.test(normalized);
   const deploymentIntent = /\b(deploy|redeploy|publish|launch|ship|go live|get (?:it|the app|the site|the website) (?:live|online|deployed)|bring (?:it|the app|the site|the website) (?:live|online)|route|ingress|tls|dns|domain|rollout)\b/.test(normalized);
@@ -207,7 +213,7 @@ function buildRemoteCliInstructions({
   waitMs = 30000,
   adminMode = false,
   extraInstructions = '',
-  gitea = resolveConfiguredGiteaContext(),
+  gitea = resolveConfiguredGitProviderContext(),
 } = {}) {
   return [
     'You can modify the remote server using the remote-cli MCP tools.',
@@ -224,9 +230,9 @@ function buildRemoteCliInstructions({
     'For maintenance work, inspect only changed files, package scripts, manifests, rollout state, logs, and targeted symbols relevant to the task.',
     'For k3s delivery, use an inspect -> focused edit -> focused test/build -> image/deploy -> deploy-verify loop.',
     'For any k3s website/app create or edit, use a git-backed workspace as the source of truth before touching the live cluster.',
-    gitea?.configured ? `Configured Gitea: ${gitea.baseURL} (org: ${gitea.org}).` : '',
-    'Prefer an existing configured Gitea remote for the app. If no remote is present, initialize a local git repo in the remote workspace and commit the deployable state before build/deploy; add a Gitea remote when the task or workspace exposes one.',
-    gitea?.configured ? 'For new apps without a remote, create or use a repository under the configured Gitea org when GITEA_TOKEN is available; otherwise keep a local git repo and report that no Gitea token or remote was available.' : '',
+    gitea?.configured ? `Configured Git provider: ${gitea.provider || 'gitlab'} at ${gitea.baseURL} (group/org: ${gitea.org}).` : '',
+    'Prefer an existing configured GitLab remote for the app. If no remote is present, initialize a local git repo in the remote workspace and commit the deployable state before build/deploy; add a GitLab remote when the task or workspace exposes one.',
+    gitea?.configured ? 'For new apps without a remote, create or use a repository under the configured GitLab group when GITLAB_TOKEN is available; otherwise keep a local git repo and report that no GitLab token or remote was available.' : '',
     'Before committing in a fresh remote workspace, set repo-local git user.name and user.email if they are missing.',
     'For follow-up edits, inspect git status, git log, and the current source files first. Patch the existing source, preserve prior content/assets unless explicitly replacing them, commit the change, then rebuild/redeploy.',
     'Use live Kubernetes resources, mounted files, or ConfigMaps as diagnostics or recovery input only; do not leave them as the only editable source of truth for a deployed site.',
@@ -441,6 +447,7 @@ module.exports = {
   remoteCliAgentsSdkRunner,
   resolveRemoteCliTargetId,
   resolveConfiguredGiteaContext,
+  resolveConfiguredGitProviderContext,
   resolveAgentsApiMode,
   hasRemoteSoftwareDeploymentIntent,
   resolveAdminMode,

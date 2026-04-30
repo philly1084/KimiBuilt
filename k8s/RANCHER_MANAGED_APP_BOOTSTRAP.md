@@ -1,190 +1,112 @@
-# Rancher Managed-App Bootstrap
+# Managed App GitLab Bootstrap
 
-This setup uses two separate clusters:
+KimiBuilt now expects the managed-app control plane to be GitLab based:
 
-- External software-factory cluster: Gitea, registry, BuildKit, runner
-- KimiBuilt app cluster: KimiBuilt itself plus managed-app deployment RBAC
+- GitLab CE for repositories, CI, and the container registry
+- GitLab Runner for CI job execution
+- BuildKit for image builds
+- Traefik/cert-manager ingress for `gitlab.demoserver2.buzz` and `registry.gitlab.demoserver2.buzz`
 
-## 1. External Gitea Cluster
-
-For automated setup, run the bootstrap helper on the build host:
+## 1. Bootstrap The Platform
 
 ```bash
 ./k8s/bootstrap-managed-app-platform.sh
 ```
 
-For manual Rancher-only setup, open the external cluster and import:
-
-- [rancher-agent-platform-test-env.yaml](/C:/Users/phill/KimiBuilt/k8s/rancher-agent-platform-test-env.yaml)
-
-The helper is idempotent. It first runs a health check against the
-`agent-platform` namespace, the Gitea/BuildKit/runner deployments, saved
-Secrets, and registry auth. If the platform is already healthy it exits without
-re-applying setup. On a new or broken cluster it creates the namespace, generates
-missing passwords/secrets, saves them into Kubernetes Secrets, applies only the
-non-secret platform manifests, generates a fresh runner token from the live
-Gitea pod, and restarts `act-runner`.
-
-This boots:
-
-- `agent-platform` namespace
-- Gitea
-- BuildKit
-- TLS ingress for `gitea.demoserver2.buzz`
-- `act-runner`, initially scaled to `0` until the bootstrap helper generates a fresh runner token and scales it up
-
-### After Gitea Is Up
-
-The generated values are saved in:
-
-- `agent-platform/gitea-admin`
-- `agent-platform/gitea-actions`
-- `agent-platform/agent-platform-runtime`
-
-To inspect the generated admin password:
-
-```bash
-kubectl get secret gitea-admin -n agent-platform -o jsonpath='{.data.password}' | base64 -d
-```
-
-If you already have a dedicated Gitea registry PAT, pass it to the helper. The
-helper preserves existing non-placeholder values on later runs:
-
-```bash
-export GITEA_REGISTRY_USERNAME=admin
-export GITEA_REGISTRY_PASSWORD=<gitea-pat>
-./k8s/bootstrap-managed-app-platform.sh
-```
-
-For a true clean rebuild, delete the old namespace and PVC-backed state first:
+For a fresh install:
 
 ```bash
 export FRESH_INSTALL=1
 ./k8s/bootstrap-managed-app-platform.sh
 ```
 
-To force a re-apply even when the health check passes:
+For production defaults:
 
 ```bash
-export FORCE_SETUP=1
+export PLATFORM_PROFILE=prod
 ./k8s/bootstrap-managed-app-platform.sh
 ```
 
-Optional:
+The bootstrap creates `agent-platform`, GitLab PVCs, the GitLab deployment,
+BuildKit, the GitLab runner deployment, and runtime secrets. The runner stays
+scaled to `0` until a real GitLab runner authentication token is supplied.
+
+## 2. Configure GitLab
+
+After GitLab is ready, browse to:
+
+```text
+https://gitlab.demoserver2.buzz
+```
+
+The root password is stored in:
 
 ```bash
-export KIMIBUILT_BUILD_EVENTS_INSECURE=1
+kubectl get secret gitlab-root -n agent-platform -o jsonpath='{.data.password}' | base64 -d
 ```
 
-Use that only as a temporary workaround when the runner cannot validate the KimiBuilt TLS certificate.
+Create:
 
-### Verify
+- a group named `agent-apps`
+- a PAT/service account/group deploy token for `GITLAB_TOKEN`
+- registry credentials with read/write access
+- a runner authentication token for the instance or `agent-apps` group
 
-Check:
+Then enable the runner:
 
-- `gitea` pod is `Running`
-- `buildkitd` pod is `Running`
-- `act-runner` pod is `Running`
-- `https://gitea.demoserver2.buzz` loads
-
-This fresh-install path is only truly fresh when `FRESH_INSTALL=1` is used. Re-applying the manifest without deleting the namespace leaves the `gitea-data` PVC and the existing Gitea database in place.
-
-## 2. KimiBuilt App Cluster
-
-In Rancher, open the KimiBuilt app cluster and import:
-
-- [managed-app-rbac.yaml](/C:/Users/phill/KimiBuilt/k8s/managed-app-rbac.yaml)
-
-Then edit the KimiBuilt workload in Rancher:
-
-- Namespace: usually `kimibuilt`
-- Workload/deployment: whatever runs the backend API
-
-Set the service account name to:
-
-- `kimibuilt-managed-apps`
-
-Add these environment variables to the KimiBuilt backend workload:
-
-```text
-API_BASE_URL=https://kimibuilt.demoserver2.buzz
-GITEA_BASE_URL=https://gitea.demoserver2.buzz
-GITEA_TOKEN=<paste the PAT from Gitea>
-GITEA_WEBHOOK_SECRET=TestOnly-Webhook-Secret-2026!
-GITEA_ORG=agent-apps
-GITEA_REGISTRY_HOST=gitea.demoserver2.buzz
-GITEA_REGISTRY_USERNAME=admin
-GITEA_REGISTRY_PASSWORD=<paste the same PAT or another PAT with package write access>
-MANAGED_APPS_BASE_DOMAIN=demoserver2.buzz
-MANAGED_APPS_NAMESPACE_PREFIX=app-
-MANAGED_APPS_PLATFORM_NAMESPACE=agent-platform
-MANAGED_APPS_DEFAULT_BRANCH=main
-MANAGED_APPS_REGISTRY_PULL_SECRET=gitea-registry-credentials
-MANAGED_APPS_BUILD_EVENTS_PATH=/api/integrations/gitea/build-events
-KUBERNETES_IN_CLUSTER_ENABLED=true
+```bash
+export GITLAB_REGISTRY_USERNAME=<gitlab-registry-user>
+export GITLAB_REGISTRY_PASSWORD=<gitlab-registry-token>
+export GITLAB_RUNNER_TOKEN=<glrt-token>
+./k8s/update-managed-app-runner.sh
 ```
 
-If the runner log shows a webhook TLS error like `certificate verify failed`, either fix the certificate chain for `kimibuilt.demoserver2.buzz` or temporarily add this on the runner side:
+## 3. Backend Environment
 
-```text
-KIMIBUILT_BUILD_EVENTS_INSECURE=1
+Set these in the backend environment or admin settings:
+
+```bash
+GITLAB_ENABLED=true
+GITLAB_BASE_URL=https://gitlab.demoserver2.buzz
+GITLAB_TOKEN=<gitlab-api-token>
+GITLAB_WEBHOOK_SECRET=<shared-build-events-secret>
+GITLAB_GROUP=agent-apps
+GITLAB_REGISTRY_HOST=registry.gitlab.demoserver2.buzz
+GITLAB_REGISTRY_USERNAME=<gitlab-registry-user>
+GITLAB_REGISTRY_PASSWORD=<gitlab-registry-token>
+GITLAB_RUNNER_TOKEN=<glrt-token>
+
+MANAGED_APPS_REGISTRY_PULL_SECRET=gitlab-registry-credentials
+MANAGED_APPS_BUILD_EVENTS_PATH=/api/integrations/gitlab/build-events
 ```
 
-Then redeploy the KimiBuilt backend workload.
+`/api/integrations/gitea/build-events` remains as a legacy alias, but new
+scaffolds and runtime settings use `/api/integrations/gitlab/build-events`.
 
-## 3. Catch The Remote Server Up
+## 4. Verify
 
-Your remote KimiBuilt server or cluster also needs the code changes that added:
-
-- the `managed-app` tool
-- the Gitea webhook route
-- the managed app catalog
-- the Kubernetes deployment lane
-
-If your Rancher workload builds from an image:
-
-1. Build and push the latest KimiBuilt image from this workspace.
-2. Update the Rancher workload to that new image tag.
-3. Redeploy the workload.
-
-If your remote server uses a repo checkout:
-
-1. Pull the latest repo changes onto the remote host.
-2. Rebuild the KimiBuilt image or restart the backend process.
-3. Confirm the workload is running the updated code.
-
-## 4. First End-To-End Test
-
-After both clusters are updated, use web chat with a request like:
-
-```text
-Create and deploy a managed app called hello-stack. Make it a simple one-page site that says the managed app pipeline is working.
+```bash
+kubectl get pods -n agent-platform
+kubectl rollout status deployment/gitlab -n agent-platform --timeout=900s
+kubectl rollout status deployment/buildkitd -n agent-platform --timeout=300s
+kubectl rollout status deployment/gitlab-runner -n agent-platform --timeout=180s
 ```
 
-Expected result:
+Expected:
 
-1. KimiBuilt creates the repo in Gitea under `agent-apps/hello-stack`
-2. Gitea Actions builds and pushes the image
-3. Gitea posts the build event to KimiBuilt
-4. KimiBuilt creates namespace `app-hello-stack`
-5. KimiBuilt deploys the app and creates ingress
+- `gitlab` pod is ready
+- `buildkitd` pod is ready
+- `gitlab-runner` pod is ready after `GITLAB_RUNNER_TOKEN` is supplied
+- `https://gitlab.demoserver2.buzz` loads
+- `https://registry.gitlab.demoserver2.buzz/v2/` responds with registry auth
 
-## 5. Useful Rancher Checks
-
-External Gitea cluster:
+## Rancher Locations
 
 ```text
-Workloads > agent-platform > gitea
+Workloads > agent-platform > gitlab
 Workloads > agent-platform > buildkitd
-Workloads > agent-platform > act-runner
-Service Discovery > Ingresses > agent-platform > gitea
-Storage > PersistentVolumeClaims > agent-platform > gitea-data
-```
-
-KimiBuilt app cluster:
-
-```text
-Workloads > kimibuilt > backend
-Service Accounts > kimibuilt > kimibuilt-managed-apps
-RBAC > ClusterRoleBindings > kimibuilt-managed-apps
+Workloads > agent-platform > gitlab-runner
+Service Discovery > Ingresses > agent-platform > gitlab
+Service Discovery > Ingresses > agent-platform > gitlab-registry
+Storage > PersistentVolumeClaims > agent-platform > gitlab-data
 ```

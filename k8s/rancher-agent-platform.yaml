@@ -1,6 +1,5 @@
 # Apply this manifest set to the separate k3s cluster that hosts the external
-# Gitea control plane. It is intentionally separate from the KimiBuilt app
-# cluster.
+# GitLab control plane for managed-app repository, CI, registry, and runner work.
 ---
 apiVersion: v1
 kind: Namespace
@@ -10,23 +9,22 @@ metadata:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: gitea-admin
+  name: gitlab-root
   namespace: agent-platform
 type: Opaque
 stringData:
-  username: admin
+  username: root
   password: change-me
   email: admin@demoserver2.buzz
 ---
 apiVersion: v1
 kind: Secret
 metadata:
-  name: gitea-actions
+  name: gitlab-runner
   namespace: agent-platform
 type: Opaque
 stringData:
-  shared-secret: change-me
-  runner-registration-token: change-me
+  runner-token: replace-after-gitlab-boot
 ---
 apiVersion: v1
 kind: Secret
@@ -35,12 +33,12 @@ metadata:
   namespace: agent-platform
 type: Opaque
 stringData:
-  gitea-registry-host: gitea.demoserver2.buzz
-  # Use a real Gitea username that can push container packages.
-  gitea-registry-username: change-me
-  # Prefer a PAT with package write access over a raw account password.
-  gitea-registry-password: change-me
-  kimibuilt-build-events-url: https://kimibuilt.demoserver2.buzz/api/integrations/gitea/build-events
+  gitlab-registry-host: registry.gitlab.demoserver2.buzz
+  # Use a GitLab user, project access token, group deploy token, or service account
+  # token that can read and push container registry packages.
+  gitlab-registry-username: change-me
+  gitlab-registry-password: change-me
+  kimibuilt-build-events-url: https://kimibuilt.demoserver2.buzz/api/integrations/gitlab/build-events
   kimibuilt-build-events-secret: change-me
   # Set to `1` only as a temporary workaround for an untrusted KimiBuilt TLS
   # certificate on the runner host.
@@ -50,75 +48,97 @@ stringData:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: gitea-app-ini
+  name: gitlab-omnibus-config
   namespace: agent-platform
 data:
-  app.ini: |
-    APP_NAME = KimiBuilt Agent Platform
-    RUN_MODE = prod
+  GITLAB_OMNIBUS_CONFIG: |
+    external_url 'https://gitlab.demoserver2.buzz'
+    registry_external_url 'https://registry.gitlab.demoserver2.buzz'
 
-    [server]
-    DOMAIN = gitea.demoserver2.buzz
-    ROOT_URL = https://gitea.demoserver2.buzz/
-    HTTP_ADDR = 0.0.0.0
-    HTTP_PORT = 3000
-    SSH_DOMAIN = gitea.demoserver2.buzz
-    START_SSH_SERVER = false
+    letsencrypt['enable'] = false
+    nginx['listen_port'] = 80
+    nginx['listen_https'] = false
+    registry_nginx['listen_port'] = 5050
+    registry_nginx['listen_https'] = false
+    gitlab_rails['gitlab_shell_ssh_port'] = 22
 
-    [database]
-    DB_TYPE = sqlite3
-    PATH = /data/gitea/gitea.db
-
-    [service]
-    DISABLE_REGISTRATION = true
-    REQUIRE_SIGNIN_VIEW = false
-    DEFAULT_KEEP_EMAIL_PRIVATE = true
-
-    [actions]
-    ENABLED = true
-    DEFAULT_ACTIONS_URL = github
-
-    [packages]
-    ENABLED = true
-
-    [packages.container]
-    ENABLED = true
-
-    [registry]
-    ENABLED = true
-    DOMAIN = gitea.demoserver2.buzz
-
-    [security]
-    INSTALL_LOCK = true
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: act-runner-config
-  namespace: agent-platform
-data:
-  config.yaml: |
-    log:
-      level: info
-    runner:
-      file: /data/.runner
-      capacity: 1
-      timeout: 1h
-      insecure: false
-    host:
-      workdir_parent: /workspace
+    # Low-memory profile from GitLab's memory-constrained environment guidance.
+    puma['worker_processes'] = 0
+    sidekiq['concurrency'] = 10
+    prometheus_monitoring['enable'] = false
+    alertmanager['enable'] = false
+    gitlab_exporter['enable'] = false
+    gitlab_kas['enable'] = false
+    node_exporter['enable'] = false
+    postgres_exporter['enable'] = false
+    prometheus['enable'] = false
+    puma['exporter_enabled'] = false
+    redis_exporter['enable'] = false
+    sidekiq['metrics_enabled'] = false
+    gitlab_rails['env'] = {
+      'MALLOC_CONF' => 'dirty_decay_ms:1000,muzzy_decay_ms:1000'
+    }
+    gitaly['env'] = {
+      'MALLOC_CONF' => 'dirty_decay_ms:1000,muzzy_decay_ms:1000',
+      'GITALY_COMMAND_SPAWN_MAX_PARALLEL' => '2'
+    }
+    gitaly['configuration'] = {
+      concurrency: [
+        {
+          'rpc' => "/gitaly.SmartHTTPService/PostReceivePack",
+          'max_per_repo' => 3,
+        },
+        {
+          'rpc' => "/gitaly.SSHService/SSHUploadPack",
+          'max_per_repo' => 3,
+        },
+      ],
+      cgroups: {
+        repositories: {
+          count: 2,
+        },
+        mountpoint: '/sys/fs/cgroup',
+        hierarchy_root: 'gitaly',
+        memory_bytes: 500000,
+        cpu_shares: 512,
+      },
+    }
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: gitea-data
+  name: gitlab-config
   namespace: agent-platform
 spec:
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 20Gi
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gitlab-logs
+  namespace: agent-platform
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gitlab-data
+  namespace: agent-platform
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 40Gi
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -135,103 +155,92 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: gitea
+  name: gitlab
   namespace: agent-platform
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
-      app: gitea
+      app: gitlab
   template:
     metadata:
       labels:
-        app: gitea
+        app: gitlab
     spec:
-      securityContext:
-        fsGroup: 1000
-      initContainers:
-        - name: seed-app-ini
-          image: busybox:1.36
-          securityContext:
-            runAsUser: 0
-          command:
-            - sh
-            - -c
-            - |
-              set -eu
-              mkdir -p /data/gitea/conf
-              if [ ! -s /data/gitea/conf/app.ini ]; then
-                cp /config/app.ini /data/gitea/conf/app.ini
-              fi
-              chown -R 1000:1000 /data
-              chmod 755 /data/gitea/conf
-              chmod 640 /data/gitea/conf/app.ini
-          volumeMounts:
-            - name: data
-              mountPath: /data
-            - name: app-ini-template
-              mountPath: /config/app.ini
-              subPath: app.ini
       containers:
-        - name: gitea
-          image: gitea/gitea:1.23.4
+        - name: gitlab
+          image: gitlab/gitlab-ce:18.11.1-ce.0
+          imagePullPolicy: IfNotPresent
           env:
-            - name: USER_UID
-              value: "1000"
-            - name: USER_GID
-              value: "1000"
-            - name: GITEA__security__INSTALL_LOCK
-              value: "true"
-            - name: GITEA__service__DISABLE_REGISTRATION
-              value: "true"
-            - name: GITEA__service__REQUIRE_SIGNIN_VIEW
-              value: "false"
-            - name: GITEA__security__INTERNAL_TOKEN
+            - name: GITLAB_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: gitea-actions
-                  key: shared-secret
-            - name: GITEA_ADMIN_USER
-              valueFrom:
-                secretKeyRef:
-                  name: gitea-admin
-                  key: username
-            - name: GITEA_ADMIN_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: gitea-admin
+                  name: gitlab-root
                   key: password
-            - name: GITEA_ADMIN_EMAIL
+            - name: GITLAB_OMNIBUS_CONFIG
               valueFrom:
-                secretKeyRef:
-                  name: gitea-admin
-                  key: email
+                configMapKeyRef:
+                  name: gitlab-omnibus-config
+                  key: GITLAB_OMNIBUS_CONFIG
           ports:
-            - containerPort: 3000
+            - containerPort: 80
               name: http
+            - containerPort: 5050
+              name: registry
+            - containerPort: 22
+              name: ssh
+          readinessProbe:
+            httpGet:
+              path: /-/readiness
+              port: http
+            initialDelaySeconds: 240
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 18
+          resources:
+            requests:
+              cpu: 500m
+              memory: 2Gi
+            limits:
+              memory: 6Gi
           volumeMounts:
+            - name: config
+              mountPath: /etc/gitlab
+            - name: logs
+              mountPath: /var/log/gitlab
             - name: data
-              mountPath: /data
+              mountPath: /var/opt/gitlab
       volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: gitlab-config
+        - name: logs
+          persistentVolumeClaim:
+            claimName: gitlab-logs
         - name: data
           persistentVolumeClaim:
-            claimName: gitea-data
-        - name: app-ini-template
-          configMap:
-            name: gitea-app-ini
+            claimName: gitlab-data
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: gitea-http
+  name: gitlab-http
   namespace: agent-platform
 spec:
   selector:
-    app: gitea
+    app: gitlab
   ports:
     - name: http
       port: 80
-      targetPort: 3000
+      targetPort: http
+    - name: registry
+      port: 5050
+      targetPort: registry
+    - name: ssh
+      port: 22
+      targetPort: ssh
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -282,52 +291,72 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: act-runner
+  name: gitlab-runner
   namespace: agent-platform
 spec:
   replicas: 0
   selector:
     matchLabels:
-      app: act-runner
+      app: gitlab-runner
   template:
     metadata:
       labels:
-        app: act-runner
+        app: gitlab-runner
     spec:
       containers:
-        - name: act-runner
-          image: gitea/act_runner:0.2.11
+        - name: gitlab-runner
+          image: gitlab/gitlab-runner:alpine-v18.11.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -lc
+            - |
+              set -eu
+              case "${RUNNER_TOKEN:-}" in
+                ""|change-me|replace-me|replace-after-gitlab-boot)
+                  echo "GitLab runner token is missing; set GITLAB_RUNNER_TOKEN and rerun the bootstrap/update script." >&2
+                  sleep 3600
+                  exit 1
+                  ;;
+              esac
+              if [ ! -s /etc/gitlab-runner/config.toml ]; then
+                gitlab-runner register --non-interactive \
+                  --url "$CI_SERVER_URL" \
+                  --token "$RUNNER_TOKEN" \
+                  --name "${RUNNER_NAME:-agent-platform-runner}" \
+                  --executor shell \
+                  --tag-list "${RUNNER_TAG_LIST:-kimibuilt,buildkit}" \
+                  --run-untagged="false" \
+                  --locked="false"
+              fi
+              exec gitlab-runner run --working-directory=/builds
           env:
-            - name: CONFIG_FILE
-              value: /data/config.yaml
-            - name: GITEA_INSTANCE_URL
-              value: https://gitea.demoserver2.buzz
-            - name: GITEA_RUNNER_REGISTRATION_TOKEN
+            - name: CI_SERVER_URL
+              value: https://gitlab.demoserver2.buzz
+            - name: RUNNER_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: gitea-actions
-                  key: runner-registration-token
-            - name: GITEA_RUNNER_NAME
+                  name: gitlab-runner
+                  key: runner-token
+            - name: RUNNER_NAME
               value: agent-platform-runner
-            - name: GITEA_RUNNER_LABELS
-              value: ubuntu-latest:host
-            - name: GITEA_RUNNER_EPHEMERAL
-              value: "false"
-            - name: GITEA_REGISTRY_HOST
+            - name: RUNNER_TAG_LIST
+              value: kimibuilt,buildkit
+            - name: GITLAB_REGISTRY_HOST
               valueFrom:
                 secretKeyRef:
                   name: agent-platform-runtime
-                  key: gitea-registry-host
-            - name: GITEA_REGISTRY_USERNAME
+                  key: gitlab-registry-host
+            - name: GITLAB_REGISTRY_USERNAME
               valueFrom:
                 secretKeyRef:
                   name: agent-platform-runtime
-                  key: gitea-registry-username
-            - name: GITEA_REGISTRY_PASSWORD
+                  key: gitlab-registry-username
+            - name: GITLAB_REGISTRY_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: agent-platform-runtime
-                  key: gitea-registry-password
+                  key: gitlab-registry-password
             - name: KIMIBUILT_BUILD_EVENTS_URL
               valueFrom:
                 secretKeyRef:
@@ -349,26 +378,20 @@ spec:
                   name: agent-platform-runtime
                   key: buildkit-host
           volumeMounts:
-            - name: runner-data
-              mountPath: /data
             - name: runner-config
-              mountPath: /data/config.yaml
-              subPath: config.yaml
-            - name: runner-workspace
-              mountPath: /workspace
+              mountPath: /etc/gitlab-runner
+            - name: runner-builds
+              mountPath: /builds
       volumes:
-        - name: runner-data
-          emptyDir: {}
         - name: runner-config
-          configMap:
-            name: act-runner-config
-        - name: runner-workspace
+          emptyDir: {}
+        - name: runner-builds
           emptyDir: {}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: gitea
+  name: gitlab
   namespace: agent-platform
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
@@ -376,16 +399,41 @@ spec:
   ingressClassName: traefik
   tls:
     - hosts:
-        - gitea.demoserver2.buzz
-      secretName: gitea-tls
+        - gitlab.demoserver2.buzz
+      secretName: gitlab-tls
   rules:
-    - host: gitea.demoserver2.buzz
+    - host: gitlab.demoserver2.buzz
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: gitea-http
+                name: gitlab-http
                 port:
                   number: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gitlab-registry
+  namespace: agent-platform
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - registry.gitlab.demoserver2.buzz
+      secretName: gitlab-registry-tls
+  rules:
+    - host: registry.gitlab.demoserver2.buzz
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gitlab-http
+                port:
+                  number: 5050

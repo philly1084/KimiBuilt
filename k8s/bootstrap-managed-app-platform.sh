@@ -13,7 +13,7 @@ ROTATE_SECRETS="${ROTATE_SECRETS:-0}"
 
 usage() {
   cat <<'EOF'
-Bootstrap the external managed-app build platform without rebuilding KimiBuilt.
+Bootstrap the external GitLab managed-app build platform without rebuilding KimiBuilt.
 
 Environment variables:
   PLATFORM_PROFILE            test or prod. Default: test
@@ -25,17 +25,21 @@ Environment variables:
   FORCE_SETUP                 Set to 1 to bypass the healthy-platform short circuit
   ROTATE_SECRETS              Set to 1 to regenerate bootstrap passwords/secrets
 
-If these are provided, the script will also update the runner secret state:
-  GITEA_ADMIN_USERNAME
-  GITEA_ADMIN_PASSWORD
-  GITEA_ADMIN_EMAIL
-  GITEA_REGISTRY_USERNAME
-  GITEA_REGISTRY_PASSWORD
+If these are provided, the script also updates the runner and registry state:
+  GITLAB_ROOT_USERNAME
+  GITLAB_ROOT_PASSWORD
+  GITLAB_ROOT_EMAIL
+  GITLAB_REGISTRY_HOST
+  GITLAB_REGISTRY_USERNAME
+  GITLAB_REGISTRY_PASSWORD
+  GITLAB_RUNNER_TOKEN
+  GITLAB_BASE_URL
+  GITLAB_RUNNER_TAG_LIST
   KIMIBUILT_BUILD_EVENTS_INSECURE
   KIMIBUILT_BUILD_EVENTS_URL
   KIMIBUILT_BUILD_EVENTS_SECRET
-  GITEA_ORG
-  GITEA_RUNNER_SCOPE
+
+Legacy GITEA_REGISTRY_* variables are accepted only as migration fallbacks.
 
 Examples:
   ./k8s/bootstrap-managed-app-platform.sh
@@ -44,8 +48,9 @@ Examples:
   ./k8s/bootstrap-managed-app-platform.sh
 
   export PLATFORM_PROFILE=prod
-  export GITEA_REGISTRY_USERNAME=admin
-  export GITEA_REGISTRY_PASSWORD=<gitea-pat>
+  export GITLAB_REGISTRY_USERNAME=root
+  export GITLAB_REGISTRY_PASSWORD=<gitlab-token>
+  export GITLAB_RUNNER_TOKEN=<glrt-token>
   ./k8s/bootstrap-managed-app-platform.sh
 EOF
 }
@@ -98,7 +103,7 @@ is_enabled() {
 
 is_placeholder() {
   case "${1:-}" in
-    ""|change-me|replace-me|replace-after-gitea-boot)
+    ""|change-me|replace-me|replace-after-gitea-boot|replace-after-gitlab-boot)
       return 0
       ;;
     *)
@@ -159,9 +164,9 @@ deployment_ready() {
 
 registry_auth_healthy() {
   local host username password
-  host="$(secret_value agent-platform-runtime gitea-registry-host)"
-  username="$(secret_value agent-platform-runtime gitea-registry-username)"
-  password="$(secret_value agent-platform-runtime gitea-registry-password)"
+  host="$(secret_value agent-platform-runtime gitlab-registry-host)"
+  username="$(secret_value agent-platform-runtime gitlab-registry-username)"
+  password="$(secret_value agent-platform-runtime gitlab-registry-password)"
 
   if is_placeholder "$host" || is_placeholder "$username" || is_placeholder "$password"; then
     return 1
@@ -176,13 +181,12 @@ registry_auth_healthy() {
 
 platform_healthy() {
   kubectl_cmd get namespace "$PLATFORM_NAMESPACE" >/dev/null 2>&1 \
-    && deployment_ready gitea \
+    && deployment_ready gitlab \
     && deployment_ready buildkitd \
-    && deployment_ready act-runner \
-    && secret_usable gitea-admin password \
-    && secret_usable gitea-actions shared-secret \
-    && secret_usable gitea-actions runner-registration-token \
-    && secret_usable agent-platform-runtime gitea-registry-password \
+    && deployment_ready gitlab-runner \
+    && secret_usable gitlab-root password \
+    && secret_usable gitlab-runner runner-token \
+    && secret_usable agent-platform-runtime gitlab-registry-password \
     && secret_usable agent-platform-runtime kimibuilt-build-events-secret \
     && registry_auth_healthy
 }
@@ -196,48 +200,43 @@ ensure_namespace() {
 }
 
 ensure_bootstrap_secrets() {
-  local admin_username admin_password admin_email
-  local shared_secret runner_registration_token
+  local root_username root_password root_email
+  local runner_token
   local registry_host registry_username registry_password
   local build_events_url build_events_secret build_events_insecure buildkit_host
 
-  admin_username="$(choose_secret_value GITEA_ADMIN_USERNAME "$(secret_value gitea-admin username)" "admin")"
-  admin_password="$(choose_secret_value GITEA_ADMIN_PASSWORD "$(secret_value gitea-admin password)")"
-  admin_email="$(choose_secret_value GITEA_ADMIN_EMAIL "$(secret_value gitea-admin email)" "admin@demoserver2.buzz")"
+  root_username="$(choose_secret_value GITLAB_ROOT_USERNAME "$(secret_value gitlab-root username)" "root")"
+  root_password="$(choose_secret_value GITLAB_ROOT_PASSWORD "$(secret_value gitlab-root password)")"
+  root_email="$(choose_secret_value GITLAB_ROOT_EMAIL "$(secret_value gitlab-root email)" "admin@demoserver2.buzz")"
 
-  shared_secret="$(choose_secret_value GITEA_ACTIONS_SHARED_SECRET "$(secret_value gitea-actions shared-secret)")"
-  runner_registration_token="$(secret_value gitea-actions runner-registration-token)"
-  if is_enabled "$ROTATE_SECRETS" || is_placeholder "$runner_registration_token"; then
-    runner_registration_token="replace-after-gitea-boot"
-  fi
+  runner_token="$(choose_secret_value GITLAB_RUNNER_TOKEN "$(secret_value gitlab-runner runner-token)" "replace-after-gitlab-boot")"
 
-  registry_host="$(choose_secret_value GITEA_REGISTRY_HOST "$(secret_value agent-platform-runtime gitea-registry-host)" "gitea.demoserver2.buzz")"
-  registry_username="$(choose_secret_value GITEA_REGISTRY_USERNAME "$(secret_value agent-platform-runtime gitea-registry-username)" "$admin_username")"
-  registry_password="$(choose_secret_value GITEA_REGISTRY_PASSWORD "$(secret_value agent-platform-runtime gitea-registry-password)" "$admin_password")"
-  build_events_url="$(choose_secret_value KIMIBUILT_BUILD_EVENTS_URL "$(secret_value agent-platform-runtime kimibuilt-build-events-url)" "https://kimibuilt.demoserver2.buzz/api/integrations/gitea/build-events")"
+  registry_host="$(choose_secret_value GITLAB_REGISTRY_HOST "$(secret_value agent-platform-runtime gitlab-registry-host)" "registry.gitlab.demoserver2.buzz")"
+  registry_username="$(choose_secret_value GITLAB_REGISTRY_USERNAME "$(secret_value agent-platform-runtime gitlab-registry-username)" "${GITEA_REGISTRY_USERNAME:-$root_username}")"
+  registry_password="$(choose_secret_value GITLAB_REGISTRY_PASSWORD "$(secret_value agent-platform-runtime gitlab-registry-password)" "${GITEA_REGISTRY_PASSWORD:-$root_password}")"
+  build_events_url="$(choose_secret_value KIMIBUILT_BUILD_EVENTS_URL "$(secret_value agent-platform-runtime kimibuilt-build-events-url)" "https://kimibuilt.demoserver2.buzz/api/integrations/gitlab/build-events")"
   build_events_secret="$(choose_secret_value KIMIBUILT_BUILD_EVENTS_SECRET "$(secret_value agent-platform-runtime kimibuilt-build-events-secret)")"
   build_events_insecure="${KIMIBUILT_BUILD_EVENTS_INSECURE:-$(secret_value agent-platform-runtime kimibuilt-build-events-insecure)}"
   build_events_insecure="${build_events_insecure:-0}"
   buildkit_host="${BUILDKIT_HOST:-$(secret_value agent-platform-runtime buildkit-host)}"
   buildkit_host="${buildkit_host:-tcp://buildkitd.agent-platform.svc.cluster.local:1234}"
 
-  echo "Ensuring generated platform secrets in ${PLATFORM_NAMESPACE}..."
-  apply_secret gitea-admin \
+  echo "Ensuring generated GitLab platform secrets in ${PLATFORM_NAMESPACE}..."
+  apply_secret gitlab-root \
     --namespace "$PLATFORM_NAMESPACE" \
-    --from-literal=username="$admin_username" \
-    --from-literal=password="$admin_password" \
-    --from-literal=email="$admin_email"
+    --from-literal=username="$root_username" \
+    --from-literal=password="$root_password" \
+    --from-literal=email="$root_email"
 
-  apply_secret gitea-actions \
+  apply_secret gitlab-runner \
     --namespace "$PLATFORM_NAMESPACE" \
-    --from-literal=shared-secret="$shared_secret" \
-    --from-literal=runner-registration-token="$runner_registration_token"
+    --from-literal=runner-token="$runner_token"
 
   apply_secret agent-platform-runtime \
     --namespace "$PLATFORM_NAMESPACE" \
-    --from-literal=gitea-registry-host="$registry_host" \
-    --from-literal=gitea-registry-username="$registry_username" \
-    --from-literal=gitea-registry-password="$registry_password" \
+    --from-literal=gitlab-registry-host="$registry_host" \
+    --from-literal=gitlab-registry-username="$registry_username" \
+    --from-literal=gitlab-registry-password="$registry_password" \
     --from-literal=kimibuilt-build-events-url="$build_events_url" \
     --from-literal=kimibuilt-build-events-secret="$build_events_secret" \
     --from-literal=kimibuilt-build-events-insecure="$build_events_insecure" \
@@ -282,39 +281,6 @@ wait_for_namespace_deletion() {
   exit 1
 }
 
-generate_runner_token() {
-  local gitea_pod
-  gitea_pod="$(kubectl_cmd get pod -n "$PLATFORM_NAMESPACE" -l app=gitea -o "jsonpath={.items[0].metadata.name}")"
-  if [[ -z "$gitea_pod" ]]; then
-    echo "Could not find a running gitea pod in $PLATFORM_NAMESPACE" >&2
-    exit 1
-  fi
-  kubectl_cmd exec -n "$PLATFORM_NAMESPACE" "$gitea_pod" -- sh -lc \
-    'gitea --config /data/gitea/conf/app.ini actions generate-runner-token | tail -n 1' \
-    | tr -d '\r\n'
-}
-
-sync_gitea_admin_password() {
-  local gitea_pod admin_username admin_password
-  gitea_pod="$(kubectl_cmd get pod -n "$PLATFORM_NAMESPACE" -l app=gitea -o "jsonpath={.items[0].metadata.name}" 2>/dev/null || true)"
-  admin_username="$(secret_value gitea-admin username)"
-  admin_password="$(secret_value gitea-admin password)"
-  if [[ -z "$gitea_pod" || -z "$admin_username" || -z "$admin_password" ]]; then
-    return 1
-  fi
-
-  kubectl_cmd exec -n "$PLATFORM_NAMESPACE" "$gitea_pod" -- env \
-    KIMIBUILT_GITEA_ADMIN_USERNAME="$admin_username" \
-    KIMIBUILT_GITEA_ADMIN_PASSWORD="$admin_password" \
-    sh -lc '
-      set -eu
-      gitea --config /data/gitea/conf/app.ini admin user change-password \
-        --username "$KIMIBUILT_GITEA_ADMIN_USERNAME" \
-        --password "$KIMIBUILT_GITEA_ADMIN_PASSWORD" \
-        --must-change-password=false
-    ' >/dev/null
-}
-
 if [[ -z "$MANIFEST_PATH" ]]; then
   case "$PLATFORM_PROFILE" in
     test)
@@ -337,7 +303,7 @@ if is_enabled "$FRESH_INSTALL"; then
 fi
 
 if is_enabled "$SKIP_IF_HEALTHY" && ! is_enabled "$FORCE_SETUP" && ! is_enabled "$FRESH_INSTALL" && platform_healthy; then
-  echo "Managed-app platform is already healthy in ${PLATFORM_NAMESPACE}; skipping setup."
+  echo "Managed-app GitLab platform is already healthy in ${PLATFORM_NAMESPACE}; skipping setup."
   kubectl_cmd get pods -n "$PLATFORM_NAMESPACE"
   exit 0
 fi
@@ -350,42 +316,28 @@ echo "Applying non-secret resources from ${MANIFEST_PATH}..."
 apply_manifest_without_secrets
 
 if [[ "$SKIP_WAIT" != "1" ]]; then
-  echo "Waiting for Gitea and BuildKit deployments..."
-  kubectl_cmd rollout status deployment/gitea -n "$PLATFORM_NAMESPACE" --timeout=300s
+  echo "Waiting for GitLab and BuildKit deployments..."
+  kubectl_cmd rollout status deployment/gitlab -n "$PLATFORM_NAMESPACE" --timeout=900s
   kubectl_cmd rollout status deployment/buildkitd -n "$PLATFORM_NAMESPACE" --timeout=300s
 fi
 
-echo "Synchronizing the saved Gitea admin password when the account already exists..."
-if sync_gitea_admin_password; then
-  echo "Gitea admin password is synchronized with the saved secret."
+runner_token="$(secret_value gitlab-runner runner-token)"
+if is_placeholder "$runner_token"; then
+  echo
+  echo "GitLab is deployed, but the runner is not enabled yet."
+  echo "Create a GitLab runner authentication token in GitLab, then run:"
+  echo "  export GITLAB_RUNNER_TOKEN=<glrt-token>"
+  echo "  ./k8s/update-managed-app-runner.sh"
+  kubectl_cmd scale deployment gitlab-runner -n "$PLATFORM_NAMESPACE" --replicas=0 >/dev/null 2>&1 || true
 else
-  echo "Gitea admin password sync was skipped or unsupported; continuing with runner bootstrap."
+  echo "Updating runtime settings and scaling the GitLab runner..."
+  export GITLAB_RUNNER_TOKEN="$runner_token"
+  export RUNNER_REPLICAS="${RUNNER_REPLICAS:-1}"
+  export GITLAB_REGISTRY_HOST="${GITLAB_REGISTRY_HOST:-$(secret_value agent-platform-runtime gitlab-registry-host)}"
+  export GITLAB_REGISTRY_USERNAME="${GITLAB_REGISTRY_USERNAME:-$(secret_value agent-platform-runtime gitlab-registry-username)}"
+  export GITLAB_REGISTRY_PASSWORD="${GITLAB_REGISTRY_PASSWORD:-$(secret_value agent-platform-runtime gitlab-registry-password)}"
+  "$SCRIPT_DIR/update-managed-app-runner.sh"
 fi
-
-echo "Generating a fresh runner registration token from the Gitea pod..."
-RUNNER_REGISTRATION_TOKEN="$(generate_runner_token)"
-if [[ -z "$RUNNER_REGISTRATION_TOKEN" ]]; then
-  echo "Failed to generate a runner registration token" >&2
-  exit 1
-fi
-
-if [[ -z "${GITEA_REGISTRY_USERNAME:-}" ]]; then
-  GITEA_REGISTRY_USERNAME="$(secret_value gitea-admin username)"
-  export GITEA_REGISTRY_USERNAME
-fi
-
-if [[ -z "${GITEA_REGISTRY_PASSWORD:-}" ]]; then
-  GITEA_REGISTRY_PASSWORD="$(secret_value agent-platform-runtime gitea-registry-password)"
-  if [[ -z "$GITEA_REGISTRY_PASSWORD" || "$GITEA_REGISTRY_PASSWORD" == "change-me" ]]; then
-    GITEA_REGISTRY_PASSWORD="$(secret_value gitea-admin password)"
-  fi
-  export GITEA_REGISTRY_PASSWORD
-fi
-
-echo "Updating runtime settings and scaling the runner..."
-export RUNNER_REGISTRATION_TOKEN
-export RUNNER_REPLICAS="${RUNNER_REPLICAS:-1}"
-"$SCRIPT_DIR/update-managed-app-runner.sh"
 
 if [[ "$SKIP_WAIT" != "1" ]]; then
   echo "Current platform pods:"

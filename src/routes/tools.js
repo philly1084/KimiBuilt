@@ -37,7 +37,7 @@ const {
 
 const registry = getUnifiedRegistry();
 const DISABLED_TOOL_IDS = new Set(['managed-app']);
-const DISABLED_TOOL_MESSAGE = 'managed-app is disabled. Use remote-cli-agent or remote-workbench for git-backed remote authoring, prefer configured Gitea repos for k3s apps, and use k3s-deploy only after changes are committed.';
+const DISABLED_TOOL_MESSAGE = 'managed-app is disabled. Use remote-cli-agent or remote-workbench for git-backed remote authoring, prefer configured GitLab repos for k3s apps, and use k3s-deploy only after changes are committed.';
 
 function getRequestOwnerId(req) {
   return String(req.user?.username || '').trim() || null;
@@ -71,9 +71,14 @@ function buildRuntimeSummary(toolManager, options = {}) {
   const deploy = typeof settingsController.getEffectiveDeployConfig === 'function'
     ? settingsController.getEffectiveDeployConfig()
     : {};
-  const gitea = typeof settingsController.getEffectiveGiteaConfig === 'function'
-    ? settingsController.getEffectiveGiteaConfig()
+  const gitProvider = typeof settingsController.getEffectiveGitProviderConfig === 'function'
+    ? settingsController.getEffectiveGitProviderConfig()
     : {};
+  const gitea = Object.keys(gitProvider).length > 0
+    ? gitProvider
+    : (typeof settingsController.getEffectiveGiteaConfig === 'function'
+      ? settingsController.getEffectiveGiteaConfig()
+      : {});
   const healthyRunner = remoteRunnerService.getHealthyRunner();
   const runnerCliTools = buildRunnerCliTools(healthyRunner);
   return {
@@ -106,7 +111,8 @@ function buildRuntimeSummary(toolManager, options = {}) {
       ingressClassName: deploy.ingressClassName || '',
       tlsClusterIssuer: deploy.tlsClusterIssuer || '',
     },
-    gitea: {
+    gitProvider: {
+      provider: gitea.provider || 'gitlab',
       enabled: gitea.enabled !== false,
       configured: Boolean(gitea.enabled !== false && gitea.baseURL && gitea.token),
       baseURL: gitea.baseURL || '',

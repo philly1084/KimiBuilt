@@ -140,6 +140,88 @@ describe('WebScrapeTool content extraction', () => {
         expect(result.stats.headingsCaptured).toBe(1);
     });
 
+    test('normalizes array selector params before execute validation', async () => {
+        browsePage.mockResolvedValue({
+            engine: 'playwright',
+            url: 'https://example.com/news',
+            title: 'Example News',
+            html: '<html><body><main><h1>Breaking News</h1></main></body></html>',
+            text: 'Breaking News',
+            links: [],
+            headings: ['Breaking News'],
+            images: [],
+            selectorData: {
+                headline: 'Breaking News',
+                selector2: 'Breaking News',
+            },
+            screenshot: {
+                available: true,
+                artifact: {
+                    id: 'artifact-1',
+                },
+            },
+            actions: [],
+        });
+
+        const tool = new WebScrapeTool();
+        const result = await tool.execute({
+            url: 'https://example.com/news',
+            browser: true,
+            captureScreenshot: true,
+            selectors: [
+                { name: 'headline', selector: 'h1' },
+                'main',
+            ],
+        }, {
+            sessionId: 'session-1',
+        });
+
+        expect(result.success).toBe(true);
+        expect(browsePage).toHaveBeenCalledWith('https://example.com/news', expect.objectContaining({
+            selectors: {
+                headline: {
+                    selector: 'h1',
+                    transform: 'text',
+                },
+                selector2: {
+                    selector: 'main',
+                    transform: 'text',
+                },
+            },
+            captureScreenshot: true,
+        }));
+        expect(result.data.data.headline).toBe('Breaking News');
+    });
+
+    test('normalizes string-valued selector maps before static extraction', async () => {
+        const tool = new WebScrapeTool();
+        const fetchTool = {
+            execute: jest.fn().mockResolvedValue({
+                success: true,
+                data: {
+                    url: 'https://example.com/article',
+                    body: '<html><body><main><h1>Headline</h1><p>Alpha beta gamma.</p></main></body></html>',
+                },
+            }),
+        };
+        const context = {
+            tools: {
+                get: jest.fn().mockReturnValue(fetchTool),
+            },
+        };
+
+        const result = await tool.execute({
+            url: 'https://example.com/article',
+            selectors: {
+                headline: 'h1',
+            },
+        }, context);
+
+        expect(result.success).toBe(true);
+        expect(result.data.data.headline).toBe('Headline');
+        expect(result.data.method).toBe('css-selectors');
+    });
+
     test('includes research site policy metadata when research-safe scraping is allowed', async () => {
         const tool = new WebScrapeTool();
         const fetchTool = {

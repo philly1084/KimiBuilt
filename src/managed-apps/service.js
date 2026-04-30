@@ -11,7 +11,7 @@ const { parseLenientJson } = require('../utils/lenient-json');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 const { sessionStore } = require('../session-store');
 const { managedAppStore } = require('./store');
-const { GiteaClient } = require('./gitea-client');
+const { GitLabClient } = require('./gitlab-client');
 const { KubernetesClient } = require('./kubernetes-client');
 const {
     buildDefaultScaffoldFiles,
@@ -58,7 +58,7 @@ function normalizeManagedAppWebhookBaseUrl(value = '') {
 
 const MAX_MANAGED_APP_SLUG_LENGTH = 63;
 const MAX_KUBERNETES_NAME_LENGTH = 63;
-const DEFAULT_GITEA_RUNNER_LABELS = 'ubuntu-latest:host';
+const DEFAULT_GITLAB_RUNNER_TAGS = 'kimibuilt,buildkit';
 const DEFAULT_MANAGED_APP_SLUG_PREFIX = 'managed-app';
 const PROMPT_NAME_STOPWORDS = new Set([
     'a', 'an', 'and', 'app', 'application', 'build', 'built', 'called', 'can', 'could', 'create', 'deploy',
@@ -492,7 +492,7 @@ function buildManagedAppDeployBuildStateError(buildRun = null) {
     const status = normalizeBuildStatus(buildRun?.buildStatus);
     let message = 'Managed app deployment requires a successful image build before deployment can continue.';
     if (isPendingBuildStatus(status)) {
-        message = 'Managed app deployment requires a successful image build. The latest build is still running or queued; wait for the remote Gitea workflow to finish before deploying.';
+        message = 'Managed app deployment requires a successful image build. The latest build is still running or queued; wait for the remote GitLab pipeline to finish before deploying.';
     } else if (isFailedBuildStatus(status)) {
         message = 'Managed app deployment requires a successful image build. The latest build failed, so deployment will not continue until the image build succeeds or an explicit image tag is provided.';
     }
@@ -605,9 +605,9 @@ function formatDeploymentSummary(deployment = {}, fallbackName = '') {
 function buildPlatformDoctorSuggestions(report = {}) {
     const suggestions = [];
     const platformNamespace = normalizeText(report.platformNamespace || 'agent-platform');
-    const gitea = getDeploymentStatus(report, 'gitea');
+    const gitlab = getDeploymentStatus(report, 'gitlab');
     const buildkitd = getDeploymentStatus(report, 'buildkitd');
-    const actRunner = getDeploymentStatus(report, 'act-runner');
+    const gitlabRunner = getDeploymentStatus(report, 'gitlab-runner');
     const runnerTokenState = normalizeText(report.runnerTokenState || 'unknown').toLowerCase();
     const runnerLabels = normalizeText(report.runnerLabels);
     const runnerLogText = (Array.isArray(report.runnerLogExcerpt) ? report.runnerLogExcerpt : []).join('\n').toLowerCase();
@@ -617,44 +617,40 @@ function buildPlatformDoctorSuggestions(report = {}) {
         return suggestions;
     }
 
-    if (!isDeploymentReady(gitea)) {
-        suggestions.push(`Gitea is not ready in \`${platformNamespace}\` (${formatDeploymentSummary(gitea, 'gitea')}).`);
+    if (!isDeploymentReady(gitlab)) {
+        suggestions.push(`GitLab is not ready in \`${platformNamespace}\` (${formatDeploymentSummary(gitlab, 'gitlab')}).`);
     }
 
     if (!isDeploymentReady(buildkitd)) {
         suggestions.push(`BuildKit is not ready in \`${platformNamespace}\` (${formatDeploymentSummary(buildkitd, 'buildkitd')}).`);
     }
 
-    if (!actRunner.present) {
-        suggestions.push(`The \`act-runner\` deployment is missing from \`${platformNamespace}\`. The remote Gitea runner stack is incomplete, so Actions will stay waiting.`);
-    } else if (Number(actRunner.desiredReplicas || 0) === 0) {
-        suggestions.push('`act-runner` is scaled to `0`. Replace the real runner registration token in `gitea-actions`, then scale `act-runner` to `1`.');
-    } else if (!isDeploymentReady(actRunner)) {
-        suggestions.push(`\`act-runner\` exists but is not ready (${formatDeploymentSummary(actRunner, 'act-runner')}). Check the runner pod logs on the remote cluster.`);
+    if (!gitlabRunner.present) {
+        suggestions.push(`The \`gitlab-runner\` deployment is missing from \`${platformNamespace}\`. The remote GitLab runner stack is incomplete, so pipelines will stay pending.`);
+    } else if (Number(gitlabRunner.desiredReplicas || 0) === 0) {
+        suggestions.push('`gitlab-runner` is scaled to `0`. Set `GITLAB_RUNNER_TOKEN`, then scale `gitlab-runner` to `1`.');
+    } else if (!isDeploymentReady(gitlabRunner)) {
+        suggestions.push(`\`gitlab-runner\` exists but is not ready (${formatDeploymentSummary(gitlabRunner, 'gitlab-runner')}). Check the runner pod logs on the remote cluster.`);
     }
 
     if (runnerTokenState === 'missing-secret') {
-        suggestions.push(`Secret \`gitea-actions\` is missing from \`${platformNamespace}\`. The runner cannot register without \`runner-registration-token\`.`);
+        suggestions.push(`Secret \`gitlab-runner\` is missing from \`${platformNamespace}\`. The runner cannot register without \`runner-token\`.`);
     } else if (runnerTokenState === 'missing') {
-        suggestions.push('Secret `gitea-actions` exists, but `runner-registration-token` is empty or unreadable.');
+        suggestions.push('Secret `gitlab-runner` exists, but `runner-token` is empty or unreadable.');
     } else if (runnerTokenState === 'placeholder') {
-        suggestions.push('`runner-registration-token` still has a placeholder value. Replace it with a real runner registration token from this Gitea instance.');
+        suggestions.push('`runner-token` still has a placeholder value. Replace it with a real GitLab runner authentication token.');
     }
 
-    if (actRunner.present && isDeploymentReady(actRunner) && runnerLabels) {
-        suggestions.push(`If workflows are still waiting, confirm the runner is attached in Gitea and advertises the label \`${runnerLabels}\`.`);
+    if (gitlabRunner.present && isDeploymentReady(gitlabRunner) && runnerLabels) {
+        suggestions.push(`If pipelines are still pending, confirm the runner is attached in GitLab and advertises the tags \`${runnerLabels}\`.`);
     }
 
     if (/\bunauthorized\b|\bforbidden\b|\binvalid\b|\btoken\b/.test(runnerLogText)) {
-        suggestions.push('The runner log excerpt points at a registration or token problem. Reissue the runner registration token from Gitea and update `gitea-actions`.');
+        suggestions.push('The runner log excerpt points at a registration or token problem. Reissue the GitLab runner token and update `gitlab-runner`.');
     }
 
-    if (/\bcannot find:\s*node in path\b/.test(runnerLogText)) {
-        suggestions.push('This runner does not have Node in host mode. Managed-app workflows should avoid JavaScript-based actions like `actions/checkout`, or the runner image must be extended to include Node.');
-    }
-
-    if (runnerLabels && !/\bubuntu-latest\b/i.test(runnerLabels)) {
-        suggestions.push(`The runner labels are currently \`${runnerLabels}\`. The managed-app workflow expects an \`ubuntu-latest\` compatible label.`);
+    if (runnerLabels && !/\bkimibuilt\b/i.test(runnerLabels)) {
+        suggestions.push(`The runner tags are currently \`${runnerLabels}\`. The managed-app pipeline expects a \`kimibuilt\` compatible runner tag.`);
     }
 
     return Array.from(new Set(suggestions.filter(Boolean)));
@@ -663,18 +659,18 @@ function buildPlatformDoctorSuggestions(report = {}) {
 function buildPlatformDoctorMessage(report = {}, healthy = false) {
     const host = normalizeText(report.executionHost || 'remote ssh target');
     const platformNamespace = normalizeText(report.platformNamespace || 'agent-platform');
-    const gitea = getDeploymentStatus(report, 'gitea');
+    const gitlab = getDeploymentStatus(report, 'gitlab');
     const buildkitd = getDeploymentStatus(report, 'buildkitd');
-    const actRunner = getDeploymentStatus(report, 'act-runner');
+    const gitlabRunner = getDeploymentStatus(report, 'gitlab-runner');
     const runnerTokenState = normalizeText(report.runnerTokenState || 'unknown');
     const labels = normalizeText(report.runnerLabels);
 
     return [
         `Managed app platform on ${host}:`,
         `namespace ${platformNamespace} ${report.namespaceExists ? 'present' : 'missing'}`,
-        formatDeploymentSummary(gitea, 'gitea'),
+        formatDeploymentSummary(gitlab, 'gitlab'),
         formatDeploymentSummary(buildkitd, 'buildkitd'),
-        formatDeploymentSummary(actRunner, 'act-runner'),
+        formatDeploymentSummary(gitlabRunner, 'gitlab-runner'),
         `runner token ${runnerTokenState || 'unknown'}`,
         labels ? `runner labels ${labels}` : '',
         healthy ? 'platform healthy' : 'platform needs attention',
@@ -684,9 +680,9 @@ function buildPlatformDoctorMessage(report = {}, healthy = false) {
 function isPlatformHealthy(report = {}) {
     return Boolean(
         report.namespaceExists
-        && isDeploymentReady(getDeploymentStatus(report, 'gitea'))
+        && isDeploymentReady(getDeploymentStatus(report, 'gitlab'))
         && isDeploymentReady(getDeploymentStatus(report, 'buildkitd'))
-        && isDeploymentReady(getDeploymentStatus(report, 'act-runner'))
+        && isDeploymentReady(getDeploymentStatus(report, 'gitlab-runner'))
         && normalizeText(report.runnerTokenState).toLowerCase() === 'present',
     );
 }
@@ -885,7 +881,7 @@ function getManagedAppDeployDiagnostics(app = null, deployment = null) {
             case 'rollout':
                 return 'Inspect the remote rollout error, fix the cluster state, and redeploy the managed app.';
             case 'image_pull':
-                return 'Inspect the registry pull secret and Gitea registry credentials on the remote cluster, then redeploy once the image can be pulled.';
+                return 'Inspect the registry pull secret and GitLab registry credentials on the remote cluster, then redeploy once the image can be pulled.';
             case 'ingress':
                 if (httpsStatusCode === 404 && appProbeOk) {
                     return 'Inspect Traefik ingress routing for this host because the service is reachable but the public endpoint returns 404.';
@@ -1032,7 +1028,7 @@ function buildManagedAppProgressState(app = null, buildRun = null, phase = '', d
         case 'updated':
             mark('prepare', 'completed');
             mark('build', 'in_progress');
-            detail = 'Waiting for the remote Gitea build to publish the image.';
+            detail = 'Waiting for the remote GitLab build to publish the image.';
             break;
         case 'built':
             mark('prepare', 'completed');
@@ -1414,12 +1410,12 @@ function deriveNextStepForLifecycle(phase = '', { deployRequested = false, healt
         case 'created':
         case 'updated':
             return deployRequested
-                ? 'Wait for the remote Gitea build to finish, then continue deployment through the managed-app control plane.'
-                : 'Wait for the remote Gitea build to finish, then inspect or deploy the managed app.';
+                ? 'Wait for the remote GitLab pipeline to finish, then continue deployment through the managed-app control plane.'
+                : 'Wait for the remote GitLab pipeline to finish, then inspect or deploy the managed app.';
         case 'built':
             return 'Deploy the latest built image when you are ready to publish the changes.';
         case 'build_failed':
-            return 'Investigate the failed build in Gitea, fix the repository state, and queue another build.';
+            return 'Investigate the failed GitLab pipeline, fix the repository state, and queue another build.';
         case 'deploying':
             return 'Wait for rollout, ingress, TLS, and HTTPS verification to finish on the remote cluster.';
         case 'tls_ready':
@@ -1470,7 +1466,11 @@ function deriveOpenItemsForLifecycle(phase = '', {
 class ManagedAppService {
     constructor(options = {}) {
         this.store = options.store || managedAppStore;
-        this.giteaClient = options.giteaClient || new GiteaClient();
+        this.giteaClient = options.gitProviderClient
+            || options.gitlabClient
+            || options.giteaClient
+            || new GitLabClient();
+        this.gitlabClient = this.giteaClient;
         this.kubernetesClient = options.kubernetesClient || new KubernetesClient();
         this.llmClient = options.llmClient || createManagedAppLlmClient();
         this.sessionStore = options.sessionStore || sessionStore;
@@ -1481,6 +1481,12 @@ class ManagedAppService {
     }
 
     getEffectiveGiteaConfig() {
+        if (typeof settingsController.getEffectiveGitProviderConfig === 'function') {
+            return settingsController.getEffectiveGitProviderConfig();
+        }
+        if (typeof settingsController.getEffectiveGitLabConfig === 'function') {
+            return settingsController.getEffectiveGitLabConfig();
+        }
         return typeof settingsController.getEffectiveGiteaConfig === 'function'
             ? settingsController.getEffectiveGiteaConfig()
             : {};
@@ -1589,7 +1595,7 @@ class ManagedAppService {
         if (!baseUrl) {
             return '';
         }
-        const endpointPath = normalizeText(managedAppsConfig.webhookEndpointPath || config.managedApps.webhookEndpointPath || '/api/integrations/gitea/build-events');
+        const endpointPath = normalizeText(managedAppsConfig.webhookEndpointPath || config.managedApps.webhookEndpointPath || '/api/integrations/gitlab/build-events');
         return `${baseUrl}${endpointPath.startsWith('/') ? endpointPath : `/${endpointPath}`}`;
     }
 
@@ -1726,7 +1732,7 @@ class ManagedAppService {
                 deployRequested: buildRun.deployRequested === true,
                 requestedAction: buildRun.requestedAction || (buildRun.deployRequested === true ? 'deploy' : 'build'),
                 message: isFailedBuildStatus(reconciledBuildStatus)
-                    ? `Gitea workflow concluded with ${normalizeText(workflowRun.conclusion || workflowRun.status || 'a failure state')}.`
+                    ? `GitLab pipeline concluded with ${normalizeText(workflowRun.conclusion || workflowRun.status || 'a failure state')}.`
                     : '',
             });
 
@@ -1739,7 +1745,7 @@ class ManagedAppService {
 
         const workflowMetadata = {
             ...(buildRun.metadata || {}),
-            giteaRun: {
+            gitlabPipeline: {
                 id: externalRunId,
                 status: normalizeText(workflowRun.status),
                 conclusion: normalizeText(workflowRun.conclusion),
@@ -2208,9 +2214,9 @@ class ManagedAppService {
             deploymentTarget,
         });
         const healthy = platform.namespaceExists
-            && isDeploymentReady(getDeploymentStatus(platform, 'gitea'))
+            && isDeploymentReady(getDeploymentStatus(platform, 'gitlab'))
             && isDeploymentReady(getDeploymentStatus(platform, 'buildkitd'))
-            && isDeploymentReady(getDeploymentStatus(platform, 'act-runner'))
+            && isDeploymentReady(getDeploymentStatus(platform, 'gitlab-runner'))
             && normalizeText(platform.runnerTokenState).toLowerCase() === 'present';
         const suggestions = buildPlatformDoctorSuggestions(platform);
         const message = buildPlatformDoctorMessage(platform, healthy);
@@ -2241,7 +2247,7 @@ class ManagedAppService {
                 expected: {
                     deploymentTarget,
                     platformNamespace: managedAppsConfig.platformNamespace,
-                    giteaBaseURL: giteaConfig.baseURL,
+                    gitlabBaseURL: giteaConfig.baseURL,
                     registryHost: giteaConfig.registryHost,
                 },
             },
@@ -2254,7 +2260,7 @@ class ManagedAppService {
     async reconcilePlatform(input = {}, ownerId = null, context = {}) {
         const deploymentTarget = this.resolveDeploymentTarget(input, context, null);
         if (!this.giteaClient.isConfigured()) {
-            const error = new Error('Managed app platform reconciliation requires a configured external Gitea control plane.');
+            const error = new Error('Managed app platform reconciliation requires a configured external GitLab control plane.');
             error.statusCode = 503;
             throw error;
         }
@@ -2271,30 +2277,43 @@ class ManagedAppService {
             platformNamespace,
             deploymentTarget,
         });
-        const runnerScope = normalizeText(input.runnerScope || 'org').toLowerCase() || 'org';
+        const runnerScope = normalizeText(input.runnerScope || 'instance').toLowerCase() || 'instance';
         const shouldRotateRunnerToken = input.rotateRunnerToken === true
             || ['missing', 'missing-secret', 'placeholder'].includes(normalizeText(before.runnerTokenState).toLowerCase())
             || (Array.isArray(before.runnerLogExcerpt)
                 && before.runnerLogExcerpt.some((line) => /\bunauthorized\b|\bforbidden\b|\binvalid\b|\btoken\b/i.test(String(line || ''))));
-        const runnerToken = await this.giteaClient.getRunnerRegistrationToken({
+        let runnerToken = {
             scope: runnerScope,
-            org: giteaConfig.org,
-            owner: input.repoOwner,
-            repo: input.repoName,
-            rotate: shouldRotateRunnerToken,
-        });
+            token: normalizeText(input.runnerToken || giteaConfig.runnerToken),
+            rotated: false,
+        };
+        if (!runnerToken.token && typeof this.giteaClient.getRunnerRegistrationToken === 'function') {
+            runnerToken = await this.giteaClient.getRunnerRegistrationToken({
+                scope: runnerScope,
+                org: giteaConfig.org,
+                owner: input.repoOwner,
+                repo: input.repoName,
+                rotate: shouldRotateRunnerToken,
+            });
+        }
+        if (!runnerToken.token) {
+            const error = new Error('Managed app platform reconciliation requires GITLAB_RUNNER_TOKEN or input.runnerToken.');
+            error.statusCode = 503;
+            throw error;
+        }
         const desiredRunnerReplicas = Number.isFinite(Number(input.runnerReplicas))
             ? Math.max(0, Number(input.runnerReplicas))
             : 1;
-        const runnerLabels = normalizeText(input.runnerLabels || before.runnerLabels || DEFAULT_GITEA_RUNNER_LABELS);
-        const giteaInstanceUrl = normalizeText(input.giteaInstanceUrl || giteaConfig.baseURL || before.giteaInstanceUrl);
+        const runnerLabels = normalizeText(input.runnerLabels || input.runnerTags || before.runnerLabels || DEFAULT_GITLAB_RUNNER_TAGS);
+        const gitlabInstanceUrl = normalizeText(input.gitlabInstanceUrl || input.giteaInstanceUrl || giteaConfig.baseURL || before.gitlabInstanceUrl || before.giteaInstanceUrl);
         const reconciliation = await this.kubernetesClient.reconcileManagedAppPlatform({
             platformNamespace,
             deploymentTarget,
             desiredRunnerReplicas,
             runnerRegistrationToken: runnerToken.token,
             runnerLabels,
-            giteaInstanceUrl,
+            gitlabInstanceUrl,
+            giteaInstanceUrl: gitlabInstanceUrl,
         });
         const platform = await this.kubernetesClient.inspectManagedAppPlatform({
             platformNamespace,
@@ -2324,13 +2343,13 @@ class ManagedAppService {
 
         const runners = normalizeRunnerRecords(runnerCatalog);
         const onlineRunnerCount = runners.filter((runner) => !runner.disabled && runner.status && runner.status !== 'offline').length;
-        const healthy = isPlatformHealthy(platform) && onlineRunnerCount > 0;
+        const healthy = isPlatformHealthy(platform) && (giteaConfig.provider !== 'gitea' || onlineRunnerCount > 0);
         const suggestions = buildPlatformDoctorSuggestions(platform);
-        if (!runnerCatalog.error && onlineRunnerCount === 0) {
+        if (giteaConfig.provider === 'gitea' && !runnerCatalog.error && onlineRunnerCount === 0) {
             suggestions.push(`Gitea reports no online ${runnerScope}-level runners yet. The runner may still be registering, or the deployment labels may not match the workflow.`);
         }
         if (runnerCatalog.error) {
-            suggestions.push(`Runner verification through the Gitea API failed after reconciliation: ${runnerCatalog.error}`);
+            suggestions.push(`Runner verification through the GitLab API failed after reconciliation: ${runnerCatalog.error}`);
         }
         const message = `Managed app platform reconciliation on ${normalizeText(platform.executionHost || reconciliation.executionHost || 'remote ssh target')}: ${reconciliation.actions.join(', ') || 'no changes reported'}; ${healthy ? 'platform healthy' : 'platform still needs attention'}.`;
         this.recordRemoteServerContext(platform, {
@@ -2360,7 +2379,7 @@ class ManagedAppService {
                 expected: {
                     deploymentTarget,
                     platformNamespace,
-                    giteaBaseURL: giteaConfig.baseURL,
+                    gitlabBaseURL: giteaConfig.baseURL,
                     registryHost: giteaConfig.registryHost,
                 },
             },
@@ -2369,7 +2388,7 @@ class ManagedAppService {
                 expected: {
                     deploymentTarget,
                     platformNamespace,
-                    giteaBaseURL: giteaConfig.baseURL,
+                    gitlabBaseURL: giteaConfig.baseURL,
                     registryHost: giteaConfig.registryHost,
                     runnerLabels,
                     runnerReplicas: desiredRunnerReplicas,
@@ -2379,9 +2398,9 @@ class ManagedAppService {
             runnerToken: {
                 scope: runnerToken.scope,
                 rotated: runnerToken.rotated,
-                source: 'gitea-api',
+                source: giteaConfig.provider === 'gitea' ? 'gitea-api' : 'gitlab-config',
             },
-            giteaRunners: {
+            gitlabRunners: {
                 scope: runnerCatalog.scope,
                 totalCount: Number(runnerCatalog.totalCount || runners.length || 0),
                 onlineCount: onlineRunnerCount,
@@ -2419,7 +2438,7 @@ class ManagedAppService {
             repoName,
         }, giteaConfig);
         if (!imageRepo) {
-            const error = new Error('Managed app image publishing requires a configured Gitea registry host or a derivable Gitea base URL host.');
+            const error = new Error('Managed app image publishing requires a configured GitLab registry host or a derivable GitLab base URL host.');
             error.statusCode = 503;
             throw error;
         }
@@ -2483,7 +2502,7 @@ class ManagedAppService {
             publicHost: app.publicHost,
             namespace: app.namespace,
             sourcePrompt: app.sourcePrompt,
-            giteaOrg: app.repoOwner,
+            gitProviderOrg: app.repoOwner,
             imageRepo: app.imageRepo,
             registryHost: this.getEffectiveGiteaConfig().registryHost,
             buildEventsUrl: this.buildBuildEventsUrl(),
@@ -2556,7 +2575,7 @@ class ManagedAppService {
     async createApp(input = {}, ownerId = null, context = {}) {
         await this.store.ensureAvailable();
         if (!this.giteaClient.isConfigured()) {
-            const error = new Error('Managed app creation requires integrations.gitea to be configured.');
+            const error = new Error('Managed app creation requires integrations.gitlab to be configured.');
             error.statusCode = 503;
             throw error;
         }
@@ -2873,7 +2892,7 @@ class ManagedAppService {
 
         const resolvedImageRepo = resolveManagedAppImageRepo(deployableApp, giteaConfig);
         if (!resolvedImageRepo) {
-            const error = new Error('Managed app deployment requires a valid image repository from the configured Gitea registry host.');
+            const error = new Error('Managed app deployment requires a valid image repository from the configured GitLab registry host.');
             error.statusCode = 503;
             throw error;
         }
@@ -3133,7 +3152,7 @@ class ManagedAppService {
                 appId: app.id,
                 ownerId: app.ownerId,
                 sessionId: app.sessionId,
-                source: 'gitea-webhook',
+                source: 'gitlab-webhook',
                 requestedAction: inferDeployRequested(payload.requestedAction || payload.action) ? 'deploy' : 'build',
                 commitSha,
                 imageTag,
@@ -3505,7 +3524,7 @@ class ManagedAppService {
             configured: this.giteaClient.isConfigured(),
             persistenceAvailable: this.isAvailable(),
             kubernetesConfigured: this.kubernetesClient.isConfigured(),
-            gitea: {
+            gitlab: {
                 baseURL: giteaConfig.baseURL,
                 org: giteaConfig.org,
                 registryHost: giteaConfig.registryHost,

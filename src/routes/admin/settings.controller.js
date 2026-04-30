@@ -153,9 +153,20 @@ class SettingsController {
           token: config.gitea.token || '',
           webhookSecret: config.gitea.webhookSecret || '',
           org: config.gitea.org || 'agent-apps',
-          registryHost: config.gitea.registryHost || 'gitea.demoserver2.buzz',
+          registryHost: config.gitea.registryHost || '',
           registryUsername: config.gitea.registryUsername || '',
           registryPassword: config.gitea.registryPassword || '',
+        },
+        gitlab: {
+          enabled: config.gitlab?.enabled !== false,
+          baseURL: config.gitlab?.baseURL || '',
+          token: config.gitlab?.token || '',
+          webhookSecret: config.gitlab?.webhookSecret || '',
+          org: config.gitlab?.org || 'agent-apps',
+          registryHost: config.gitlab?.registryHost || 'registry.gitlab.demoserver2.buzz',
+          registryUsername: config.gitlab?.registryUsername || '',
+          registryPassword: config.gitlab?.registryPassword || '',
+          runnerToken: config.gitlab?.runnerToken || '',
         },
         managedApps: {
           enabled: config.managedApps.enabled !== false,
@@ -166,8 +177,8 @@ class SettingsController {
           platformRuntimeSecretName: config.managedApps.platformRuntimeSecretName || 'agent-platform-runtime',
           defaultBranch: config.managedApps.defaultBranch || 'main',
           defaultContainerPort: config.managedApps.defaultContainerPort || 80,
-          registryPullSecretName: config.managedApps.registryPullSecretName || 'gitea-registry-credentials',
-          webhookEndpointPath: config.managedApps.webhookEndpointPath || '/api/integrations/gitea/build-events',
+          registryPullSecretName: config.managedApps.registryPullSecretName || 'gitlab-registry-credentials',
+          webhookEndpointPath: config.managedApps.webhookEndpointPath || '/api/integrations/gitlab/build-events',
         }
       }
     };
@@ -498,6 +509,7 @@ class SettingsController {
 
     const deployUpdate = normalized.integrations?.deploy;
     const giteaUpdate = normalized.integrations?.gitea;
+    const gitlabUpdate = normalized.integrations?.gitlab;
     const managedAppsUpdate = normalized.integrations?.managedApps;
     const orchestrationUpdate = normalized.orchestration;
     if (orchestrationUpdate && typeof orchestrationUpdate === 'object') {
@@ -565,6 +577,40 @@ class SettingsController {
         gitea: {
           ...currentGitea,
           ...nextGitea,
+        },
+      };
+    }
+
+    if (gitlabUpdate) {
+      const currentGitlab = this.settings?.integrations?.gitlab || {};
+      const nextGitlab = {
+        ...gitlabUpdate,
+      };
+
+      [
+        'baseURL',
+        'token',
+        'webhookSecret',
+        'org',
+        'registryHost',
+        'registryUsername',
+        'registryPassword',
+        'runnerToken',
+      ].forEach((key) => {
+        if (nextGitlab[key] !== undefined) {
+          nextGitlab[key] = String(nextGitlab[key] || '').trim();
+        }
+      });
+
+      if (nextGitlab.enabled !== undefined) {
+        nextGitlab.enabled = Boolean(nextGitlab.enabled);
+      }
+
+      normalized.integrations = {
+        ...(normalized.integrations || {}),
+        gitlab: {
+          ...currentGitlab,
+          ...nextGitlab,
         },
       };
     }
@@ -673,6 +719,10 @@ class SettingsController {
 
     if (publicSettings.integrations?.gitea) {
       publicSettings.integrations.gitea = this.getPublicGiteaConfig();
+    }
+
+    if (publicSettings.integrations?.gitlab) {
+      publicSettings.integrations.gitlab = this.getPublicGitLabConfig();
     }
 
     if (publicSettings.integrations?.managedApps) {
@@ -822,9 +872,40 @@ class SettingsController {
       token: String(stored.token || config.gitea.token || '').trim(),
       webhookSecret: String(stored.webhookSecret || config.gitea.webhookSecret || '').trim(),
       org: String(stored.org || config.gitea.org || 'agent-apps').trim() || 'agent-apps',
-      registryHost: String(stored.registryHost || config.gitea.registryHost || 'gitea.demoserver2.buzz').trim() || 'gitea.demoserver2.buzz',
+      registryHost: String(stored.registryHost || config.gitea.registryHost || '').trim(),
       registryUsername: String(stored.registryUsername || config.gitea.registryUsername || '').trim(),
       registryPassword: String(stored.registryPassword || config.gitea.registryPassword || config.gitea.token || '').trim(),
+    };
+  }
+
+  getEffectiveGitLabConfig() {
+    const stored = this.settings?.integrations?.gitlab || {};
+    const defaults = config.gitlab || {};
+
+    return {
+      provider: 'gitlab',
+      enabled: stored.enabled !== false && defaults.enabled !== false,
+      baseURL: String(stored.baseURL || defaults.baseURL || '').trim(),
+      token: String(stored.token || defaults.token || '').trim(),
+      webhookSecret: String(stored.webhookSecret || defaults.webhookSecret || '').trim(),
+      org: String(stored.org || defaults.org || 'agent-apps').trim() || 'agent-apps',
+      registryHost: String(stored.registryHost || defaults.registryHost || 'registry.gitlab.demoserver2.buzz').trim() || 'registry.gitlab.demoserver2.buzz',
+      registryUsername: String(stored.registryUsername || defaults.registryUsername || '').trim(),
+      registryPassword: String(stored.registryPassword || defaults.registryPassword || defaults.token || '').trim(),
+      runnerToken: String(stored.runnerToken || defaults.runnerToken || '').trim(),
+    };
+  }
+
+  getEffectiveGitProviderConfig() {
+    const gitlab = this.getEffectiveGitLabConfig();
+    if (gitlab.enabled !== false && (gitlab.baseURL || gitlab.token || gitlab.registryHost)) {
+      return gitlab;
+    }
+
+    const gitea = this.getEffectiveGiteaConfig();
+    return {
+      ...gitea,
+      provider: 'gitea',
     };
   }
 
@@ -836,6 +917,22 @@ class SettingsController {
       hasToken: Boolean(effective.token),
       hasWebhookSecret: Boolean(effective.webhookSecret),
       hasRegistryPassword: Boolean(effective.registryPassword),
+      baseURL: effective.baseURL,
+      org: effective.org,
+      registryHost: effective.registryHost,
+      registryUsername: effective.registryUsername,
+    };
+  }
+
+  getPublicGitLabConfig() {
+    const effective = this.getEffectiveGitLabConfig();
+    return {
+      enabled: effective.enabled,
+      configured: Boolean(effective.enabled && effective.baseURL && effective.token),
+      hasToken: Boolean(effective.token),
+      hasWebhookSecret: Boolean(effective.webhookSecret),
+      hasRegistryPassword: Boolean(effective.registryPassword),
+      hasRunnerToken: Boolean(effective.runnerToken),
       baseURL: effective.baseURL,
       org: effective.org,
       registryHost: effective.registryHost,
@@ -861,8 +958,8 @@ class SettingsController {
       defaultContainerPort: Number.isFinite(Number(stored.defaultContainerPort))
         ? Math.max(1, Number(stored.defaultContainerPort))
         : Math.max(1, Number(config.managedApps.defaultContainerPort || 80)),
-      registryPullSecretName: String(stored.registryPullSecretName || config.managedApps.registryPullSecretName || 'gitea-registry-credentials').trim() || 'gitea-registry-credentials',
-      webhookEndpointPath: String(stored.webhookEndpointPath || config.managedApps.webhookEndpointPath || '/api/integrations/gitea/build-events').trim() || '/api/integrations/gitea/build-events',
+      registryPullSecretName: String(stored.registryPullSecretName || config.managedApps.registryPullSecretName || 'gitlab-registry-credentials').trim() || 'gitlab-registry-credentials',
+      webhookEndpointPath: String(stored.webhookEndpointPath || config.managedApps.webhookEndpointPath || '/api/integrations/gitlab/build-events').trim() || '/api/integrations/gitlab/build-events',
     };
   }
 
@@ -1007,9 +1104,20 @@ class SettingsController {
           token: config.gitea.token || '',
           webhookSecret: config.gitea.webhookSecret || '',
           org: config.gitea.org || 'agent-apps',
-          registryHost: config.gitea.registryHost || 'gitea.demoserver2.buzz',
+          registryHost: config.gitea.registryHost || '',
           registryUsername: config.gitea.registryUsername || '',
           registryPassword: config.gitea.registryPassword || '',
+        },
+        gitlab: {
+          enabled: config.gitlab?.enabled !== false,
+          baseURL: config.gitlab?.baseURL || '',
+          token: config.gitlab?.token || '',
+          webhookSecret: config.gitlab?.webhookSecret || '',
+          org: config.gitlab?.org || 'agent-apps',
+          registryHost: config.gitlab?.registryHost || 'registry.gitlab.demoserver2.buzz',
+          registryUsername: config.gitlab?.registryUsername || '',
+          registryPassword: config.gitlab?.registryPassword || '',
+          runnerToken: config.gitlab?.runnerToken || '',
         },
         managedApps: {
           enabled: config.managedApps.enabled !== false,
@@ -1020,8 +1128,8 @@ class SettingsController {
           platformRuntimeSecretName: config.managedApps.platformRuntimeSecretName || 'agent-platform-runtime',
           defaultBranch: config.managedApps.defaultBranch || 'main',
           defaultContainerPort: config.managedApps.defaultContainerPort || 80,
-          registryPullSecretName: config.managedApps.registryPullSecretName || 'gitea-registry-credentials',
-          webhookEndpointPath: config.managedApps.webhookEndpointPath || '/api/integrations/gitea/build-events',
+          registryPullSecretName: config.managedApps.registryPullSecretName || 'gitlab-registry-credentials',
+          webhookEndpointPath: config.managedApps.webhookEndpointPath || '/api/integrations/gitlab/build-events',
         }
       }
     };

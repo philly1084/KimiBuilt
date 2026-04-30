@@ -1,6 +1,6 @@
 # Direct CLI Build Runner
 
-This path bypasses Gitea and ACT. KimiBuilt agents can use `remote-command` for one-off runner jobs, and `remote-cli-agent` for full remote author -> build -> deploy -> verify loops. The runner uses BuildKit to build and push images, then in-cluster `kubectl` to deploy to k3s.
+This path bypasses GitLab CI. KimiBuilt agents can use `remote-command` for one-off runner jobs, and `remote-cli-agent` for full remote author -> build -> deploy -> verify loops. The runner uses BuildKit to build and push images, then in-cluster `kubectl` to deploy to k3s.
 
 ## Components
 

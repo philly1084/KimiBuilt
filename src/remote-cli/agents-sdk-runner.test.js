@@ -69,19 +69,20 @@ describe('RemoteCliAgentsSdkRunner', () => {
     expect(resolveAdminMode({ runnerAdmin: true }, 'Inspect cluster status.')).toBe(true);
   });
 
-  test('includes configured Gitea context in remote CLI instructions without exposing tokens', () => {
+  test('includes configured GitLab context in remote CLI instructions without exposing tokens', () => {
     const instructions = buildRemoteCliInstructions({
       targetId: 'prod',
       gitea: {
+        provider: 'gitlab',
         configured: true,
-        baseURL: 'https://gitea.demoserver2.buzz',
+        baseURL: 'https://gitlab.demoserver2.buzz',
         org: 'agent-apps',
         hasToken: true,
       },
     });
 
-    expect(instructions).toContain('Configured Gitea: https://gitea.demoserver2.buzz (org: agent-apps).');
-    expect(instructions).toContain('GITEA_TOKEN');
+    expect(instructions).toContain('Configured Git provider: gitlab at https://gitlab.demoserver2.buzz (group/org: agent-apps).');
+    expect(instructions).toContain('GITLAB_TOKEN');
     expect(instructions).not.toContain('hasToken');
   });
 
@@ -90,7 +91,7 @@ describe('RemoteCliAgentsSdkRunner', () => {
       'Deployed the site.',
       'REMOTE_CLI_SESSION_ID=rcs_123',
       'WORKSPACE=/srv/apps/weather',
-      'GIT_REPO=https://gitea.demoserver2.buzz/agent-apps/weather.git',
+      'GIT_REPO=https://gitlab.demoserver2.buzz/agent-apps/weather.git',
       'GIT_COMMIT=abcdef123456',
       'DEPLOYMENT=app-weather/weather',
       'PUBLIC_HOST=weather.demoserver2.buzz',
@@ -99,7 +100,7 @@ describe('RemoteCliAgentsSdkRunner', () => {
     ].join('\n'))).toEqual({
       sessionId: 'rcs_123',
       workspace: '/srv/apps/weather',
-      gitRepo: 'https://gitea.demoserver2.buzz/agent-apps/weather.git',
+      gitRepo: 'https://gitlab.demoserver2.buzz/agent-apps/weather.git',
       gitCommit: 'abcdef123456',
       deployment: 'app-weather/weather',
       publicHost: 'weather.demoserver2.buzz',

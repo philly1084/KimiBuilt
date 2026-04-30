@@ -11,6 +11,7 @@ function resolveGitCredentialToken(env = process.env) {
         env.KIMIBUILT_GIT_PASSWORD
         || env.GH_TOKEN
         || env.GITHUB_TOKEN
+        || env.GITLAB_TOKEN
         || env.GITEA_TOKEN
         || '',
     ).trim();
@@ -31,6 +32,7 @@ function buildGitCredentialEnvironment(env = process.env, overrides = {}) {
     return {
         GITHUB_TOKEN: String(mergedEnv.GITHUB_TOKEN || '').trim(),
         GH_TOKEN: String(mergedEnv.GH_TOKEN || '').trim(),
+        GITLAB_TOKEN: String(mergedEnv.GITLAB_TOKEN || '').trim(),
         GITEA_TOKEN: String(mergedEnv.GITEA_TOKEN || '').trim(),
         KIMIBUILT_GIT_USERNAME: String(mergedEnv.KIMIBUILT_GIT_USERNAME || 'x-access-token').trim() || 'x-access-token',
         KIMIBUILT_GIT_PASSWORD: credentialToken,

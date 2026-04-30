@@ -67,8 +67,8 @@ function hasRemoteSoftwareCreationIntent(text = '') {
     }
 
     return [
-        /\b(create|develop|build|make|ship|launch|publish|scaffold|prototype)\b[\s\S]{0,60}\b(app|application|website|site|frontend|service|game|software|web app)\b[\s\S]{0,80}\b(server|remote|ssh|gitea|cluster|k3s|kubernetes|environment|sandbox)\b/,
-        /\b(server|remote|ssh|gitea|cluster|k3s|kubernetes|environment|sandbox)\b[\s\S]{0,80}\b(create|develop|build|make|ship|launch|publish|scaffold|prototype)\b[\s\S]{0,60}\b(app|application|website|site|frontend|service|game|software|web app)\b/,
+        /\b(create|develop|build|make|ship|launch|publish|scaffold|prototype)\b[\s\S]{0,60}\b(app|application|website|site|frontend|service|game|software|web app)\b[\s\S]{0,80}\b(server|remote|ssh|gitlab|gitea|cluster|k3s|kubernetes|environment|sandbox)\b/,
+        /\b(server|remote|ssh|gitlab|gitea|cluster|k3s|kubernetes|environment|sandbox)\b[\s\S]{0,80}\b(create|develop|build|make|ship|launch|publish|scaffold|prototype)\b[\s\S]{0,60}\b(app|application|website|site|frontend|service|game|software|web app)\b/,
         /\b(this (?:server|cluster|environment|sandbox))\b[\s\S]{0,60}\b(create|develop|build|make|ship|launch|publish)\b[\s\S]{0,60}\b(app|application|website|site|frontend|service|game|software|web app)\b/,
     ].some((pattern) => pattern.test(normalized));
 }
@@ -282,7 +282,7 @@ function inferExecutionProfile(payload = {}) {
         /\b(deploy|release|rollout|restart)\b[\s\S]{0,40}\b(server|host|container|cluster|pod|deployment)\b/,
         /\b(kubectl|kubernetes|k8s|docker compose|docker-compose|systemctl|journalctl|nginx|pm2)\b/,
         /\b(build|compile|install|run)\b[\s\S]{0,40}\b(on|via)\b[\s\S]{0,20}\b(server|ssh|remote)\b/,
-        /\b(gitea|image repo|container registry)\b/,
+        /\b(gitlab|gitea|image repo|container registry)\b/,
     ].some((pattern) => pattern.test(normalized));
     const remoteContinuationIntent = (stickyRemoteIntent || stickyRemoteWorkflow)
         && hasRemoteResumeIntentText(normalized);
@@ -294,7 +294,7 @@ function inferExecutionProfile(payload = {}) {
         /\b(on|to|for)\b[\s\S]{0,20}\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b/,
         /\b(current html|index\.html|site html|website html)\b/,
         /\b(game|website|site|app)\b[\s\S]{0,30}\b(live|online|deployment|ingress|domain|dns|tls)\b/,
-        /\b(create|develop|build|make|ship|launch|publish|scaffold)\b[\s\S]{0,50}\b(app|application|website|site|frontend|service|game|software)\b[\s\S]{0,50}\b(gitea|cluster|deployment|ingress|domain|environment|sandbox)\b/,
+        /\b(create|develop|build|make|ship|launch|publish|scaffold)\b[\s\S]{0,50}\b(app|application|website|site|frontend|service|game|software)\b[\s\S]{0,50}\b(gitlab|gitea|cluster|deployment|ingress|domain|environment|sandbox)\b/,
     ].some((pattern) => pattern.test(normalized));
     const stickyRemoteStatusIntent = stickyRemoteContext && hasStickyRemoteStatusIntentText(normalized);
     const stickyRemoteApprovalIntent = stickyRemoteContext && isRemotePermissionGrantText(normalized);

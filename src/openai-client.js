@@ -1546,8 +1546,8 @@ function hasRemoteSoftwareCreationIntent(prompt = '') {
     }
 
     return [
-        /\b(create|develop|build|make|ship|launch|publish|scaffold|prototype)\b[\s\S]{0,60}\b(app|application|website|site|frontend|service|game|software|web app)\b[\s\S]{0,80}\b(server|remote|ssh|gitea|cluster|k3s|kubernetes|environment|sandbox)\b/,
-        /\b(server|remote|ssh|gitea|cluster|k3s|kubernetes|environment|sandbox)\b[\s\S]{0,80}\b(create|develop|build|make|ship|launch|publish|scaffold|prototype)\b[\s\S]{0,60}\b(app|application|website|site|frontend|service|game|software|web app)\b/,
+        /\b(create|develop|build|make|ship|launch|publish|scaffold|prototype)\b[\s\S]{0,60}\b(app|application|website|site|frontend|service|game|software|web app)\b[\s\S]{0,80}\b(server|remote|ssh|gitlab|gitea|cluster|k3s|kubernetes|environment|sandbox)\b/,
+        /\b(server|remote|ssh|gitlab|gitea|cluster|k3s|kubernetes|environment|sandbox)\b[\s\S]{0,80}\b(create|develop|build|make|ship|launch|publish|scaffold|prototype)\b[\s\S]{0,60}\b(app|application|website|site|frontend|service|game|software|web app)\b/,
         /\b(this (?:server|cluster|environment|sandbox))\b[\s\S]{0,60}\b(create|develop|build|make|ship|launch|publish)\b[\s\S]{0,60}\b(app|application|website|site|frontend|service|game|software|web app)\b/,
     ].some((pattern) => pattern.test(normalized));
 }
@@ -1559,7 +1559,7 @@ function hasRemoteSoftwareDeploymentIntent(prompt = '') {
     }
 
     const softwareTarget = /\b(app|application|site|website|web app|web page|webpage|frontend|dashboard|service|game|software)\b/.test(normalized);
-    const remoteTarget = /\b(remote|server|host|runner|cli runner|gitea|cluster|k3s|k8s|kubernetes|domain|dns|ingress|traefik|tls|deploy|deployment|live|online)\b/.test(normalized)
+    const remoteTarget = /\b(remote|server|host|runner|cli runner|gitlab|gitea|cluster|k3s|k8s|kubernetes|domain|dns|ingress|traefik|tls|deploy|deployment|live|online)\b/.test(normalized)
         || /\b[a-z0-9-]+(?:\.[a-z0-9-]+){1,}\b/.test(normalized);
     const deploymentIntent = /\b(deploy|redeploy|publish|launch|ship|go live|get (?:it|the app|the site|the website) (?:live|online|deployed)|bring (?:it|the app|the site|the website) (?:live|online)|route|ingress|tls|dns|domain|rollout)\b/.test(normalized);
     const authoringIntent = /\b(create|develop|build|make|ship|launch|publish|scaffold|prototype|implement|update|fix|edit|change|deploy|redeploy)\b/.test(normalized);
@@ -1683,7 +1683,12 @@ function shouldAutoUseTool(toolId, prompt = '', skill = null, options = {}) {
             );
     }
 
-    if (toolId === 'ssh-execute' || toolId === 'remote-command') {
+    if (toolId === 'ssh-execute') {
+        return promptHasExplicitSshIntent(prompt)
+            || (executionProfile === 'remote-build' && hasUsableSshDefaults());
+    }
+
+    if (toolId === 'remote-command') {
         return promptHasExplicitSshIntent(prompt)
             || (executionProfile === 'remote-build' && hasUsableSshDefaults());
     }
@@ -1749,7 +1754,7 @@ function hasManagedAppIntent(prompt = '') {
         /\bmanaged[- ]app\b/i,
         /\bmanaged\b[\s\S]{0,20}\b(app|apps|catalog|control plane|platform)\b/i,
         /\b(app|apps)\b[\s\S]{0,20}\b(managed catalog|managed-app|control plane)\b/i,
-        /\b(gitea|act[-_ ]runner|gitea actions?|managed app catalog|managed-app catalog|build events webhook)\b/i,
+        /\b(gitlab|gitlab[-_ ]runner|gitlab ci|gitea|act[-_ ]runner|gitea actions?|managed app catalog|managed-app catalog|build events webhook)\b/i,
         /\b(managed-app|managed app)\b[\s\S]{0,40}\b(create|build|deploy|publish|launch|ship|update|redeploy|inspect|list|doctor|reconcile|repair)\b/i,
     ].some((pattern) => pattern.test(text));
 }
@@ -1860,7 +1865,7 @@ function extractExplicitWebResearchQuery(prompt = '') {
     for (const pattern of patterns) {
         const match = text.match(pattern);
         if (match?.[1]) {
-            return match[1].trim();
+            return match[1].trim().replace(/[.?!]+$/g, '').trim();
         }
     }
 
@@ -1871,6 +1876,13 @@ function extractExplicitWebResearchQuery(prompt = '') {
     return text
         .replace(/^(please|can you|could you|would you|help me|i need you to)\s+/i, '')
         .replace(/[.?!]+$/g, '')
+        .trim();
+}
+
+function cleanExtractedPathLikeValue(value = '') {
+    return String(value || '')
+        .trim()
+        .replace(/[.?!,;:]+$/g, '')
         .trim();
 }
 
@@ -1921,12 +1933,12 @@ function extractRequestedDirectoryPath(prompt = '') {
 
     const namedMatch = text.match(/\b(?:called|named|name it)\s+([a-zA-Z0-9._/-]+)/i);
     if (namedMatch?.[1]) {
-        return namedMatch[1].trim();
+        return cleanExtractedPathLikeValue(namedMatch[1]);
     }
 
     const directMatch = text.match(/\b(?:create|make|mkdir)\s+(?:a\s+)?(?:folder|directory)\s+(?:called\s+|named\s+)?([a-zA-Z0-9._/-]+)/i);
     if (directMatch?.[1]) {
-        return directMatch[1].trim();
+        return cleanExtractedPathLikeValue(directMatch[1]);
     }
 
     return null;
@@ -2665,10 +2677,11 @@ function buildAutomaticToolDefinitions(toolManager, prompt = '', options = {}) {
     );
     const allowedToolIds = new Set(getAllowedToolIdsForProfile(executionProfile));
     const hasRemoteCommandAlias = Boolean(toolManager.getTool('remote-command'));
+    const shouldPreferRemoteCommandAlias = hasRemoteCommandAlias && hasUsableSshDefaults();
 
     return Array.from(AUTO_TOOL_ALLOWLIST)
         .filter((toolId) => allowedToolIds.has(toolId))
-        .filter((toolId) => !(toolId === 'ssh-execute' && hasRemoteCommandAlias))
+        .filter((toolId) => !(toolId === 'ssh-execute' && shouldPreferRemoteCommandAlias))
         .map((toolId) => {
             const tool = toolManager.getTool(toolId);
             const skill = toolManager.registry.getSkill(toolId);
@@ -3174,7 +3187,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
     }
 
     if (automaticTools.some((entry) => entry.id === 'web-scrape')) {
-        guidance.push('- Use `web-scrape` when the user asks to extract fields from a page. Set `browser: true` or `javascript: true` for dynamic sites, certificate/TLS issues, or rendered DOM content. Use `selectors` to pull structured fields and `waitForSelector` when a page must finish rendering.');
+        guidance.push('- Use `web-scrape` when the user asks to extract fields from a page. Set `browser: true` or `javascript: true` for dynamic sites, certificate/TLS issues, or rendered DOM content. Use `selectors` to pull structured fields and `waitForSelector` when a page must finish rendering. For screenshot-only QA, omit `selectors`; when needed, `selectors` must be an object keyed by field name, not an array.');
         guidance.push('- Do not default to `web-scrape` for ordinary research verification when `web-fetch` can read the page directly.');
         guidance.push('- For search-follow-up research, use `researchSafe: true` and set `approvedDomains` from the chosen result host so the backend can skip pages that are outside the approved set or explicitly disallow bots.');
         guidance.push('- When the user wants page images from sensitive or adult sites without exposing the model to the content, use `web-scrape` with `captureImages: true` and `blindImageCapture: true` so the backend stores binary artifacts and returns only safe metadata.');
@@ -3337,7 +3350,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- For remote website or HTML updates, prefer the git-backed remote workspace as the source of truth. Use live files, ConfigMaps, or deployed content only to recover context, then commit the edit before redeploying.');
         guidance.push('- If the user asks for a fresh replacement page, generate the full HTML remotely, save it in the owning git workspace, set repo-local git identity if needed, commit it, and then roll out the change instead of blocking on a missing local artifact.');
         guidance.push('- Do not infer an arbitrary live website path such as `/var/www/...` as the target. Prefer the configured deploy target directory, a git workspace, or a path the user explicitly named.');
-        guidance.push('- If the configured deploy target directory is not a git repo, initialize one or clone the configured origin before making deployable edits; prefer configured Gitea origins when available.');
+        guidance.push('- If the configured deploy target directory is not a git repo, initialize one or clone the configured origin before making deployable edits; prefer configured GitLab origins when available.');
         guidance.push('- Internal artifact references like `/api/artifacts/...` are backend-local links. Do not invent `https://api/...` from them.');
         const sshConfig = settingsController.getEffectiveSshConfig();
 

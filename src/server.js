@@ -42,6 +42,7 @@ const workloadsRouter = require('./routes/workloads');
 const managedAppsRouter = require('./routes/managed-apps');
 const runnersRouter = require('./routes/runners');
 const giteaIntegrationsRouter = require('./routes/integrations-gitea');
+const gitlabIntegrationsRouter = require('./routes/integrations-gitlab');
 const providerSessionsRouter = require('./routes/provider-sessions');
 const remoteAgentTasksRouter = require('./routes/remote-agent-tasks');
 const DashboardController = require('./routes/admin/dashboard.controller');
@@ -161,6 +162,7 @@ app.get('/login', (req, res) => {
 });
 
 app.use('/api/auth', authRouter);
+app.use('/api/integrations/gitlab', gitlabIntegrationsRouter);
 app.use('/api/integrations/gitea', giteaIntegrationsRouter);
 app.post('/api/runners/register', (req, res, next) => {
     try {

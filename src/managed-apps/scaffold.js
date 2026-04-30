@@ -19,231 +19,156 @@ const DEFAULT_SOURCE_FILE_PATHS = Object.freeze([
     'public/app.js',
 ]);
 
-function buildWorkflowYaml({
+function buildGitLabCiYaml({
     appName = '',
     slug = '',
-    giteaOrg = '',
+    gitProviderOrg = '',
     imageRepo = '',
     registryHost = '',
     buildEventsUrl = '',
 } = {}) {
-    return `name: build-and-publish
+    return `stages:
+  - build
 
-on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
+variables:
+  APP_NAME: ${appName}
+  APP_SLUG: ${slug}
+  GIT_PROVIDER_ORG: ${gitProviderOrg}
+  IMAGE_REPO: ${imageRepo}
+  REGISTRY_HOST: ${registryHost}
+  BUILD_EVENTS_URL: ${buildEventsUrl}
+  DEFAULT_TARGET_PLATFORMS: linux/amd64,linux/arm64
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    env:
-      APP_NAME: ${appName}
-      APP_SLUG: ${slug}
-      GITEA_ORG: ${giteaOrg}
-      IMAGE_REPO: ${imageRepo}
-      REGISTRY_HOST: ${registryHost}
-      BUILD_EVENTS_URL: ${buildEventsUrl}
-      DEFAULT_TARGET_PLATFORMS: linux/amd64,linux/arm64
-    steps:
-      - name: Materialize repository
-        shell: bash
-        env:
-          REPOSITORY_URL: \${{ gitea.server_url }}/\${{ github.repository }}.git
-          GITHUB_TOKEN: \${{ github.token }}
-          KIMIBUILT_GIT_USERNAME: x-access-token
-        run: |
-          set -euo pipefail
-          if ! command -v git >/dev/null 2>&1; then
-            echo "git is required on the runner host" >&2
-            exit 1
-          fi
-          git_askpass_dir="$(mktemp -d)"
-          git_askpass_script="$git_askpass_dir/askpass.sh"
-          cat > "$git_askpass_script" <<'EOF'
-          #!/bin/sh
-          case "$1" in
-            *Username*|*username*)
-              printf "%s" "\${KIMIBUILT_GIT_USERNAME:-x-access-token}"
-              ;;
-            *)
-              printf "%s" "\${KIMIBUILT_GIT_PASSWORD:-\${GITHUB_TOKEN:-}}"
-              ;;
-          esac
-          EOF
-          chmod 700 "$git_askpass_script"
-          export GIT_ASKPASS="$git_askpass_script"
-          export GIT_TERMINAL_PROMPT=0
-          export GCM_INTERACTIVE=Never
-          export KIMIBUILT_GIT_PASSWORD="\${KIMIBUILT_GIT_PASSWORD:-\${GITHUB_TOKEN:-}}"
-          trap 'rm -rf "$git_askpass_dir"' EXIT
-          if [ ! -d .git ]; then
-            git init .
-            git remote add origin "$REPOSITORY_URL"
-          else
-            git remote set-url origin "$REPOSITORY_URL"
-          fi
-          git fetch --depth=1 origin "\${GITHUB_REF_NAME:-main}"
-          git checkout -B "\${GITHUB_REF_NAME:-main}" FETCH_HEAD
-          test -f Dockerfile
+build-and-publish:
+  stage: build
+  image: alpine:3.20
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+  before_script:
+    - apk add --no-cache bash curl wget tar git ca-certificates coreutils
+  script:
+    - |
+      bash <<'BASH'
+      set -euo pipefail
 
-      - name: Prepare tags
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "SHORT_SHA=\${GITHUB_SHA::12}" >> "$GITHUB_ENV"
-          echo "IMAGE_TAG=sha-\${GITHUB_SHA::12}" >> "$GITHUB_ENV"
-          echo "TARGET_PLATFORMS=\${TARGET_PLATFORMS:-$DEFAULT_TARGET_PLATFORMS}" >> "$GITHUB_ENV"
-
-      - name: Install buildctl
-        shell: bash
-        run: |
-          set -euo pipefail
-          download() {
-            url="$1"
-            if command -v curl >/dev/null 2>&1; then
-              curl -fsSL "$url"
-              return
-            fi
-            if command -v wget >/dev/null 2>&1; then
-              wget -qO- "$url"
-              return
-            fi
-            echo "curl or wget is required on the runner host" >&2
-            exit 1
-          }
-          ARCH="$(uname -m)"
-          case "$ARCH" in
-            x86_64|amd64) BUILDKIT_ARCH=amd64 ;;
-            aarch64|arm64) BUILDKIT_ARCH=arm64 ;;
-            *)
-              echo "Unsupported architecture: $ARCH" >&2
-              exit 1
-              ;;
-          esac
-          BUILDKIT_VERSION="\${BUILDKIT_VERSION:-v0.17.2}"
-          download "https://github.com/moby/buildkit/releases/download/$BUILDKIT_VERSION/buildkit-$BUILDKIT_VERSION.linux-$BUILDKIT_ARCH.tar.gz" \\
-            | tar -xz --strip-components=1 -C "$RUNNER_TEMP" bin/buildctl
-          chmod +x "$RUNNER_TEMP/buildctl"
-          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
-
-      - name: Write registry auth
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "\${GITEA_REGISTRY_USERNAME:-}"
-          test -n "\${GITEA_REGISTRY_PASSWORD:-}"
-          TARGET_REGISTRY_HOST="\${GITEA_REGISTRY_HOST:-$REGISTRY_HOST}"
-          mkdir -p "$HOME/.docker"
-          AUTH="$(printf '%s' "$GITEA_REGISTRY_USERNAME:$GITEA_REGISTRY_PASSWORD" | base64 | tr -d '\\n')"
-          cat > "$HOME/.docker/config.json" <<EOF
-          {"auths":{"$TARGET_REGISTRY_HOST":{"username":"$GITEA_REGISTRY_USERNAME","password":"$GITEA_REGISTRY_PASSWORD","auth":"$AUTH"}}}
-          EOF
-
-      - name: Validate build settings
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$IMAGE_REPO"
-          test -n "$TARGET_PLATFORMS"
-          case "$IMAGE_REPO" in
-            */*/*) ;;
-            *)
-              echo "IMAGE_REPO must look like <registry>/<owner>/<repo>; got $IMAGE_REPO" >&2
-              exit 1
-              ;;
-          esac
-          case "/$IMAGE_REPO/" in
-            *"/undefined/"*)
-              echo "Invalid IMAGE_REPO=$IMAGE_REPO" >&2
-              exit 1
-              ;;
-          esac
-
-      - name: Build and push image
-        shell: bash
-        run: |
-          set -euo pipefail
-          BUILDKIT_ADDR="\${BUILDKIT_HOST:-tcp://buildkitd.agent-platform.svc.cluster.local:1234}"
-          buildctl --addr "$BUILDKIT_ADDR" build \\
-            --frontend dockerfile.v0 \\
-            --local context=. \\
-            --local dockerfile=. \\
-            --opt platform="$TARGET_PLATFORMS" \\
-            --output "type=image,name=$IMAGE_REPO:$IMAGE_TAG,push=true" \\
-            --export-cache type=inline \\
-            --import-cache "type=registry,ref=$IMAGE_REPO:latest"
-
-      - name: Notify KimiBuilt
-        if: always()
-        shell: bash
-        env:
-          JOB_STATUS: \${{ job.status }}
-        run: |
-          set -euo pipefail
+      build_status="failed"
+      notify_kimibuilt() {
+        local exit_code="$1"
+        if [ "$exit_code" = "0" ]; then
           build_status="success"
-          if [ "\${JOB_STATUS:-success}" != "success" ]; then
-            build_status="failed"
-          fi
-          finish_notification_failure() {
-            echo "$1" >&2
-            if [ "$build_status" = "success" ]; then
-              echo "Successful managed app builds must notify KimiBuilt before the Gitea workflow can be treated as complete." >&2
-              exit 1
-            fi
-            exit 0
-          }
-          target_url="\${KIMIBUILT_BUILD_EVENTS_URL:-$BUILD_EVENTS_URL}"
-          if [ -z "\${target_url:-}" ]; then
-            finish_notification_failure "No KimiBuilt build events URL configured; cannot notify the managed app control plane."
-          fi
-          run_url="\${GITHUB_SERVER_URL:-\${GITEA_INSTANCE_URL:-}}"
-          if [ -n "\${run_url:-}" ] && [ -n "\${GITHUB_REPOSITORY:-}" ] && [ -n "\${GITHUB_RUN_ID:-}" ]; then
-            run_url="\${run_url%/}/\${GITHUB_REPOSITORY}/actions/runs/\${GITHUB_RUN_ID}"
-          fi
-          payload_file="$(mktemp)"
-          cat > "$payload_file" <<EOF
-          {"repoOwner":"$GITEA_ORG","repoName":"$APP_SLUG","slug":"$APP_SLUG","commitSha":"\${GITHUB_SHA:-}","imageTag":"\${IMAGE_TAG:-}","imageRepo":"$IMAGE_REPO","buildStatus":"$build_status","requestedAction":"deploy","deployRequested":true,"runId":"\${GITHUB_RUN_ID:-}","runUrl":"$run_url","platforms":"\${TARGET_PLATFORMS:-}"}
-          EOF
-          header_secret="\${KIMIBUILT_BUILD_EVENTS_SECRET:-}"
-          curl_flags=(-fsS -X POST -H "Content-Type: application/json" --data-binary "@$payload_file")
-          if [ -n "\${header_secret:-}" ]; then
-            curl_flags+=(-H "X-KimiBuilt-Webhook-Secret: $header_secret")
-          fi
-          insecure_requested=0
-          if [ "\${KIMIBUILT_BUILD_EVENTS_INSECURE:-0}" = "1" ] || [ "\${KIMIBUILT_BUILD_EVENTS_INSECURE:-0}" = "true" ]; then
-            insecure_requested=1
-            curl_flags+=(-k)
-          fi
-          if command -v curl >/dev/null 2>&1; then
-            if curl "\${curl_flags[@]}" "$target_url"; then
-              exit 0
-            fi
-            finish_notification_failure "KimiBuilt notification via curl failed."
-          fi
-          if command -v wget >/dev/null 2>&1; then
-            wget_headers=(--header "Content-Type: application/json")
-            if [ -n "\${header_secret:-}" ]; then
-              wget_headers+=(--header "X-KimiBuilt-Webhook-Secret: $header_secret")
-            fi
-            if wget -qO- "\${wget_headers[@]}" --post-file="$payload_file" "$target_url" >/dev/null; then
-              exit 0
-            fi
-            if [ "$insecure_requested" = "1" ]; then
-              case "$target_url" in
-                https://*)
-                  http_url="http://\${target_url#https://}"
-                  echo "BusyBox wget cannot disable TLS verification; trying $http_url because KIMIBUILT_BUILD_EVENTS_INSECURE is set." >&2
-                  if wget -qO- "\${wget_headers[@]}" --post-file="$payload_file" "$http_url" >/dev/null; then
-                    exit 0
-                  fi
-                  ;;
-              esac
-            fi
-            finish_notification_failure "KimiBuilt notification via wget failed."
-          fi
-          finish_notification_failure "curl or wget is required to notify KimiBuilt."
+        else
+          build_status="failed"
+        fi
+
+        target_url="\${KIMIBUILT_BUILD_EVENTS_URL:-$BUILD_EVENTS_URL}"
+        if [ -z "\${target_url:-}" ]; then
+          echo "No KimiBuilt build events URL configured; cannot notify the managed app control plane." >&2
+          return "$exit_code"
+        fi
+
+        payload_file="$(mktemp)"
+        cat > "$payload_file" <<EOF
+{"repoOwner":"$GIT_PROVIDER_ORG","repoName":"$APP_SLUG","slug":"$APP_SLUG","commitSha":"\${CI_COMMIT_SHA:-}","imageTag":"\${IMAGE_TAG:-}","imageRepo":"$IMAGE_REPO","buildStatus":"$build_status","requestedAction":"deploy","deployRequested":true,"runId":"\${CI_PIPELINE_ID:-}","runUrl":"\${CI_PIPELINE_URL:-}","platforms":"\${TARGET_PLATFORMS:-}"}
+EOF
+
+        header_secret="\${KIMIBUILT_BUILD_EVENTS_SECRET:-}"
+        curl_flags=(-fsS -X POST -H "Content-Type: application/json" --data-binary "@$payload_file")
+        if [ -n "\${header_secret:-}" ]; then
+          curl_flags+=(-H "X-KimiBuilt-Webhook-Secret: $header_secret")
+        fi
+        if [ "\${KIMIBUILT_BUILD_EVENTS_INSECURE:-0}" = "1" ] || [ "\${KIMIBUILT_BUILD_EVENTS_INSECURE:-0}" = "true" ]; then
+          curl_flags+=(-k)
+        fi
+
+        if curl "\${curl_flags[@]}" "$target_url"; then
+          return "$exit_code"
+        fi
+
+        echo "KimiBuilt notification via curl failed." >&2
+        if [ "$exit_code" = "0" ]; then
+          return 1
+        fi
+        return "$exit_code"
+      }
+      trap 'rc=$?; notify_kimibuilt "$rc"; exit $?' EXIT
+
+      test -f Dockerfile
+      SHORT_SHA="$(printf '%s' "\${CI_COMMIT_SHA:-}" | cut -c1-12)"
+      IMAGE_TAG="sha-$SHORT_SHA"
+      TARGET_PLATFORMS="\${TARGET_PLATFORMS:-$DEFAULT_TARGET_PLATFORMS}"
+      if [ -z "\${IMAGE_REPO:-}" ] && [ -n "\${CI_REGISTRY_IMAGE:-}" ]; then
+        IMAGE_REPO="$CI_REGISTRY_IMAGE"
+      fi
+
+      download() {
+        url="$1"
+        if command -v curl >/dev/null 2>&1; then
+          curl -fsSL "$url"
+          return
+        fi
+        if command -v wget >/dev/null 2>&1; then
+          wget -qO- "$url"
+          return
+        fi
+        echo "curl or wget is required on the runner image" >&2
+        exit 1
+      }
+
+      ARCH="$(uname -m)"
+      case "$ARCH" in
+        x86_64|amd64) BUILDKIT_ARCH=amd64 ;;
+        aarch64|arm64) BUILDKIT_ARCH=arm64 ;;
+        *)
+          echo "Unsupported architecture: $ARCH" >&2
+          exit 1
+          ;;
+      esac
+      BUILDKIT_VERSION="\${BUILDKIT_VERSION:-v0.17.2}"
+      install_dir="$(mktemp -d)"
+      download "https://github.com/moby/buildkit/releases/download/$BUILDKIT_VERSION/buildkit-$BUILDKIT_VERSION.linux-$BUILDKIT_ARCH.tar.gz" \\
+        | tar -xz --strip-components=1 -C "$install_dir" bin/buildctl
+      chmod +x "$install_dir/buildctl"
+      export PATH="$install_dir:$PATH"
+
+      registry_user="\${GITLAB_REGISTRY_USERNAME:-\${CI_REGISTRY_USER:-}}"
+      registry_password="\${GITLAB_REGISTRY_PASSWORD:-\${CI_REGISTRY_PASSWORD:-}}"
+      target_registry_host="\${GITLAB_REGISTRY_HOST:-\${CI_REGISTRY:-$REGISTRY_HOST}}"
+      test -n "$registry_user"
+      test -n "$registry_password"
+      test -n "$target_registry_host"
+      mkdir -p "$HOME/.docker"
+      AUTH="$(printf '%s' "$registry_user:$registry_password" | base64 | tr -d '\\n')"
+      cat > "$HOME/.docker/config.json" <<EOF
+{"auths":{"$target_registry_host":{"username":"$registry_user","password":"$registry_password","auth":"$AUTH"}}}
+EOF
+
+      test -n "$IMAGE_REPO"
+      test -n "$TARGET_PLATFORMS"
+      case "$IMAGE_REPO" in
+        */*/*) ;;
+        *)
+          echo "IMAGE_REPO must look like <registry>/<owner>/<repo>; got $IMAGE_REPO" >&2
+          exit 1
+          ;;
+      esac
+      case "/$IMAGE_REPO/" in
+        *"/undefined/"*)
+          echo "Invalid IMAGE_REPO=$IMAGE_REPO" >&2
+          exit 1
+          ;;
+      esac
+
+      BUILDKIT_ADDR="\${BUILDKIT_HOST:-tcp://buildkitd.agent-platform.svc.cluster.local:1234}"
+      buildctl --addr "$BUILDKIT_ADDR" build \\
+        --frontend dockerfile.v0 \\
+        --local context=. \\
+        --local dockerfile=. \\
+        --opt platform="$TARGET_PLATFORMS" \\
+        --output "type=image,name=$IMAGE_REPO:$IMAGE_TAG,push=true" \\
+        --export-cache type=inline \\
+        --import-cache "type=registry,ref=$IMAGE_REPO:latest"
+      BASH
 `;
 }
 
@@ -327,6 +252,7 @@ function buildDefaultScaffoldFiles({
     namespace = '',
     sourcePrompt = '',
     giteaOrg = '',
+    gitProviderOrg = '',
     imageRepo = '',
     registryHost = '',
     buildEventsUrl = '',
@@ -338,7 +264,7 @@ function buildDefaultScaffoldFiles({
             publicHost,
             namespace,
             sourcePrompt,
-            giteaOrg,
+            gitProviderOrg: gitProviderOrg || giteaOrg,
             imageRepo,
             registryHost,
             buildEventsUrl,
@@ -358,6 +284,7 @@ function buildManagedAppInfrastructureFiles({
     namespace = '',
     sourcePrompt = '',
     giteaOrg = '',
+    gitProviderOrg = '',
     imageRepo = '',
     registryHost = '',
     buildEventsUrl = '',
@@ -380,13 +307,12 @@ Original request:
 
 > ${sourcePrompt || 'No original prompt was recorded.'}
 
-This repository is wired for Gitea Actions image publishing and KimiBuilt deployment orchestration.
+This repository is wired for GitLab CI image publishing and KimiBuilt deployment orchestration.
 `,
         },
         {
             path: '.dockerignore',
             content: `.git
-.gitea
 node_modules
 npm-debug.log
 Dockerfile*
@@ -409,11 +335,11 @@ README.md
             }),
         },
         {
-            path: '.gitea/workflows/build-and-publish.yml',
-            content: buildWorkflowYaml({
+            path: '.gitlab-ci.yml',
+            content: buildGitLabCiYaml({
                 appName,
                 slug,
-                giteaOrg,
+                gitProviderOrg: gitProviderOrg || giteaOrg,
                 imageRepo,
                 registryHost,
                 buildEventsUrl,
@@ -568,6 +494,7 @@ function normalizeGeneratedManagedAppSourceFiles(files = []) {
 }
 
 module.exports = {
+    buildGitLabCiYaml,
     buildDefaultScaffoldFiles,
     buildDefaultManagedAppSourceFiles,
     buildManagedAppAuthoringPrompt,

@@ -310,7 +310,7 @@ class KubernetesClient {
             return null;
         }
 
-        const secretName = sanitizeKubernetesName(name || 'gitea-registry-credentials', 'gitea-registry-credentials');
+        const secretName = sanitizeKubernetesName(name || 'gitlab-registry-credentials', 'gitlab-registry-credentials');
         return this.upsertNamespacedResource({
             kind: 'Secret',
             apiPath: `/api/v1/namespaces/${encodeURIComponent(namespace)}/secrets`,
@@ -944,7 +944,7 @@ class KubernetesClient {
             return null;
         }
 
-        const secretName = sanitizeKubernetesName(name || 'gitea-registry-credentials', 'gitea-registry-credentials');
+        const secretName = sanitizeKubernetesName(name || 'gitlab-registry-credentials', 'gitlab-registry-credentials');
         return {
             apiVersion: 'v1',
             kind: 'Secret',
@@ -998,7 +998,7 @@ class KubernetesClient {
         registryUsername = '',
         registryPassword = '',
     } = {}) {
-        const normalizedSecretName = sanitizeKubernetesName(secretName || 'gitea-registry-credentials', 'gitea-registry-credentials');
+        const normalizedSecretName = sanitizeKubernetesName(secretName || 'gitlab-registry-credentials', 'gitlab-registry-credentials');
         const normalizedNamespace = sanitizeKubernetesName(namespace, 'managed-apps');
         const normalizedPlatformNamespace = sanitizeKubernetesName(
             platformNamespace || this.managedAppsConfig.platformNamespace || 'agent-platform',
@@ -1019,10 +1019,13 @@ class KubernetesClient {
             '  raw="$(kubectl_cmd get secret "$runtime_secret_name" -n "$platform_namespace" -o "jsonpath={.data.${key}}" 2>/dev/null || true)"',
             '  if [ -n "${raw:-}" ]; then printf "%s" "$raw" | base64 -d 2>/dev/null || true; fi',
             '}',
-            'resolved_registry_host="$(secret_value gitea-registry-host)"',
-            'resolved_registry_username="$(secret_value gitea-registry-username)"',
-            'resolved_registry_password="$(secret_value gitea-registry-password)"',
-            'is_placeholder_value() { case "${1:-}" in ""|change-me|replace-me|replace-after-gitea-boot) return 0 ;; *) return 1 ;; esac; }',
+            'resolved_registry_host="$(secret_value gitlab-registry-host)"',
+            'resolved_registry_username="$(secret_value gitlab-registry-username)"',
+            'resolved_registry_password="$(secret_value gitlab-registry-password)"',
+            'if [ -z "${resolved_registry_host:-}" ]; then resolved_registry_host="$(secret_value gitea-registry-host)"; fi',
+            'if [ -z "${resolved_registry_username:-}" ]; then resolved_registry_username="$(secret_value gitea-registry-username)"; fi',
+            'if [ -z "${resolved_registry_password:-}" ]; then resolved_registry_password="$(secret_value gitea-registry-password)"; fi',
+            'is_placeholder_value() { case "${1:-}" in ""|change-me|replace-me|replace-after-gitea-boot|replace-after-gitlab-boot) return 0 ;; *) return 1 ;; esac; }',
             'if is_placeholder_value "$resolved_registry_host"; then resolved_registry_host="$fallback_registry_host"; fi',
             'if is_placeholder_value "$resolved_registry_username"; then resolved_registry_username="$fallback_registry_username"; fi',
             'if is_placeholder_value "$resolved_registry_password"; then resolved_registry_password="$fallback_registry_password"; fi',
@@ -1099,37 +1102,37 @@ class KubernetesClient {
             '    echo "__KIMIBUILT_DEPLOYMENT__=${name}|missing|0|0|0|0"',
             '  fi',
             '}',
-            'deployment_status gitea',
+            'deployment_status gitlab',
             'deployment_status buildkitd',
-            'deployment_status act-runner',
-            'if kubectl_cmd get secret gitea-actions -n "$platform_namespace" >/dev/null 2>&1; then',
-            '  echo "__KIMIBUILT_SECRET__=gitea-actions|present"',
-            "  runner_token_b64=$(kubectl_cmd get secret gitea-actions -n \"$platform_namespace\" -o jsonpath='{.data.runner-registration-token}' 2>/dev/null || true)",
+            'deployment_status gitlab-runner',
+            'if kubectl_cmd get secret gitlab-runner -n "$platform_namespace" >/dev/null 2>&1; then',
+            '  echo "__KIMIBUILT_SECRET__=gitlab-runner|present"',
+            "  runner_token_b64=$(kubectl_cmd get secret gitlab-runner -n \"$platform_namespace\" -o jsonpath='{.data.runner-token}' 2>/dev/null || true)",
             '  if [ -z "${runner_token_b64:-}" ]; then',
             '    echo "__KIMIBUILT_RUNNER_TOKEN__=missing"',
             '  else',
             '    runner_token=$(printf "%s" "$runner_token_b64" | base64 -d 2>/dev/null || true)',
             '    case "$runner_token" in',
             '      "" ) echo "__KIMIBUILT_RUNNER_TOKEN__=missing" ;;',
-            '      "change-me"|"replace-me"|"replace-after-gitea-boot" ) echo "__KIMIBUILT_RUNNER_TOKEN__=placeholder" ;;',
+            '      "change-me"|"replace-me"|"replace-after-gitea-boot"|"replace-after-gitlab-boot" ) echo "__KIMIBUILT_RUNNER_TOKEN__=placeholder" ;;',
             '      * ) echo "__KIMIBUILT_RUNNER_TOKEN__=present" ;;',
             '    esac',
             '  fi',
             'else',
-            '  echo "__KIMIBUILT_SECRET__=gitea-actions|missing"',
+            '  echo "__KIMIBUILT_SECRET__=gitlab-runner|missing"',
             '  echo "__KIMIBUILT_RUNNER_TOKEN__=missing-secret"',
             'fi',
-            "runner_env=$(kubectl_cmd get deployment act-runner -n \"$platform_namespace\" -o jsonpath='{range .spec.template.spec.containers[*].env[*]}{.name}={.value}{\"\\n\"}{end}' 2>/dev/null || true)",
+            "runner_env=$(kubectl_cmd get deployment gitlab-runner -n \"$platform_namespace\" -o jsonpath='{range .spec.template.spec.containers[*].env[*]}{.name}={.value}{\"\\n\"}{end}' 2>/dev/null || true)",
             'if [ -n "${runner_env:-}" ]; then',
-            '  runner_labels=$(printf "%s\\n" "$runner_env" | grep "^GITEA_RUNNER_LABELS=" | head -n 1 | cut -d= -f2-)',
-            '  gitea_instance_url=$(printf "%s\\n" "$runner_env" | grep "^GITEA_INSTANCE_URL=" | head -n 1 | cut -d= -f2-)',
+            '  runner_labels=$(printf "%s\\n" "$runner_env" | grep "^RUNNER_TAG_LIST=" | head -n 1 | cut -d= -f2-)',
+            '  gitlab_instance_url=$(printf "%s\\n" "$runner_env" | grep "^CI_SERVER_URL=" | head -n 1 | cut -d= -f2-)',
             '  if [ -n "${runner_labels:-}" ]; then echo "__KIMIBUILT_RUNNER_LABELS__=${runner_labels}"; fi',
-            '  if [ -n "${gitea_instance_url:-}" ]; then echo "__KIMIBUILT_GITEA_INSTANCE_URL__=${gitea_instance_url}"; fi',
+            '  if [ -n "${gitlab_instance_url:-}" ]; then echo "__KIMIBUILT_GITLAB_INSTANCE_URL__=${gitlab_instance_url}"; fi',
             'fi',
-            "gitea_ingress_host=$(kubectl_cmd get ingress gitea -n \"$platform_namespace\" -o jsonpath='{.spec.rules[0].host}' 2>/dev/null || true)",
-            'if [ -n "${gitea_ingress_host:-}" ]; then echo "__KIMIBUILT_GITEA_INGRESS_HOST__=${gitea_ingress_host}"; fi',
-            'if kubectl_cmd get deployment act-runner -n "$platform_namespace" >/dev/null 2>&1; then',
-            '  kubectl_cmd logs deployment/act-runner -n "$platform_namespace" --tail=40 2>/dev/null | sed \'s/^/__KIMIBUILT_RUNNER_LOG__=/\' || true',
+            "gitlab_ingress_host=$(kubectl_cmd get ingress gitlab -n \"$platform_namespace\" -o jsonpath='{.spec.rules[0].host}' 2>/dev/null || true)",
+            'if [ -n "${gitlab_ingress_host:-}" ]; then echo "__KIMIBUILT_GITLAB_INGRESS_HOST__=${gitlab_ingress_host}"; fi',
+            'if kubectl_cmd get deployment gitlab-runner -n "$platform_namespace" >/dev/null 2>&1; then',
+            '  kubectl_cmd logs deployment/gitlab-runner -n "$platform_namespace" --tail=40 2>/dev/null | sed \'s/^/__KIMIBUILT_RUNNER_LOG__=/\' || true',
             'fi',
         ].join('\n');
     }
@@ -1139,25 +1142,27 @@ class KubernetesClient {
         desiredRunnerReplicas = 1,
         runnerRegistrationToken = '',
         runnerLabels = '',
+        gitlabInstanceUrl = '',
         giteaInstanceUrl = '',
     } = {}) {
         const namespace = sanitizeKubernetesName(
             platformNamespace || this.managedAppsConfig.platformNamespace || 'agent-platform',
             'agent-platform',
         );
-        const actRunnerDesiredReplicas = Math.max(0, parseInteger(desiredRunnerReplicas, 1));
+        const gitlabRunnerDesiredReplicas = Math.max(0, parseInteger(desiredRunnerReplicas, 1));
         const secretManifest = normalizeText(runnerRegistrationToken)
             ? this.buildOpaqueSecretManifest({
                 namespace,
-                name: 'gitea-actions',
+                name: 'gitlab-runner',
                 labels: {
                     'kimibuilt.io/managed-app-platform': 'true',
                 },
                 stringData: {
-                    'runner-registration-token': normalizeText(runnerRegistrationToken),
+                    'runner-token': normalizeText(runnerRegistrationToken),
                 },
             })
             : null;
+        const desiredGitlabInstanceUrl = normalizeText(gitlabInstanceUrl || giteaInstanceUrl);
 
         return [
             'set -e',
@@ -1169,9 +1174,9 @@ class KubernetesClient {
             '}',
             'if [ -f /etc/rancher/k3s/k3s.yaml ] && [ -z "${KUBECONFIG:-}" ]; then export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; fi',
             `platform_namespace=${this.quoteShellArg(namespace)}`,
-            `desired_runner_replicas=${this.quoteShellArg(String(actRunnerDesiredReplicas))}`,
+            `desired_runner_replicas=${this.quoteShellArg(String(gitlabRunnerDesiredReplicas))}`,
             `desired_runner_labels=${this.quoteShellArg(normalizeText(runnerLabels))}`,
-            `desired_gitea_instance_url=${this.quoteShellArg(normalizeText(giteaInstanceUrl))}`,
+            `desired_gitlab_instance_url=${this.quoteShellArg(desiredGitlabInstanceUrl)}`,
             'echo "__KIMIBUILT_PLATFORM_NAMESPACE__=${platform_namespace}"',
             'if ! kubectl_cmd get namespace "$platform_namespace" >/dev/null 2>&1; then',
             '  echo "__KIMIBUILT_RECONCILE_ACTION__=platform-namespace-missing"',
@@ -1189,32 +1194,32 @@ class KubernetesClient {
             '    fi',
             '  fi',
             '}',
-            'scale_min_if_needed gitea 1',
+            'scale_min_if_needed gitlab 1',
             'scale_min_if_needed buildkitd 1',
             secretManifest
                 ? [
                     'cat <<\'EOF\' | kubectl_cmd apply -f -',
                     JSON.stringify(secretManifest, null, 2),
                     'EOF',
-                    'echo "__KIMIBUILT_RECONCILE_ACTION__=gitea-actions-secret-applied"',
+                    'echo "__KIMIBUILT_RECONCILE_ACTION__=gitlab-runner-secret-applied"',
                 ].join('\n')
                 : '',
-            'if kubectl_cmd get deployment act-runner -n "$platform_namespace" >/dev/null 2>&1; then',
+            'if kubectl_cmd get deployment gitlab-runner -n "$platform_namespace" >/dev/null 2>&1; then',
             '  if [ -n "${desired_runner_labels:-}" ]; then',
-            '    kubectl_cmd set env deployment/act-runner -n "$platform_namespace" GITEA_RUNNER_LABELS="${desired_runner_labels}" >/dev/null',
-            '    echo "__KIMIBUILT_RECONCILE_ACTION__=act-runner-labels-set"',
+            '    kubectl_cmd set env deployment/gitlab-runner -n "$platform_namespace" RUNNER_TAG_LIST="${desired_runner_labels}" >/dev/null',
+            '    echo "__KIMIBUILT_RECONCILE_ACTION__=gitlab-runner-tags-set"',
             '  fi',
-            '  if [ -n "${desired_gitea_instance_url:-}" ]; then',
-            '    kubectl_cmd set env deployment/act-runner -n "$platform_namespace" GITEA_INSTANCE_URL="${desired_gitea_instance_url}" >/dev/null',
-            '    echo "__KIMIBUILT_RECONCILE_ACTION__=act-runner-instance-url-set"',
+            '  if [ -n "${desired_gitlab_instance_url:-}" ]; then',
+            '    kubectl_cmd set env deployment/gitlab-runner -n "$platform_namespace" CI_SERVER_URL="${desired_gitlab_instance_url}" >/dev/null',
+            '    echo "__KIMIBUILT_RECONCILE_ACTION__=gitlab-runner-instance-url-set"',
             '  fi',
-            '  kubectl_cmd scale deployment act-runner -n "$platform_namespace" --replicas="${desired_runner_replicas}" >/dev/null',
-            '  echo "__KIMIBUILT_RECONCILE_ACTION__=act-runner-scaled-${desired_runner_replicas}"',
-            '  kubectl_cmd rollout restart deployment/act-runner -n "$platform_namespace" >/dev/null',
-            '  echo "__KIMIBUILT_RECONCILE_ACTION__=act-runner-restarted"',
-            '  kubectl_cmd rollout status deployment/act-runner -n "$platform_namespace" --timeout=180s',
+            '  kubectl_cmd scale deployment gitlab-runner -n "$platform_namespace" --replicas="${desired_runner_replicas}" >/dev/null',
+            '  echo "__KIMIBUILT_RECONCILE_ACTION__=gitlab-runner-scaled-${desired_runner_replicas}"',
+            '  kubectl_cmd rollout restart deployment/gitlab-runner -n "$platform_namespace" >/dev/null',
+            '  echo "__KIMIBUILT_RECONCILE_ACTION__=gitlab-runner-restarted"',
+            '  kubectl_cmd rollout status deployment/gitlab-runner -n "$platform_namespace" --timeout=180s',
             'else',
-            '  echo "__KIMIBUILT_RECONCILE_ACTION__=act-runner-missing"',
+            '  echo "__KIMIBUILT_RECONCILE_ACTION__=gitlab-runner-missing"',
             'fi',
         ].filter(Boolean).join('\n');
     }
@@ -1288,15 +1293,17 @@ class KubernetesClient {
             executionHost: result.host,
             deployments,
             secrets: {
-                [secretName || 'gitea-actions']: {
-                    name: secretName || 'gitea-actions',
+                [secretName || 'gitlab-runner']: {
+                    name: secretName || 'gitlab-runner',
                     present: secretStatus === 'present',
                 },
             },
             runnerTokenState: readMarkerValue(stdout, '__KIMIBUILT_RUNNER_TOKEN__') || 'unknown',
             runnerLabels: readMarkerValue(stdout, '__KIMIBUILT_RUNNER_LABELS__'),
-            giteaInstanceUrl: readMarkerValue(stdout, '__KIMIBUILT_GITEA_INSTANCE_URL__'),
-            giteaIngressHost: readMarkerValue(stdout, '__KIMIBUILT_GITEA_INGRESS_HOST__'),
+            gitlabInstanceUrl: readMarkerValue(stdout, '__KIMIBUILT_GITLAB_INSTANCE_URL__'),
+            gitlabIngressHost: readMarkerValue(stdout, '__KIMIBUILT_GITLAB_INGRESS_HOST__'),
+            giteaInstanceUrl: readMarkerValue(stdout, '__KIMIBUILT_GITLAB_INSTANCE_URL__'),
+            giteaIngressHost: readMarkerValue(stdout, '__KIMIBUILT_GITLAB_INGRESS_HOST__'),
             runnerLogExcerpt: runnerLogs.slice(-20),
             serverContext,
             raw: {
@@ -1313,6 +1320,7 @@ class KubernetesClient {
         desiredRunnerReplicas = 1,
         runnerRegistrationToken = '',
         runnerLabels = '',
+        gitlabInstanceUrl = '',
         giteaInstanceUrl = '',
     } = {}) {
         if (!this.isConfigured(deploymentTarget)) {
@@ -1325,6 +1333,7 @@ class KubernetesClient {
             desiredRunnerReplicas,
             runnerRegistrationToken,
             runnerLabels,
+            gitlabInstanceUrl,
             giteaInstanceUrl,
         });
         const result = await this.executeRemoteCommand({

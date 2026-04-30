@@ -21,11 +21,11 @@ describe('ManagedAppService', () => {
 
         settingsController.settings.api.baseURL = 'https://kimibuilt.example.test/v1';
         service.getEffectiveManagedAppsConfig = () => ({
-            webhookEndpointPath: '/api/integrations/gitea/build-events',
+            webhookEndpointPath: '/api/integrations/gitlab/build-events',
         });
 
         try {
-            expect(service.buildBuildEventsUrl()).toBe('https://kimibuilt.example.test/api/integrations/gitea/build-events');
+            expect(service.buildBuildEventsUrl()).toBe('https://kimibuilt.example.test/api/integrations/gitlab/build-events');
         } finally {
             settingsController.settings.api.baseURL = previousBaseUrl;
         }
@@ -37,11 +37,11 @@ describe('ManagedAppService', () => {
 
         settingsController.settings.api.baseURL = 'https://kimibuilt.example.test/control-plane/api/v1';
         service.getEffectiveManagedAppsConfig = () => ({
-            webhookEndpointPath: '/api/integrations/gitea/build-events',
+            webhookEndpointPath: '/api/integrations/gitlab/build-events',
         });
 
         try {
-            expect(service.buildBuildEventsUrl()).toBe('https://kimibuilt.example.test/control-plane/api/integrations/gitea/build-events');
+            expect(service.buildBuildEventsUrl()).toBe('https://kimibuilt.example.test/control-plane/api/integrations/gitlab/build-events');
         } finally {
             settingsController.settings.api.baseURL = previousBaseUrl;
         }
@@ -473,7 +473,7 @@ describe('ManagedAppService', () => {
                     content: 'document.body.dataset.ready = "true";',
                 }),
                 expect.objectContaining({
-                    path: '.gitea/workflows/build-and-publish.yml',
+                    path: '.gitlab-ci.yml',
                 }),
             ]),
         }));
@@ -1402,7 +1402,7 @@ describe('ManagedAppService', () => {
         expect(result.app.metadata.liveDeploy.https).toBe(false);
     });
 
-    test('getAppProgress reconciles a successful Gitea run when the webhook is missing', async () => {
+    test('getAppProgress reconciles a successful GitLab pipeline when the webhook is missing', async () => {
         const app = {
             id: 'app-1',
             ownerId: 'user-1',
@@ -1424,7 +1424,7 @@ describe('ManagedAppService', () => {
                 deploymentTarget: 'ssh',
                 project: {
                     summary: 'Demo App was created in agent-apps/demo-app. Build and deploy are queued.',
-                    nextStep: 'Wait for the remote Gitea build to finish, then continue deployment through the managed-app control plane.',
+                    nextStep: 'Wait for the remote GitLab pipeline to finish, then continue deployment through the managed-app control plane.',
                     openItems: ['Remote build is queued.'],
                 },
             },
@@ -1449,7 +1449,7 @@ describe('ManagedAppService', () => {
             deployStatus: 'succeeded',
             verificationStatus: 'live',
             externalRunId: '42',
-            externalRunUrl: 'https://gitea.demoserver2.buzz/agent-apps/demo-app/actions/runs/42',
+            externalRunUrl: 'https://gitlab.demoserver2.buzz/agent-apps/demo-app/-/pipelines/42',
         };
         const liveApp = {
             ...app,
@@ -1495,7 +1495,7 @@ describe('ManagedAppService', () => {
                     head_sha: 'abcdef1234567890',
                     status: 'completed',
                     conclusion: 'success',
-                    html_url: 'https://gitea.demoserver2.buzz/agent-apps/demo-app/actions/runs/42',
+                    html_url: 'https://gitlab.demoserver2.buzz/agent-apps/demo-app/-/pipelines/42',
                     started_at: '2026-04-22T12:00:00Z',
                     completed_at: '2026-04-22T12:01:00Z',
                 }],
@@ -1557,7 +1557,7 @@ describe('ManagedAppService', () => {
         }));
     });
 
-    test('getAppProgress records a failed Gitea run when the webhook is missing', async () => {
+    test('getAppProgress records a failed GitLab pipeline when the webhook is missing', async () => {
         const app = {
             id: 'app-1',
             ownerId: 'user-1',
@@ -1575,7 +1575,7 @@ describe('ManagedAppService', () => {
                 deploymentTarget: 'ssh',
                 project: {
                     summary: 'Demo App build is queued.',
-                    nextStep: 'Wait for the remote Gitea build to finish.',
+                    nextStep: 'Wait for the remote GitLab pipeline to finish.',
                     openItems: ['Remote build is queued.'],
                 },
             },
@@ -1598,9 +1598,9 @@ describe('ManagedAppService', () => {
             ...queuedBuildRun,
             buildStatus: 'failed',
             externalRunId: '43',
-            externalRunUrl: 'https://gitea.demoserver2.buzz/agent-apps/demo-app/actions/runs/43',
+            externalRunUrl: 'https://gitlab.demoserver2.buzz/agent-apps/demo-app/-/pipelines/43',
             error: {
-                message: 'Gitea workflow concluded with failure.',
+                message: 'GitLab pipeline concluded with failure.',
             },
         };
         const failedApp = {
@@ -1610,11 +1610,11 @@ describe('ManagedAppService', () => {
                 deploymentTarget: 'ssh',
                 project: {
                     summary: 'Demo App build failed.',
-                    nextStep: 'Open the Gitea run and fix the failed build step.',
+                    nextStep: 'Open the GitLab pipeline and fix the failed build step.',
                     openItems: ['Remote build failed.'],
                 },
                 liveDeploy: {
-                    lastError: 'Gitea workflow concluded with failure.',
+                    lastError: 'GitLab pipeline concluded with failure.',
                 },
             },
         };
@@ -1642,7 +1642,7 @@ describe('ManagedAppService', () => {
                     head_sha: 'abcdef1234567890',
                     status: 'completed',
                     conclusion: 'failure',
-                    html_url: 'https://gitea.demoserver2.buzz/agent-apps/demo-app/actions/runs/43',
+                    html_url: 'https://gitlab.demoserver2.buzz/agent-apps/demo-app/-/pipelines/43',
                     started_at: '2026-04-22T12:00:00Z',
                     completed_at: '2026-04-22T12:01:00Z',
                 }],
@@ -1671,9 +1671,9 @@ describe('ManagedAppService', () => {
         expect(store.updateBuildRun).toHaveBeenCalledWith('run-1', expect.objectContaining({
             buildStatus: 'failed',
             externalRunId: '43',
-            externalRunUrl: 'https://gitea.demoserver2.buzz/agent-apps/demo-app/actions/runs/43',
+            externalRunUrl: 'https://gitlab.demoserver2.buzz/agent-apps/demo-app/-/pipelines/43',
             error: expect.objectContaining({
-                message: 'Gitea workflow concluded with failure.',
+                message: 'GitLab pipeline concluded with failure.',
             }),
         }));
         expect(service.deployApp).not.toHaveBeenCalled();
@@ -1701,7 +1701,7 @@ describe('ManagedAppService', () => {
                     metadata: {
                         project: {
                             summary: 'Demo App was updated. Build and deploy are queued.',
-                            nextStep: 'Wait for the remote Gitea build to finish, then continue deployment through the managed-app control plane.',
+                            nextStep: 'Wait for the remote GitLab pipeline to finish, then continue deployment through the managed-app control plane.',
                             openItems: ['Remote build is queued.'],
                         },
                     },
@@ -1714,7 +1714,7 @@ describe('ManagedAppService', () => {
         expect(result).toHaveLength(1);
         expect(result[0]).toEqual(expect.objectContaining({
             summary: 'Demo App was updated. Build and deploy are queued.',
-            nextStep: expect.stringContaining('Wait for the remote Gitea build to finish'),
+            nextStep: expect.stringContaining('Wait for the remote GitLab pipeline to finish'),
             openItems: expect.arrayContaining(['Remote build is queued.']),
             progress: expect.objectContaining({
                 phase: 'updated',
@@ -1724,15 +1724,15 @@ describe('ManagedAppService', () => {
         }));
     });
 
-    test('doctorPlatform summarizes the remote Gitea runner stack through the SSH kubernetes client', async () => {
+    test('doctorPlatform summarizes the remote GitLab runner stack through the SSH kubernetes client', async () => {
         const inspectManagedAppPlatform = jest.fn(async () => ({
             deploymentTarget: 'ssh',
             platformNamespace: 'agent-platform',
             namespaceExists: true,
             executionHost: 'deploy.example:22',
             deployments: {
-                gitea: {
-                    name: 'gitea',
+                gitlab: {
+                    name: 'gitlab',
                     present: true,
                     desiredReplicas: 1,
                     readyReplicas: 1,
@@ -1749,8 +1749,8 @@ describe('ManagedAppService', () => {
                     updatedReplicas: 1,
                     ready: true,
                 },
-                'act-runner': {
-                    name: 'act-runner',
+                'gitlab-runner': {
+                    name: 'gitlab-runner',
                     present: true,
                     desiredReplicas: 0,
                     readyReplicas: 0,
@@ -1760,8 +1760,8 @@ describe('ManagedAppService', () => {
                 },
             },
             runnerTokenState: 'placeholder',
-            runnerLabels: 'ubuntu-latest:host',
-            giteaInstanceUrl: 'https://gitea.demoserver2.buzz',
+            runnerLabels: 'kimibuilt,buildkit',
+            gitlabInstanceUrl: 'https://gitlab.demoserver2.buzz',
             runnerLogExcerpt: ['registration token invalid'],
             raw: {
                 stdout: '',
@@ -1777,8 +1777,9 @@ describe('ManagedAppService', () => {
         });
 
         service.getEffectiveGiteaConfig = () => ({
-            baseURL: 'https://gitea.demoserver2.buzz',
-            registryHost: 'gitea.demoserver2.buzz',
+            provider: 'gitlab',
+            baseURL: 'https://gitlab.demoserver2.buzz',
+            registryHost: 'registry.gitlab.demoserver2.buzz',
         });
         service.getEffectiveManagedAppsConfig = () => ({
             platformNamespace: 'agent-platform',
@@ -1793,16 +1794,16 @@ describe('ManagedAppService', () => {
             deploymentTarget: 'ssh',
         });
         expect(result.healthy).toBe(false);
-        expect(result.platform.expected.giteaBaseURL).toBe('https://gitea.demoserver2.buzz');
+        expect(result.platform.expected.gitlabBaseURL).toBe('https://gitlab.demoserver2.buzz');
         expect(result.suggestions).toEqual(expect.arrayContaining([
-            expect.stringContaining('`act-runner` is scaled to `0`'),
+            expect.stringContaining('`gitlab-runner` is scaled to `0`'),
             expect.stringContaining('placeholder value'),
         ]));
         expect(result.message).toContain('deploy.example:22');
         expect(result.message).toContain('platform needs attention');
     });
 
-    test('reconcilePlatform repairs the remote runner stack through Gitea and SSH', async () => {
+    test('reconcilePlatform repairs the remote runner stack through GitLab and SSH', async () => {
         const inspectManagedAppPlatform = jest.fn()
             .mockResolvedValueOnce({
                 deploymentTarget: 'ssh',
@@ -1810,8 +1811,8 @@ describe('ManagedAppService', () => {
                 namespaceExists: true,
                 executionHost: 'deploy.example:22',
                 deployments: {
-                    gitea: {
-                        name: 'gitea',
+                    gitlab: {
+                        name: 'gitlab',
                         present: true,
                         desiredReplicas: 1,
                         readyReplicas: 1,
@@ -1828,8 +1829,8 @@ describe('ManagedAppService', () => {
                         updatedReplicas: 1,
                         ready: true,
                     },
-                    'act-runner': {
-                        name: 'act-runner',
+                    'gitlab-runner': {
+                        name: 'gitlab-runner',
                         present: true,
                         desiredReplicas: 0,
                         readyReplicas: 0,
@@ -1839,8 +1840,8 @@ describe('ManagedAppService', () => {
                     },
                 },
                 runnerTokenState: 'placeholder',
-                runnerLabels: 'ubuntu-latest:host',
-                giteaInstanceUrl: 'https://gitea.demoserver2.buzz',
+                runnerLabels: 'kimibuilt,buildkit',
+                gitlabInstanceUrl: 'https://gitlab.demoserver2.buzz',
                 runnerLogExcerpt: ['registration token invalid'],
                 raw: {
                     stdout: '',
@@ -1854,8 +1855,8 @@ describe('ManagedAppService', () => {
                 namespaceExists: true,
                 executionHost: 'deploy.example:22',
                 deployments: {
-                    gitea: {
-                        name: 'gitea',
+                    gitlab: {
+                        name: 'gitlab',
                         present: true,
                         desiredReplicas: 1,
                         readyReplicas: 1,
@@ -1872,8 +1873,8 @@ describe('ManagedAppService', () => {
                         updatedReplicas: 1,
                         ready: true,
                     },
-                    'act-runner': {
-                        name: 'act-runner',
+                    'gitlab-runner': {
+                        name: 'gitlab-runner',
                         present: true,
                         desiredReplicas: 1,
                         readyReplicas: 1,
@@ -1883,8 +1884,8 @@ describe('ManagedAppService', () => {
                     },
                 },
                 runnerTokenState: 'present',
-                runnerLabels: 'ubuntu-latest:host',
-                giteaInstanceUrl: 'https://gitea.demoserver2.buzz',
+                runnerLabels: 'kimibuilt,buildkit',
+                gitlabInstanceUrl: 'https://gitlab.demoserver2.buzz',
                 runnerLogExcerpt: [],
                 raw: {
                     stdout: '',
@@ -1897,9 +1898,9 @@ describe('ManagedAppService', () => {
             platformNamespace: 'agent-platform',
             executionHost: 'deploy.example:22',
             actions: [
-                'gitea-actions-secret-applied',
-                'act-runner-scaled-1',
-                'act-runner-restarted',
+                'gitlab-runner-secret-applied',
+                'gitlab-runner-scaled-1',
+                'gitlab-runner-restarted',
             ],
             raw: {
                 stdout: '',
@@ -1907,13 +1908,8 @@ describe('ManagedAppService', () => {
                 exitCode: 0,
             },
         }));
-        const getRunnerRegistrationToken = jest.fn(async () => ({
-            scope: 'org',
-            token: 'runner-token-123',
-            rotated: true,
-        }));
         const listActionsRunners = jest.fn(async () => ({
-            scope: 'org',
+            scope: 'gitlab',
             totalCount: 1,
             runners: [{
                 id: 7,
@@ -1921,14 +1917,13 @@ describe('ManagedAppService', () => {
                 status: 'online',
                 disabled: false,
                 busy: false,
-                labels: [{ name: 'ubuntu-latest:host' }],
+                labels: [{ name: 'kimibuilt' }, { name: 'buildkit' }],
             }],
         }));
 
         const service = new ManagedAppService({
             giteaClient: {
                 isConfigured: jest.fn(() => true),
-                getRunnerRegistrationToken,
                 listActionsRunners,
             },
             kubernetesClient: {
@@ -1939,9 +1934,11 @@ describe('ManagedAppService', () => {
         });
 
         service.getEffectiveGiteaConfig = () => ({
-            baseURL: 'https://gitea.demoserver2.buzz',
+            provider: 'gitlab',
+            baseURL: 'https://gitlab.demoserver2.buzz',
             org: 'agent-apps',
-            registryHost: 'gitea.demoserver2.buzz',
+            registryHost: 'registry.gitlab.demoserver2.buzz',
+            runnerToken: 'runner-token-123',
         });
         service.getEffectiveManagedAppsConfig = () => ({
             platformNamespace: 'agent-platform',
@@ -1951,26 +1948,21 @@ describe('ManagedAppService', () => {
             executionProfile: 'remote-build',
         });
 
-        expect(getRunnerRegistrationToken).toHaveBeenCalledWith(expect.objectContaining({
-            scope: 'org',
-            org: 'agent-apps',
-            rotate: true,
-        }));
         expect(reconcileManagedAppPlatform).toHaveBeenCalledWith(expect.objectContaining({
             platformNamespace: 'agent-platform',
             deploymentTarget: 'ssh',
             runnerRegistrationToken: 'runner-token-123',
-            runnerLabels: 'ubuntu-latest:host',
-            giteaInstanceUrl: 'https://gitea.demoserver2.buzz',
+            runnerLabels: 'kimibuilt,buildkit',
+            gitlabInstanceUrl: 'https://gitlab.demoserver2.buzz',
         }));
         expect(listActionsRunners).toHaveBeenCalledWith(expect.objectContaining({
-            scope: 'org',
+            scope: 'instance',
             org: 'agent-apps',
         }));
         expect(result.healthy).toBe(true);
-        expect(result.giteaRunners.onlineCount).toBe(1);
-        expect(result.runnerToken.rotated).toBe(true);
-        expect(result.message).toContain('act-runner-restarted');
+        expect(result.gitlabRunners.onlineCount).toBe(1);
+        expect(result.runnerToken.rotated).toBe(false);
+        expect(result.message).toContain('gitlab-runner-restarted');
     });
 
     test('deployApp routes managed apps with ssh deployment targets through the remote kubernetes client', async () => {

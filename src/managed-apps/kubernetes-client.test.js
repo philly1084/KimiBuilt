@@ -142,10 +142,10 @@ describe('KubernetesClient', () => {
             slug: 'demo',
             namespace: 'app-demo',
             publicHost: 'demo.demoserver2.buzz',
-            image: 'gitea.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
+            image: 'registry.gitlab.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
             containerPort: 80,
-            registryPullSecretName: 'gitea-registry-credentials',
-            registryHost: 'gitea.demoserver2.buzz',
+            registryPullSecretName: 'gitlab-registry-credentials',
+            registryHost: 'registry.gitlab.demoserver2.buzz',
             registryUsername: 'builder',
             registryPassword: 'secret',
             deploymentTarget: 'ssh',
@@ -193,10 +193,10 @@ describe('KubernetesClient', () => {
             slug: 'demo',
             namespace: 'managed-app',
             publicHost: 'demo.demoserver2.buzz',
-            image: 'gitea.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
+            image: 'registry.gitlab.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
             containerPort: 80,
-            registryPullSecretName: 'gitea-registry-credentials',
-            registryHost: 'gitea.demoserver2.buzz',
+            registryPullSecretName: 'gitlab-registry-credentials',
+            registryHost: 'registry.gitlab.demoserver2.buzz',
             registryUsername: 'builder',
             registryPassword: 'secret',
             deploymentTarget: 'ssh',
@@ -231,9 +231,9 @@ describe('KubernetesClient', () => {
             slug: 'demo',
             namespace: 'app-demo',
             publicHost: 'demo.demoserver2.buzz',
-            image: 'gitea.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
-            registryPullSecretName: 'gitea-registry-credentials',
-            registryHost: 'gitea.demoserver2.buzz',
+            image: 'registry.gitlab.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
+            registryPullSecretName: 'gitlab-registry-credentials',
+            registryHost: 'registry.gitlab.demoserver2.buzz',
             registryUsername: 'stale-user',
             registryPassword: 'stale-password',
             deploymentTarget: 'ssh',
@@ -241,7 +241,7 @@ describe('KubernetesClient', () => {
 
         const applyCommand = sshTool.handler.mock.calls[0][0].command;
         expect(applyCommand).toContain('runtime_secret_name=\'agent-platform-runtime\'');
-        expect(applyCommand).toContain('secret_value gitea-registry-password');
+        expect(applyCommand).toContain('secret_value gitlab-registry-password');
         expect(applyCommand).toContain('kubectl_cmd create secret docker-registry "$registry_secret_name"');
         expect(applyCommand.indexOf('kubectl_cmd create secret docker-registry "$registry_secret_name"')).toBeLessThan(
             applyCommand.indexOf('"kind": "Deployment"'),
@@ -276,7 +276,7 @@ describe('KubernetesClient', () => {
             slug: 'demo',
             namespace: 'app-demo',
             publicHost: 'demo.demoserver2.buzz',
-            image: 'gitea.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
+            image: 'registry.gitlab.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
             deploymentTarget: 'in-cluster',
         });
 
@@ -315,7 +315,7 @@ describe('KubernetesClient', () => {
             slug: 'demo',
             namespace: 'app-demo',
             publicHost: 'demo.demoserver2.buzz',
-            image: 'gitea.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
+            image: 'registry.gitlab.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
             deploymentTarget: 'ssh',
         });
 
@@ -357,7 +357,7 @@ describe('KubernetesClient', () => {
             slug: 'demo',
             namespace: 'app-demo',
             publicHost: 'demo.demoserver2.buzz',
-            image: 'gitea.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
+            image: 'registry.gitlab.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
             deploymentTarget: 'ssh',
         });
 
@@ -400,7 +400,7 @@ describe('KubernetesClient', () => {
             slug: 'demo',
             namespace: 'app-demo',
             publicHost: 'demo.demoserver2.buzz',
-            image: 'gitea.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
+            image: 'registry.gitlab.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
             deploymentTarget: 'ssh',
         });
 
@@ -420,7 +420,7 @@ describe('KubernetesClient', () => {
                 ingressPresent: 'true',
                 podPhase: 'Pending',
                 podWaitingReason: 'ErrImagePull',
-                podWaitingMessage: 'failed to authorize: unexpected status from GET request to https://gitea.demoserver2.buzz/v2/token: 401 Unauthorized',
+                podWaitingMessage: 'failed to authorize: unexpected status from GET request to https://registry.gitlab.demoserver2.buzz/v2/token: 401 Unauthorized',
                 tlsSecret: 'false',
                 certificateReady: 'false',
                 appProbeAttempted: 'false',
@@ -446,7 +446,7 @@ describe('KubernetesClient', () => {
             slug: 'demo',
             namespace: 'app-demo',
             publicHost: 'demo.demoserver2.buzz',
-            image: 'gitea.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
+            image: 'registry.gitlab.demoserver2.buzz/agent-apps/demo:sha-abcdef123456',
             deploymentTarget: 'ssh',
         });
 
@@ -458,7 +458,7 @@ describe('KubernetesClient', () => {
         }));
     });
 
-    test('inspectManagedAppPlatform reads remote Gitea runner health from the SSH target', async () => {
+    test('inspectManagedAppPlatform reads remote GitLab runner health from the SSH target', async () => {
         const sshTool = {
             handler: jest.fn(async () => ({
                 stdout: [
@@ -473,14 +473,14 @@ describe('KubernetesClient', () => {
                     '__KIMIBUILT_PLATFORM_CERT_MANAGER__=true',
                     '__KIMIBUILT_PLATFORM_NAMESPACE__=agent-platform',
                     '__KIMIBUILT_PLATFORM_NAMESPACE_EXISTS__=true',
-                    '__KIMIBUILT_DEPLOYMENT__=gitea|present|1|1|1|1',
+                    '__KIMIBUILT_DEPLOYMENT__=gitlab|present|1|1|1|1',
                     '__KIMIBUILT_DEPLOYMENT__=buildkitd|present|1|1|1|1',
-                    '__KIMIBUILT_DEPLOYMENT__=act-runner|present|1|0|0|0',
-                    '__KIMIBUILT_SECRET__=gitea-actions|present',
+                    '__KIMIBUILT_DEPLOYMENT__=gitlab-runner|present|1|0|0|0',
+                    '__KIMIBUILT_SECRET__=gitlab-runner|present',
                     '__KIMIBUILT_RUNNER_TOKEN__=placeholder',
-                    '__KIMIBUILT_RUNNER_LABELS__=ubuntu-latest:host',
-                    '__KIMIBUILT_GITEA_INSTANCE_URL__=https://gitea.demoserver2.buzz',
-                    '__KIMIBUILT_GITEA_INGRESS_HOST__=gitea.demoserver2.buzz',
+                    '__KIMIBUILT_RUNNER_LABELS__=kimibuilt,buildkit',
+                    '__KIMIBUILT_GITLAB_INSTANCE_URL__=https://gitlab.demoserver2.buzz',
+                    '__KIMIBUILT_GITLAB_INGRESS_HOST__=gitlab.demoserver2.buzz',
                     '__KIMIBUILT_RUNNER_LOG__=registration token invalid',
                 ].join('\n'),
                 stderr: '',
@@ -503,16 +503,16 @@ describe('KubernetesClient', () => {
         });
 
         expect(sshTool.handler).toHaveBeenCalledWith(expect.objectContaining({
-            command: expect.stringContaining('deployment_status act-runner'),
+            command: expect.stringContaining('deployment_status gitlab-runner'),
             timeout: 120000,
         }), {}, expect.any(Object));
         expect(result.platformNamespace).toBe('agent-platform');
         expect(result.namespaceExists).toBe(true);
-        expect(result.deployments.gitea.ready).toBe(true);
-        expect(result.deployments['act-runner'].ready).toBe(false);
+        expect(result.deployments.gitlab.ready).toBe(true);
+        expect(result.deployments['gitlab-runner'].ready).toBe(false);
         expect(result.runnerTokenState).toBe('placeholder');
-        expect(result.runnerLabels).toBe('ubuntu-latest:host');
-        expect(result.giteaInstanceUrl).toBe('https://gitea.demoserver2.buzz');
+        expect(result.runnerLabels).toBe('kimibuilt,buildkit');
+        expect(result.gitlabInstanceUrl).toBe('https://gitlab.demoserver2.buzz');
         expect(result.runnerLogExcerpt).toContain('registration token invalid');
         expect(result.executionHost).toBe('deploy.example:22');
         expect(result.serverContext).toEqual(expect.objectContaining({
@@ -528,16 +528,16 @@ describe('KubernetesClient', () => {
         }));
     });
 
-    test('reconcileManagedAppPlatform updates the runner secret and restarts act-runner over SSH', async () => {
+    test('reconcileManagedAppPlatform updates the runner secret and restarts gitlab-runner over SSH', async () => {
         const sshTool = {
             handler: jest.fn(async () => ({
                 stdout: [
                     '__KIMIBUILT_PLATFORM_NAMESPACE__=agent-platform',
-                    '__KIMIBUILT_RECONCILE_ACTION__=gitea-actions-secret-applied',
-                    '__KIMIBUILT_RECONCILE_ACTION__=act-runner-labels-set',
-                    '__KIMIBUILT_RECONCILE_ACTION__=act-runner-instance-url-set',
-                    '__KIMIBUILT_RECONCILE_ACTION__=act-runner-scaled-1',
-                    '__KIMIBUILT_RECONCILE_ACTION__=act-runner-restarted',
+                    '__KIMIBUILT_RECONCILE_ACTION__=gitlab-runner-secret-applied',
+                    '__KIMIBUILT_RECONCILE_ACTION__=gitlab-runner-tags-set',
+                    '__KIMIBUILT_RECONCILE_ACTION__=gitlab-runner-instance-url-set',
+                    '__KIMIBUILT_RECONCILE_ACTION__=gitlab-runner-scaled-1',
+                    '__KIMIBUILT_RECONCILE_ACTION__=gitlab-runner-restarted',
                 ].join('\n'),
                 stderr: '',
                 exitCode: 0,
@@ -558,18 +558,18 @@ describe('KubernetesClient', () => {
             deploymentTarget: 'ssh',
             desiredRunnerReplicas: 1,
             runnerRegistrationToken: 'runner-token-123',
-            runnerLabels: 'ubuntu-latest:host',
-            giteaInstanceUrl: 'https://gitea.demoserver2.buzz',
+            runnerLabels: 'kimibuilt,buildkit',
+            gitlabInstanceUrl: 'https://gitlab.demoserver2.buzz',
         });
 
         expect(sshTool.handler).toHaveBeenCalledWith(expect.objectContaining({
-            command: expect.stringContaining('"runner-registration-token": "runner-token-123"'),
+            command: expect.stringContaining('"runner-token": "runner-token-123"'),
             timeout: 180000,
         }), {}, expect.any(Object));
         expect(result.actions).toEqual(expect.arrayContaining([
-            'gitea-actions-secret-applied',
-            'act-runner-scaled-1',
-            'act-runner-restarted',
+            'gitlab-runner-secret-applied',
+            'gitlab-runner-scaled-1',
+            'gitlab-runner-restarted',
         ]));
         expect(result.executionHost).toBe('deploy.example:22');
     });

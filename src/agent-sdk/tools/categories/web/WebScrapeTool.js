@@ -32,7 +32,7 @@ class WebScrapeTool extends ToolBase {
           },
           selectors: {
             type: 'object',
-            description: 'CSS selectors for structured extraction',
+            description: 'CSS selectors for structured extraction, keyed by field name. Omit for screenshot-only QA; do not send an array.',
             additionalProperties: {
               type: 'object',
               properties: {
@@ -156,6 +156,120 @@ class WebScrapeTool extends ToolBase {
         }
       }
     });
+  }
+
+  validateInputs(params) {
+    this.normalizeSelectorParams(params);
+    super.validateInputs(params);
+  }
+
+  normalizeSelectorParams(params = {}) {
+    if (!params || typeof params !== 'object' || !Object.prototype.hasOwnProperty.call(params, 'selectors')) {
+      return;
+    }
+
+    const normalizedSelectors = this.normalizeSelectors(params.selectors);
+    if (normalizedSelectors && Object.keys(normalizedSelectors).length > 0) {
+      params.selectors = normalizedSelectors;
+      return;
+    }
+
+    delete params.selectors;
+  }
+
+  normalizeSelectors(selectors) {
+    if (!selectors) {
+      return null;
+    }
+
+    const entries = Array.isArray(selectors)
+      ? selectors.map((config, index) => [this.resolveSelectorKey(config, index), config])
+      : (typeof selectors === 'object'
+        ? Object.entries(selectors)
+        : [['content', selectors]]);
+    const normalized = {};
+
+    for (const [rawKey, rawConfig] of entries) {
+      const config = this.normalizeSelectorConfig(rawConfig);
+      if (!config?.selector) {
+        continue;
+      }
+
+      const key = this.makeUniqueSelectorKey(normalized, rawKey || 'selector');
+      normalized[key] = config;
+    }
+
+    return normalized;
+  }
+
+  resolveSelectorKey(config, index) {
+    if (config && typeof config === 'object' && !Array.isArray(config)) {
+      const candidate = config.key || config.name || config.field || config.id || config.label;
+      if (candidate) {
+        return String(candidate);
+      }
+    }
+
+    return `selector${index + 1}`;
+  }
+
+  makeUniqueSelectorKey(existing, key) {
+    const base = String(key || 'selector')
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      || 'selector';
+    let candidate = base;
+    let suffix = 2;
+
+    while (Object.prototype.hasOwnProperty.call(existing, candidate)) {
+      candidate = `${base}_${suffix}`;
+      suffix += 1;
+    }
+
+    return candidate;
+  }
+
+  normalizeSelectorConfig(config) {
+    if (typeof config === 'string') {
+      const selector = config.trim();
+      return selector ? { selector, transform: 'text' } : null;
+    }
+
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      return null;
+    }
+
+    const selector = String(
+      config.selector
+      || config.css
+      || config.cssSelector
+      || config.query
+      || config.value
+      || '',
+    ).trim();
+
+    if (!selector) {
+      return null;
+    }
+
+    const transformCandidate = String(config.transform || '').trim().toLowerCase();
+    const transform = ['text', 'html', 'number', 'url'].includes(transformCandidate)
+      ? transformCandidate
+      : 'text';
+    const multiple = config.multiple === true
+      || String(config.multiple || '').trim().toLowerCase() === 'true';
+
+    return {
+      selector,
+      ...(typeof config.attribute === 'string' && config.attribute.trim()
+        ? { attribute: config.attribute.trim() }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(config, 'multiple')
+        ? { multiple }
+        : {}),
+      transform,
+    };
   }
 
   async handler(params, context, tracker) {

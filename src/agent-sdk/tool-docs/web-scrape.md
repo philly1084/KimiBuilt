@@ -27,12 +27,12 @@ Patterns:
 - Interactive page: use `browser: true` plus `actions` like `click`, `fill`, `type`, `press`, `wait_for_selector`, `wait_for_timeout`, `hover`, `scroll`, or `select_option`.
 - Visual review: add `captureScreenshot: true` in browser mode to persist a Playwright/Chromium screenshot artifact.
 - Responsive UI checks: run separate calls with `viewport: {"width":1440,"height":960}` and `viewport: {"width":390,"height":844}` to capture desktop and mobile states.
+- Screenshot-only QA: omit `selectors`; they are not required to capture a page image.
 
 Selector format:
-- `selector`
-- `attribute`
-- `multiple`
-- `transform`
+- `selectors` must be an object keyed by field name, not an array.
+- Example: `{"headline":{"selector":"h1","transform":"text"},"links":{"selector":"a[href]","attribute":"href","multiple":true,"transform":"url"}}`
+- Each field can include `selector`, `attribute`, `multiple`, and `transform`.
 
 Notes:
 - Selector support is intentionally basic.

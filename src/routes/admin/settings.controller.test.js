@@ -31,14 +31,25 @@ jest.mock('../../config', () => ({
       defaultTlsClusterIssuer: 'letsencrypt-prod',
     },
     gitea: {
-      enabled: true,
+      enabled: false,
       baseURL: 'https://gitea.demoserver2.buzz',
       token: 'gitea-token',
       webhookSecret: 'webhook-secret',
       org: 'agent-apps',
-      registryHost: 'gitea.demoserver2.buzz',
+      registryHost: '',
       registryUsername: 'builder',
       registryPassword: 'registry-password',
+    },
+    gitlab: {
+      enabled: true,
+      baseURL: 'https://gitlab.demoserver2.buzz',
+      token: 'gitlab-token',
+      webhookSecret: 'webhook-secret',
+      org: 'agent-apps',
+      registryHost: 'registry.gitlab.demoserver2.buzz',
+      registryUsername: 'builder',
+      registryPassword: 'registry-password',
+      runnerToken: 'runner-token',
     },
     managedApps: {
       enabled: true,
@@ -49,8 +60,8 @@ jest.mock('../../config', () => ({
       platformRuntimeSecretName: 'agent-platform-runtime',
       defaultBranch: 'main',
       defaultContainerPort: 80,
-      registryPullSecretName: 'gitea-registry-credentials',
-      webhookEndpointPath: '/api/integrations/gitea/build-events',
+      registryPullSecretName: 'gitlab-registry-credentials',
+      webhookEndpointPath: '/api/integrations/gitlab/build-events',
     },
   },
 }));
@@ -289,23 +300,24 @@ describe('settings.controller personality support', () => {
   });
 
   test('exposes managed app control-plane settings without leaking secrets', () => {
-    controller.settings.integrations.gitea.baseURL = 'https://gitea.alt.example';
-    controller.settings.integrations.gitea.registryHost = 'registry.alt.example';
+    controller.settings.integrations.gitlab.baseURL = 'https://gitlab.alt.example';
+    controller.settings.integrations.gitlab.registryHost = 'registry.alt.example';
     controller.settings.integrations.managedApps.deployTarget = 'SSH';
     controller.settings.integrations.managedApps.appBaseDomain = 'apps.alt.example';
     controller.settings.integrations.managedApps.namespacePrefix = 'edge-';
 
     const publicSettings = controller.getPublicSettings();
 
-    expect(publicSettings.integrations.gitea).toEqual(expect.objectContaining({
+    expect(publicSettings.integrations.gitlab).toEqual(expect.objectContaining({
       configured: true,
-      baseURL: 'https://gitea.alt.example',
+      baseURL: 'https://gitlab.alt.example',
       registryHost: 'registry.alt.example',
       hasToken: true,
       hasWebhookSecret: true,
+      hasRunnerToken: true,
     }));
-    expect(publicSettings.integrations.gitea.token).toBeUndefined();
-    expect(publicSettings.integrations.gitea.webhookSecret).toBeUndefined();
+    expect(publicSettings.integrations.gitlab.token).toBeUndefined();
+    expect(publicSettings.integrations.gitlab.webhookSecret).toBeUndefined();
     expect(publicSettings.integrations.managedApps).toEqual(expect.objectContaining({
       deployTarget: 'ssh',
       appBaseDomain: 'apps.alt.example',

@@ -227,9 +227,13 @@ async function getRuntimeSnapshot() {
 
 async function getRuntimeSupport(toolId) {
     const snapshot = await getRuntimeSnapshot();
-    const giteaConfig = typeof settingsController.getEffectiveGiteaConfig === 'function'
-        ? settingsController.getEffectiveGiteaConfig()
-        : {};
+    const gitProviderConfig = typeof settingsController.getEffectiveGitProviderConfig === 'function'
+        ? settingsController.getEffectiveGitProviderConfig()
+        : (typeof settingsController.getEffectiveGitLabConfig === 'function'
+            ? settingsController.getEffectiveGitLabConfig()
+            : (typeof settingsController.getEffectiveGiteaConfig === 'function'
+                ? { ...settingsController.getEffectiveGiteaConfig(), provider: 'gitea' }
+                : {}));
     const managedAppsConfig = typeof settingsController.getEffectiveManagedAppsConfig === 'function'
         ? settingsController.getEffectiveManagedAppsConfig()
         : {};
@@ -330,9 +334,9 @@ async function getRuntimeSupport(toolId) {
 
     if (toolId === 'managed-app') {
         const ready = Boolean(
-            giteaConfig.enabled !== false
-            && giteaConfig.baseURL
-            && giteaConfig.token
+            gitProviderConfig.enabled !== false
+            && gitProviderConfig.baseURL
+            && gitProviderConfig.token
             && managedAppsConfig.enabled !== false,
         );
 
@@ -340,17 +344,18 @@ async function getRuntimeSupport(toolId) {
             status: ready ? 'stable' : 'requires_setup',
             notes: ready
                 ? [
-                    `External Gitea configured at ${giteaConfig.baseURL}.`,
+                    `External Git provider (${gitProviderConfig.provider || 'gitlab'}) configured at ${gitProviderConfig.baseURL}.`,
                     `Managed app base domain is ${managedAppsConfig.appBaseDomain || 'demoserver2.buzz'}.`,
                 ]
                 : [
-                    'Managed app control plane needs integrations.gitea baseURL and token.',
+                    'Managed app control plane needs integrations.gitlab baseURL and token.',
                     'Managed app control plane also needs integrations.managedApps defaults.',
                 ],
             runtime: {
                 ready,
-                baseURL: giteaConfig.baseURL || '',
-                org: giteaConfig.org || '',
+                provider: gitProviderConfig.provider || 'gitlab',
+                baseURL: gitProviderConfig.baseURL || '',
+                org: gitProviderConfig.org || '',
                 appBaseDomain: managedAppsConfig.appBaseDomain || '',
             },
         };

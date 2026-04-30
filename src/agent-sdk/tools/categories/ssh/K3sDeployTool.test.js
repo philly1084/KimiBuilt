@@ -11,12 +11,13 @@ jest.mock('../../../../routes/admin/settings.controller', () => ({
     ingressClassName: 'traefik',
     tlsClusterIssuer: 'letsencrypt-prod',
   })),
-  getEffectiveGiteaConfig: jest.fn(() => ({
+  getEffectiveGitProviderConfig: jest.fn(() => ({
+    provider: 'gitlab',
     enabled: true,
-    baseURL: 'https://gitea.demoserver2.buzz',
-    token: 'gitea_test_token',
+    baseURL: 'https://gitlab.demoserver2.buzz',
+    token: 'gitlab_test_token',
     org: 'agent-apps',
-    registryHost: 'gitea.demoserver2.buzz',
+    registryHost: 'registry.gitlab.demoserver2.buzz',
     registryUsername: 'git',
   })),
 }));
@@ -124,20 +125,20 @@ describe('K3sDeployTool', () => {
     expect(tool.sshTool.handler.mock.calls[0][0].command).toContain("kubectl rollout status deployment/backend -n 'kimibuilt' --timeout=180s");
   });
 
-  test('rejects repository urls outside GitHub and configured Gitea', async () => {
+  test('rejects repository urls outside GitHub and configured Git provider', async () => {
     const tool = new K3sDeployTool();
 
     const result = await tool.execute({
       action: 'sync-repo',
-      repositoryUrl: 'https://gitlab.com/example/app.git',
+      repositoryUrl: 'https://bitbucket.org/example/app.git',
       targetDirectory: '/opt/app',
     });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Only GitHub clone URLs or the configured Gitea host are allowed');
+    expect(result.error).toContain('Only GitHub clone URLs or the configured Git provider host are allowed');
   });
 
-  test('allows configured Gitea repositories and supplies Gitea credentials', async () => {
+  test('allows configured GitLab repositories and supplies GitLab credentials', async () => {
     const tool = new K3sDeployTool();
     tool.sshTool.handler = jest.fn().mockResolvedValue({
       stdout: 'synced',
@@ -149,30 +150,30 @@ describe('K3sDeployTool', () => {
 
     const result = await tool.execute({
       action: 'sync-repo',
-      repositoryUrl: 'https://gitea.demoserver2.buzz/agent-apps/site.git',
+      repositoryUrl: 'https://gitlab.demoserver2.buzz/agent-apps/site.git',
       ref: 'main',
       targetDirectory: '/srv/apps/site',
     });
 
     expect(result.success).toBe(true);
     const request = tool.sshTool.handler.mock.calls[0][0];
-    expect(request.command).toContain("git clone --branch 'main' --single-branch 'https://gitea.demoserver2.buzz/agent-apps/site.git' '/srv/apps/site'");
+    expect(request.command).toContain("git clone --branch 'main' --single-branch 'https://gitlab.demoserver2.buzz/agent-apps/site.git' '/srv/apps/site'");
     expect(request.environment).toEqual(expect.objectContaining({
-      GITEA_TOKEN: 'gitea_test_token',
+      GITLAB_TOKEN: 'gitlab_test_token',
       KIMIBUILT_GIT_USERNAME: 'git',
-      KIMIBUILT_GIT_PASSWORD: 'gitea_test_token',
+      KIMIBUILT_GIT_PASSWORD: 'gitlab_test_token',
     }));
   });
 
-  test('normalizes configured Gitea SSH clone URLs to HTTPS when a token is available', () => {
+  test('normalizes configured GitLab SSH clone URLs to HTTPS when a token is available', () => {
     const tool = new K3sDeployTool();
     const command = tool.buildSyncRepoCommand({
-      repositoryUrl: 'git@gitea.demoserver2.buzz:agent-apps/site.git',
+      repositoryUrl: 'git@gitlab.demoserver2.buzz:agent-apps/site.git',
       ref: 'main',
       targetDirectory: '/srv/apps/site',
     });
 
-    expect(command).toContain("git clone --branch 'main' --single-branch 'https://gitea.demoserver2.buzz/agent-apps/site.git' '/srv/apps/site'");
+    expect(command).toContain("git clone --branch 'main' --single-branch 'https://gitlab.demoserver2.buzz/agent-apps/site.git' '/srv/apps/site'");
   });
 
   test('converts GitHub SSH clone URLs to HTTPS when a token is available', () => {

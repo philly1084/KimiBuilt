@@ -259,7 +259,8 @@ function normalizeManagedAppPublicPath(filePath = '') {
 function isDeployableTextFile(filePath = '') {
     const extension = path.extname(String(filePath || '').toLowerCase());
     return DEPLOYABLE_TEXT_EXTENSIONS.has(extension)
-        || String(filePath || '').startsWith('.gitea/workflows/');
+        || String(filePath || '').startsWith('.gitea/workflows/')
+        || String(filePath || '') === '.gitlab-ci.yml';
 }
 
 function extractArtifactSiteFilesForManagedApp(artifact = {}) {
