@@ -673,6 +673,58 @@ Approved page plan:
         expect(normalizedActions[0].blocks.length).toBeGreaterThan(1);
     });
 
+    test('preserves raw html documents as html code blocks instead of prose blocks', () => {
+        const agent = loadAgent();
+        const html = [
+            'Signal City HTML Document',
+            '<!doctype html>',
+            '<html lang="en">',
+            '<head>',
+            '<meta charset="utf-8" />',
+            '<title>Signal City | Editorial Infographic Website</title>',
+            '<style>',
+            ':root {',
+            '--ink: #111318;',
+            '--muted: #5f6675;',
+            '}',
+            '</style>',
+            '</head>',
+            '<body><main><h1>Signal City</h1></main></body>',
+            '</html>',
+        ].join('\n');
+
+        const normalizedActions = agent._normalizeStructuredPageActions([
+            {
+                op: 'rebuild_page',
+                blocks: [{
+                    type: 'text',
+                    content: html,
+                }],
+            },
+        ], 'Put this HTML document on the page without losing code.', {
+            blockCount: 0,
+            outline: [],
+        });
+
+        expect(normalizedActions).toHaveLength(1);
+        expect(normalizedActions[0].blocks).toEqual([
+            expect.objectContaining({ type: 'heading_1', content: 'Signal City' }),
+            expect.objectContaining({
+                type: 'code',
+                content: expect.objectContaining({
+                    language: 'html',
+                    text: expect.stringContaining('<!doctype html>'),
+                }),
+            }),
+        ]);
+        expect(normalizedActions[0].blocks[1].content.text).toContain('<style>');
+        expect(normalizedActions[0].blocks[1].content.text).toContain('--muted: #5f6675;');
+        expect(normalizedActions[0].blocks).not.toEqual(expect.arrayContaining([
+            expect.objectContaining({ type: 'callout' }),
+            expect.objectContaining({ type: 'ai_image' }),
+        ]));
+    });
+
     test('rehydrates collapsed one-line markdown into structured notes blocks', () => {
         const agent = loadAgent();
         const normalizedActions = agent._normalizeStructuredPageActions([

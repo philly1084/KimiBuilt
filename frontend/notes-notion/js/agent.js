@@ -2762,6 +2762,10 @@ const Agent = (function() {
                 return action;
             }
 
+            if (isRawHtmlSourceOnlyBlocks(action.blocks)) {
+                return action;
+            }
+
             const generatedContext = buildPageContextFromGeneratedBlocks(action.blocks, context);
             const template = selectNotesPageTemplates(question, generatedContext, { limit: 1 })[0] || null;
             if (!shouldApplyStructuredDesignUpgrade(action.blocks, { question, template })) {
@@ -4228,6 +4232,146 @@ GUIDELINES:
             .trim();
     }
 
+    function findRawHtmlDocumentStartIndex(source = '') {
+        const value = String(source || '');
+        const starts = [
+            /<!doctype\s+html\b/i,
+            /<html\b/i,
+            /<head\b/i,
+            /<body\b/i,
+        ]
+            .map((pattern) => {
+                const match = pattern.exec(value);
+                return Number.isInteger(match?.index) ? match.index : -1;
+            })
+            .filter((index) => index >= 0);
+
+        return starts.length > 0 ? Math.min(...starts) : -1;
+    }
+
+    function looksLikeRawHtmlDocumentSource(source = '') {
+        const value = String(source || '').trim();
+        if (!value || value.length < 80 || /^```/i.test(value)) {
+            return false;
+        }
+
+        if (!/^(?:<!doctype\s+html\b|<html\b|<head\b|<body\b)/i.test(value)) {
+            return false;
+        }
+
+        return /<!doctype\s+html\b/i.test(value)
+            || /<html\b/i.test(value)
+            || (/<head\b/i.test(value) && /<body\b/i.test(value))
+            || /<\/(?:html|body)>/i.test(value);
+    }
+
+    function splitRawHtmlDocumentSource(source = '') {
+        const value = stripUnsafeNullCharacters(source).replace(/\r\n?/g, '\n').trim();
+        if (!value || /^```/i.test(value)) {
+            return null;
+        }
+
+        const startIndex = findRawHtmlDocumentStartIndex(value);
+        if (startIndex < 0) {
+            return null;
+        }
+
+        const prefix = value.slice(0, startIndex).trim();
+        const htmlTail = value.slice(startIndex).trim();
+        if (!looksLikeRawHtmlDocumentSource(htmlTail)) {
+            return null;
+        }
+
+        const closeMatch = htmlTail.match(/<\/html\s*>/i);
+        const htmlEndIndex = closeMatch && Number.isInteger(closeMatch.index)
+            ? closeMatch.index + closeMatch[0].length
+            : htmlTail.length;
+
+        return {
+            prefix,
+            html: htmlTail.slice(0, htmlEndIndex).trim(),
+            suffix: htmlTail.slice(htmlEndIndex).trim(),
+        };
+    }
+
+    function stripHtmlDocumentLeadIn(prefix = '') {
+        return String(prefix || '')
+            .replace(/```html\s*$/i, '')
+            .replace(/\b(?:here(?:'s| is)?|below is|this is)\s+the\s+(?:full\s+)?html\s+(?:source|code|document)\s*(?:for|of)?\s*$/i, '')
+            .replace(/\b(?:full\s+)?html\s+(?:source|code|document|preview)\s*:?\s*$/i, '')
+            .replace(/\bhtml\s+document\s*$/i, '')
+            .replace(/\b[a-z0-9._-]+\.html\s*$/i, '')
+            .replace(/[:\-]+$/g, '')
+            .trim();
+    }
+
+    function extractTitleFromRawHtmlDocument(html = '') {
+        const match = String(html || '').match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+        return String(match?.[1] || '')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function buildBlocksFromRawHtmlDocument(sourceText = '') {
+        const split = splitRawHtmlDocumentSource(sourceText);
+        if (!split?.html) {
+            return [];
+        }
+
+        const prefixTitle = stripHtmlDocumentLeadIn(split.prefix);
+        const htmlTitle = extractTitleFromRawHtmlDocument(split.html);
+        const blocks = [];
+        const title = prefixTitle || htmlTitle;
+        if (title) {
+            blocks.push({
+                type: 'heading_1',
+                content: title,
+            });
+        }
+
+        blocks.push({
+            type: 'code',
+            content: {
+                language: 'html',
+                text: split.html,
+            },
+        });
+
+        if (split.suffix && !/^(?:done|here you go|let me know)[.!]?\s*$/i.test(split.suffix)) {
+            blocks.push({
+                type: 'text',
+                content: stripMarkdownInlineFormatting(split.suffix),
+            });
+        }
+
+        return blocks;
+    }
+
+    function isRawHtmlSourceCodeBlock(block = null) {
+        if (!block || canonicalizeBlockType(block.type || '') !== 'code') {
+            return false;
+        }
+
+        const content = block.content && typeof block.content === 'object'
+            ? block.content
+            : { text: block.content, language: '' };
+        return String(content.language || '').trim().toLowerCase() === 'html'
+            && looksLikeRawHtmlDocumentSource(content.text || '');
+    }
+
+    function isRawHtmlSourceOnlyBlocks(blocks = []) {
+        const list = Array.isArray(blocks) ? blocks : [];
+        if (!list.some((block) => isRawHtmlSourceCodeBlock(block))) {
+            return false;
+        }
+
+        return list.every((block) => {
+            const type = canonicalizeBlockType(block?.type || '');
+            return type === 'code' || type === 'heading_1' || type === 'text';
+        });
+    }
+
     function normalizeMarkdownTextForBlockType(type = 'text', value = '') {
         const normalizedType = canonicalizeBlockType(type);
         const source = String(value || '').trim();
@@ -4367,7 +4511,15 @@ GUIDELINES:
             : (hasExplicitText ? normalized.text : '');
 
         if (typeof contentValue === 'string') {
-            if ((type === 'text' || type === 'code' || type === 'mermaid') && looksLikeMermaidSource(contentValue)) {
+            const rawHtmlSplit = splitRawHtmlDocumentSource(contentValue);
+            if ((type === 'text' || type === 'code') && rawHtmlSplit?.html) {
+                type = 'code';
+                normalized.content = {
+                    language: 'html',
+                    text: rawHtmlSplit.html,
+                };
+                delete normalized.text;
+            } else if ((type === 'text' || type === 'code' || type === 'mermaid') && looksLikeMermaidSource(contentValue)) {
                 const mermaidSource = normalizeMermaidSourceText(contentValue);
                 type = 'mermaid';
                 normalized.content = {
@@ -4775,7 +4927,31 @@ GUIDELINES:
     }
 
     function extractPreferredBlocksFromSourceText(sourceText = '') {
+        const directRawHtmlBlocks = buildBlocksFromRawHtmlDocument(sourceText);
+        if (directRawHtmlBlocks.length > 0) {
+            const titleBlock = directRawHtmlBlocks.find((block) => block?.type === 'heading_1');
+            return {
+                importedPage: {
+                    title: titleBlock?.content || extractTitleFromRawHtmlDocument(directRawHtmlBlocks.find((block) => block?.type === 'code')?.content?.text || ''),
+                    blocks: directRawHtmlBlocks,
+                },
+                blocks: directRawHtmlBlocks,
+            };
+        }
+
         const normalizedSourceText = normalizeCollapsedStructuredMarkdown(sourceText);
+        const rawHtmlBlocks = buildBlocksFromRawHtmlDocument(normalizedSourceText);
+        if (rawHtmlBlocks.length > 0) {
+            const titleBlock = rawHtmlBlocks.find((block) => block?.type === 'heading_1');
+            return {
+                importedPage: {
+                    title: titleBlock?.content || extractTitleFromRawHtmlDocument(rawHtmlBlocks.find((block) => block?.type === 'code')?.content?.text || ''),
+                    blocks: rawHtmlBlocks,
+                },
+                blocks: rawHtmlBlocks,
+            };
+        }
+
         const importedPage = window.ImportExport?.importFromMarkdown?.(normalizedSourceText);
         const importedBlocks = Array.isArray(importedPage?.blocks)
             ? importedPage.blocks.filter((block) => extractBlockTextValue(block).trim() || ['divider', 'image', 'ai_image'].includes(block.type))

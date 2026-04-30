@@ -39,6 +39,31 @@ describe('model-output-parser', () => {
         expect(normalized).toContain('</html>\n```');
     });
 
+    test('fences raw html documents with prose titles before markdown rendering', () => {
+        const normalized = parser.normalizeModelOutputMarkdown([
+            'Signal City HTML Document',
+            '<!doctype html>',
+            '<html lang="en">',
+            '<head>',
+            '<meta charset="utf-8" />',
+            '<style>',
+            ':root {',
+            '--ink: #111318;',
+            '--muted: #5f6675;',
+            '}',
+            '</style>',
+            '</head>',
+            '<body><main>Ready</main></body>',
+            '</html>',
+        ].join('\n'));
+
+        expect(normalized).toContain('Signal City HTML Document');
+        expect(normalized).toContain('```html\n<!doctype html>');
+        expect(normalized).toContain('<style>');
+        expect(normalized).toContain('--muted: #5f6675;');
+        expect(normalized).toContain('</html>\n```');
+    });
+
     test('normalizes lightweight presentation markup outside code fences', () => {
         const normalized = parser.normalizeModelOutputMarkdown('This is ==important== and ::warning[check this].\n\n```md\n==literal== ::warning[literal]\n```');
 

@@ -354,8 +354,73 @@
             .replace(/([^\n])(```[a-z0-9_-]*\n)/gi, '$1\n\n$2');
     }
 
+    function findRawHtmlDocumentStartIndex(source = '') {
+        const value = String(source || '');
+        const starts = [
+            /<!doctype\s+html\b/i,
+            /<html\b/i,
+            /<head\b/i,
+            /<body\b/i,
+        ]
+            .map((pattern) => {
+                const match = pattern.exec(value);
+                return Number.isInteger(match?.index) ? match.index : -1;
+            })
+            .filter((index) => index >= 0);
+
+        return starts.length > 0 ? Math.min(...starts) : -1;
+    }
+
+    function looksLikeRawHtmlDocument(source = '') {
+        const value = String(source || '').trim();
+        if (!value || /^```/i.test(value) || value.length < 80) {
+            return false;
+        }
+
+        const hasDocumentStart = /^(?:<!doctype\s+html\b|<html\b|<head\b|<body\b)/i.test(value);
+        if (!hasDocumentStart) {
+            return false;
+        }
+
+        return /<!doctype\s+html\b/i.test(value)
+            || /<html\b/i.test(value)
+            || (/<head\b/i.test(value) && /<body\b/i.test(value))
+            || /<\/(?:html|body)>/i.test(value);
+    }
+
+    function fenceRawHtmlDocuments(source = '') {
+        const value = String(source || '').replace(/\r\n?/g, '\n').trim();
+        if (!value || /```/.test(value)) {
+            return value;
+        }
+
+        const startIndex = findRawHtmlDocumentStartIndex(value);
+        if (startIndex < 0) {
+            return value;
+        }
+
+        const prefix = value.slice(0, startIndex).trim();
+        const htmlTail = value.slice(startIndex).trim();
+        if (!looksLikeRawHtmlDocument(htmlTail)) {
+            return value;
+        }
+
+        const closeMatch = htmlTail.match(/<\/html\s*>/i);
+        const htmlEndIndex = closeMatch && Number.isInteger(closeMatch.index)
+            ? closeMatch.index + closeMatch[0].length
+            : htmlTail.length;
+        const htmlSource = htmlTail.slice(0, htmlEndIndex).trim();
+        const suffix = htmlTail.slice(htmlEndIndex).trim();
+
+        return [
+            prefix,
+            `\`\`\`html\n${htmlSource}\n\`\`\``,
+            suffix,
+        ].filter(Boolean).join('\n\n');
+    }
+
     function normalizeStructuredMarkdown(source = '') {
-        return restoreFlattenedCodeFences(source)
+        return restoreFlattenedCodeFences(fenceRawHtmlDocuments(source))
             .split(/(```[\s\S]*?```)/g)
             .map((segment) => {
                 if (/^```[\s\S]*```$/.test(segment)) {
@@ -566,6 +631,7 @@
         normalizeHumanReadableMarkdownSegment,
         restoreFlattenedMarkdownBlocks,
         restoreFlattenedMarkdownTables,
+        fenceRawHtmlDocuments,
         normalizeMultilineTableCells,
         detectToolPayload,
     };
