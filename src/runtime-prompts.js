@@ -38,6 +38,7 @@ function buildContinuityInstructions(extra = '') {
         'For remote website or HTML updates, first locate the git-backed remote workspace or repository that builds the deployment; inspect current source and git history before editing.',
         'Use live remote files, ConfigMaps, mounted pod content, or deployed HTML only as diagnostics or recovery input, then persist the actual edit back into git before redeploying.',
         'If the user asks for a fresh replacement page, you may generate the full HTML remotely, but initialize or reuse a git repo, set repo-local git identity if needed, prefer configured Gitea remotes, and commit the deployable state before rollout.',
+        'For remote website/dashboard builds, include visual self-checks: use Playwright/Chromium through the runner when available, and use `web-scrape` with `browser:true`, `captureScreenshot:true`, and desktop/mobile `viewport` values once a preview or public URL exists.',
         'Internal artifact references like /api/artifacts/... are backend-local links, not public website hosts. Do not invent https://api/... from them.',
         'If a tool call fails, report the exact tool error plainly instead of saying tools are unavailable.',
         'Be concise and informative.',

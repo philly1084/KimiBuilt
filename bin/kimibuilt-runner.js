@@ -40,6 +40,7 @@ const cliToolNames = String(process.env.KIMIBUILT_RUNNER_CLI_TOOLS || [
   'node',
   'npm',
   'npx',
+  'playwright-core',
   'git',
   'kubectl',
   'k3s',
@@ -66,6 +67,10 @@ const cliToolNames = String(process.env.KIMIBUILT_RUNNER_CLI_TOOLS || [
   'dig',
   'nslookup',
   'openssl',
+  'chromium',
+  'chromium-browser',
+  'google-chrome',
+  'google-chrome-stable',
 ].join(','))
   .split(',')
   .map((entry) => normalizeText(entry))
@@ -140,6 +145,10 @@ function findExecutable(binaryName = '') {
     .split(path.delimiter)
     .map((entry) => normalizeText(entry))
     .filter(Boolean);
+  const localBin = path.resolve(__dirname, '..', 'node_modules', '.bin');
+  if (!pathEntries.some((entry) => path.resolve(entry) === localBin)) {
+    pathEntries.push(localBin);
+  }
   const extensions = process.platform === 'win32'
     ? String(process.env.PATHEXT || '.EXE;.CMD;.BAT')
       .split(';')
@@ -163,6 +172,7 @@ function findExecutable(binaryName = '') {
 
 function buildCliToolInventory() {
   const seen = new Set();
+  const nodeModuleToolNames = new Set(['playwright', 'playwright-core']);
   return cliToolNames
     .filter((name) => {
       const key = name.toLowerCase();
@@ -174,12 +184,81 @@ function buildCliToolInventory() {
     })
     .map((name) => {
       const toolPath = findExecutable(name);
+      const modulePath = nodeModuleToolNames.has(name.toLowerCase()) && hasNodeModule(name)
+        ? `node:${name}`
+        : '';
       return {
         name,
-        available: Boolean(toolPath),
-        path: toolPath,
+        available: Boolean(toolPath || modulePath),
+        path: toolPath || modulePath,
       };
     });
+}
+
+function resolvePackageVersion(moduleName = '') {
+  try {
+    return require(`${moduleName}/package.json`).version || '';
+  } catch (_error) {
+    return '';
+  }
+}
+
+function hasNodeModule(moduleName = '') {
+  try {
+    require.resolve(moduleName);
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function resolveBrowserExecutablePath() {
+  const candidates = [
+    process.env.PLAYWRIGHT_EXECUTABLE_PATH,
+    process.env.ARTIFACT_BROWSER_PATH,
+    process.env.PUPPETEER_EXECUTABLE_PATH,
+    process.env.BROWSER_EXECUTABLE_PATH,
+    process.env.CHROME_BIN,
+    process.platform === 'win32' ? '' : '/usr/bin/chromium',
+    process.platform === 'win32' ? '' : '/usr/bin/chromium-browser',
+    process.platform === 'win32' ? '' : '/usr/bin/google-chrome',
+    process.platform === 'win32' ? '' : '/usr/bin/google-chrome-stable',
+    process.platform === 'win32' ? '' : '/snap/bin/chromium',
+    'chromium',
+    'chromium-browser',
+    'google-chrome',
+    'google-chrome-stable',
+  ].map((entry) => normalizeText(entry)).filter(Boolean);
+
+  for (const candidate of candidates) {
+    const executable = findExecutable(candidate);
+    if (executable) {
+      return executable;
+    }
+  }
+
+  return '';
+}
+
+function buildBrowserAutomationMetadata() {
+  const playwrightPackage = hasNodeModule('playwright')
+    ? 'playwright'
+    : (hasNodeModule('playwright-core') ? 'playwright-core' : '');
+  const browserExecutablePath = resolveBrowserExecutablePath();
+  const uiCheckScript = path.resolve(__dirname, 'kimibuilt-ui-check.js');
+  const uiCheckAvailable = fs.existsSync(uiCheckScript);
+
+  return {
+    playwrightPackage,
+    playwrightVersion: playwrightPackage ? resolvePackageVersion(playwrightPackage) : '',
+    browserExecutablePath,
+    screenshotReady: Boolean(playwrightPackage && browserExecutablePath && uiCheckAvailable),
+    uiCheckCommand: uiCheckAvailable ? `node ${uiCheckScript}` : '',
+    defaultViewports: [
+      { name: 'desktop', width: 1440, height: 960 },
+      { name: 'mobile', width: 390, height: 844 },
+    ],
+  };
 }
 
 function resolveJobCwd(requestedCwd = '') {
@@ -278,6 +357,7 @@ function buildRunnerMetadata() {
     dockerConfigConfigured: Boolean(normalizeText(process.env.DOCKER_CONFIG || '')),
     kubernetesConfigured: Boolean(normalizeText(process.env.KUBECONFIG || process.env.KUBERNETES_SERVICE_HOST || '')),
     imagePrefix: normalizeText(process.env.DIRECT_CLI_IMAGE_PREFIX || ''),
+    browserAutomation: buildBrowserAutomationMetadata(),
     nodeVersion: process.version,
   };
 }

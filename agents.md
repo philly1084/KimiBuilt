@@ -207,6 +207,7 @@ hostname && whoami && uname -m && (test -f /etc/os-release && sed -n '1,6p' /etc
   - `kubectl logs ... --previous`
   - `kubectl rollout status ...`
   - `systemctl status k3s` / `journalctl -u k3s --no-pager -n 200`
+- For remote website/dashboard builds, run UI/UX self-checks with Playwright/Chromium when a preview or public URL exists. Prefer `node /app/bin/kimibuilt-ui-check.js <url> --out ui-checks` on the runner and use backend `web-scrape` with `browser: true`, `captureScreenshot: true`, and desktop/mobile `viewport` values to persist screenshot artifacts.
 - Keep remote command batches small and purposeful: baseline -> inspect -> fix -> verify.
 - Avoid interactive commands and editors unless the user explicitly asks for that style of access.
 - See `src/agent-sdk/tool-docs/remote-command.md` for the reusable command catalog.

@@ -188,6 +188,9 @@ describe('orchestration rewrite policy', () => {
       ROLE_IDS.QA,
       ROLE_IDS.INTEGRATOR,
     ]));
+    const qaRole = pipeline.roles.find((role) => role.id === ROLE_IDS.QA);
+    expect(qaRole.tools).toContain('web-scrape');
+    expect(qaRole.outputContract.required).toContain('screenshots');
   });
 
   test('allows previewable code-sandbox project mode but blocks executable sandbox mode', () => {
@@ -232,6 +235,7 @@ describe('orchestration rewrite policy', () => {
       'code-sandbox',
       'web-search',
       'web-fetch',
+      'web-scrape',
     ]);
     const objective = 'Build a polished landing page website for a local AI consulting firm.';
     const policy = orchestrator.buildToolPolicy({
@@ -249,6 +253,7 @@ describe('orchestration rewrite policy', () => {
       'document-workflow',
       'design-resource-search',
       'code-sandbox',
+      'web-scrape',
     ]));
 
     const directAction = orchestrator.buildDirectAction({

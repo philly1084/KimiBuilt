@@ -18,13 +18,15 @@ Key params:
 - `waitForSelector`
 - `actions`
 - `captureScreenshot`
+- `viewport`
 
 Patterns:
 - Static page: use selectors only.
 - Dynamic page: set `browser: true` or `javascript: true`.
 - Cert/TLS problems: browser mode is the preferred fallback.
 - Interactive page: use `browser: true` plus `actions` like `click`, `fill`, `type`, `press`, `wait_for_selector`, `wait_for_timeout`, `hover`, `scroll`, or `select_option`.
-- Visual review: add `captureScreenshot: true` in browser mode to persist a screenshot artifact.
+- Visual review: add `captureScreenshot: true` in browser mode to persist a Playwright/Chromium screenshot artifact.
+- Responsive UI checks: run separate calls with `viewport: {"width":1440,"height":960}` and `viewport: {"width":390,"height":844}` to capture desktop and mobile states.
 
 Selector format:
 - `selector`

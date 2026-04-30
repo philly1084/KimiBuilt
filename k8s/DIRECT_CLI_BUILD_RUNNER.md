@@ -16,6 +16,7 @@ The runner is configured as the default remote CLI workbench:
 - `/workspace` is backed by a PVC so generated projects survive pod restarts
 - commands run through Bash when it is available
 - runner metadata reports the default workspace, shell, BuildKit, Kubernetes, and image prefix back to the backend tool catalog
+- runner metadata reports Playwright/Chromium readiness for website UI screenshot checks
 
 ## Backend Settings
 
@@ -54,6 +55,7 @@ From KimiBuilt, use `/remote status`, then:
 ```bash
 /remote run pwd && command -v bash && command -v buildctl && command -v kubectl && buildctl --addr "$BUILDKIT_HOST" debug workers
 /remote run export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; kubectl get nodes -o wide
+/remote run command -v chromium && command -v playwright-core && node /app/bin/kimibuilt-ui-check.js https://example.com --out /tmp/kimibuilt-ui-smoke
 ```
 
 ## TLS
@@ -115,6 +117,17 @@ kubectl rollout status deployment/app -n app --timeout=180s
 ```
 
 For a private registry, pre-create the pull secret in each application namespace. The runner policy intentionally does not grant Secret mutation.
+
+## Website UI Checks
+
+The runner image includes Chromium plus `playwright-core`. After a site preview or public route is reachable, agents should run:
+
+```bash
+node /app/bin/kimibuilt-ui-check.js https://app.demoserver2.buzz --out ui-checks
+cat ui-checks/ui-check-report.json
+```
+
+The helper captures desktop and mobile screenshots and reports browser errors, failed requests, broken images, empty body text, and horizontal overflow. Backend agents can also use `web-scrape` with `browser: true`, `captureScreenshot: true`, and desktop/mobile `viewport` values to persist screenshot artifacts into the active session.
 
 ## Policy
 

@@ -1415,6 +1415,7 @@ function buildScoredCandidateToolMap({
     if (rolePipeline?.requiresSandbox || hasRole(rolePipeline, ROLE_IDS.QA)) {
         adjustCandidateToolScore(scoreMap, 'code-sandbox', 0.95, 'The active role pipeline requires a previewable sandbox project for website or dashboard output.');
         adjustCandidateToolScore(scoreMap, DOCUMENT_WORKFLOW_TOOL_ID, 1.05, 'The active role pipeline should build the deliverable through the document workflow with sandbox output.');
+        adjustCandidateToolScore(scoreMap, 'web-scrape', 0.45, 'The QA role can use Playwright browser screenshots for desktop and mobile UI self-checks.');
     }
     if (workflowNeedsRepoLane && remoteToolId) {
         adjustCandidateToolScore(scoreMap, remoteToolId, 1.05, 'Repository work in remote-build mode should use the remote CLI lane.');
@@ -3903,12 +3904,16 @@ function summarizeRemoteRunnerCliTools(runner = null) {
         .slice(0, 12);
     const workspace = runner.metadata?.defaultCwd || runner.metadata?.workspace || '';
     const shell = runner.metadata?.shell || '';
+    const browserAutomation = runner.metadata?.browserAutomation || {};
     const parts = [
         `Runner ${runner.runnerId || 'unknown'} is online.`,
         workspace ? `Workspace: ${workspace}.` : '',
         shell ? `Shell: ${shell}.` : '',
         available.length > 0 ? `Available CLI tools: ${available.join(', ')}.` : '',
         missing.length > 0 ? `Missing or unavailable common tools: ${missing.join(', ')}.` : '',
+        browserAutomation.screenshotReady
+            ? `Browser visual QA: Playwright ${browserAutomation.playwrightVersion || ''} with ${browserAutomation.browserExecutablePath}; UI screenshot command: ${browserAutomation.uiCheckCommand}.`
+            : '',
     ].filter(Boolean);
 
     return parts.join(' ');
@@ -9370,6 +9375,9 @@ class ConversationOrchestrator extends EventEmitter {
                 && allowedToolIds.includes('code-sandbox')) {
                 candidates.add('code-sandbox');
             }
+            if (effectiveRolePipelineSeed?.requiresSandbox && allowedToolIds.includes('web-scrape')) {
+                candidates.add('web-scrape');
+            }
             if (hasArchitectureIntent && allowedToolIds.includes('architecture-design')) {
                 candidates.add('architecture-design');
             }
@@ -9530,6 +9538,9 @@ class ConversationOrchestrator extends EventEmitter {
             if ((effectiveRolePipelineSeed?.requiresSandbox || hasExplicitLocalSandboxIntent(prompt))
                 && allowedToolIds.includes('code-sandbox')) {
                 candidates.add('code-sandbox');
+            }
+            if (effectiveRolePipelineSeed?.requiresSandbox && allowedToolIds.includes('web-scrape')) {
+                candidates.add('web-scrape');
             }
             if (/\b(git|github)\b[\s\S]{0,80}\b(status|diff|branch|stage|add|commit|push|save and push|save-and-push)\b/.test(prompt)
                 && allowedToolIds.includes('git-safe')) {
@@ -11095,6 +11106,9 @@ class ConversationOrchestrator extends EventEmitter {
             if (toolPolicy.rolePipeline.requiresSandbox && allowedToolIds.includes('code-sandbox')) {
                 parts.push('For website/dashboard/front-end outputs, produce a previewable sandbox project. Prefer `document-workflow generate-suite` with `buildMode:"sandbox"`/`useSandbox:true`, or use `code-sandbox` only in `mode:"project"` with files.');
             }
+            if (toolPolicy.rolePipeline.requiresSandbox && allowedToolIds.includes('web-scrape')) {
+                parts.push('For website/dashboard/front-end QA, use Playwright-backed `web-scrape` with `browser:true`, `captureScreenshot:true`, and desktop plus mobile `viewport` values once a preview or public URL exists.');
+            }
             parts.push('For slides, slide decks, presentations, and PowerPoint requests, default the final deliverable to PPTX unless the user explicitly asks for interactive or HTML output; an HTML sandbox preview can be a companion design stage, but not the final replacement.');
             parts.push('For PDF, PPTX, HTML, XLSX, or multi-format document packages, let the builder role produce concrete `document-workflow` artifacts. Use `generate-suite` when multiple formats or an HTML preview companion are needed.');
         }
@@ -11155,6 +11169,9 @@ class ConversationOrchestrator extends EventEmitter {
         if (toolPolicy?.remoteCliInventorySummary) {
             parts.push(`Remote CLI runtime inventory:\n${toolPolicy.remoteCliInventorySummary}`);
             parts.push('Use `remote-command` to run commands through the online remote runner and prefer commands that match the reported remote CLI inventory.');
+            if (/Browser visual QA:/i.test(toolPolicy.remoteCliInventorySummary)) {
+                parts.push('For remote website builds, the runner can execute Playwright visual QA. Use the reported UI screenshot command against the local preview or public URL and inspect the JSON report before finalizing.');
+            }
         }
 
         if (allowedToolIds.includes('remote-workbench')) {
@@ -11211,6 +11228,7 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('For search-follow-up research, treat the selected search-result host as approved by default and use `researchSafe: true` plus `approvedDomains` so bot-blocked pages are skipped automatically instead of turning source selection back into a user task.');
             parts.push('When browser rendering is enabled, `web-scrape` can execute `actions` such as click, fill, type, press, wait_for_selector, wait_for_timeout, hover, scroll, and select_option before extracting the final page state.');
             parts.push('Use `captureScreenshot: true` in browser mode when a visual snapshot of the rendered page would help later review or UI verification.');
+            parts.push('For responsive UI/UX self-checks, call `web-scrape` separately with desktop `viewport:{width:1440,height:960}` and mobile `viewport:{width:390,height:844}` so both screenshot artifacts are available for review.');
             parts.push('When the user wants page images from sensitive or adult sites without exposing the model to the content, use `web-scrape` with `captureImages: true` and `blindImageCapture: true` so the backend stores opaque binary artifacts and only returns safe metadata.');
         }
 

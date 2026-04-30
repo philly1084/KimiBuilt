@@ -5,7 +5,8 @@
     "main": "src/server.js",
     "bin": {
         "kimibuilt-ingress": "bin/kimibuilt-ingress.js",
-        "kimibuilt-runner": "bin/kimibuilt-runner.js"
+        "kimibuilt-runner": "bin/kimibuilt-runner.js",
+        "kimibuilt-ui-check": "bin/kimibuilt-ui-check.js"
     },
     "scripts": {
         "start": "node src/server.js",

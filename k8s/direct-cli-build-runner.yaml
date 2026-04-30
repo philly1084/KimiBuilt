@@ -58,6 +58,9 @@ data:
   KIMIBUILT_RUNNER_SHELL: "/bin/bash"
   KIMIBUILT_RUNNER_HEARTBEAT_MS: "15000"
   KIMIBUILT_RUNNER_MAX_OUTPUT_CHARS: "120000"
+  KIMIBUILT_RUNNER_CLI_TOOLS: "bash,sh,node,npm,npx,playwright-core,git,kubectl,k3s,helm,docker,buildctl,curl,wget,jq,yq,python3,python,tar,gzip,unzip,rsync,ssh,scp,systemctl,journalctl,ss,ip,getent,dig,nslookup,openssl,chromium,chromium-browser,google-chrome,google-chrome-stable"
+  ARTIFACT_BROWSER_PATH: "/usr/bin/chromium"
+  PLAYWRIGHT_EXECUTABLE_PATH: "/usr/bin/chromium"
   # Temporary workaround for self-signed backend ingress certificates.
   # Prefer fixing TLS and setting these back to "false" / removing the Node override.
   KIMIBUILT_RUNNER_TLS_INSECURE: "true"
@@ -265,7 +268,7 @@ spec:
                 /usr/bin/curl -fsSL -o /tmp/tools/kubectl https://dl.k8s.io/release/v1.30.4/bin/linux/arm64/kubectl
                 /bin/chmod 0755 /tmp/tools/kubectl
               fi
-              export PATH=/tmp/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+              export PATH=/tmp/tools:/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
               exec /usr/local/bin/node /app/bin/kimibuilt-runner.js
           envFrom:
             - configMapRef:
@@ -276,7 +279,7 @@ spec:
             - name: KUBECONFIG
               value: /etc/rancher/k3s/k3s.yaml
             - name: PATH
-              value: /tmp/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+              value: /tmp/tools:/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
           volumeMounts:
             - name: kubeconfig
               mountPath: /etc/rancher/k3s

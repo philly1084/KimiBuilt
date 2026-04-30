@@ -103,6 +103,25 @@ describe('RemoteWorkbenchTool', () => {
     expect(params.command).toContain('kubectl rollout status deployment/"$app"');
   });
 
+  test('maps ui-visual-check to the Playwright helper with public URL environment', async () => {
+    const { tool, remoteCommand } = buildTool();
+
+    await tool.handler({
+      action: 'ui-visual-check',
+      publicUrl: 'https://demo.example.com',
+      uiCheckDir: 'ui-checks/demo',
+    }, {}, { recordExecution: jest.fn() });
+
+    const params = remoteCommand.handler.mock.calls[0][0];
+    expect(params.profile).toBe('inspect');
+    expect(params.environment).toEqual(expect.objectContaining({
+      PUBLIC_URL: 'https://demo.example.com',
+      UI_CHECK_DIR: 'ui-checks/demo',
+    }));
+    expect(params.command).toContain('/app/bin/kimibuilt-ui-check.js');
+    expect(params.command).toContain('UI_CHECK_DIR');
+  });
+
   test('rejects traversal paths before delegating to remote-command', async () => {
     const { tool, remoteCommand } = buildTool();
 

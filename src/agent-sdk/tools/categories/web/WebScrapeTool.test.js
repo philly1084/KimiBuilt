@@ -94,6 +94,7 @@ describe('WebScrapeTool content extraction', () => {
             url: 'https://example.com/news',
             browser: true,
             captureScreenshot: true,
+            viewport: { width: 390, height: 844 },
             selectors: {
                 headline: {
                     selector: 'h1',
@@ -113,6 +114,7 @@ describe('WebScrapeTool content extraction', () => {
                 },
             },
             captureScreenshot: true,
+            viewport: { width: 390, height: 844 },
             sessionId: 'session-1',
         }));
         expect(result.url).toBe('https://example.com/news');

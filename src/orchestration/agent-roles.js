@@ -127,7 +127,7 @@ function inferAgentRolePipeline({
       tools: ['design-resource-search', 'image-search-unsplash', 'image-generate', 'graph-diagram'],
       outputContract: {
         format: 'design-brief',
-        required: ['audience', 'layoutPlan', 'visualDirection', 'componentMap'],
+        required: ['audience', 'layoutPlan', 'visualDirection', 'componentMap', 'visualQaPlan'],
       },
     }));
   }
@@ -153,11 +153,11 @@ function inferAgentRolePipeline({
     roles.push(buildRole({
       id: ROLE_IDS.QA,
       label: 'QA Agent',
-      purpose: 'Verify the generated website or dashboard for renderability, responsiveness, and obvious content/design regressions.',
-      tools: ['code-sandbox', 'web-fetch'],
+      purpose: 'Verify the generated website or dashboard for renderability, responsive screenshots, and obvious content/design regressions.',
+      tools: ['code-sandbox', 'web-fetch', 'web-scrape'],
       outputContract: {
         format: 'qa-report',
-        required: ['checks', 'issues', 'ready'],
+        required: ['checks', 'screenshots', 'issues', 'ready'],
       },
     }));
   }

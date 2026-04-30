@@ -53,6 +53,7 @@ describe('tool execution profiles', () => {
         expect(toolIds).toContain('web-search');
         expect(toolIds).toContain('web-fetch');
         expect(toolIds).toContain('web-scrape');
+        expect(toolIds).toContain('design-resource-search');
         expect(toolIds).toContain('code-sandbox');
         expect(toolIds).not.toContain('managed-app');
         expect(toolIds).not.toContain('opencode-run');

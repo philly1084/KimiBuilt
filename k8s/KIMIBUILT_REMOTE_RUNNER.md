@@ -32,6 +32,9 @@ KIMIBUILT_RUNNER_CAPABILITIES=inspect,deploy,build
 KIMIBUILT_RUNNER_ALLOWED_ROOTS=/workspace,/opt,/srv,/var/www,/tmp
 KIMIBUILT_RUNNER_DEFAULT_CWD=/workspace
 KIMIBUILT_RUNNER_SHELL=/bin/bash
+KIMIBUILT_RUNNER_CLI_TOOLS=bash,sh,node,npm,npx,playwright-core,git,kubectl,k3s,helm,docker,buildctl,curl,wget,jq,yq,python3,python,tar,gzip,unzip,rsync,ssh,scp,systemctl,journalctl,ss,ip,getent,dig,nslookup,openssl,chromium,chromium-browser,google-chrome,google-chrome-stable
+ARTIFACT_BROWSER_PATH=/usr/bin/chromium
+PLAYWRIGHT_EXECUTABLE_PATH=/usr/bin/chromium
 EOF
 sudo chmod 0640 /etc/kimibuilt/runner.env
 ```
@@ -95,6 +98,16 @@ curl -X POST https://kimibuilt.demoserver2.buzz/api/runners/demoserver2-builder/
 ```
 
 Expected: `pwd` reports `/workspace` unless the job supplies a narrower `cwd`.
+
+For website UI screenshot checks, verify Playwright/Chromium and the helper:
+
+```bash
+curl -X POST https://kimibuilt.demoserver2.buzz/api/runners/demoserver2-builder/jobs \
+  -H 'Content-Type: application/json' \
+  -d '{"command":"command -v chromium && node -e \"require(\\\"playwright-core\\\"); console.log(\\\"playwright-core ok\\\")\" && node /opt/kimibuilt/bin/kimibuilt-ui-check.js https://example.com --out /tmp/kimibuilt-ui-smoke","profile":"inspect","timeout":60000}'
+```
+
+Expected: output includes `UI_CHECK_REPORT=...` and `UI_SCREENSHOT=...` lines.
 
 ## Policy Notes
 

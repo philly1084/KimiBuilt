@@ -126,6 +126,7 @@ function buildRuntimeSummary(toolManager, options = {}) {
       shell: healthyRunner?.metadata?.shell || '',
       capabilities: healthyRunner?.capabilities || [],
       allowedRoots: healthyRunner?.allowedRoots || [],
+      browserAutomation: healthyRunner?.metadata?.browserAutomation || null,
       cliTools: runnerCliTools,
       availableCliTools: runnerCliTools.filter((tool) => tool.available).map((tool) => tool.name),
     },
@@ -175,6 +176,7 @@ function buildRunnerRuntimeDetails(runner = null) {
     buildkitHostConfigured: Boolean(runner.metadata?.buildkitHostConfigured),
     kubernetesConfigured: Boolean(runner.metadata?.kubernetesConfigured),
     imagePrefix: runner.metadata?.imagePrefix || '',
+    browserAutomation: runner.metadata?.browserAutomation || null,
     hostIdentity: runner.hostIdentity || {},
     cliTools,
     availableCliTools: cliTools.filter((tool) => tool.available).map((tool) => tool.name),
@@ -230,6 +232,7 @@ function buildToolRuntime(toolId, options = {}) {
         'focused-test',
         'buildkit',
         'direct-image-build',
+        'ui-visual-check',
         'kubectl-inspect',
         'k8s-app-inventory',
         'logs',
@@ -707,6 +710,8 @@ async function updateSessionToolMetadata(sessionId, toolId, params = {}, result 
       ...(payload?.gitCommit ? { gitCommit: payload.gitCommit } : {}),
       ...(payload?.deployment ? { deployment: payload.deployment } : {}),
       ...(payload?.publicHost ? { publicHost: payload.publicHost } : {}),
+      ...(payload?.uiCheckReport ? { uiCheckReport: payload.uiCheckReport } : {}),
+      ...(Array.isArray(payload?.uiScreenshots) && payload.uiScreenshots.length > 0 ? { uiScreenshots: payload.uiScreenshots } : {}),
       ...(payload?.model ? { model: payload.model } : {}),
     };
     const controlPatch = {

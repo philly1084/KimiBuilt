@@ -91,11 +91,14 @@ RUN mkdir -p /app/data/piper/voices && \
     --output /app/data/piper/voices/en_GB-cori-high.onnx.json
 
 RUN mkdir -p /home/kimibuilt/.kimibuilt && \
+  chmod 0755 /app/bin/kimibuilt-ingress.js /app/bin/kimibuilt-runner.js /app/bin/kimibuilt-ui-check.js && \
   chown -R kimibuilt:kimibuilt /home/kimibuilt /app
 
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV ARTIFACT_BROWSER_PATH=/usr/bin/chromium
+ENV PLAYWRIGHT_EXECUTABLE_PATH=/usr/bin/chromium
+ENV PATH=/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ENV KIMIBUILT_DATA_DIR=/home/kimibuilt/.kimibuilt
 ENV KIMIBUILT_STATE_DIR=/home/kimibuilt/.kimibuilt
 ENV TTS_PROVIDER=kokoro

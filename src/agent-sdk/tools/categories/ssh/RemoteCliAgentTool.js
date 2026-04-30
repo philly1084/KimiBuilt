@@ -73,6 +73,8 @@ class RemoteCliAgentTool extends ToolBase {
           gitCommit: { type: 'string' },
           deployment: { type: 'string' },
           publicHost: { type: 'string' },
+          uiCheckReport: { type: 'string' },
+          uiScreenshots: { type: 'array' },
           model: { type: 'string' },
           apiMode: { type: 'string' },
         },

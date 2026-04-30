@@ -37,6 +37,21 @@ function readMarkerLine(text = '', keys = []) {
   return '';
 }
 
+function readMarkerLines(text = '', keys = []) {
+  const keyPattern = keys
+    .map((key) => String(key || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|');
+  if (!keyPattern) {
+    return [];
+  }
+
+  return String(text || '')
+    .split(/\r?\n/)
+    .map((line) => line.match(new RegExp(`^\\s*(?:[-*]\\s*)?(?:${keyPattern})\\s*[:=]\\s*(.+?)\\s*$`, 'i'))?.[1] || '')
+    .map((value) => cleanMarkerValue(value))
+    .filter(Boolean);
+}
+
 function extractRemoteCliRunMetadata(finalOutput = '') {
   const text = String(finalOutput || '');
   const sessionId = readMarkerLine(text, ['REMOTE_CLI_SESSION_ID', 'REMOTE_CODE_SESSION_ID'])
@@ -50,6 +65,13 @@ function extractRemoteCliRunMetadata(finalOutput = '') {
   const deployment = readMarkerLine(text, ['DEPLOYMENT', 'K8S_DEPLOYMENT']);
   const publicHost = readMarkerLine(text, ['PUBLIC_HOST', 'HOST', 'URL'])
     || cleanMarkerValue(text.match(/https?:\/\/([^/\s`]+)/i)?.[1] || '');
+  const uiCheckReport = readMarkerLine(text, ['UI_CHECK_REPORT']);
+  const uiScreenshots = Array.from(new Set(
+    readMarkerLines(text, ['UI_SCREENSHOTS', 'UI_SCREENSHOT'])
+      .flatMap((value) => value.split(','))
+      .map((value) => cleanMarkerValue(value))
+      .filter(Boolean),
+  ));
 
   return {
     ...(sessionId ? { sessionId } : {}),
@@ -58,6 +80,8 @@ function extractRemoteCliRunMetadata(finalOutput = '') {
     ...(gitCommit ? { gitCommit } : {}),
     ...(deployment ? { deployment } : {}),
     ...(publicHost ? { publicHost } : {}),
+    ...(uiCheckReport ? { uiCheckReport } : {}),
+    ...(uiScreenshots.length > 0 ? { uiScreenshots } : {}),
   };
 }
 
@@ -133,6 +157,9 @@ function buildRemoteCliInstructions({
     'Before committing in a fresh remote workspace, set repo-local git user.name and user.email if they are missing.',
     'For follow-up edits, inspect git status, git log, and the current source files first. Patch the existing source, preserve prior content/assets unless explicitly replacing them, commit the change, then rebuild/redeploy.',
     'Use live Kubernetes resources, mounted files, or ConfigMaps as diagnostics or recovery input only; do not leave them as the only editable source of truth for a deployed site.',
+    'For website, dashboard, or frontend work, include visual QA in the build package: run Playwright/Chromium screenshots for desktop and mobile states when the target exposes a local preview or public URL.',
+    'If the KimiBuilt runner helper is present, prefer `node /app/bin/kimibuilt-ui-check.js <url> --out ui-checks` and inspect its JSON report before claiming the UI is ready.',
+    'Report screenshot and report paths with marker lines when known: UI_CHECK_REPORT=<path> and UI_SCREENSHOTS=<comma-separated paths>.',
     `For long tasks, call remote_code_run with waitMs: ${waitMs}.`,
     'If it returns status "running", call remote_code_status with the returned jobId.',
     'If continuing prior work, reuse the returned sessionId.',
@@ -305,6 +332,8 @@ class RemoteCliAgentsSdkRunner {
         gitCommit: runMetadata.gitCommit || null,
         deployment: runMetadata.deployment || null,
         publicHost: runMetadata.publicHost || null,
+        uiCheckReport: runMetadata.uiCheckReport || null,
+        uiScreenshots: runMetadata.uiScreenshots || [],
         model,
         apiMode,
       };

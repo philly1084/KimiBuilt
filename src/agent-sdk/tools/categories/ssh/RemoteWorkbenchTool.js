@@ -32,6 +32,7 @@ const ALLOWED_ACTIONS = Object.freeze([
   'focused-test',
   'buildkit',
   'direct-image-build',
+  'ui-visual-check',
   'kubectl-inspect',
   'k8s-app-inventory',
   'logs',
@@ -52,6 +53,7 @@ const CATALOG_ACTION_IDS = Object.freeze({
   'focused-test': 'focused-test',
   buildkit: 'buildkit',
   'direct-image-build': 'direct-image-build',
+  'ui-visual-check': 'ui-visual-check',
   'kubectl-inspect': 'kubectl-inspect',
   'k8s-app-inventory': 'k8s-app-inventory',
   'pod-debug': 'pod-debug',
@@ -107,6 +109,8 @@ function buildEnvironment(params = {}, overrides = {}) {
     ['namespace', 'NAMESPACE'],
     ['deployment', 'DEPLOYMENT'],
     ['publicHost', 'PUBLIC_HOST'],
+    ['publicUrl', 'PUBLIC_URL'],
+    ['uiCheckDir', 'UI_CHECK_DIR'],
     ['testPath', 'TEST_PATH'],
     ['manifestDir', 'MANIFEST_DIR'],
     ['needle', 'NEEDLE'],
@@ -197,6 +201,14 @@ class RemoteWorkbenchTool extends ToolBase {
           publicHost: {
             type: 'string',
             description: 'Public host for deploy-verify.',
+          },
+          publicUrl: {
+            type: 'string',
+            description: 'Public URL for ui-visual-check. If omitted, publicHost is used as https://publicHost.',
+          },
+          uiCheckDir: {
+            type: 'string',
+            description: 'Remote output directory for ui-visual-check screenshots and report.',
           },
           testPath: {
             type: 'string',

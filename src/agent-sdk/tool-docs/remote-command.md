@@ -94,6 +94,7 @@ These catalog entries are exposed through `/api/tools/available` so agents can s
 | `rollout` | `deploy` | Check rollout and available conditions for a deployment. |
 | `https-verify` | `inspect` | Verify DNS and public HTTPS for the deployed domain. |
 | `deploy-verify` | `deploy` | Verify rollout, service, ingress, TLS objects, DNS, and public HTTPS before claiming success. |
+| `ui-visual-check` | `inspect` | Run Playwright/Chromium screenshot self-checks for desktop and mobile UI states. |
 | `ingress-plan` | `inspect` | Validate a guarded Traefik/cert-manager route plan with `kimibuilt-ingress`. |
 | `ingress-apply` | `deploy` | Safely upsert one host/path Ingress route and emit a registry event. |
 | `ingress-verify` | `deploy` | Verify the guarded route, TLS secret/certificate, and public HTTPS. |
@@ -101,6 +102,19 @@ These catalog entries are exposed through `/api/tools/available` so agents can s
 For repo maintenance and updates, start with `repo-map`, `changed-files`, and `dependency-check`. Then use `targeted-grep` or focused file reads for the feature area instead of walking the full repository.
 
 For k3s app delivery, use `k8s-manifest-summary`, `buildkit`, `direct-image-build`, `k8s-app-inventory`, `rollout`, and `deploy-verify` as the default progression.
+
+For website and dashboard delivery, add a visual QA pass after the preview or public route is reachable. Prefer `ui-visual-check` when the runner advertises Playwright readiness; otherwise use backend `web-scrape` with `browser: true`, `captureScreenshot: true`, and desktop/mobile `viewport` values so screenshot artifacts are saved with the session.
+
+### UI visual checks
+
+When the runner image includes Playwright/Chromium, capture screenshots and layout metrics before claiming a website or dashboard is ready:
+
+```bash
+PUBLIC_HOST=hello.demoserver2.buzz node /app/bin/kimibuilt-ui-check.js "https://$PUBLIC_HOST" --out ui-checks
+cat ui-checks/ui-check-report.json
+```
+
+The helper emits `UI_CHECK_REPORT=...`, one `UI_SCREENSHOT=...` line per PNG, and a compact `KIMIBUILT_UI_CHECK_RESULT=...` summary. Use the JSON report to catch load failures, browser errors, horizontal overflow, empty body text, broken images, and missing basic responsive checks.
 
 ### Guarded ingress and TLS route changes
 

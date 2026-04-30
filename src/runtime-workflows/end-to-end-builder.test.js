@@ -594,6 +594,7 @@ describe('end-to-end builder workflow', () => {
         ]);
         expect(verificationPlan[0].params.command).toContain('kubectl get ingress -A');
         expect(verificationPlan[0].params.command).toContain('curl -fsSIL --max-time 20 "https://$host"');
+        expect(verificationPlan[0].params.command).toContain('kimibuilt-ui-check.js');
     });
 
     test('falls back to the configured public domain when website deployment verification omits an explicit host', () => {

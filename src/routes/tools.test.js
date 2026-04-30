@@ -76,6 +76,7 @@ describe('/api/tools routes', () => {
             expect.objectContaining({ id: 'dependency-check' }),
             expect.objectContaining({ id: 'k8s-manifest-summary' }),
             expect.objectContaining({ id: 'focused-test' }),
+            expect.objectContaining({ id: 'ui-visual-check' }),
             expect.objectContaining({ id: 'deploy-verify' }),
         ]));
     });
@@ -93,6 +94,13 @@ describe('/api/tools routes', () => {
                     { name: 'git', available: true, path: '/usr/bin/git' },
                     { name: 'rg', available: false, path: '' },
                 ],
+                browserAutomation: {
+                    playwrightPackage: 'playwright-core',
+                    playwrightVersion: '1.53.0',
+                    browserExecutablePath: '/usr/bin/chromium',
+                    screenshotReady: true,
+                    uiCheckCommand: 'node /app/bin/kimibuilt-ui-check.js',
+                },
             },
         }, { readyState: 1, send: jest.fn() });
 
@@ -105,6 +113,13 @@ describe('/api/tools routes', () => {
             expect.objectContaining({ name: 'kubectl', path: '/usr/local/bin/kubectl' }),
             expect.objectContaining({ name: 'rg', available: false }),
         ]));
+        expect(response.body.data.runtime.runner.browserAutomation).toEqual(expect.objectContaining({
+            screenshotReady: true,
+            uiCheckCommand: 'node /app/bin/kimibuilt-ui-check.js',
+        }));
+        expect(response.body.meta.runtime.remoteRunner.browserAutomation).toEqual(expect.objectContaining({
+            screenshotReady: true,
+        }));
         expect(response.body.meta.runtime.remoteRunner.availableCliTools).toEqual(expect.arrayContaining(['kubectl', 'git']));
     });
 
@@ -130,6 +145,7 @@ describe('/api/tools routes', () => {
             'write-file',
             'apply-patch',
             'build',
+            'ui-visual-check',
             'deploy-verify',
         ]));
         expect(response.body.data.runtime.availableCliTools).toEqual(expect.arrayContaining(['kubectl', 'git']));

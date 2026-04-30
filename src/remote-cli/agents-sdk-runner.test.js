@@ -23,6 +23,9 @@ describe('RemoteCliAgentsSdkRunner', () => {
     expect(instructions).toContain('deploy-verify');
     expect(instructions).toContain('git-backed workspace');
     expect(instructions).toContain('git user.name');
+    expect(instructions).toContain('Playwright/Chromium screenshots');
+    expect(instructions).toContain('kimibuilt-ui-check');
+    expect(instructions).toContain('UI_CHECK_REPORT');
     expect(instructions).toContain('GIT_COMMIT');
     expect(instructions).toContain('remote_code_status');
     expect(instructions).toContain('persistent private workbench');
@@ -54,6 +57,8 @@ describe('RemoteCliAgentsSdkRunner', () => {
       'GIT_COMMIT=abcdef123456',
       'DEPLOYMENT=app-weather/weather',
       'PUBLIC_HOST=weather.demoserver2.buzz',
+      'UI_CHECK_REPORT=/srv/apps/weather/ui-checks/ui-check-report.json',
+      'UI_SCREENSHOTS=/srv/apps/weather/ui-checks/weather-desktop.png,/srv/apps/weather/ui-checks/weather-mobile.png',
     ].join('\n'))).toEqual({
       sessionId: 'rcs_123',
       workspace: '/srv/apps/weather',
@@ -61,6 +66,11 @@ describe('RemoteCliAgentsSdkRunner', () => {
       gitCommit: 'abcdef123456',
       deployment: 'app-weather/weather',
       publicHost: 'weather.demoserver2.buzz',
+      uiCheckReport: '/srv/apps/weather/ui-checks/ui-check-report.json',
+      uiScreenshots: [
+        '/srv/apps/weather/ui-checks/weather-desktop.png',
+        '/srv/apps/weather/ui-checks/weather-mobile.png',
+      ],
     });
   });
 
@@ -126,6 +136,8 @@ describe('RemoteCliAgentsSdkRunner', () => {
             'REMOTE_CLI_SESSION_ID=remote-session-1',
             'WORKSPACE=/srv/apps/my-app',
             'GIT_COMMIT=abcdef123456',
+            'UI_CHECK_REPORT=/srv/apps/my-app/ui-checks/ui-check-report.json',
+            'UI_SCREENSHOT=/srv/apps/my-app/ui-checks/my-app-desktop.png',
           ].join('\n'),
         };
       }
@@ -182,6 +194,8 @@ describe('RemoteCliAgentsSdkRunner', () => {
       cwd: '/srv/apps/my-app',
       sessionId: 'remote-session-1',
       gitCommit: 'abcdef123456',
+      uiCheckReport: '/srv/apps/my-app/ui-checks/ui-check-report.json',
+      uiScreenshots: ['/srv/apps/my-app/ui-checks/my-app-desktop.png'],
     });
   });
 });

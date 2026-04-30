@@ -41,7 +41,8 @@ Behavior:
 - For k3s website/app creation or edits, the remote CLI agent must use a git-backed workspace as the editable source of truth. Prefer an existing configured Gitea origin; if none exists and `GITEA_TOKEN` is available, create or use a repo under the configured Gitea org before first rollout. If Gitea is not available, initialize local git and report that the app is not yet backed by a remote origin.
 - Before first commit in a fresh remote workspace, set repo-local `git config user.name` and `git config user.email` if they are missing.
 - For follow-up edits, inspect `git status`, recent commits, and current source first. Use live Kubernetes resources, ConfigMaps, or mounted files only as diagnostics or recovery input, then persist the change back to git before redeploying.
-- The final output should include continuity markers when known: `REMOTE_CLI_SESSION_ID=...`, `WORKSPACE=...`, `GIT_REPO=...`, `GIT_COMMIT=...`, `DEPLOYMENT=...`, and `PUBLIC_HOST=...`.
+- For website/dashboard/frontend work, run Playwright/Chromium visual QA when a local preview or public URL exists. Prefer `node /app/bin/kimibuilt-ui-check.js <url> --out ui-checks` when the helper is present.
+- The final output should include continuity markers when known: `REMOTE_CLI_SESSION_ID=...`, `WORKSPACE=...`, `GIT_REPO=...`, `GIT_COMMIT=...`, `DEPLOYMENT=...`, `PUBLIC_HOST=...`, `UI_CHECK_REPORT=...`, and `UI_SCREENSHOTS=...`.
 - Prefer `waitMs: 30000` for long coding tasks.
 - Pass `sessionId` when continuing a previous remote coding session.
 - Pass `mcpSessionId` when continuing a previous Streamable HTTP MCP session.

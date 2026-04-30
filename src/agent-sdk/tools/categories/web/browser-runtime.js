@@ -20,6 +20,8 @@ const DEFAULT_BROWSER_ARGS = [
 
 const DEFAULT_USER_AGENT = 'KimiBuilt-Agent/1.0 (Automated Browser Research)';
 const DEFAULT_VIEWPORT = { width: 1440, height: 960 };
+const MIN_VIEWPORT_EDGE = 240;
+const MAX_VIEWPORT_EDGE = 4096;
 
 function splitArgs(value = '') {
   return String(value || '')
@@ -114,6 +116,37 @@ function normalizeText(value = '') {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
+function normalizeViewport(value = null) {
+  if (!value) {
+    return { ...DEFAULT_VIEWPORT };
+  }
+
+  if (typeof value === 'string') {
+    const match = value.trim().match(/^(\d{2,5})x(\d{2,5})$/i);
+    if (match) {
+      return normalizeViewport({
+        width: Number(match[1]),
+        height: Number(match[2]),
+      });
+    }
+  }
+
+  if (typeof value !== 'object') {
+    return { ...DEFAULT_VIEWPORT };
+  }
+
+  const width = Math.trunc(Number(value.width));
+  const height = Math.trunc(Number(value.height));
+  if (!Number.isFinite(width) || !Number.isFinite(height)) {
+    return { ...DEFAULT_VIEWPORT };
+  }
+
+  return {
+    width: Math.max(MIN_VIEWPORT_EDGE, Math.min(width, MAX_VIEWPORT_EDGE)),
+    height: Math.max(MIN_VIEWPORT_EDGE, Math.min(height, MAX_VIEWPORT_EDGE)),
+  };
+}
+
 function normalizeUrl(url) {
   const value = String(url || '').trim();
   if (!value) {
@@ -142,7 +175,7 @@ function truncateText(value = '', limit = config.scrape.contentCharLimit) {
   return text.slice(0, limit);
 }
 
-async function captureScreenshotArtifact({ page, sessionId, url, title = '', contentText = '', fullPage = true }) {
+async function captureScreenshotArtifact({ page, sessionId, url, title = '', contentText = '', fullPage = true, viewport = null }) {
   if (!sessionId) {
     return {
       available: false,
@@ -173,6 +206,7 @@ async function captureScreenshotArtifact({ page, sessionId, url, title = '', con
       browserCapture: true,
       sourceUrl: url,
       pageTitle: title,
+      viewport,
     },
     vectorize: false,
   });
@@ -432,12 +466,13 @@ async function browseWithPlaywright(normalizedUrl, options = {}) {
   const browser = await loaded.chromium.launch(launchOptions);
   let context;
   let page;
+  const viewport = normalizeViewport(options.viewport);
 
   try {
     context = await browser.newContext({
       ignoreHTTPSErrors: true,
       userAgent: DEFAULT_USER_AGENT,
-      viewport: DEFAULT_VIEWPORT,
+      viewport,
     });
     page = await context.newPage();
     await page.goto(normalizedUrl, {
@@ -469,6 +504,7 @@ async function browseWithPlaywright(normalizedUrl, options = {}) {
         title: snapshot.title,
         contentText: snapshot.text,
         fullPage: options.fullPageScreenshot,
+        viewport,
       });
     }
 
@@ -616,4 +652,5 @@ async function browsePage(url, options = {}) {
 module.exports = {
   browsePage,
   normalizeBrowserUrl: normalizeUrl,
+  normalizeBrowserViewport: normalizeViewport,
 };

@@ -120,6 +120,14 @@ class WebScrapeTool extends ToolBase {
             description: 'Capture a screenshot artifact of the rendered page when browser mode is used',
             default: false,
           },
+          viewport: {
+            type: 'object',
+            description: 'Optional browser viewport for rendering and screenshot capture, for example { "width": 390, "height": 844 } for mobile checks',
+            properties: {
+              width: { type: 'integer' },
+              height: { type: 'integer' },
+            },
+          },
           fullPageScreenshot: {
             type: 'boolean',
             description: 'Capture the full page when captureScreenshot is enabled',
@@ -166,6 +174,7 @@ class WebScrapeTool extends ToolBase {
       researchSafe = false,
       actions = [],
       captureScreenshot = false,
+      viewport = null,
       fullPageScreenshot = true,
       timeout = 30000
     } = params;
@@ -208,6 +217,7 @@ class WebScrapeTool extends ToolBase {
         selectors,
         actions,
         captureScreenshot,
+        viewport,
         fullPageScreenshot,
         sessionId: context?.sessionId || null,
         imageLimit,
@@ -235,6 +245,7 @@ class WebScrapeTool extends ToolBase {
             selectors,
             actions,
             captureScreenshot,
+            viewport,
             fullPageScreenshot,
             sessionId: context?.sessionId || null,
             imageLimit,

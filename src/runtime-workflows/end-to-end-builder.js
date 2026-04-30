@@ -931,6 +931,12 @@ function buildVerificationCommand(workflow = null, deployDefaults = null) {
             'curl -fsSIL --max-time 20 "https://$host"',
             'echo "--- https body preview ---"',
             'curl -fsS --max-time 20 "https://$host" | sed -n "1,20p"',
+            'echo "--- ui visual check ---"',
+            'if [ -f /app/bin/kimibuilt-ui-check.js ] && command -v node >/dev/null 2>&1; then',
+            '  node /app/bin/kimibuilt-ui-check.js "https://$host" --out "ui-checks/$host" || echo "UI visual check failed; use web-scrape screenshot fallback."',
+            'else',
+            '  echo "UI visual check skipped: kimibuilt-ui-check helper or node is unavailable."',
+            'fi',
         ]).join('\n');
     }
 
@@ -960,6 +966,12 @@ function buildVerificationCommand(workflow = null, deployDefaults = null) {
         'curl -fsSIL --max-time 20 "https://$host"',
         'echo "--- https body preview ---"',
         'curl -fsS --max-time 20 "https://$host" | sed -n "1,20p"',
+        'echo "--- ui visual check ---"',
+        'if [ -f /app/bin/kimibuilt-ui-check.js ] && command -v node >/dev/null 2>&1; then',
+        '  node /app/bin/kimibuilt-ui-check.js "https://$host" --out "ui-checks/$host" || echo "UI visual check failed; use web-scrape screenshot fallback."',
+        'else',
+        '  echo "UI visual check skipped: kimibuilt-ui-check helper or node is unavailable."',
+        'fi',
     ]).join('\n');
 }
 
