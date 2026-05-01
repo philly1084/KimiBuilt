@@ -10,6 +10,7 @@ const { vectorStore } = require('../../memory/vector-store');
 const { getUnifiedRegistry } = require('../../agent-sdk/registry/UnifiedRegistry');
 const { parseLenientJson } = require('../../utils/lenient-json');
 const { normalizeUsageMetadata } = require('../../utils/token-usage');
+const { formatImageDiagnosticsSummary } = require('../../image-generation-diagnostics');
 
 class DashboardController {
   constructor(agentOrchestrator) {
@@ -151,8 +152,13 @@ class DashboardController {
 
   buildTimeline(task, toolUsage, metadata = {}, { completed = true, responseId = null, output = '', duration = 0, error = '' } = {}) {
     const endTime = completed ? task.completedAt : task.failedAt;
-    const executionTrace = this.extractExecutionTrace(metadata, task.createdAt, endTime);
-    const diagnostics = this.extractDiagnostics(metadata);
+    const traceMetadata = {
+      ...(task?.metadata || {}),
+      ...(metadata || {}),
+    };
+    const executionTrace = this.extractExecutionTrace(traceMetadata, task.createdAt, endTime);
+    const diagnostics = this.extractDiagnostics(traceMetadata);
+    const diagnosticSummary = formatImageDiagnosticsSummary(diagnostics);
     const hasExplicitToolCalls = executionTrace.some((step) => step.type === 'tool_call');
     const hasExplicitModelCall = executionTrace.some((step) => step.type === 'model_call');
     const fallbackToolSteps = hasExplicitToolCalls
@@ -169,6 +175,7 @@ class DashboardController {
           paramKeys: event.paramKeys,
           error: event.error,
           diagnostics: event.diagnostics,
+          diagnosticSummary: formatImageDiagnosticsSummary(event.diagnostics),
         },
       }));
     const fallbackModelStep = hasExplicitModelCall
@@ -186,6 +193,7 @@ class DashboardController {
               responseId,
               outputPreview: String(output || '').slice(0, 200),
               diagnostics,
+              diagnosticSummary,
             },
           }
           : {
@@ -198,6 +206,7 @@ class DashboardController {
             details: {
               error,
               diagnostics,
+              diagnosticSummary,
             },
           },
       ];
@@ -212,6 +221,11 @@ class DashboardController {
         details: {
           transport: task.transport,
           sessionId: task.sessionId,
+          route: traceMetadata.route,
+          clientSurface: traceMetadata.clientSurface,
+          requestedCount: traceMetadata.requestedCount,
+          diagnostics,
+          diagnosticSummary,
         },
       },
       ...executionTrace,

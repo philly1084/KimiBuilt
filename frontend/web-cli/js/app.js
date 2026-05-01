@@ -2935,9 +2935,13 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
             `usable=${Number(counts.usableReturnedImageRecords || 0)}`,
             `artifacts=${Number(counts.artifacts || 0)}`,
         ].filter(Boolean);
-        const likely = flags.likelyFrontendReceiveOrParserIssue
-            ? 'Backend sent usable image data; inspect the web CLI receive/parser path.'
-            : (diagnostics.likelyCause || '');
+        const usableCount = Number(counts.usableReturnedImageRecords || 0);
+        const artifactCount = Number(counts.artifacts || 0);
+        const likely = (flags.likelyArtifactPersistenceIssue || (usableCount > 0 && artifactCount === 0))
+            ? 'Backend parsed usable image data, but no reusable artifact was persisted; inspect artifact persistence/image validation path.'
+            : flags.likelyFrontendReceiveOrParserIssue
+                ? 'Backend sent usable persisted image data; inspect the web CLI receive/parser path.'
+                : (diagnostics.likelyCause || '');
 
         return `${parts.join(' | ')}${likely ? ` | ${likely}` : ''}`;
     }

@@ -271,7 +271,11 @@ describe('DashboardController', () => {
       model: 'gpt-image-2',
       mode: 'image',
       transport: 'http',
-      metadata: {},
+      metadata: {
+        route: '/v1/images/generations',
+        clientSurface: 'image',
+        requestedCount: 1,
+      },
     });
     const diagnostics = {
       imageGeneration: {
@@ -303,8 +307,14 @@ describe('DashboardController', () => {
     }));
 
     const trace = tracesController.addTrace.mock.calls[0][0];
+    const requestStep = trace.timeline.find((step) => step.type === 'request');
     const failedModelStep = trace.timeline.find((step) => step.type === 'model_call');
+    expect(requestStep.details.diagnostics).toEqual(diagnostics);
+    expect(requestStep.details.diagnosticSummary).toContain('provider_response_not_parsable');
+    expect(requestStep.details.route).toBe('/v1/images/generations');
+    expect(requestStep.details.requestedCount).toBe(1);
     expect(failedModelStep.details.diagnostics).toEqual(diagnostics);
+    expect(failedModelStep.details.diagnosticSummary).toContain('provider_response_not_parsable');
   });
 
   test('surfaces image diagnostics from failed tool events in fallback trace steps', () => {

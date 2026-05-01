@@ -774,6 +774,15 @@ function parseErrorMessage(errorBody, status) {
     }
 }
 
+function parseErrorPayload(errorBody) {
+    try {
+        const parsed = JSON.parse(errorBody);
+        return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch (_error) {
+        return null;
+    }
+}
+
 function isUnsupportedImageResponseFormatError(errorBody = '', status = 0) {
     if (![400, 422].includes(Number(status))) {
         return false;
@@ -972,10 +981,16 @@ async function postImageGenerationToProvider(params, imageProvider) {
             }
 
             const errorBody = await response.text();
+            const parsedErrorBody = parseErrorPayload(errorBody);
             const error = new Error(parseErrorMessage(errorBody, response.status));
             error.status = response.status;
             error.baseURL = baseURL;
             error.provider = imageProvider.source;
+            error.providerResponse = parsedErrorBody;
+            error.responseBodyPreview = String(errorBody || '').slice(0, 2000);
+            if (parsedErrorBody?.diagnostics && typeof parsedErrorBody.diagnostics === 'object') {
+                error.diagnostics = parsedErrorBody.diagnostics;
+            }
             lastError = error;
 
             const responseFormatFallbackAllowed = index === 0

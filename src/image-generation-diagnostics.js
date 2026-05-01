@@ -334,10 +334,10 @@ function classifyImageDiagnostics({
       status: 'warning',
       code: 'backend_sent_usable_unpersisted_images',
       stage: 'backend_response_build',
-      likelyCause: 'The backend returned usable image payloads, but no reusable artifact was persisted.',
+      likelyCause: 'The backend parsed and returned usable image payloads, but no reusable artifact was persisted.',
       hints: [
-        'If the frontend still reports no parsable data, inspect the frontend parser/session-file path.',
-        'If images display but cannot be reused later, inspect artifact persistence and image validation.',
+        'Inspect artifact persistence, image validation, and session-file creation before chasing frontend parsing.',
+        'If final model text contains a generic image URL, verify synthesis is using persisted artifact URLs instead of inventing links.',
       ],
     };
   }
@@ -375,9 +375,15 @@ function buildImageGenerationDiagnostics({
   const parsedImageRecords = Array.isArray(parsedImages) ? parsedImages : [];
   const returnedImageRecords = Array.isArray(returnedImages) ? returnedImages : parsedImageRecords;
   const artifactRecords = Array.isArray(artifacts) ? artifacts : [];
+  const providerResponse = response || (error?.providerResponse && typeof error.providerResponse === 'object'
+    ? error.providerResponse
+    : null);
+  const errorImageDiagnostics = error?.diagnostics?.imageGeneration
+    || error?.providerResponse?.diagnostics?.imageGeneration
+    || null;
   const noParseableImageDataError = error
     && /\bno\s+(?:parseable|parsable)\s+image\s+(?:data|payload)\b/i.test(String(error.message || error));
-  const providerResponseReceived = Boolean(response || providerMetadata || upstreamDiagnostics || noParseableImageDataError);
+  const providerResponseReceived = Boolean(providerResponse || providerMetadata || upstreamDiagnostics || errorImageDiagnostics || noParseableImageDataError);
   const parsedImageCount = parsedImageRecords.length;
   const returnedImageCount = returnedImageRecords.length;
   const usableImageCount = countUsableImageRecords(returnedImageRecords);
@@ -390,7 +396,10 @@ function buildImageGenerationDiagnostics({
     usableImageCount,
     artifactCount,
   });
-  const upstream = normalizeDiagnosticsList(upstreamDiagnostics);
+  const upstream = [
+    ...normalizeDiagnosticsList(upstreamDiagnostics),
+    ...normalizeDiagnosticsList(errorImageDiagnostics),
+  ];
   const metadata = providerMetadata && typeof providerMetadata === 'object' ? providerMetadata : {};
 
   return {
@@ -409,7 +418,8 @@ function buildImageGenerationDiagnostics({
       artifactsPersisted: artifactCount > 0,
       likelyBackendParserIssue: providerResponseReceived && parsedImageCount === 0,
       likelyBackendResponseIssue: parsedImageCount > 0 && usableImageCount === 0,
-      likelyFrontendReceiveOrParserIssue: usableImageCount > 0,
+      likelyArtifactPersistenceIssue: usableImageCount > 0 && artifactCount === 0,
+      likelyFrontendReceiveOrParserIssue: usableImageCount > 0 && artifactCount > 0,
     },
     counts: {
       requested: Number(requestedCount || 0),
@@ -419,11 +429,11 @@ function buildImageGenerationDiagnostics({
       artifacts: artifactCount,
     },
     provider: {
-      source: normalizeText(providerSource || metadata.providerSource || metadata.source),
+      source: normalizeText(providerSource || metadata.providerSource || metadata.source || error?.provider),
       family: normalizeText(metadata.providerFamily || metadata.family),
-      baseUrl: summarizeBaseUrl(providerBaseUrl || metadata.baseURL || metadata.baseUrl),
+      baseUrl: summarizeBaseUrl(providerBaseUrl || metadata.baseURL || metadata.baseUrl || error?.baseURL || error?.baseUrl),
       endpoint: normalizeText(metadata.endpoint || ''),
-      status: metadata.status || null,
+      status: metadata.status || error?.status || error?.statusCode || null,
       requestHadResponseFormat: metadata.requestHadResponseFormat === true,
       requestVariant: metadata.requestVariant ?? null,
     },
@@ -433,7 +443,7 @@ function buildImageGenerationDiagnostics({
       quality: normalizeText(quality),
       promptPreview: truncate(prompt, 120),
     },
-    responseShape: response ? summarizeProviderResponseShape(response) : null,
+    responseShape: providerResponse ? summarizeProviderResponseShape(providerResponse) : null,
     returnedImageFlags: returnedImageRecords.slice(0, 5).map((image) => summarizeImageRecordFlags(image)),
     upstreamDiagnostics: upstream.map((entry) => ({
       status: entry.status,
@@ -488,9 +498,13 @@ function formatImageDiagnosticsSummary(diagnostics = null) {
     `usable=${Number(counts.usableReturnedImageRecords || 0)}`,
     `artifacts=${Number(counts.artifacts || 0)}`,
   ].filter(Boolean);
-  const likely = flags.likelyFrontendReceiveOrParserIssue
-    ? 'backend sent usable image data; inspect frontend receive/parser path'
-    : (diag.likelyCause || '');
+  const usableCount = Number(counts.usableReturnedImageRecords || 0);
+  const artifactCount = Number(counts.artifacts || 0);
+  const likely = (flags.likelyArtifactPersistenceIssue || (usableCount > 0 && artifactCount === 0))
+    ? 'backend parsed usable image data, but no reusable artifact was persisted; inspect artifact persistence/image validation path'
+    : flags.likelyFrontendReceiveOrParserIssue
+      ? 'backend sent usable persisted image data; inspect frontend receive/parser path'
+      : (diag.likelyCause || '');
 
   return `${parts.join(' | ')}${likely ? ` | ${likely}` : ''}`;
 }

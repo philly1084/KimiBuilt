@@ -1381,9 +1381,13 @@ class Dashboard {
             `usable=${Number(counts.usableReturnedImageRecords || 0)}`,
             `artifacts=${Number(counts.artifacts || 0)}`,
         ].filter(Boolean);
-        const likely = flags.likelyFrontendReceiveOrParserIssue
-            ? 'Backend sent usable image data; inspect frontend receive/parser path.'
-            : (diagnostics.likelyCause || '');
+        const usableCount = Number(counts.usableReturnedImageRecords || 0);
+        const artifactCount = Number(counts.artifacts || 0);
+        const likely = (flags.likelyArtifactPersistenceIssue || (usableCount > 0 && artifactCount === 0))
+            ? 'Backend parsed usable image data, but no reusable artifact was persisted; inspect artifact persistence/image validation path.'
+            : flags.likelyFrontendReceiveOrParserIssue
+                ? 'Backend sent usable persisted image data; inspect frontend receive/parser path.'
+                : (diagnostics.likelyCause || '');
 
         return `${parts.join(' | ')}${likely ? ` | ${likely}` : ''}`;
     }
@@ -1404,12 +1408,20 @@ class Dashboard {
     renderTraceDetails(step = {}) {
         const details = this.normalizeTraceDetails(step.details);
         const diagnosticSummary = this.formatTraceDiagnosticSummary(details);
+        const imageDiagnostics = this.getTraceImageDiagnostics(details) || {};
         const fields = [
             ['Phase', details.phase],
+            ['Transport', details.transport],
+            ['Route', details.route],
+            ['Session', details.sessionId],
+            ['Client', details.clientSurface],
+            ['Requested', details.requestedCount],
             ['Reason', details.reason],
             ['Error', details.error],
             ['Response ID', details.responseId],
             ['Source tool', details.diagnosticSourceTool],
+            ['Diagnostic code', imageDiagnostics.code],
+            ['Diagnostic stage', imageDiagnostics.stage],
             ['Params', details.paramKeys],
             ['State changed', details.stateChanged],
         ].filter(([, value]) => value != null && value !== '' && !(Array.isArray(value) && value.length === 0));
