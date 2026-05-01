@@ -1020,6 +1020,7 @@ async function postImageGenerationToProvider(params, imageProvider) {
             const error = new Error(parseErrorMessage(errorBody, response.status));
             error.status = response.status;
             error.baseURL = baseURL;
+            error.endpoint = endpoint;
             error.provider = imageProvider.source;
             error.requestId = response.headers?.get?.('x-request-id')
                 || response.headers?.get?.('openai-request-id')
