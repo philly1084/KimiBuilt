@@ -507,20 +507,25 @@ function normalizePodcastArtifactIds(params = {}, context = {}) {
 
 function resolvePodcastScriptModelCandidates(params = {}, context = {}) {
   const requestedModel = String(params?.model || '').trim();
+  const actionModel = String(
+    context?.model
+    || context?.toolContext?.model
+    || context?.metadata?.model
+    || '',
+  ).trim();
   const defaultModel = String(settingsController?.settings?.models?.defaultModel || '').trim();
   const fallbackModel = String(settingsController?.settings?.models?.fallbackModel || '').trim();
   const configuredModel = String(config.openai?.model || '').trim();
-  const contextModel = String(context?.model || '').trim();
   const normalizedRequestedModel = requestedModel.toLowerCase();
-  const normalizedContextModel = contextModel.toLowerCase();
+  const normalizedContextModel = actionModel.toLowerCase();
   const shouldIgnoreRequestedModel = Boolean(
-    contextModel
+    actionModel
       && requestedModel
       && normalizedRequestedModel !== normalizedContextModel,
   );
 
   return uniqueOrdered([
-    contextModel,
+    actionModel,
     shouldIgnoreRequestedModel ? '' : requestedModel,
     defaultModel,
     configuredModel,
@@ -535,7 +540,7 @@ function resolvePodcastScriptModelCandidates(params = {}, context = {}) {
       return true;
     }
 
-    return requestedModel && !contextModel && normalized === normalizedRequestedModel;
+    return requestedModel && !actionModel && normalized === normalizedRequestedModel;
   }));
 }
 
