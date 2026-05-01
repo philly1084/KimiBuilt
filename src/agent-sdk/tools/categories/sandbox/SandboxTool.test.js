@@ -48,6 +48,29 @@ describe('SandboxTool runtime configuration', () => {
     expect(tool.normalizeProjectFiles({ language: 'tailwind', code: '<main></main>' })[0].path).toBe('index.html');
   });
 
+  test('applies bundle styling normalization before workspace preview writes', () => {
+    const tool = new SandboxTool();
+
+    const files = tool.normalizeProjectFiles({
+      language: 'vite',
+      files: [{
+        path: 'index.html',
+        content: '<!DOCTYPE html><html><head><title>Preview</title></head><body><main><h1>Preview</h1></main></body></html>',
+      }],
+    });
+
+    expect(files).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: 'index.html',
+        content: expect.stringContaining('rel="stylesheet"'),
+      }),
+      expect.objectContaining({
+        path: 'styles.css',
+        language: 'css',
+      }),
+    ]));
+  });
+
   test('drops unsafe dependency strings before building install commands', () => {
     const tool = new SandboxTool();
 

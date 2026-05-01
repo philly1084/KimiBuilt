@@ -8,7 +8,11 @@ const fs = require('fs').promises;
 const path = require('path');
 const os = require('os');
 const { artifactService } = require('../../../../artifacts/artifact-service');
-const { buildFrontendBundleArtifact, normalizeBundlePath } = require('../../../../frontend-bundles');
+const {
+  buildFrontendBundleArtifact,
+  ensureFrontendBundleStyling,
+  normalizeBundlePath,
+} = require('../../../../frontend-bundles');
 const { buildSandboxBrowserLibraryInstructions } = require('../../../../sandbox-browser-libraries');
 
 class SandboxTool extends ToolBase {
@@ -281,7 +285,17 @@ class SandboxTool extends ToolBase {
       });
     }
 
-    return normalizedFiles;
+    const normalizedLanguage = String(language || '').trim().toLowerCase();
+    if (!['html', 'vite', 'react', 'tailwind'].includes(normalizedLanguage)) {
+      return normalizedFiles;
+    }
+
+    return ensureFrontendBundleStyling({
+      entry: normalizeBundlePath(entry || '') || 'index.html',
+      frameworkTarget: normalizedLanguage === 'html' ? 'static' : normalizedLanguage,
+      routing: 'multipage',
+      files: normalizedFiles,
+    }).files;
   }
 
   async writeProjectFiles(workspacePath, files, tracker) {

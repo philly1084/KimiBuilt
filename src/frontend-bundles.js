@@ -749,6 +749,7 @@ module.exports = {
     buildFrontendFallbackMetadata,
     buildFrontendBundlePreviewUrl,
     createFrontendBundleArchive,
+    ensureFrontendBundleStyling,
     extractRequestedSitePageCount,
     getArtifactFrontendBundle,
     getFrontendBundleFile,

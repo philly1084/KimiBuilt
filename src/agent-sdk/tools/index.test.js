@@ -1227,6 +1227,74 @@ describe('ToolManager image tools', () => {
     }));
   });
 
+  test('builds a sandbox project for single html document generation when requested', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const documentService = {
+      recommendDocumentWorkflow: jest.fn(() => ({
+        inferredType: 'document',
+        recommendedFormat: 'html',
+        blueprint: { label: 'Sandbox Brief' },
+      })),
+      buildDocumentPlan: jest.fn(),
+      assemble: jest.fn(),
+      generatePresentation: jest.fn(),
+      aiGenerate: jest.fn(async () => ({
+        id: 'doc-html',
+        filename: 'brief.html',
+        mimeType: 'text/html',
+        content: '<!DOCTYPE html><html><head><title>Brief</title></head><body><main><h1>Brief</h1></main></body></html>',
+        contentBuffer: Buffer.from('<!DOCTYPE html><html><head><title>Brief</title></head><body><main><h1>Brief</h1></main></body></html>'),
+        metadata: { format: 'html' },
+      })),
+    };
+    const nestedToolManager = {
+      executeTool: jest.fn(async (id, params) => {
+        if (id !== 'code-sandbox') {
+          throw new Error(`Unexpected nested tool call: ${id}`);
+        }
+        return {
+          success: true,
+          data: {
+            mode: 'project',
+            files: params.files.map((file) => ({ path: file.path })),
+          },
+        };
+      }),
+    };
+
+    const result = await toolManager.executeTool('document-workflow', {
+      action: 'generate',
+      prompt: 'Create an HTML brief and build it in the sandbox.',
+      format: 'html',
+      buildMode: 'sandbox',
+    }, {
+      documentService,
+      toolManager: nestedToolManager,
+      model: 'gpt-5.4-mini',
+    });
+
+    expect(result.success).toBe(true);
+    expect(nestedToolManager.executeTool).toHaveBeenCalledWith(
+      'code-sandbox',
+      expect.objectContaining({
+        mode: 'project',
+        language: 'vite',
+        files: expect.arrayContaining([
+          expect.objectContaining({ path: 'index.html' }),
+          expect.objectContaining({
+            path: 'AGENT_SANDBOX_BUILD.md',
+            content: expect.stringContaining('You are in sandbox build mode'),
+          }),
+          expect.objectContaining({ path: 'brief.html' }),
+        ]),
+      }),
+      expect.any(Object),
+    );
+    expect(result.data.sandboxBuild).toEqual(expect.objectContaining({ mode: 'project' }));
+  });
+
   test('builds a sandboxed multi-format document suite with attached images', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();
@@ -1325,6 +1393,115 @@ describe('ToolManager image tools', () => {
       mode: 'project',
       artifact: expect.objectContaining({ id: 'sandbox-artifact-1' }),
     }));
+  });
+
+  test('carries frontend bundle files into sandboxed document suites', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const bundlePayload = {
+      content: '<!DOCTYPE html><html><head><title>Ops</title><link rel="stylesheet" href="./styles.css"></head><body><main><h1>Ops</h1></main></body></html>',
+      metadata: {
+        title: 'Ops Dashboard',
+        language: 'html',
+        frameworkTarget: 'static',
+        bundle: {
+          entry: 'index.html',
+          files: [
+            {
+              path: 'index.html',
+              language: 'html',
+              content: '<!DOCTYPE html><html><head><title>Ops</title><link rel="stylesheet" href="./styles.css"></head><body><main><h1>Ops</h1></main></body></html>',
+            },
+            {
+              path: 'styles.css',
+              language: 'css',
+              content: 'body { margin: 0; color: #111827; background: #ffffff; }',
+            },
+            {
+              path: 'app.js',
+              language: 'javascript',
+              content: 'document.documentElement.dataset.ready = "true";',
+            },
+          ],
+        },
+      },
+    };
+
+    artifactService.generateArtifact.mockResolvedValueOnce({
+      artifact: {
+        id: 'artifact-dashboard-bundle',
+        filename: 'ops-dashboard.zip',
+        mimeType: 'application/zip',
+        sizeBytes: 4096,
+        downloadUrl: '/api/artifacts/artifact-dashboard-bundle/download',
+        bundleDownloadUrl: '/api/artifacts/artifact-dashboard-bundle/bundle',
+        preview: {
+          type: 'site',
+          entry: 'index.html',
+          fileCount: 3,
+        },
+        metadata: {
+          siteBundle: {
+            entry: 'index.html',
+            fileCount: 3,
+            htmlPageCount: 1,
+          },
+        },
+      },
+      outputText: JSON.stringify(bundlePayload),
+    });
+
+    const documentService = {
+      recommendDocumentWorkflow: jest.fn(({ format }) => ({
+        inferredType: 'html-dashboard-kpi',
+        recommendedFormat: format || 'html',
+        blueprint: { label: 'Ops Dashboard' },
+      })),
+      buildDocumentPlan: jest.fn(),
+      assemble: jest.fn(),
+      generatePresentation: jest.fn(),
+      aiGenerate: jest.fn(),
+    };
+    const nestedToolManager = {
+      executeTool: jest.fn(async (id, params) => {
+        if (id !== 'code-sandbox') {
+          throw new Error(`Unexpected nested tool call: ${id}`);
+        }
+        return {
+          success: true,
+          data: {
+            mode: 'project',
+            files: params.files.map((file) => ({ path: file.path })),
+          },
+        };
+      }),
+    };
+
+    const result = await toolManager.executeTool('document-workflow', {
+      action: 'generate-suite',
+      prompt: 'Build a dashboard-style HTML for support operations.',
+      formats: ['html'],
+      buildMode: 'sandbox',
+    }, {
+      documentService,
+      toolManager: nestedToolManager,
+      sessionId: 'session-1',
+    });
+
+    expect(result.success).toBe(true);
+    expect(documentService.aiGenerate).not.toHaveBeenCalled();
+    expect(nestedToolManager.executeTool).toHaveBeenCalledWith(
+      'code-sandbox',
+      expect.objectContaining({
+        files: expect.arrayContaining([
+          expect.objectContaining({ path: 'styles.css' }),
+          expect.objectContaining({ path: 'app.js' }),
+          expect.objectContaining({ path: 'AGENT_SANDBOX_BUILD.md' }),
+        ]),
+      }),
+      expect.any(Object),
+    );
   });
 
   test('uses graph-diagram before building a visual document suite', async () => {

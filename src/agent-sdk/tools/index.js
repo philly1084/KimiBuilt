@@ -25,6 +25,12 @@ const { podcastService } = require('../../podcast/podcast-service');
 const { podcastVideoService } = require('../../video/podcast-video-service');
 const { config } = require('../../config');
 const { isDashboardRequest } = require('../../dashboard-template-catalog');
+const {
+  ensureFrontendBundleStyling,
+  normalizeBundlePath,
+  normalizeFrontendBundle,
+} = require('../../frontend-bundles');
+const { buildSandboxBrowserLibraryInstructions } = require('../../sandbox-browser-libraries');
 const { escapeHtml, normalizeWhitespace, stripHtml } = require('../../utils/text');
 const { mergeMemoryKeywords, normalizeMemoryKeywords } = require('../../memory/memory-keywords');
 const {
@@ -975,6 +981,7 @@ function buildArtifactWorkflowResult(result = null, { includeContent = false } =
   const textualContent = isTextualDocumentMimeType(artifact.mimeType, artifact.filename)
     ? String(result?.outputText || artifact.preview?.content || '')
     : '';
+  const rawGenerationText = String(result?.outputText || '').trim();
 
   return {
     id: artifact.id,
@@ -986,10 +993,18 @@ function buildArtifactWorkflowResult(result = null, { includeContent = false } =
     downloadUrl: artifact.downloadUrl || null,
     ...(artifact.previewUrl ? { previewUrl: artifact.previewUrl } : {}),
     ...(artifact.bundleDownloadUrl ? { bundleDownloadUrl: artifact.bundleDownloadUrl } : {}),
+    artifact,
+    artifacts: [artifact],
     ...(textualContent
       ? {
         contentPreview: textualContent.slice(0, 4000),
         ...(includeContent ? { content: textualContent } : {}),
+      }
+      : {}),
+    ...(!textualContent && rawGenerationText
+      ? {
+        contentPreview: rawGenerationText.slice(0, 4000),
+        ...(includeContent ? { content: rawGenerationText } : {}),
       }
       : {}),
   };
@@ -1004,6 +1019,93 @@ function buildSafeDocumentBundlePath(filename = '', fallback = 'document.html') 
     .slice(0, 96);
 
   return normalized || fallback;
+}
+
+function tryParseDocumentWorkflowJson(value = '') {
+  const source = String(value || '').trim();
+  if (!source || !/^[{[]/.test(source)) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(source);
+  } catch (_error) {
+    return null;
+  }
+}
+
+function resolveWorkflowFrontendBundle(document = null) {
+  const metadataBundle = document?.metadata?.bundle || document?.metadata?.siteBundle || null;
+  const parsed = tryParseDocumentWorkflowJson(document?.content || document?.contentPreview || '');
+  const parsedBundle = parsed?.metadata?.bundle || parsed?.metadata?.siteBundle || parsed?.bundle || parsed?.siteBundle || null;
+  const parsedContent = typeof parsed?.content === 'string' ? parsed.content : '';
+  const bundle = metadataBundle?.files ? metadataBundle : parsedBundle;
+  const normalized = normalizeFrontendBundle(bundle, parsedContent);
+
+  if (!normalized.files.length) {
+    return null;
+  }
+
+  return ensureFrontendBundleStyling(normalized);
+}
+
+function buildSandboxAgentHandoffPrompt(title = 'Document Suite') {
+  return [
+    '# Sandbox Build Handoff',
+    '',
+    `Project: ${title || 'Document Suite'}`,
+    '',
+    'You are in sandbox build mode. Work inside this project bundle and keep every runtime dependency static-safe for the sandbox preview.',
+    '',
+    'Build rules:',
+    '- Use relative links for local files such as ./styles.css and ./app.js.',
+    '- Keep the preview browser-runnable without npm install or a separate build step.',
+    '- Use explicit readable color tokens for page, panels, text, muted text, borders, links, controls, tables, captions, and overlays.',
+    '- Preserve the requested task, audience, and content hierarchy; choose the visual direction from the task instead of applying a fixed house style.',
+    '- Treat the included HTML, CSS, images, and data files as editable source for this sandbox.',
+    '- Run a browser/UI check before delivery when a browser is available.',
+    '',
+    'Available sandbox browser libraries:',
+    buildSandboxBrowserLibraryInstructions(),
+  ].join('\n');
+}
+
+function hasPreviewableSandboxOutput(files = []) {
+  return (Array.isArray(files) ? files : []).some((file) => {
+    const filePath = String(file?.path || '').trim().toLowerCase();
+    return filePath
+      && filePath !== 'index.html'
+      && filePath !== 'agent_sandbox_build.md'
+      && filePath !== 'agent-sandbox-build.md'
+      && filePath !== 'agent_sandbox_build'
+      && filePath !== 'agent-sandbox-build'
+      && filePath !== 'assets/images.json';
+  });
+}
+
+async function buildDocumentWorkflowSandbox({
+  context = {},
+  documents = [],
+  title = 'Document Suite',
+  prompt = '',
+  images = [],
+} = {}) {
+  const files = buildDocumentSuiteSandboxFiles(documents, title, images);
+  if (!hasPreviewableSandboxOutput(files)) {
+    return {
+      skipped: true,
+      reason: 'No previewable HTML outputs were available for sandbox project mode.',
+    };
+  }
+
+  return executeNestedTool(context, 'code-sandbox', {
+    mode: 'project',
+    language: 'vite',
+    projectName: buildSafeDocumentBundlePath(title || prompt || 'document-suite', 'document-suite')
+      .replace(/\.html$/i, ''),
+    entry: 'index.html',
+    files,
+  });
 }
 
 function normalizeSandboxImageAssets(images = []) {
@@ -1048,6 +1150,29 @@ function normalizeSandboxImageAssets(images = []) {
 }
 
 function buildDocumentSuiteSandboxFiles(documents = [], title = 'Document Suite', images = []) {
+  const usedPaths = new Set(['index.html', 'AGENT_SANDBOX_BUILD.md']);
+  const reservePath = (candidate = '', fallback = 'document.html') => {
+    const normalizedCandidate = normalizeBundlePath(candidate || fallback);
+    const normalized = (normalizedCandidate || fallback)
+      .split('/')
+      .map((segment) => buildSafeDocumentBundlePath(segment, 'file'))
+      .filter(Boolean)
+      .join('/') || buildSafeDocumentBundlePath(fallback, 'document.html');
+    if (!usedPaths.has(normalized)) {
+      usedPaths.add(normalized);
+      return normalized;
+    }
+
+    const extension = normalized.includes('.') ? normalized.replace(/^.*(\.[^.]+)$/i, '$1') : '';
+    const base = extension ? normalized.slice(0, -extension.length) : normalized;
+    let cursor = 2;
+    while (usedPaths.has(`${base}-${cursor}${extension}`)) {
+      cursor += 1;
+    }
+    const nextPath = `${base}-${cursor}${extension}`;
+    usedPaths.add(nextPath);
+    return nextPath;
+  };
   const htmlDocuments = (Array.isArray(documents) ? documents : [])
     .map((entry, index) => ({
       index,
@@ -1062,11 +1187,34 @@ function buildDocumentSuiteSandboxFiles(documents = [], title = 'Document Suite'
     ));
 
   const files = htmlDocuments.map((entry) => ({
-    path: buildSafeDocumentBundlePath(entry.document.filename, `document-${entry.index + 1}.html`),
+    path: reservePath(entry.document.filename, `document-${entry.index + 1}.html`),
     content: String(entry.document.content || entry.document.contentPreview || ''),
     language: 'html',
     purpose: `${entry.format || 'document'} output`,
   }));
+
+  (Array.isArray(documents) ? documents : []).forEach((entry, index) => {
+    const bundle = resolveWorkflowFrontendBundle(entry?.document || null);
+    if (!bundle) {
+      return;
+    }
+
+    bundle.files.forEach((file) => {
+      const normalizedPath = normalizeBundlePath(file.path || '');
+      if (!normalizedPath) {
+        return;
+      }
+
+      files.push({
+        path: reservePath(normalizedPath, `bundle-${index + 1}.html`),
+        content: file.content || '',
+        ...(file.contentBuffer ? { contentBuffer: file.contentBuffer } : {}),
+        ...(file.contentBase64 ? { contentBase64: file.contentBase64 } : {}),
+        language: file.language || null,
+        purpose: file.purpose || `${entry?.format || 'frontend'} sandbox bundle file ${index + 1}`,
+      });
+    });
+  });
 
   const imageAssets = normalizeSandboxImageAssets(images);
   const imageFiles = imageAssets
@@ -1127,6 +1275,12 @@ function buildDocumentSuiteSandboxFiles(documents = [], title = 'Document Suite'
       content: indexHtml,
       language: 'html',
       purpose: 'Suite index',
+    },
+    {
+      path: 'AGENT_SANDBOX_BUILD.md',
+      content: buildSandboxAgentHandoffPrompt(title),
+      language: 'markdown',
+      purpose: 'Agent-to-agent sandbox build instructions',
     },
     ...files,
     ...imageFiles,
@@ -2592,15 +2746,31 @@ class ToolManager {
                   disableQualityPass: params.disableQualityPass,
                 });
 
-                return {
-                  action,
-                  recommendation,
-                  sourceCount: sources.length,
-                  document: await buildPersistedDocumentWorkflowResult(document, context, {
-                    includeContent: params.includeContent === true,
-                  }),
-                };
-              }
+                  const workflowDocument = await buildPersistedDocumentWorkflowResult(document, context, {
+                    includeContent: params.includeContent === true || useSandboxBuild,
+                  });
+                  const sandboxBuild = useSandboxBuild && resolvedFormat === 'html'
+                    ? await buildDocumentWorkflowSandbox({
+                      context,
+                      documents: [{
+                        format: resolvedFormat,
+                        documentType: resolvedDocumentType,
+                        document: workflowDocument,
+                      }],
+                      title: String(params.title || structuredPresentation.title || recommendation.blueprint?.label || 'Document').trim() || 'Document',
+                      prompt: groundedPrompt,
+                      images: imageAssets,
+                    })
+                    : null;
+
+                  return {
+                    action,
+                    recommendation,
+                    sourceCount: sources.length,
+                    document: workflowDocument,
+                    ...(sandboxBuild ? { sandboxBuild } : {}),
+                  };
+                }
 
               if (resolvedFormat === 'html'
                 && isDashboardRequest(groundedPrompt)
@@ -2618,13 +2788,29 @@ class ToolManager {
                     reasoningEffort: params.reasoningEffort || context.reasoningEffort || undefined,
                   });
 
+                  const workflowDocument = buildArtifactWorkflowResult(generatedArtifact, {
+                    includeContent: params.includeContent === true || useSandboxBuild,
+                  });
+                  const sandboxBuild = useSandboxBuild
+                    ? await buildDocumentWorkflowSandbox({
+                      context,
+                      documents: [{
+                        format: 'html',
+                        documentType: resolvedDocumentType,
+                        document: workflowDocument,
+                      }],
+                      title: String(params.title || recommendation.blueprint?.label || 'Dashboard').trim() || 'Dashboard',
+                      prompt: groundedPrompt,
+                      images: imageAssets,
+                    })
+                    : null;
+
                   return {
                     action,
                     recommendation,
                     sourceCount: sources.length,
-                    document: buildArtifactWorkflowResult(generatedArtifact, {
-                      includeContent: params.includeContent === true,
-                    }),
+                    document: workflowDocument,
+                    ...(sandboxBuild ? { sandboxBuild } : {}),
                   };
                 } catch (error) {
                   console.warn(`[document-workflow] Dashboard HTML artifact generation failed, falling back to document service: ${error.message}`);
@@ -2650,13 +2836,29 @@ class ToolManager {
                 disableQualityPass: params.disableQualityPass,
               });
 
+              const workflowDocument = await buildPersistedDocumentWorkflowResult(document, context, {
+                includeContent: params.includeContent === true || useSandboxBuild,
+              });
+              const sandboxBuild = useSandboxBuild && resolvedFormat === 'html'
+                ? await buildDocumentWorkflowSandbox({
+                  context,
+                  documents: [{
+                    format: resolvedFormat,
+                    documentType: resolvedDocumentType,
+                    document: workflowDocument,
+                  }],
+                  title: String(params.title || recommendation.blueprint?.label || 'Document').trim() || 'Document',
+                  prompt: groundedPrompt,
+                  images: imageAssets,
+                })
+                : null;
+
               return {
                 action,
                 recommendation,
                 sourceCount: sources.length,
-                document: await buildPersistedDocumentWorkflowResult(document, context, {
-                  includeContent: params.includeContent === true,
-                }),
+                document: workflowDocument,
+                ...(sandboxBuild ? { sandboxBuild } : {}),
               };
             }
 
@@ -2765,27 +2967,13 @@ class ToolManager {
 
               let sandboxBuild = null;
               if (useSandboxBuild) {
-                const files = buildDocumentSuiteSandboxFiles(
+                sandboxBuild = await buildDocumentWorkflowSandbox({
+                  context,
                   documents,
-                  String(params.title || recommendation.blueprint?.label || 'Document Suite').trim() || 'Document Suite',
-                  [...rawImageAssets, ...graphImageAssets],
-                );
-                const hasPreviewableOutput = files.length > 1;
-                if (hasPreviewableOutput) {
-                  sandboxBuild = await executeNestedTool(context, 'code-sandbox', {
-                    mode: 'project',
-                    language: 'vite',
-                    projectName: buildSafeDocumentBundlePath(params.title || prompt || 'document-suite', 'document-suite')
-                      .replace(/\.html$/i, ''),
-                    entry: 'index.html',
-                    files,
-                  });
-                } else {
-                  sandboxBuild = {
-                    skipped: true,
-                    reason: 'No previewable HTML outputs were available for sandbox project mode.',
-                  };
-                }
+                  title: String(params.title || recommendation.blueprint?.label || 'Document Suite').trim() || 'Document Suite',
+                  prompt,
+                  images: [...rawImageAssets, ...graphImageAssets],
+                });
               }
 
               return {
