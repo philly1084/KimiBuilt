@@ -38,6 +38,7 @@ const {
 } = require('./utils/token-usage');
 const {
     buildImageGenerationDiagnostics,
+    formatImageDiagnosticsSummary,
 } = require('./image-generation-diagnostics');
 const {
     hasExplicitPodcastIntent,
@@ -3504,6 +3505,7 @@ function normalizeToolResultForModel(result, fallbackToolId) {
         duration: result?.duration || 0,
         data: sanitizeToolResultPayload(result?.data),
         error: result?.error || null,
+        diagnostics: sanitizeToolResultPayload(result?.diagnostics),
         sideEffects: sanitizeToolResultPayload(result?.sideEffects || {}),
         timestamp: result?.timestamp || new Date().toISOString(),
     };
@@ -4140,7 +4142,10 @@ function formatDirectToolResultMessage(toolEvent = {}) {
     }
 
     if (!result.success) {
-        return `${toolId} failed: ${result.error || 'Unknown error'}`;
+        const diagnosticSummary = toolId === 'image-generate'
+            ? formatImageDiagnosticsSummary(result.diagnostics)
+            : '';
+        return `${toolId} failed: ${result.error || 'Unknown error'}${diagnosticSummary ? `\nDiagnostics: ${diagnosticSummary}` : ''}`;
     }
 
     if (toolId === 'web-scrape') {

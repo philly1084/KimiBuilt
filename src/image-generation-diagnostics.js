@@ -231,6 +231,26 @@ function classifyImageDiagnostics({
   artifactCount = 0,
 } = {}) {
   if (error) {
+    const message = normalizeText(error.message || error).toLowerCase();
+    const causeMessage = normalizeText(error.cause?.message || '').toLowerCase();
+    const code = normalizeText(error.code || error.cause?.code || '').toLowerCase();
+    const isFetchFailure = message.includes('fetch failed')
+      || causeMessage.includes('fetch failed')
+      || ['enotfound', 'econnrefused', 'econnreset', 'etimedout', 'eai_again', 'und_err_connect_timeout'].includes(code);
+
+    if (isFetchFailure) {
+      return {
+        status: 'failed',
+        code: 'provider_fetch_failed',
+        stage: 'provider_request',
+        likelyCause: 'The backend image tool could not reach the configured image provider/router before any image response was returned.',
+        hints: [
+          'Check OPENAI_BASE_URL, OPENAI_MEDIA_BASE_URL, image provider routing, DNS, TLS, and network access from the backend host.',
+          'If this only happens through the agent tool path, inspect the backend runner/container network rather than the frontend parser.',
+        ],
+      };
+    }
+
     return {
       status: 'failed',
       code: 'provider_or_backend_error',
@@ -409,10 +429,21 @@ function buildImageGenerationDiagnostics({
     error: error
       ? {
         message: truncate(error.message || error, 240),
+        name: normalizeText(error.name || ''),
         status: error.status || error.statusCode || null,
         code: error.code || null,
         provider: error.provider || null,
         baseUrl: summarizeBaseUrl(error.baseURL || error.baseUrl || ''),
+        cause: error.cause
+          ? {
+            name: normalizeText(error.cause.name || ''),
+            message: truncate(error.cause.message || '', 240),
+            code: error.cause.code || null,
+            errno: error.cause.errno || null,
+            syscall: error.cause.syscall || null,
+            hostname: error.cause.hostname || null,
+          }
+          : null,
       }
       : null,
     hints: classification.hints,

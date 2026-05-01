@@ -4780,12 +4780,28 @@ class ToolManager {
           timestamp: new Date().toISOString(),
         };
       } catch (error) {
+        const diagnostics = id === 'image-generate'
+          ? {
+              imageGeneration: buildImageGenerationDiagnostics({
+                route: 'agent-tool:image-generate',
+                stage: 'tool_error',
+                source: 'agent-tool',
+                requestedCount: Math.min(Math.max(Number(normalizedParams?.n) || 1, 1), 5),
+                model: normalizedParams?.model || null,
+                size: normalizedParams?.size || 'auto',
+                quality: normalizedParams?.quality || 'auto',
+                prompt: normalizedParams?.prompt || '',
+                error,
+              }),
+            }
+          : null;
         result = {
           success: false,
           error: error.message,
           duration: Date.now() - startedAt,
           toolId: id,
           timestamp: new Date().toISOString(),
+          ...(diagnostics ? { diagnostics } : {}),
         };
       }
     } else {

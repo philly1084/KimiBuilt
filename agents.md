@@ -65,6 +65,18 @@ When an agent or program creates HTML, PDF-oriented HTML, DOCX, slide decks, das
 
 ---
 
+## Sandbox HTML Library Defaults
+
+When agents build previewable sandbox projects or generated HTML documents:
+
+- Prefer local sandbox browser library routes under `/api/sandbox-libraries/` before external CDNs when the runtime has the packages installed. Check `/api/sandbox-libraries/catalog.json` for availability.
+- Good chart and graph choices: Chart.js (`/api/sandbox-libraries/chartjs/chart.umd.js`), D3 (`/api/sandbox-libraries/d3/d3.min.js`), Mermaid (use the local route only when the catalog reports it available; otherwise use jsDelivr), Cytoscape (`/api/sandbox-libraries/cytoscape/cytoscape.min.js`), Plotly (`/api/sandbox-libraries/plotly/plotly.min.js`), ECharts (`/api/sandbox-libraries/echarts/echarts.min.js`), vis-network (`/api/sandbox-libraries/vis-network/vis-network.min.js`), Force Graph (`/api/sandbox-libraries/force-graph/force-graph.min.js`), and 3D Force Graph (`/api/sandbox-libraries/force-graph-3d/3d-force-graph.min.js`).
+- Good 3D/design choices: Three.js (`/api/sandbox-libraries/three/three.module.js` plus `/api/sandbox-libraries/three/addons/` import-map support), GSAP (`/api/sandbox-libraries/gsap/gsap.min.js`), Matter.js (`/api/sandbox-libraries/matter/matter.min.js`), p5.js (`/api/sandbox-libraries/p5/p5.min.js`), and Rough.js (`/api/sandbox-libraries/rough/rough.js`).
+- For Three.js, use an import map: `<script type="importmap">{"imports":{"three":"/api/sandbox-libraries/three/three.module.js","three/addons/":"/api/sandbox-libraries/three/addons/"}}</script>`, then import from `"three"` in a module script.
+- Keep sandbox previews static-safe and browser-runnable without a build step. If a local route is unavailable in development, fall back to the matching jsDelivr CDN package path.
+
+---
+
 ## Build and Test Commands
 
 ```bash

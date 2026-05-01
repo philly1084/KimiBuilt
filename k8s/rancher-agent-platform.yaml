@@ -93,15 +93,6 @@ data:
           'max_per_repo' => 3,
         },
       ],
-      cgroups: {
-        repositories: {
-          count: 2,
-        },
-        mountpoint: '/sys/fs/cgroup',
-        hierarchy_root: 'gitaly',
-        memory_bytes: 500000,
-        cpu_shares: 512,
-      },
     }
 ---
 apiVersion: v1

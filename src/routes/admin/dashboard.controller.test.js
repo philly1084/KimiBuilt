@@ -307,6 +307,54 @@ describe('DashboardController', () => {
     expect(failedModelStep.details.diagnostics).toEqual(diagnostics);
   });
 
+  test('surfaces image diagnostics from failed tool events in fallback trace steps', () => {
+    const controller = new DashboardController(null);
+    const task = controller.recordRuntimeTaskStart({
+      sessionId: 'session-image-tool-1',
+      input: 'Generate a dog image',
+      model: 'gpt-test',
+      mode: 'chat',
+      transport: 'http',
+      metadata: {},
+    });
+    const diagnostics = {
+      imageGeneration: {
+        code: 'provider_fetch_failed',
+        stage: 'tool_error',
+        flags: {
+          providerResponseReceived: false,
+        },
+      },
+    };
+
+    controller.recordRuntimeTaskComplete(task.id, {
+      responseId: 'resp-image-tool-1',
+      output: 'The image tool failed with: fetch failed.',
+      model: 'gpt-test',
+      duration: 600,
+      metadata: {
+        toolEvents: [{
+          toolCall: {
+            function: {
+              name: 'image-generate',
+              arguments: JSON.stringify({ prompt: 'dog' }),
+            },
+          },
+          result: {
+            success: false,
+            error: 'fetch failed',
+            diagnostics,
+          },
+          reason: 'Generate requested dog image',
+        }],
+      },
+    });
+
+    const trace = tracesController.addTrace.mock.calls[0][0];
+    const toolStep = trace.timeline.find((step) => step.type === 'tool_call');
+    expect(toolStep.details.diagnostics).toEqual(diagnostics);
+  });
+
   test('reports optional admin capabilities in health without treating them as core service failures', async () => {
     const controller = new DashboardController(null);
     controller.checkVectorStore = jest.fn(async () => 'connected');

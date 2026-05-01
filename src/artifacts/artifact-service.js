@@ -28,6 +28,7 @@ const {
     normalizeFrontendMetadata,
     sanitizeFrontendArtifactMetadata,
 } = require('../frontend-bundles');
+const { buildSandboxBrowserLibraryInstructions } = require('../sandbox-browser-libraries');
 const {
     extractResponseUsageMetadata,
     mergeUsageMetadata,
@@ -1466,6 +1467,7 @@ function buildFrontendBundleGenerationInstructions({
         'Create real multi-page navigation with relative URLs only. Never use leading-slash URLs such as `/about` or `/styles.css` because the preview runs from a nested artifact route.',
         'Every HTML page must feel complete and intentionally designed, not like filler placeholders around a shared shell.',
         'Include shared assets such as CSS, JSON fixtures, and JavaScript modules in `metadata.bundle.files` when they support the site.',
+        buildSandboxBrowserLibraryInstructions(),
         'If you choose `frameworkTarget: "vite"`, keep the preview dependency-free and browser-runnable with native ES modules so it still works without install or build steps. You may include `package.json` and `vite.config.js` as handoff files, but do not depend on npm packages for the sandbox preview.',
         'Use realistic example data by default, and when a live source is known, wire it behind a small fetch layer or a clearly swappable data adapter.',
         'Favor real interactions such as filters, tab switches, drill-down panels, carousels, sticky nav, or chart toggles over static decoration.',
@@ -1972,6 +1974,7 @@ class ArtifactService {
                 'Keep the result portable so it can be moved into a real frontend repository later.',
                 'Use realistic example data by default, and when a live source is known, wire it behind a small fetch layer or a clearly swappable data adapter.',
                 'Favor real interactions such as filters, tab switches, drill-down panels, carousels, sticky nav, or chart toggles over static decoration.',
+                buildSandboxBrowserLibraryInstructions(),
                 'For documentation or reference requests, prioritize information architecture, wayfinding, examples, and utilities over marketing polish.',
                 'For report or brief requests, prioritize headline findings, evidence panels, charts, and recommendations over conversion patterns.',
                 'For app or dashboard requests, build working surfaces with controls, tables, panels, and navigation rather than brochure sections.',
@@ -2023,6 +2026,7 @@ class ArtifactService {
                 normalizedFormat === 'html'
                     ? 'For HTML outputs, add web-document affordances such as sticky wayfinding, details/summary disclosures, source cards, tasteful CSS motion, and responsive controls when they improve comprehension.'
                     : 'For PDF outputs, keep the HTML print-safe while still visually composed.',
+                normalizedFormat === 'html' ? buildSandboxBrowserLibraryInstructions() : '',
             ].filter(Boolean).join('\n\n');
         }
         if (normalizedFormat === 'xml') {

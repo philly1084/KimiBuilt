@@ -174,6 +174,46 @@ describe('ToolManager image tools', () => {
     ]));
   });
 
+  test('returns image diagnostics when image generation fetch fails before provider response', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+    const imageTool = toolManager.getTool('image-generate');
+    const fetchError = new Error('fetch failed');
+    fetchError.cause = Object.assign(new Error('getaddrinfo ENOTFOUND image-router.local'), {
+      code: 'ENOTFOUND',
+      hostname: 'image-router.local',
+      syscall: 'getaddrinfo',
+    });
+    imageTool.backend.handler = jest.fn(async () => {
+      throw fetchError;
+    });
+
+    const result = await toolManager.executeTool('image-generate', {
+      prompt: 'A dog playing fetch',
+      model: 'gpt-image-2',
+      size: '1024x1024',
+    }, {
+      sessionId: 'session-image-fetch-failed',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('fetch failed');
+    expect(result.diagnostics.imageGeneration).toEqual(expect.objectContaining({
+      code: 'provider_fetch_failed',
+      stage: 'tool_error',
+      flags: expect.objectContaining({
+        providerResponseReceived: false,
+      }),
+      error: expect.objectContaining({
+        message: 'fetch failed',
+        cause: expect.objectContaining({
+          code: 'ENOTFOUND',
+          hostname: 'image-router.local',
+        }),
+      }),
+    }));
+  });
+
   test('registers and executes the curated design resource search tool', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();

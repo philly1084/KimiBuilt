@@ -94,6 +94,7 @@ class DashboardController {
       startTime,
       endTime,
       error: event?.result?.error || event?.error || null,
+      diagnostics: event?.result?.diagnostics || event?.diagnostics || null,
       paramKeys: Object.keys(rawArgs).sort(),
       dataPreview: typeof event?.result?.data === 'string'
         ? String(event.result.data).slice(0, 160)
@@ -167,6 +168,7 @@ class DashboardController {
           reason: event.reason,
           paramKeys: event.paramKeys,
           error: event.error,
+          diagnostics: event.diagnostics,
         },
       }));
     const fallbackModelStep = hasExplicitModelCall

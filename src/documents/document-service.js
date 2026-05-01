@@ -27,6 +27,7 @@ const {
   buildDocumentQualityPlan,
   summarizeDocumentQualityPlan,
 } = require('./document-quality');
+const { buildSandboxBrowserLibraryInstructions } = require('../sandbox-browser-libraries');
 const {
   getDocumentLayoutOptions,
   findDocumentLayout,
@@ -1334,8 +1335,9 @@ class DocumentService {
         ...common,
         renderPipeline: ['ai-document-generator', 'multi-agent-quality-pass', 'document-design-engine', 'html-renderer'],
         computeTools: ['graph-diagram', 'code-sandbox'],
-        visualCapabilities: ['background surface system', 'curated layout shells', 'section images', 'inline charts', 'Mermaid-ready HTML'],
+        visualCapabilities: ['background surface system', 'curated layout shells', 'section images', 'inline charts', 'Mermaid-ready HTML', 'local Chart.js/D3/Three.js/Plotly/ECharts sandbox libraries'],
         packageTargets: ['static-html', 'vite-preview-bundle'],
+        browserLibraries: buildSandboxBrowserLibraryInstructions(),
       },
       pdf: {
         ...common,

@@ -9,13 +9,14 @@ const path = require('path');
 const os = require('os');
 const { artifactService } = require('../../../../artifacts/artifact-service');
 const { buildFrontendBundleArtifact, normalizeBundlePath } = require('../../../../frontend-bundles');
+const { buildSandboxBrowserLibraryInstructions } = require('../../../../sandbox-browser-libraries');
 
 class SandboxTool extends ToolBase {
   constructor() {
     super({
       id: 'code-sandbox',
       name: 'Code Sandbox',
-      description: 'Execute code in isolated Docker containers with resource limits and optional package installs, or persist previewable frontend project files with browser libraries such as React, Tailwind, Chart.js, D3, Mermaid, and Cytoscape',
+      description: 'Execute code in isolated Docker containers with resource limits and optional package installs, or persist previewable frontend project files with local sandbox browser libraries such as Three.js, Chart.js, D3, Mermaid, Cytoscape, Plotly, ECharts, vis-network, GSAP, Matter.js, p5.js, and force-graph',
       category: 'sandbox',
       version: '1.0.0',
       backend: {
@@ -72,7 +73,7 @@ class SandboxTool extends ToolBase {
           dependencies: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Package dependencies to install before execution. Supported for javascript/npm and python/pip execution; frontend project previews should prefer CDN/browser imports so the saved site works immediately.'
+            description: 'Package dependencies to install before execution. Supported for javascript/npm and python/pip execution; frontend project previews should prefer static browser imports from /api/sandbox-libraries or CDN fallbacks so the saved site works immediately.'
           },
           environment: {
             type: 'object',
@@ -393,6 +394,7 @@ class SandboxTool extends ToolBase {
       `Project workspace created: ${workspacePath}`,
       previewUrl ? `Preview: ${previewUrl}` : '',
       artifact?.bundleDownloadUrl ? `Bundle: ${artifact.bundleDownloadUrl}` : '',
+      'Browser libraries: /api/sandbox-libraries/catalog.json',
       artifactError ? `Artifact persistence skipped: ${artifactError}` : ''
     ].filter(Boolean).join('\n');
 
@@ -692,6 +694,10 @@ class SandboxTool extends ToolBase {
         this.containers.delete(id);
       }
     }
+  }
+
+  getBrowserLibraryGuidance() {
+    return buildSandboxBrowserLibraryInstructions();
   }
 }
 

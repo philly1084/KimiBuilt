@@ -23,6 +23,7 @@ Training and Manuals:
 - Prefer `generate-suite` when the user asks for a package across PDF, XLSX, HTML, or markdown.
 - Pass `graphs`/`diagrams` when the deliverable needs charts, network diagrams, flowcharts, timelines, architecture visuals, or other custom document graphics; the workflow will call `graph-diagram` and feed the generated visual assets into the document suite.
 - Use `buildMode: "sandbox"` or `useSandbox: true` for previewable HTML/Vite document bundles rather than a bare template export.
+- For interactive HTML documents, dashboards, graph explorers, and 3D explainers, prefer local sandbox browser library routes from `/api/sandbox-libraries/` before external CDNs. Common choices include Three.js, Chart.js, D3, Mermaid, Cytoscape, Plotly, ECharts, vis-network, GSAP, Matter.js, p5.js, Rough.js, Force Graph, and 3D Force Graph.
 - Ask concise design questions when audience, delivery mode, duration, format mix, research depth, assessment style, or visual direction is unclear.
 - Ground subject-specific training in vector context and verified web research when the user asks for current facts, standards, procedures, or domain-specific instruction.
 

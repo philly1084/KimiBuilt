@@ -14,7 +14,7 @@ metadata:
 type: Opaque
 stringData:
   username: root
-  password: KbTestRoot-R7pQ2vM9zL4s!
+  password: z9Q!4vL#72pR@mX6
   email: admin@demoserver2.buzz
 ---
 apiVersion: v1
@@ -35,7 +35,7 @@ type: Opaque
 stringData:
   gitlab-registry-host: registry.gitlab.demoserver2.buzz
   gitlab-registry-username: root
-  gitlab-registry-password: KbTestRoot-R7pQ2vM9zL4s!
+  gitlab-registry-password: z9Q!4vL#72pR@mX6
   kimibuilt-build-events-url: https://kimibuilt.demoserver2.buzz/api/integrations/gitlab/build-events
   kimibuilt-build-events-secret: KbTestHook-X3nV8qT6cW2a!
   kimibuilt-build-events-insecure: "0"
@@ -88,15 +88,6 @@ data:
           'max_per_repo' => 3,
         },
       ],
-      cgroups: {
-        repositories: {
-          count: 2,
-        },
-        mountpoint: '/sys/fs/cgroup',
-        hierarchy_root: 'gitaly',
-        memory_bytes: 500000,
-        cpu_shares: 512,
-      },
     }
 ---
 apiVersion: v1

@@ -28,6 +28,7 @@ const { audioProcessingService } = require('./audio/audio-processing-service');
 const imagesRouter = require('./routes/images');
 const artifactsRouter = require('./routes/artifacts');
 const sandboxWorkspacesRouter = require('./routes/sandbox-workspaces');
+const sandboxLibrariesRouter = require('./routes/sandbox-libraries');
 const { artifactService } = require('./artifacts/artifact-service');
 const openaiCompatRouter = require('./routes/openai-compat');
 const documentsRouter = require('./routes/documents');
@@ -164,6 +165,7 @@ app.get('/login', (req, res) => {
 app.use('/api/auth', authRouter);
 app.use('/api/integrations/gitlab', gitlabIntegrationsRouter);
 app.use('/api/integrations/gitea', giteaIntegrationsRouter);
+app.use('/api/sandbox-libraries', sandboxLibrariesRouter);
 app.post('/api/runners/register', (req, res, next) => {
     try {
         remoteRunnerService.authenticateRequest(req);
