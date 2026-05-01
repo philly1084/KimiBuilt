@@ -1,5 +1,6 @@
 const { ReadableStream } = require('stream/web');
 const { CodexGatewayRunner, parseSseChunk } = require('./codex-gateway-runner');
+const { RemoteCliAgentRunner, mapRemoteCliConfig } = require('./remote-cli-agent-runner');
 const { renderPromptTemplate } = require('./prompt-renderer');
 
 function jsonResponse(body, status = 200) {
@@ -199,6 +200,81 @@ describe('CodexGatewayRunner', () => {
     await expect(promise).rejects.toThrow(/aborted/);
     expect(fetchImpl).toHaveBeenCalledWith(expect.stringContaining('/cancel'), expect.objectContaining({
       method: 'POST',
+    }));
+  });
+
+  test('RemoteCliAgentRunner renders the workflow prompt and dispatches through configured cluster defaults', async () => {
+    const runnerImpl = {
+      run: jest.fn(async () => ({
+        finalOutput: 'REMOTE_CLI_SESSION_ID=session-1\nGIT_COMMIT=abc1234',
+        targetId: 'prod',
+      })),
+    };
+    const runner = new RemoteCliAgentRunner({ runner: runnerImpl });
+    const events = [];
+
+    const result = await runner.run({
+      issue: {
+        id: '10',
+        identifier: 'agent-apps/site#4',
+        title: 'Deploy app',
+        description: 'Use GitLab and the cluster runner.',
+        state: 'Todo',
+        url: 'https://gitlab.demoserver2.buzz/agent-apps/site/-/issues/4',
+      },
+      workflow: {
+        prompt_template: 'Handle {{ issue.identifier }}',
+      },
+      serviceConfig: {
+        remote_cli_agent: {
+          target_id: 'prod',
+          cwd: '/srv/apps',
+          model: 'gpt-5.5',
+          max_turns: 40,
+          wait_ms: 45000,
+          admin_mode: true,
+          instructions: 'Prefer configured GitLab repositories.',
+        },
+      },
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(runnerImpl.run).toHaveBeenCalledWith(expect.objectContaining({
+      targetId: 'prod',
+      cwd: '/srv/apps',
+      model: 'gpt-5.5',
+      maxTurns: 40,
+      waitMs: 45000,
+      adminMode: true,
+      instructions: 'Prefer configured GitLab repositories.',
+      task: expect.stringContaining('Handle agent-apps/site#4'),
+    }));
+    expect(runnerImpl.run.mock.calls[0][0].task).toContain('Use GitLab and the cluster runner.');
+    expect(events.map((event) => event.event)).toEqual([
+      'remote_cli_agent_started',
+      'turn_completed',
+    ]);
+    expect(result).toEqual(expect.objectContaining({
+      ok: true,
+      runner: 'remote-cli-agent',
+    }));
+  });
+
+  test('mapRemoteCliConfig maps Symphony snake_case config to remote-cli-agent params', () => {
+    expect(mapRemoteCliConfig({
+      remote_cli_agent: {
+        target_id: 'prod',
+        cwd: '/srv/apps',
+        max_turns: 25,
+        wait_ms: 60000,
+        admin_mode: true,
+      },
+    })).toEqual(expect.objectContaining({
+      targetId: 'prod',
+      cwd: '/srv/apps',
+      maxTurns: 25,
+      waitMs: 60000,
+      adminMode: true,
     }));
   });
 });

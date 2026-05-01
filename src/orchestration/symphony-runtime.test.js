@@ -2,6 +2,7 @@ const path = require('path');
 const { WorkflowLoader } = require('./workflow-loader');
 const { WorkspaceManager } = require('./workspace-manager');
 const { LinearIssueTrackerClient, normalizeLinearIssue } = require('./linear-client');
+const { GitLabIssueTrackerClient, normalizeGitLabIssue } = require('./gitlab-client');
 const { SymphonyOrchestrator } = require('./symphony-orchestrator');
 const { buildServiceConfig, createRuntimeState } = require('./symphony');
 
@@ -201,6 +202,65 @@ Do the work
       state: 'In Progress',
       labels: ['api'],
       blocked_by: [],
+    }));
+  });
+
+  test('GitLabIssueTrackerClient fetches group issues and normalizes them for Symphony', async () => {
+    const fetchImpl = jest.fn(async (url, options) => {
+      expect(String(url)).toContain('/api/v4/groups/agent-apps/issues');
+      expect(String(url)).toContain('state=opened');
+      expect(String(url)).toContain('labels=symphony');
+      expect(options.headers['PRIVATE-TOKEN']).toBe('glpat_test');
+      return {
+        ok: true,
+        status: 200,
+        async text() {
+          return JSON.stringify([{
+            id: 10,
+            iid: 4,
+            title: 'Deploy app',
+            description: 'Use the cluster runner.',
+            state: 'opened',
+            labels: ['Symphony'],
+            references: { full: 'agent-apps/site#4' },
+            web_url: 'https://gitlab.demoserver2.buzz/agent-apps/site/-/issues/4',
+            created_at: '2026-01-01T00:00:00Z',
+            updated_at: '2026-01-02T00:00:00Z',
+          }]);
+        },
+      };
+    });
+    const client = new GitLabIssueTrackerClient({
+      endpoint: 'https://gitlab.demoserver2.buzz',
+      apiKey: 'glpat_test',
+      group: 'agent-apps',
+      labels: ['symphony'],
+      fetchImpl,
+    });
+
+    const issues = await client.fetchCandidateIssues(['Todo']);
+
+    expect(issues).toEqual([expect.objectContaining({
+      id: '10',
+      identifier: 'agent-apps/site#4',
+      title: 'Deploy app',
+      state: 'Todo',
+      labels: ['symphony'],
+      url: 'https://gitlab.demoserver2.buzz/agent-apps/site/-/issues/4',
+    })]);
+  });
+
+  test('normalizeGitLabIssue maps closed issues to terminal Symphony state', () => {
+    expect(normalizeGitLabIssue({
+      id: 11,
+      iid: 5,
+      title: 'Done',
+      state: 'closed',
+      labels: [],
+    }, { baseUrl: 'https://gitlab.example' })).toEqual(expect.objectContaining({
+      id: '11',
+      identifier: 'GL-5',
+      state: 'Done',
     }));
   });
 

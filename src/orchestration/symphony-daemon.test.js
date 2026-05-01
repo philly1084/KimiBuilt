@@ -34,12 +34,14 @@ describe('symphony daemon wiring', () => {
   test('parseArgs accepts workflow, gateway, key, status port, and once', () => {
     expect(parseArgs([
       '--workflow', 'ops/WORKFLOW.md',
+      '--runner', 'remote-cli-agent',
       '--gateway', 'http://gateway.local',
       '--api-key', 'front',
       '--port', '0',
       '--once',
     ])).toEqual(expect.objectContaining({
       workflowPath: 'ops/WORKFLOW.md',
+      runner: 'remote-cli-agent',
       codexAgentBaseUrl: 'http://gateway.local',
       codexAgentApiKey: 'front',
       statusPort: 0,
@@ -55,6 +57,7 @@ describe('symphony daemon wiring', () => {
         WORKFLOW_PATH: 'workflow/custom.md',
         KIMIBUILT_BACKEND_URL: 'http://backend.local',
         FRONTEND_API_KEY: 'front-key',
+        SYMPHONY_AGENT_RUNNER: 'remote-cli-agent',
         SYMPHONY_STATUS_PORT: '3131',
         SYMPHONY_RUN_ONCE: 'true',
       },
@@ -65,6 +68,7 @@ describe('symphony daemon wiring', () => {
       cwd: 'C:\\repo',
       codexAgentBaseUrl: 'http://backend.local',
       codexAgentApiKey: 'front-key',
+      runner: 'remote-cli-agent',
       statusPort: 3131,
       once: true,
     }));

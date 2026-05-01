@@ -11,6 +11,7 @@ const {
   accumulateAbsoluteTokenDeltas,
 } = require('./symphony');
 const { LinearIssueTrackerClient } = require('./linear-client');
+const { GitLabIssueTrackerClient } = require('./gitlab-client');
 const { WorkspaceManager } = require('./workspace-manager');
 
 function nowIso() {
@@ -96,11 +97,7 @@ class SymphonyOrchestrator extends EventEmitter {
     if (!this.trackerClient) {
       this.trackerClient = this.trackerClientFactory
         ? this.trackerClientFactory(config)
-        : new LinearIssueTrackerClient({
-          endpoint: config.tracker.endpoint,
-          apiKey: config.tracker.api_key,
-          projectSlug: config.tracker.project_slug,
-        });
+        : this.createTrackerClient(config);
     }
     if (!this.workspaceManager) {
       this.workspaceManager = this.workspaceManagerFactory
@@ -116,6 +113,24 @@ class SymphonyOrchestrator extends EventEmitter {
         hooks: config.hooks,
       });
     }
+  }
+
+  createTrackerClient(config = {}) {
+    if (config.tracker.kind === 'gitlab') {
+      return new GitLabIssueTrackerClient({
+        endpoint: config.tracker.endpoint,
+        apiKey: config.tracker.api_key,
+        group: config.tracker.group,
+        project: config.tracker.project,
+        labels: config.tracker.labels,
+      });
+    }
+
+    return new LinearIssueTrackerClient({
+      endpoint: config.tracker.endpoint,
+      apiKey: config.tracker.api_key,
+      projectSlug: config.tracker.project_slug,
+    });
   }
 
   scheduleNextTick(delayMs = null) {

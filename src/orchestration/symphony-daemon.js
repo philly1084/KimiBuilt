@@ -1,5 +1,6 @@
 const http = require('http');
 const { createCodexGatewayAgentRunner } = require('./codex-gateway-runner');
+const { createRemoteCliAgentRunner } = require('./remote-cli-agent-runner');
 const { SymphonyOrchestrator } = require('./symphony-orchestrator');
 const { WorkflowLoader } = require('./workflow-loader');
 
@@ -13,6 +14,7 @@ function parseArgs(argv = []) {
     codexAgentBaseUrl: '',
     codexAgentApiKey: '',
     statusPort: null,
+    runner: '',
     once: false,
     help: false,
   };
@@ -40,6 +42,11 @@ function parseArgs(argv = []) {
     }
     if (value === '--status-port' || value === '--port') {
       args.statusPort = Number(argv[index + 1]);
+      index += 1;
+      continue;
+    }
+    if (value === '--runner') {
+      args.runner = normalizeText(argv[index + 1]);
       index += 1;
       continue;
     }
@@ -76,6 +83,10 @@ function resolveDaemonConfig({
   const statusPort = Number.isFinite(args.statusPort)
     ? args.statusPort
     : Number(env.SYMPHONY_STATUS_PORT || env.SYMPHONY_PORT || NaN);
+  const runner = normalizeText(args.runner)
+    || normalizeText(env.SYMPHONY_AGENT_RUNNER)
+    || normalizeText(env.SYMPHONY_RUNNER)
+    || 'codex-gateway';
 
   return {
     help: args.help,
@@ -85,17 +96,19 @@ function resolveDaemonConfig({
     codexAgentBaseUrl,
     codexAgentApiKey,
     statusPort: Number.isFinite(statusPort) ? statusPort : null,
+    runner,
   };
 }
 
 function printUsage(stream = process.stderr) {
   stream.write([
-    'Usage: kimibuilt-symphony [--workflow WORKFLOW.md] [--codex-agent-base-url URL] [--codex-agent-api-key KEY] [--status-port PORT] [--once]',
+    'Usage: kimibuilt-symphony [--workflow WORKFLOW.md] [--runner codex-gateway|remote-cli-agent] [--codex-agent-base-url URL] [--codex-agent-api-key KEY] [--status-port PORT] [--once]',
     '',
     'Environment:',
     '  SYMPHONY_WORKFLOW_PATH        Path to WORKFLOW.md. Defaults to ./WORKFLOW.md.',
     '  CODEX_AGENT_BASE_URL          Gateway base URL exposing /api/codex-agent/*.',
     '  FRONTEND_API_KEY              Bearer key for the Codex frontend-agent API.',
+    '  SYMPHONY_AGENT_RUNNER         codex-gateway or remote-cli-agent. Defaults to codex-gateway.',
     '  SYMPHONY_STATUS_PORT          Optional local JSON status server port.',
     '',
   ].join('\n'));
@@ -135,12 +148,14 @@ function createSymphonyDaemon({
     env,
     logger,
   });
-  const runner = agentRunner || createCodexGatewayAgentRunner({
-    baseUrl: daemonConfig.codexAgentBaseUrl,
-    apiKey: daemonConfig.codexAgentApiKey,
-    fetchImpl,
-    logger,
-  });
+  const runner = agentRunner || (daemonConfig.runner === 'remote-cli-agent'
+    ? createRemoteCliAgentRunner()
+    : createCodexGatewayAgentRunner({
+      baseUrl: daemonConfig.codexAgentBaseUrl,
+      apiKey: daemonConfig.codexAgentApiKey,
+      fetchImpl,
+      logger,
+    }));
   const symphony = orchestrator || new SymphonyOrchestrator({
     workflowLoader: loader,
     agentRunner: runner,
@@ -165,7 +180,7 @@ async function startSymphonyDaemon(options = {}) {
 
   let statusServer = null;
   await daemon.orchestrator.start();
-  logger.log?.(`[Symphony] started workflow=${daemon.config.workflowPath} codex_agent_base_url=${daemon.config.codexAgentBaseUrl}`);
+  logger.log?.(`[Symphony] started workflow=${daemon.config.workflowPath} runner=${daemon.config.runner} codex_agent_base_url=${daemon.config.codexAgentBaseUrl}`);
 
   if (daemon.config.statusPort != null) {
     statusServer = createStatusServer(daemon.orchestrator);

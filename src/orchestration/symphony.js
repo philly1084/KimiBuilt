@@ -210,19 +210,28 @@ function buildServiceConfig(workflowConfig = {}, env = process.env) {
   const hooks = isPlainObject(workflowConfig.hooks) ? workflowConfig.hooks : {};
   const agent = isPlainObject(workflowConfig.agent) ? workflowConfig.agent : {};
   const codex = isPlainObject(workflowConfig.codex) ? workflowConfig.codex : {};
+  const remoteCliAgent = isPlainObject(workflowConfig.remote_cli_agent) ? workflowConfig.remote_cli_agent : {};
   const worker = isPlainObject(workflowConfig.worker) ? workflowConfig.worker : {};
   const server = isPlainObject(workflowConfig.server) ? workflowConfig.server : {};
 
   const trackerKind = normalizeText(tracker.kind);
-  const apiKey = resolveEnvToken(tracker.api_key || (trackerKind === 'linear' ? '$LINEAR_API_KEY' : ''), env);
+  const apiKey = resolveEnvToken(tracker.api_key || (trackerKind === 'linear' ? '$LINEAR_API_KEY' : trackerKind === 'gitlab' ? '$GITLAB_TOKEN' : ''), env);
   const workspaceRoot = expandPathLike(workspace.root || path.join(os.tmpdir(), 'symphony_workspaces'), env);
 
   return {
     tracker: {
       kind: trackerKind,
-      endpoint: normalizeText(tracker.endpoint) || (trackerKind === 'linear' ? 'https://api.linear.app/graphql' : ''),
+      endpoint: normalizeText(tracker.endpoint)
+        || (trackerKind === 'linear'
+          ? 'https://api.linear.app/graphql'
+          : trackerKind === 'gitlab'
+            ? normalizeText(env.GITLAB_BASE_URL)
+            : ''),
       api_key: normalizeText(apiKey),
       project_slug: normalizeText(tracker.project_slug),
+      group: normalizeText(tracker.group || tracker.org || env.GITLAB_GROUP || env.GITLAB_ORG),
+      project: normalizeText(tracker.project || tracker.repository || tracker.repo),
+      labels: normalizeStringList(tracker.labels, []),
       active_states: normalizeStringList(tracker.active_states, DEFAULT_ACTIVE_STATES),
       terminal_states: normalizeStringList(tracker.terminal_states, DEFAULT_TERMINAL_STATES),
     },
@@ -260,6 +269,16 @@ function buildServiceConfig(workflowConfig = {}, env = process.env) {
         ? 0
         : toPositiveInteger(codex.stall_timeout_ms, DEFAULT_CODEX_STALL_TIMEOUT_MS),
     },
+    remote_cli_agent: {
+      enabled: remoteCliAgent.enabled !== false,
+      target_id: normalizeText(remoteCliAgent.target_id || remoteCliAgent.targetId || env.REMOTE_CLI_DEFAULT_TARGET_ID || 'prod'),
+      cwd: normalizeText(remoteCliAgent.cwd || remoteCliAgent.working_directory || remoteCliAgent.workingDirectory || env.REMOTE_CLI_DEFAULT_CWD),
+      model: normalizeText(remoteCliAgent.model || env.REMOTE_CLI_AGENT_MODEL || env.OPENAI_MODEL),
+      max_turns: toPositiveInteger(remoteCliAgent.max_turns || remoteCliAgent.maxTurns || env.REMOTE_CLI_AGENT_MAX_TURNS, 20),
+      wait_ms: toPositiveInteger(remoteCliAgent.wait_ms || remoteCliAgent.waitMs, 30000),
+      admin_mode: remoteCliAgent.admin_mode === true || remoteCliAgent.adminMode === true,
+      instructions: normalizeText(remoteCliAgent.instructions),
+    },
     server: {
       port: Number.isFinite(Number(server.port)) ? Number(server.port) : null,
     },
@@ -271,7 +290,7 @@ function validateDispatchConfig(serviceConfig = {}) {
   const trackerKind = normalizeText(serviceConfig?.tracker?.kind);
   if (!trackerKind) {
     errors.push({ code: 'missing_tracker_kind', message: 'tracker.kind is required.' });
-  } else if (trackerKind !== 'linear') {
+  } else if (!['linear', 'gitlab'].includes(trackerKind)) {
     errors.push({ code: 'unsupported_tracker_kind', message: `Unsupported tracker.kind: ${trackerKind}` });
   }
   if (!normalizeText(serviceConfig?.tracker?.api_key)) {
@@ -279,6 +298,12 @@ function validateDispatchConfig(serviceConfig = {}) {
   }
   if (trackerKind === 'linear' && !normalizeText(serviceConfig?.tracker?.project_slug)) {
     errors.push({ code: 'missing_tracker_project_slug', message: 'tracker.project_slug is required for Linear dispatch.' });
+  }
+  if (trackerKind === 'gitlab' && !normalizeText(serviceConfig?.tracker?.endpoint)) {
+    errors.push({ code: 'missing_tracker_endpoint', message: 'tracker.endpoint or GITLAB_BASE_URL is required for GitLab dispatch.' });
+  }
+  if (trackerKind === 'gitlab' && !normalizeText(serviceConfig?.tracker?.group) && !normalizeText(serviceConfig?.tracker?.project)) {
+    errors.push({ code: 'missing_tracker_scope', message: 'tracker.group or tracker.project is required for GitLab dispatch.' });
   }
   if (!normalizeText(serviceConfig?.codex?.command)) {
     errors.push({ code: 'missing_codex_command', message: 'codex.command is required.' });

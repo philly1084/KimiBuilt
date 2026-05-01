@@ -72,6 +72,42 @@ Issue: {{ issue.identifier }}
     expect(config.codex.stall_timeout_ms).toBe(0);
   });
 
+  test('builds GitLab tracker and remote CLI agent service config from env defaults', () => {
+    const config = buildServiceConfig({
+      tracker: {
+        kind: 'gitlab',
+        api_key: '$GITLAB_TOKEN',
+        labels: ['symphony'],
+      },
+      remote_cli_agent: {
+        admin_mode: true,
+      },
+    }, {
+      GITLAB_TOKEN: 'glpat_test',
+      GITLAB_BASE_URL: 'https://gitlab.demoserver2.buzz',
+      GITLAB_GROUP: 'agent-apps',
+      REMOTE_CLI_DEFAULT_TARGET_ID: 'prod',
+      REMOTE_CLI_DEFAULT_CWD: '/srv/apps',
+      OPENAI_MODEL: 'gpt-5.5',
+    });
+
+    expect(config.tracker).toEqual(expect.objectContaining({
+      kind: 'gitlab',
+      endpoint: 'https://gitlab.demoserver2.buzz',
+      api_key: 'glpat_test',
+      group: 'agent-apps',
+      labels: ['symphony'],
+    }));
+    expect(config.remote_cli_agent).toEqual(expect.objectContaining({
+      enabled: true,
+      target_id: 'prod',
+      cwd: '/srv/apps',
+      model: 'gpt-5.5',
+      admin_mode: true,
+    }));
+    expect(validateDispatchConfig(config).ok).toBe(true);
+  });
+
   test('validates dispatch-critical config', () => {
     const missing = validateDispatchConfig(buildServiceConfig({ tracker: { kind: 'linear' } }, {}));
     expect(missing.ok).toBe(false);
@@ -90,6 +126,17 @@ Issue: {{ issue.identifier }}
       LINEAR_API_KEY: 'lin_test',
     }));
     expect(valid.ok).toBe(true);
+
+    const invalidGitLab = validateDispatchConfig(buildServiceConfig({
+      tracker: {
+        kind: 'gitlab',
+        api_key: 'glpat_test',
+      },
+    }, {}));
+    expect(invalidGitLab.errors.map((error) => error.code)).toEqual(expect.arrayContaining([
+      'missing_tracker_endpoint',
+      'missing_tracker_scope',
+    ]));
   });
 
   test('sanitizes workspace identifiers and keeps paths inside root', () => {
