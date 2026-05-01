@@ -73,6 +73,7 @@ const {
 } = require('./conversation-continuity');
 const { parseLenientJson } = require('./utils/lenient-json');
 const { stripNullCharacters } = require('./utils/text');
+const { formatImageDiagnosticsSummary } = require('./image-generation-diagnostics');
 const {
     DEFAULT_EXECUTION_PROFILE,
     NOTES_EXECUTION_PROFILE,
@@ -928,6 +929,19 @@ function hasIndexedAssetIntentText(text = '') {
         /\b(image|images|photo|photos|picture|pictures|document|documents|doc|docs|pdf|deck|slide deck|pptx|file|files|artifact|artifacts|attachment|attachments)\b[\s\S]{0,70}\b(from earlier|from before|from last time|we worked on|we were working with|you generated|you made|you created|uploaded|attached|saved)\b/i,
         /\b(find|search|locate|list|show|open|use|reuse|reference|pull up|look for)\b[\s\S]{0,40}\b(previous|earlier|uploaded|attached|generated|saved|artifact|image|document|pdf|file|attachment)\b/i,
         /\b(asset|assets)\b[\s\S]{0,20}\b(search|index|indexed|catalog|catalogue|manager)\b/i,
+    ].some((pattern) => pattern.test(normalized));
+}
+
+function hasPodcastSourceArtifactReferenceText(text = '') {
+    const normalized = String(text || '').trim();
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        /\b(previous|earlier|prior|last|latest|same|that|those|these|uploaded|attached|saved|worked on|working with)\b[\s\S]{0,60}\b(document|documents|doc|docs|pdf|docx|xlsx|csv|file|files|artifact|artifacts|attachment|attachments)\b/i,
+        /\b(document|documents|doc|docs|pdf|docx|xlsx|csv|file|files|artifact|artifacts|attachment|attachments)\b[\s\S]{0,80}\b(from earlier|from before|from last time|we worked on|we were working with|uploaded|attached|saved|selected)\b/i,
+        /\b(use|reuse|reference|pull from|base it on|make it from|turn)\b[\s\S]{0,60}\b(uploaded|attached|selected|previous|earlier)\b[\s\S]{0,60}\b(document|documents|doc|docs|pdf|docx|xlsx|csv|file|files|artifact|artifacts|attachment|attachments)\b/i,
     ].some((pattern) => pattern.test(normalized));
 }
 
@@ -6609,6 +6623,7 @@ class HarnessRunState {
 function appendModelResponseTrace(executionTrace = [], response = null, {
     startedAt = null,
     phase = 'final-response',
+    toolEvents = [],
 } = {}) {
     if (!Array.isArray(executionTrace) || !response) {
         return;
@@ -6616,6 +6631,7 @@ function appendModelResponseTrace(executionTrace = [], response = null, {
 
     const endedAt = new Date().toISOString();
     const usage = extractResponseUsageMetadata(response);
+    const imageDiagnostics = extractImageDiagnosticsFromToolEvents(toolEvents);
     executionTrace.push(createExecutionTraceEntry({
         type: 'model_call',
         name: `Model response (${response.model || 'unknown'})`,
@@ -6625,9 +6641,38 @@ function appendModelResponseTrace(executionTrace = [], response = null, {
             phase,
             responseId: response.id || null,
             outputPreview: truncateText(extractResponseText(response), 200),
+            ...(imageDiagnostics ? { diagnostics: imageDiagnostics.diagnostics } : {}),
+            ...(imageDiagnostics ? { diagnosticSummary: imageDiagnostics.summary } : {}),
+            ...(imageDiagnostics ? { diagnosticSourceTool: imageDiagnostics.toolId } : {}),
             ...(usage ? { usage } : {}),
         },
     }));
+}
+
+function extractImageDiagnosticsFromToolEvents(toolEvents = []) {
+    const events = Array.isArray(toolEvents) ? toolEvents : [];
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+        const event = events[index] || {};
+        const toolId = String(event?.toolCall?.function?.name || event?.result?.toolId || '').trim();
+        const imageGeneration = event?.result?.diagnostics?.imageGeneration
+            || event?.diagnostics?.imageGeneration
+            || event?.result?.data?.diagnostics?.imageGeneration
+            || null;
+
+        if (!imageGeneration) {
+            continue;
+        }
+
+        return {
+            toolId: toolId || 'image-generate',
+            diagnostics: {
+                imageGeneration,
+            },
+            summary: formatImageDiagnosticsSummary(imageGeneration),
+        };
+    }
+
+    return null;
 }
 
 function summarizeToolEventForUser(event = {}) {
@@ -7665,6 +7710,7 @@ class ConversationOrchestrator extends EventEmitter {
             appendModelResponseTrace(executionTrace, response, {
                 phase,
                 startedAt: startedAtOverride,
+                toolEvents,
             });
         };
         const publishProgress = ({
@@ -9989,6 +10035,15 @@ class ConversationOrchestrator extends EventEmitter {
         const podcastVideoOptions = podcastTopic && hasExplicitPodcastVideoIntent(objective)
             ? inferPodcastVideoOptions(objective)
             : {};
+        const selectedArtifactIds = Array.isArray(toolContext?.artifactIds)
+            ? toolContext.artifactIds.map((artifactId) => String(artifactId || '').trim()).filter(Boolean)
+            : [];
+        const podcastNeedsAssetLookup = Boolean(
+            podcastTopic
+            && hasPodcastSourceArtifactReferenceText(objective)
+            && selectedArtifactIds.length === 0
+            && !getLastSuccessfulToolEvent(toolEvents, 'asset-search')
+        );
         const shouldForcePlannerForMultiWorkload = toolPolicy.candidateToolIds.includes('agent-workload')
             && hasMultiWorkloadSchedulingIntent(objective);
         const hasActiveForegroundWorkflow = toolPolicy?.workflow?.status === 'active';
@@ -10083,7 +10138,7 @@ class ConversationOrchestrator extends EventEmitter {
             });
         }
 
-        if (podcastTopic) {
+        if (podcastTopic && !podcastNeedsAssetLookup) {
             return finalizeAction({
                 tool: 'podcast',
                 reason: podcastVideoOptions.includeVideo
@@ -10091,6 +10146,7 @@ class ConversationOrchestrator extends EventEmitter {
                     : 'Explicit podcast request should start with the podcast workflow tool.',
                 params: {
                     topic: podcastTopic,
+                    ...(selectedArtifactIds.length > 0 ? { artifactIds: selectedArtifactIds } : {}),
                     ...(podcastDurationMinutes ? { durationMinutes: podcastDurationMinutes } : {}),
                     ...podcastVideoOptions,
                 },
@@ -11380,6 +11436,7 @@ class ConversationOrchestrator extends EventEmitter {
             appendModelResponseTrace(executionTrace, response, {
                 phase: 'tool-synthesis-empty',
                 startedAt: synthesisStartedAt,
+                toolEvents,
             });
             response = await this.requestResponse({
                 input: buildCompactToolSynthesisPrompt({

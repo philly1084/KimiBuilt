@@ -8,6 +8,7 @@ class Embedder {
     constructor() {
         this.baseURL = config.ollama.baseURL;
         this.model = config.ollama.embedModel;
+        this.timeoutMs = Math.max(1000, Number(config.ollama.embedTimeoutMs) || 30000);
     }
 
     /**
@@ -16,14 +17,17 @@ class Embedder {
      * @returns {Promise<number[]>} 768-dim embedding vector
      */
     async embed(text) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
         const response = await fetch(`${this.baseURL}/api/embeddings`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
             body: JSON.stringify({
                 model: this.model,
                 prompt: text,
             }),
-        });
+        }).finally(() => clearTimeout(timeoutId));
 
         if (!response.ok) {
             const body = await response.text();

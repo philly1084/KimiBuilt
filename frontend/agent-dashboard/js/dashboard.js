@@ -1333,19 +1333,131 @@ class Dashboard {
     /**
      * Render trace timeline
      */
+    normalizeTraceDetails(details) {
+        if (details && typeof details === 'object') {
+            return details;
+        }
+
+        const text = String(details || '').trim();
+        if (!text) {
+            return {};
+        }
+
+        try {
+            const parsed = JSON.parse(text);
+            return parsed && typeof parsed === 'object' ? parsed : { message: text };
+        } catch (_error) {
+            return { message: text };
+        }
+    }
+
+    getTraceImageDiagnostics(details = {}) {
+        return details?.diagnostics?.imageGeneration
+            || details?.imageDiagnostics?.imageGeneration
+            || details?.imageGeneration
+            || null;
+    }
+
+    formatTraceDiagnosticSummary(details = {}) {
+        if (details.diagnosticSummary) {
+            return String(details.diagnosticSummary);
+        }
+
+        const diagnostics = this.getTraceImageDiagnostics(details);
+        if (!diagnostics) {
+            return '';
+        }
+
+        const counts = diagnostics.counts || {};
+        const flags = diagnostics.flags || {};
+        const provider = diagnostics.provider || {};
+        const parts = [
+            diagnostics.code || 'image_diagnostics',
+            diagnostics.stage ? `stage=${diagnostics.stage}` : '',
+            provider.source ? `provider=${provider.source}` : '',
+            provider.status ? `providerStatus=${provider.status}` : '',
+            `parsed=${Number(counts.parsedImageRecords || 0)}`,
+            `returned=${Number(counts.returnedImageRecords || 0)}`,
+            `usable=${Number(counts.usableReturnedImageRecords || 0)}`,
+            `artifacts=${Number(counts.artifacts || 0)}`,
+        ].filter(Boolean);
+        const likely = flags.likelyFrontendReceiveOrParserIssue
+            ? 'Backend sent usable image data; inspect frontend receive/parser path.'
+            : (diagnostics.likelyCause || '');
+
+        return `${parts.join(' | ')}${likely ? ` | ${likely}` : ''}`;
+    }
+
+    renderTraceValue(value) {
+        if (value == null || value === '') {
+            return '<span class="trace-muted">none</span>';
+        }
+        if (Array.isArray(value)) {
+            return this.escapeHtml(value.join(', '));
+        }
+        if (typeof value === 'object') {
+            return `<code>${this.escapeHtml(JSON.stringify(value))}</code>`;
+        }
+        return this.escapeHtml(String(value));
+    }
+
+    renderTraceDetails(step = {}) {
+        const details = this.normalizeTraceDetails(step.details);
+        const diagnosticSummary = this.formatTraceDiagnosticSummary(details);
+        const fields = [
+            ['Phase', details.phase],
+            ['Reason', details.reason],
+            ['Error', details.error],
+            ['Response ID', details.responseId],
+            ['Source tool', details.diagnosticSourceTool],
+            ['Params', details.paramKeys],
+            ['State changed', details.stateChanged],
+        ].filter(([, value]) => value != null && value !== '' && !(Array.isArray(value) && value.length === 0));
+        const raw = this.stringifyAdminPayload(details);
+
+        return `
+            ${diagnosticSummary ? `
+                <div class="trace-diagnostic">
+                    <span class="trace-diagnostic-label">Diagnostics</span>
+                    <span class="trace-diagnostic-text">${this.escapeHtml(diagnosticSummary)}</span>
+                </div>
+            ` : ''}
+            ${fields.length > 0 ? `
+                <div class="trace-detail-fields">
+                    ${fields.map(([label, value]) => `
+                        <div class="trace-detail-field">
+                            <span class="trace-detail-label">${this.escapeHtml(label)}</span>
+                            <span class="trace-detail-value">${this.renderTraceValue(value)}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : ''}
+            ${details.outputPreview ? `<div class="trace-output-preview">${this.escapeHtml(details.outputPreview)}</div>` : ''}
+            <details class="trace-raw-details">
+                <summary>Raw details</summary>
+                <pre>${this.escapeHtml(raw)}</pre>
+            </details>
+        `;
+    }
+
     renderTraceTimeline(trace) {
         const container = document.getElementById('traceTimeline');
         if (!container || !trace) return;
         
-        container.innerHTML = (trace.steps || []).map((step, index) => `
-            <div class="timeline-item ${step.status}">
-                <span class="timeline-time">+${step.offset}ms</span>
+        container.innerHTML = (trace.steps || []).map((step, index) => {
+            const status = ['success', 'error', 'info', 'running', 'completed'].includes(step.status)
+                ? step.status
+                : 'info';
+            return `
+            <div class="timeline-item ${status}">
+                <span class="timeline-time">+${this.escapeHtml(String(step.offset || 0))}ms</span>
                 <div class="timeline-content">
-                    <div class="timeline-title">${step.name}</div>
-                    <div class="timeline-details">${step.details}</div>
+                    <div class="timeline-title">${this.escapeHtml(step.name || `Step ${index + 1}`)}</div>
+                    <div class="timeline-details">${this.renderTraceDetails(step)}</div>
                 </div>
             </div>
-        `).join('');
+        `;
+        }).join('');
         
         const detailsContainer = document.getElementById('traceDetails');
         if (detailsContainer) {
@@ -2833,16 +2945,17 @@ class Dashboard {
     }
 
     normalizeTrace(trace = {}) {
-        const steps = Array.isArray(trace.steps)
+        const rawSteps = Array.isArray(trace.steps)
             ? trace.steps
             : Array.isArray(trace.timeline)
-                ? trace.timeline.map((step, index) => ({
-                    name: step.name || step.type || `Step ${index + 1}`,
-                    offset: step.duration || 0,
-                    status: step.status === 'completed' ? 'success' : (step.status || 'info'),
-                    details: typeof step.details === 'string' ? step.details : JSON.stringify(step.details || {}),
-                }))
+                ? trace.timeline
                 : [];
+        const steps = rawSteps.map((step, index) => ({
+            name: step.name || step.type || `Step ${index + 1}`,
+            offset: step.offset || step.duration || 0,
+            status: step.status === 'completed' ? 'success' : (step.status || 'info'),
+            details: this.normalizeTraceDetails(step.details),
+        }));
 
         return {
             ...trace,

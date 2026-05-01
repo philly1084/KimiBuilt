@@ -488,6 +488,10 @@ const config = {
     ollama: {
         baseURL: process.env.OLLAMA_BASE_URL || 'http://ollama:11434',
         embedModel: process.env.OLLAMA_EMBED_MODEL || 'nomic-embed-text:latest',
+        embedTimeoutMs: Math.max(
+            1000,
+            parseInt(process.env.OLLAMA_EMBED_TIMEOUT_MS, 10) || 30000,
+        ),
     },
 
     // Qdrant - Vector Store
@@ -515,6 +519,10 @@ const config = {
         browserPath: process.env.ARTIFACT_BROWSER_PATH || process.env.PUPPETEER_EXECUTABLE_PATH || '',
         browserArgs: process.env.ARTIFACT_BROWSER_ARGS || '',
         pdfTimeoutMs: parseInt(process.env.ARTIFACT_PDF_TIMEOUT_MS, 10) || 15000,
+        vectorizeMaxChunks: Math.max(
+            1,
+            parseInt(process.env.ARTIFACT_VECTORIZE_MAX_CHUNKS, 10) || 24,
+        ),
     },
 
     tts: {

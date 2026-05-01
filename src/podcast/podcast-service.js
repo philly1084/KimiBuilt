@@ -1,5 +1,6 @@
 const { config } = require('../config');
 const { createResponse } = require('../openai-client');
+const { artifactService } = require('../artifacts/artifact-service');
 const { ttsService } = require('../tts/tts-service');
 const { normalizeTextForSpeech } = require('../tts/speech-text');
 const { persistGeneratedAudio, updateGeneratedAudioSessionState } = require('../generated-audio-artifacts');
@@ -24,6 +25,7 @@ const DEFAULT_MINIMUM_VALID_TURNS = 4;
 const DEFAULT_PODCAST_SEARCH_TIMEOUT_MS = 45000;
 const MAX_PODCAST_SOURCE_SNIPPET_CHARS = 800;
 const MAX_PODCAST_SOURCE_EXCERPT_CHARS = 1400;
+const MAX_PODCAST_ARTIFACT_SOURCE_CHARS = 6000;
 const DEFAULT_PODCAST_SCRIPT_REQUEST_TIMEOUT_MS = Math.max(
   30000,
   Number(config?.podcast?.scriptRequestTimeoutMs) || (5 * 60 * 1000),
@@ -471,6 +473,38 @@ function uniqueUrls(items = []) {
   });
 }
 
+function normalizePodcastSourceDocuments(value = []) {
+  return (Array.isArray(value) ? value : [])
+    .map((source, index) => {
+      const content = sanitizePodcastText(source?.content || source?.text || source?.excerpt || '', { preserveNewlines: true });
+      const snippet = truncatePodcastSourceText(source?.snippet || source?.summary || content, MAX_PODCAST_SOURCE_SNIPPET_CHARS);
+      const title = sanitizePodcastText(source?.title || source?.filename || `Uploaded source ${index + 1}`);
+      const url = sanitizePodcastText(source?.url || source?.artifactId || `uploaded-source-${index + 1}`);
+      if (!content && !snippet) {
+        return null;
+      }
+
+      return {
+        title: title || `Uploaded source ${index + 1}`,
+        url: url.startsWith('artifact:') || url.startsWith('session-artifacts:') || /^https?:\/\//i.test(url)
+          ? url
+          : `artifact:${url}`,
+        snippet,
+        content,
+        excerptMaxChars: MAX_PODCAST_ARTIFACT_SOURCE_CHARS,
+      };
+    })
+    .filter(Boolean);
+}
+
+function normalizePodcastArtifactIds(params = {}, context = {}) {
+  return uniqueOrdered([
+    ...(Array.isArray(params.artifactIds) ? params.artifactIds : []),
+    ...(Array.isArray(params.sourceArtifactIds) ? params.sourceArtifactIds : []),
+    ...(Array.isArray(context.artifactIds) ? context.artifactIds : []),
+  ].map((artifactId) => String(artifactId || '').trim()).filter(Boolean));
+}
+
 function resolvePodcastScriptModelCandidates(params = {}, context = {}) {
   const requestedModel = String(params?.model || '').trim();
   const defaultModel = String(settingsController?.settings?.models?.defaultModel || '').trim();
@@ -861,7 +895,10 @@ function buildResearchPrompt({
     `Source ${index + 1}: ${sanitizePodcastText(source.title || 'Untitled source')}`,
     `URL: ${sanitizePodcastText(source.url)}`,
     source.snippet ? `Snippet: ${truncatePodcastSourceText(source.snippet, MAX_PODCAST_SOURCE_SNIPPET_CHARS)}` : '',
-    source.content ? `Excerpt: ${truncatePodcastSourceText(source.content, MAX_PODCAST_SOURCE_EXCERPT_CHARS)}` : '',
+    source.content ? `Excerpt: ${truncatePodcastSourceText(
+      source.content,
+      Math.max(MAX_PODCAST_SOURCE_EXCERPT_CHARS, Number(source.excerptMaxChars) || MAX_PODCAST_SOURCE_EXCERPT_CHARS),
+    )}` : '',
   ].filter(Boolean).join('\n')).join('\n\n');
 
   return `
@@ -915,6 +952,7 @@ class PodcastService {
     this.persistGeneratedAudio = dependencies.persistGeneratedAudio || persistGeneratedAudio;
     this.updateGeneratedAudioSessionState = dependencies.updateGeneratedAudioSessionState || updateGeneratedAudioSessionState;
     this.audioProcessingService = dependencies.audioProcessingService || audioProcessingService;
+    this.artifactService = dependencies.artifactService || artifactService;
   }
 
   async retryTransientOperation(operation, {
@@ -965,10 +1003,15 @@ class PodcastService {
     topic,
     searchDomains = [],
     sourceUrls = [],
+    sourceDocuments = [],
     maxSources = DEFAULT_MAX_SOURCES,
     concurrency = DEFAULT_PODCAST_RESEARCH_CONCURRENCY,
   }, context = {}) {
+    const documentSources = normalizePodcastSourceDocuments(sourceDocuments);
     if (typeof context?.executeTool !== 'function') {
+      if (documentSources.length > 0) {
+        return documentSources.slice(0, maxSources);
+      }
       throw new Error('Podcast research requires tool execution support.');
     }
 
@@ -997,7 +1040,7 @@ class PodcastService {
       }, context.toolContext);
     } catch (error) {
       searchError = error;
-      if (seededSources.length === 0) {
+      if (seededSources.length === 0 && documentSources.length === 0) {
         throw error;
       }
     }
@@ -1010,6 +1053,9 @@ class PodcastService {
     ]).slice(0, maxSources);
 
     if (candidates.length === 0) {
+      if (documentSources.length > 0) {
+        return documentSources.slice(0, maxSources);
+      }
       throw searchError || new Error('Podcast research did not return any usable sources.');
     }
 
@@ -1043,13 +1089,48 @@ class PodcastService {
     })).filter(Boolean);
 
     if (verifiedSources.length === 0) {
+      if (documentSources.length > 0) {
+        return documentSources.slice(0, maxSources);
+      }
       if (searchError) {
         throw searchError;
       }
       throw new Error('Podcast research did not return any usable sources.');
     }
 
-    return verifiedSources;
+    return uniqueUrls([
+      ...documentSources,
+      ...verifiedSources,
+    ]).slice(0, maxSources);
+  }
+
+  async resolveArtifactSourceDocuments(params = {}, context = {}) {
+    const sessionId = String(context?.sessionId || '').trim();
+    const artifactIds = normalizePodcastArtifactIds(params, context);
+    if (!sessionId || artifactIds.length === 0 || typeof this.artifactService?.buildPromptContext !== 'function') {
+      return [];
+    }
+
+    try {
+      const promptContext = await this.artifactService.buildPromptContext(sessionId, artifactIds);
+      const content = sanitizePodcastText(promptContext, { preserveNewlines: true });
+      if (!content) {
+        return [];
+      }
+
+      return [{
+        title: artifactIds.length === 1
+          ? 'Selected uploaded file'
+          : `Selected uploaded files (${artifactIds.length})`,
+        url: `session-artifacts://${artifactIds.join(',')}`,
+        snippet: 'User-selected uploaded files from this session.',
+        content,
+        excerptMaxChars: MAX_PODCAST_ARTIFACT_SOURCE_CHARS,
+      }];
+    } catch (error) {
+      console.warn(`[PodcastService] Failed to load selected artifact context: ${error.message}`);
+      return [];
+    }
   }
 
   async generateScript({
@@ -1371,10 +1452,15 @@ class PodcastService {
     const executeTool = typeof context?.toolManager?.executeTool === 'function'
       ? context.toolManager.executeTool.bind(context.toolManager)
       : null;
+    const sourceDocuments = [
+      ...normalizePodcastSourceDocuments(params.sourceDocuments || params.sources || []),
+      ...await this.resolveArtifactSourceDocuments(params, context),
+    ];
     const sources = await this.researchTopic({
       topic: normalizedTopic,
       searchDomains: params.searchDomains || params.domains || [],
       sourceUrls: params.sourceUrls || params.urls || [],
+      sourceDocuments,
       maxSources,
       concurrency: podcastResearchConcurrency,
     }, {

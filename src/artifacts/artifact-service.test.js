@@ -60,6 +60,7 @@ const { artifactService, extractResponseText, resolveCompletedResponseText } = r
 const { artifactStore } = require('./artifact-store');
 const { assetManager } = require('../asset-manager');
 const { postgres } = require('../postgres');
+const { vectorStore } = require('../memory/vector-store');
 const { renderArtifact } = require('./artifact-renderer');
 const { createResponse } = require('../openai-client');
 const { searchImages, isConfigured } = require('../unsplash-client');
@@ -120,6 +121,10 @@ describe('ArtifactService', () => {
         });
     });
 
+    afterEach(() => {
+        jest.useRealTimers();
+    });
+
     test('ensures a backing session row exists before storing an artifact', async () => {
         await artifactService.createStoredArtifact({
             sessionId: 'session-1',
@@ -178,6 +183,55 @@ describe('ArtifactService', () => {
             id: 'artifact-local-1',
             metadata: expect.objectContaining({ storage: 'local-fallback' }),
         }));
+    });
+
+    test('returns uploaded text artifacts before deferred vectorization runs', async () => {
+        jest.useFakeTimers();
+        vectorStore.store.mockResolvedValue('point-1');
+        const storedUpload = {
+            id: 'artifact-1',
+            sessionId: 'session-1',
+            filename: 'kubota.csv',
+            extension: 'csv',
+            mimeType: 'text/csv',
+            sizeBytes: 47,
+            extractedText: 'model,notes KX040,hydraulic service interval',
+            previewHtml: '<pre>model,notes KX040,hydraulic service interval</pre>',
+            metadata: {},
+            vectorizedAt: null,
+        };
+        artifactStore.create.mockResolvedValue(storedUpload);
+        artifactStore.updateProcessing.mockResolvedValue(storedUpload);
+
+        const artifact = await artifactService.uploadArtifact({
+            sessionId: 'session-1',
+            session: { id: 'session-1', metadata: { ownerId: 'phill' } },
+            mode: 'chat',
+            file: {
+                filename: 'kubota.csv',
+                mimeType: 'text/csv',
+                buffer: Buffer.from('model,notes\nKX040,hydraulic service interval'),
+            },
+        });
+
+        expect(artifact).toEqual(expect.objectContaining({
+            id: 'artifact-1',
+            filename: 'kubota.csv',
+            vectorized: false,
+        }));
+        expect(vectorStore.store).not.toHaveBeenCalled();
+
+        await jest.runOnlyPendingTimersAsync();
+
+        expect(vectorStore.store).toHaveBeenCalledWith(
+            'session-1',
+            expect.stringContaining('hydraulic service interval'),
+            expect.objectContaining({
+                sourceKind: 'file',
+                artifactId: 'artifact-1',
+                filename: 'kubota.csv',
+            }),
+        );
     });
 
     test('extractResponseText handles direct output_text and mixed content item types', () => {

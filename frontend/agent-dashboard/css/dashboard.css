@@ -2460,6 +2460,90 @@ select.form-control,
     color: var(--text-secondary);
 }
 
+.trace-diagnostic {
+    display: grid;
+    gap: var(--space-xs);
+    padding: var(--space-sm);
+    margin-bottom: var(--space-sm);
+    border: 1px solid var(--danger-light);
+    border-radius: var(--radius-sm);
+    background-color: rgba(239, 68, 68, 0.08);
+    color: var(--text-primary);
+}
+
+.trace-diagnostic-label {
+    font-size: var(--text-xs);
+    font-weight: 700;
+    color: var(--danger-light);
+    text-transform: uppercase;
+}
+
+.trace-diagnostic-text {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.trace-detail-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: var(--space-xs);
+    margin-bottom: var(--space-sm);
+}
+
+.trace-detail-field {
+    display: grid;
+    gap: 2px;
+    padding: var(--space-xs) var(--space-sm);
+    border: 1px solid var(--border-secondary);
+    border-radius: var(--radius-sm);
+    background-color: var(--bg-secondary);
+}
+
+.trace-detail-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+.trace-detail-value {
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+
+.trace-muted {
+    color: var(--text-muted);
+}
+
+.trace-output-preview {
+    margin-bottom: var(--space-sm);
+    padding: var(--space-sm);
+    border: 1px solid var(--border-secondary);
+    border-radius: var(--radius-sm);
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.trace-raw-details summary {
+    cursor: pointer;
+    color: var(--text-muted);
+}
+
+.trace-raw-details pre {
+    margin-top: var(--space-xs);
+    padding: var(--space-sm);
+    border: 1px solid var(--border-secondary);
+    border-radius: var(--radius-sm);
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
 .trace-details {
     padding: var(--space-lg);
     border-top: 1px solid var(--border-secondary);

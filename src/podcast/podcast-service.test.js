@@ -68,10 +68,17 @@ jest.mock('../audio/audio-processing-service', () => ({
   },
 }));
 
+jest.mock('../artifacts/artifact-service', () => ({
+  artifactService: {
+    buildPromptContext: jest.fn(),
+  },
+}));
+
 const { createResponse } = require('../openai-client');
 const { ttsService } = require('../tts/tts-service');
 const { persistGeneratedAudio, updateGeneratedAudioSessionState } = require('../generated-audio-artifacts');
 const { audioProcessingService } = require('../audio/audio-processing-service');
+const { artifactService } = require('../artifacts/artifact-service');
 const settingsController = require('../routes/admin/settings.controller');
 const { parseWavBuffer, writeWavBuffer } = require('../audio/wav-utils');
 const { PodcastService } = require('./podcast-service');
@@ -120,6 +127,7 @@ describe('PodcastService', () => {
       contentType: 'audio/wav',
       text: 'segment',
     });
+    artifactService.buildPromptContext.mockResolvedValue('');
     persistGeneratedAudio.mockResolvedValue({
       artifact: { id: 'artifact-podcast-1', filename: 'battery-breakdown.wav' },
       artifactIds: ['artifact-podcast-1'],
@@ -436,6 +444,51 @@ describe('PodcastService', () => {
     expect(result.sources).toEqual(expect.arrayContaining([
       expect.objectContaining({
         url: 'https://example.com/seed-source',
+      }),
+    ]));
+  });
+
+  test('uses selected uploaded artifacts as podcast source material', async () => {
+    artifactService.buildPromptContext.mockResolvedValue([
+      '[Session artifacts]',
+      '- kubota-loader.pdf (pdf, selected, 12000 bytes)',
+      '',
+      '[Selected artifact details]',
+      'File: kubota-loader.pdf',
+      'Type: pdf',
+      'Summary:',
+      'Kubota loader maintenance intervals and hydraulic safety checks.',
+    ].join('\n'));
+    const service = new PodcastService();
+    const executeTool = jest.fn(async (toolId) => {
+      if (toolId === 'web-search') {
+        return {
+          success: false,
+          error: 'Search is temporarily unavailable.',
+          errorCode: 'web_search_unavailable',
+          statusCode: 400,
+        };
+      }
+
+      throw new Error(`Unexpected tool: ${toolId}`);
+    });
+
+    const result = await service.createPodcast({
+      topic: 'Kubota loader maintenance',
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+      artifactIds: ['artifact-kubota-1'],
+      toolManager: { executeTool },
+    });
+
+    expect(artifactService.buildPromptContext).toHaveBeenCalledWith('session-1', ['artifact-kubota-1']);
+    expect(executeTool).toHaveBeenCalledWith('web-search', expect.any(Object), expect.any(Object));
+    expect(executeTool).not.toHaveBeenCalledWith('web-fetch', expect.any(Object), expect.any(Object));
+    expect(createResponse.mock.calls[0][0].input).toContain('Kubota loader maintenance intervals');
+    expect(result.sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        url: 'session-artifacts://artifact-kubota-1',
       }),
     ]));
   });

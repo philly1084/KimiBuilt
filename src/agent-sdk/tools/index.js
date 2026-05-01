@@ -3704,6 +3704,30 @@ class ToolManager {
             },
             cycleHostVoices: { type: 'boolean' },
             allowVoiceFallback: { type: 'boolean' },
+            artifactIds: {
+              type: 'array',
+              items: { type: 'string' },
+            },
+            sourceArtifactIds: {
+              type: 'array',
+              items: { type: 'string' },
+            },
+            sourceDocuments: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  title: { type: 'string' },
+                  filename: { type: 'string' },
+                  artifactId: { type: 'string' },
+                  url: { type: 'string' },
+                  summary: { type: 'string' },
+                  snippet: { type: 'string' },
+                  content: { type: 'string' },
+                  text: { type: 'string' },
+                },
+              },
+            },
             sourceUrls: {
               type: 'array',
               items: { type: 'string' },

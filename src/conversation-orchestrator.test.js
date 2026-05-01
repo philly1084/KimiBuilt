@@ -4915,6 +4915,77 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
+    test('passes selected artifact ids into direct podcast actions', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['podcast', 'web-search', 'asset-search'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Make a podcast about these uploaded Kubota files.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            toolPolicy,
+            toolContext: {
+                artifactIds: ['artifact-kubota-1'],
+            },
+        });
+
+        expect(directAction).toEqual(expect.objectContaining({
+            tool: 'podcast',
+            params: expect.objectContaining({
+                topic: 'these uploaded Kubota files',
+                artifactIds: ['artifact-kubota-1'],
+            }),
+        }));
+    });
+
+    test('lets asset search run before podcast when uploaded files are referenced but none are selected', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['podcast', 'web-search', 'asset-search'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Make a podcast about the uploaded Kubota files.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            toolPolicy,
+            toolContext: {
+                artifactIds: [],
+            },
+        });
+
+        expect(toolPolicy.candidateToolIds).toEqual(expect.arrayContaining(['podcast', 'asset-search']));
+        expect(directAction).toBeNull();
+    });
+
     test('turns video podcast requests into podcast workflow calls with MP4 rendering enabled', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {
@@ -6175,6 +6246,87 @@ describe('ConversationOrchestrator', () => {
                 n: 3,
             },
         });
+    });
+
+    test('attaches image tool diagnostics to explicit model response trace entries', async () => {
+        const diagnostics = {
+            imageGeneration: {
+                code: 'provider_response_not_parsable',
+                status: 'failed',
+                stage: 'provider_response_parse',
+                likelyCause: 'Provider returned no parseable image data',
+                provider: {
+                    source: 'responses',
+                    status: 200,
+                },
+                flags: {
+                    providerResponseReceived: true,
+                    likelyBackendParserIssue: true,
+                },
+                counts: {
+                    parsedImageRecords: 0,
+                    returnedImageRecords: 0,
+                    usableReturnedImageRecords: 0,
+                    artifacts: 0,
+                },
+            },
+        };
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(
+                buildResponse('I tried to generate the dog image, but the image tool failed.', 'resp_image_diag'),
+            ),
+            complete: jest.fn(),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                toolId === 'image-generate'
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn().mockResolvedValue({
+                success: false,
+                toolId: 'image-generate',
+                error: 'Provider returned no parseable image data',
+                diagnostics,
+            }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-image-diag', metadata: {} }),
+            getOrCreate: jest.fn().mockResolvedValue({ id: 'session-image-diag', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'generate a dog image',
+            sessionId: 'session-image-diag',
+            stream: false,
+        });
+
+        const modelTrace = result.response.metadata.executionTrace.find((entry) => (
+            entry.type === 'model_call' && entry.details?.phase === 'tool-synthesis'
+        ));
+        expect(modelTrace).toMatchObject({
+            details: {
+                diagnosticSourceTool: 'image-generate',
+                diagnostics,
+                diagnosticSummary: expect.stringContaining('provider_response_not_parsable'),
+            },
+        });
+        expect(modelTrace.details.diagnosticSummary).toContain('parsed=0');
+        expect(modelTrace.details.diagnosticSummary).toContain('Provider returned no parseable image data');
     });
 
     test('notes synthesis instructions keep repaired answers on the page instead of drifting into workspace writes', () => {

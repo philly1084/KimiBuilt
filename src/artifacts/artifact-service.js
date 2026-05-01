@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
+const { config } = require('../config');
 const { artifactStore } = require('./artifact-store');
 const { extractArtifact } = require('./artifact-extractor');
 const { renderArtifact } = require('./artifact-renderer');
@@ -1587,8 +1588,12 @@ class ArtifactService {
         };
     }
 
-    async vectorizeArtifactText(artifact, extractedText) {
-        const chunks = chunkText(extractedText);
+    async vectorizeArtifactText(artifact, extractedText, options = {}) {
+        const maxChunks = Math.max(
+            1,
+            Number(options.maxChunks || config.artifacts?.vectorizeMaxChunks) || 24,
+        );
+        const chunks = chunkText(extractedText).slice(0, maxChunks);
         if (chunks.length === 0) {
             return null;
         }
@@ -1606,6 +1611,31 @@ class ArtifactService {
         return new Date().toISOString();
     }
 
+    deferArtifactVectorization(artifact, extractedText, { previewHtml = '', metadata = {}, session = null } = {}) {
+        if (!artifact?.id || !extractedText) {
+            return;
+        }
+
+        setImmediate(async () => {
+            try {
+                const vectorizedAt = await this.vectorizeArtifactText(artifact, extractedText);
+                const updatedArtifact = await artifactStore.updateProcessing(artifact.id, {
+                    extractedText,
+                    previewHtml,
+                    metadata,
+                    vectorizedAt,
+                });
+                try {
+                    await assetManager.upsertArtifact(updatedArtifact || artifact, { session });
+                } catch (error) {
+                    console.warn('[Artifacts] Failed to refresh deferred artifact index:', error.message);
+                }
+            } catch (error) {
+                console.warn(`[Artifacts] Deferred artifact vectorization skipped for ${artifact.filename || artifact.id}: ${error.message}`);
+            }
+        });
+    }
+
     async createStoredArtifact({
         sessionId,
         session = null,
@@ -1620,6 +1650,7 @@ class ArtifactService {
         previewHtml = '',
         metadata = {},
         vectorize = true,
+        deferVectorization = false,
     }) {
         if (!this.isEnabled()) {
             return persistGeneratedArtifactLocally({
@@ -1659,7 +1690,7 @@ class ArtifactService {
             });
 
             let vectorizedAt = null;
-            if (vectorize && extractedText) {
+            if (vectorize && extractedText && !deferVectorization) {
                 vectorizedAt = await this.vectorizeArtifactText(artifact, extractedText);
             }
 
@@ -1674,6 +1705,15 @@ class ArtifactService {
             } catch (error) {
                 console.warn('[Artifacts] Failed to index stored artifact:', error.message);
             }
+
+            if (vectorize && extractedText && deferVectorization) {
+                this.deferArtifactVectorization(storedArtifact, extractedText, {
+                    previewHtml,
+                    metadata,
+                    session,
+                });
+            }
+
             return storedArtifact;
         } catch (error) {
             if (error?.statusCode !== 503 && postgres.enabled) {
@@ -1751,6 +1791,7 @@ class ArtifactService {
                 originalFilename: file.filename,
             },
             vectorize: extraction.vectorizable,
+            deferVectorization: true,
         });
 
         return this.serializeArtifact(artifact);
