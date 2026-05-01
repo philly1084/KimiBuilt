@@ -214,6 +214,35 @@ describe('ToolManager image tools', () => {
     }));
   });
 
+  test('returns image diagnostics when provider reports no parseable image data', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+    const imageTool = toolManager.getTool('image-generate');
+    imageTool.backend.handler = jest.fn(async () => {
+      throw new Error('Provider returned no parseable image data');
+    });
+
+    const result = await toolManager.executeTool('image-generate', {
+      prompt: 'A dog versus a cat',
+      model: 'gpt-image-2',
+    }, {
+      sessionId: 'session-image-not-parseable',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.diagnostics.imageGeneration).toEqual(expect.objectContaining({
+      code: 'provider_response_not_parsable',
+      stage: 'tool_error',
+      flags: expect.objectContaining({
+        providerResponseReceived: true,
+        likelyBackendParserIssue: true,
+      }),
+      error: expect.objectContaining({
+        message: 'Provider returned no parseable image data',
+      }),
+    }));
+  });
+
   test('registers and executes the curated design resource search tool', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();

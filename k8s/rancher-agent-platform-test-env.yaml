@@ -179,7 +179,7 @@ spec:
               name: ssh
           readinessProbe:
             httpGet:
-              path: /-/readiness
+              path: /users/sign_in
               port: http
             initialDelaySeconds: 240
             periodSeconds: 20

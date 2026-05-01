@@ -251,6 +251,22 @@ function classifyImageDiagnostics({
       };
     }
 
+    if (/\bno\s+(?:parseable|parsable)\s+image\s+data\b/.test(message)
+      || /\bno\s+(?:parseable|parsable)\s+image\s+payload\b/.test(message)
+      || /\bprovider\s+returned\s+no\s+(?:parseable|parsable)\s+image\b/.test(message)) {
+      return {
+        status: 'failed',
+        code: 'provider_response_not_parsable',
+        stage: 'provider_response_parse',
+        likelyCause: 'The image provider/router returned a response, but no recognizable image URL, file reference, inline_data, or base64 payload was found.',
+        hints: [
+          'Inspect the image router/provider response schema and map any custom image fields into the backend image normalizer.',
+          'If the provider returned a refusal, moderation result, or text-only message, surface that as the image failure reason instead of an empty image result.',
+          'This points at provider/router response shape or backend parsing, not the frontend receive path.',
+        ],
+      };
+    }
+
     return {
       status: 'failed',
       code: 'provider_or_backend_error',
@@ -359,7 +375,9 @@ function buildImageGenerationDiagnostics({
   const parsedImageRecords = Array.isArray(parsedImages) ? parsedImages : [];
   const returnedImageRecords = Array.isArray(returnedImages) ? returnedImages : parsedImageRecords;
   const artifactRecords = Array.isArray(artifacts) ? artifacts : [];
-  const providerResponseReceived = Boolean(response || providerMetadata || upstreamDiagnostics);
+  const noParseableImageDataError = error
+    && /\bno\s+(?:parseable|parsable)\s+image\s+(?:data|payload)\b/i.test(String(error.message || error));
+  const providerResponseReceived = Boolean(response || providerMetadata || upstreamDiagnostics || noParseableImageDataError);
   const parsedImageCount = parsedImageRecords.length;
   const returnedImageCount = returnedImageRecords.length;
   const usableImageCount = countUsableImageRecords(returnedImageRecords);
