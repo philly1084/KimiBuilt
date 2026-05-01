@@ -287,11 +287,21 @@ router.post('/generate', normalizePodcastGenerateRequest, validate(generateSchem
       ...(videoData ? { video: videoData.video, videoArtifact: videoData.artifact, storyboard: videoData.storyboard } : {}),
     });
   } catch (error) {
+    console.error('[PodcastRoute] Podcast generation failed', {
+      stage: error?.podcastStage || error?.podcastDiagnostics?.stage || 'route',
+      code: error?.code || null,
+      statusCode: error?.statusCode || error?.status || null,
+      message: error?.message || String(error),
+      sessionId: req.body?.sessionId || null,
+      topic: req.body?.topic || req.body?.prompt || req.body?.subject || '',
+    });
     if (error?.statusCode) {
       return res.status(error.statusCode).json({
         error: {
           type: error.code || 'podcast_error',
           message: error.message,
+          ...(error.podcastStage ? { stage: error.podcastStage } : {}),
+          ...(error.podcastDiagnostics ? { diagnostics: error.podcastDiagnostics } : {}),
         },
       });
     }
@@ -320,11 +330,21 @@ router.post('/video/storyboard', async (req, res, next) => {
       ...storyboard,
     });
   } catch (error) {
+    console.error('[PodcastRoute] Podcast storyboard failed', {
+      stage: error?.podcastStage || error?.podcastDiagnostics?.stage || 'storyboard',
+      code: error?.code || null,
+      statusCode: error?.statusCode || error?.status || null,
+      message: error?.message || String(error),
+      sessionId: req.body?.sessionId || null,
+      topic: req.body?.title || req.body?.topic || '',
+    });
     if (error?.statusCode) {
       return res.status(error.statusCode).json({
         error: {
           type: error.code || 'podcast_video_error',
           message: error.message,
+          ...(error.podcastStage ? { stage: error.podcastStage } : {}),
+          ...(error.podcastDiagnostics ? { diagnostics: error.podcastDiagnostics } : {}),
         },
       });
     }
@@ -382,11 +402,21 @@ router.post('/video/render', async (req, res, next) => {
       ...result,
     });
   } catch (error) {
+    console.error('[PodcastRoute] Podcast video render failed', {
+      stage: error?.podcastStage || error?.podcastDiagnostics?.stage || 'video-render',
+      code: error?.code || null,
+      statusCode: error?.statusCode || error?.status || null,
+      message: error?.message || String(error),
+      sessionId: req.body?.sessionId || null,
+      topic: req.body?.title || req.body?.topic || '',
+    });
     if (error?.statusCode) {
       return res.status(error.statusCode).json({
         error: {
           type: error.code || 'podcast_video_error',
           message: error.message,
+          ...(error.podcastStage ? { stage: error.podcastStage } : {}),
+          ...(error.podcastDiagnostics ? { diagnostics: error.podcastDiagnostics } : {}),
         },
       });
     }

@@ -55,6 +55,25 @@ const PODCAST_HIGH_QUALITY_VOICE_IDS = Object.freeze([
 ]);
 const DEFAULT_MAX_VOICE_FALLBACK_ATTEMPTS = 2;
 const MAX_PODCAST_TTS_SPLIT_DEPTH = 3;
+const PODCAST_STAGE_DETAILS_ALLOWLIST = new Set([
+  'sessionId',
+  'topic',
+  'durationMinutes',
+  'model',
+  'includeVideo',
+  'sourceCount',
+  'turnCount',
+  'hostCount',
+  'ttsProvider',
+  'ttsConcurrency',
+  'ttsTimeoutMs',
+  'ttsChunkMaxChars',
+  'researchConcurrency',
+  'mixed',
+  'enhanced',
+  'musicBedApplied',
+  'mp3Exported',
+]);
 const UNSAFE_IMPLICIT_PODCAST_SCRIPT_MODELS = new Set([
   'gpt-4o-mini',
 ]);
@@ -230,6 +249,49 @@ function stableIndexFromText(value = '', modulo = 1) {
     hash = ((hash * 31) + input.charCodeAt(index)) >>> 0;
   }
   return hash % limit;
+}
+
+function sanitizePodcastLogDetails(details = {}) {
+  const output = {};
+  for (const [key, value] of Object.entries(details || {})) {
+    if (!PODCAST_STAGE_DETAILS_ALLOWLIST.has(key)) {
+      continue;
+    }
+    if (value == null) {
+      continue;
+    }
+    if (typeof value === 'string') {
+      output[key] = value.length > 240 ? `${value.slice(0, 237)}...` : value;
+      continue;
+    }
+    if (['number', 'boolean'].includes(typeof value)) {
+      output[key] = value;
+    }
+  }
+  return output;
+}
+
+function annotatePodcastError(error, stage, details = {}) {
+  if (error && typeof error === 'object') {
+    error.podcastStage = error.podcastStage || stage;
+    error.podcastDiagnostics = {
+      ...(error.podcastDiagnostics || {}),
+      stage,
+      ...sanitizePodcastLogDetails(details),
+    };
+  }
+  return error;
+}
+
+function logPodcastStageFailure(stage, error = {}, details = {}) {
+  const safeDetails = sanitizePodcastLogDetails(details);
+  const code = String(error?.code || error?.statusCode || error?.status || '').trim();
+  const message = String(error?.message || error || 'Unknown podcast failure').trim();
+  console.error(`[PodcastService] Stage failed: ${stage}`, {
+    ...(code ? { code } : {}),
+    message,
+    ...safeDetails,
+  });
 }
 
 function hasExplicitHostConfig(params = {}) {
@@ -985,6 +1047,15 @@ class PodcastService {
     throw lastError || new Error(`${label} failed.`);
   }
 
+  async runPodcastStage(stage, operation, details = {}) {
+    try {
+      return await operation();
+    } catch (error) {
+      logPodcastStageFailure(stage, error, details);
+      throw annotatePodcastError(error, stage, details);
+    }
+  }
+
   async runTool(executeTool, toolId, params, context) {
     return this.retryTransientOperation(async () => {
       const result = await executeTool(toolId, params, context);
@@ -1459,9 +1530,12 @@ class PodcastService {
       : null;
     const sourceDocuments = [
       ...normalizePodcastSourceDocuments(params.sourceDocuments || params.sources || []),
-      ...await this.resolveArtifactSourceDocuments(params, context),
+      ...await this.runPodcastStage('artifact-context', () => this.resolveArtifactSourceDocuments(params, context), {
+        sessionId,
+        topic: normalizedTopic,
+      }),
     ];
-    const sources = await this.researchTopic({
+    const sources = await this.runPodcastStage('research', () => this.researchTopic({
       topic: normalizedTopic,
       searchDomains: params.searchDomains || params.domains || [],
       sourceUrls: params.sourceUrls || params.urls || [],
@@ -1471,9 +1545,14 @@ class PodcastService {
     }, {
       executeTool,
       toolContext: context,
+    }), {
+      sessionId,
+      topic: normalizedTopic,
+      researchConcurrency: podcastResearchConcurrency,
+      sourceCount: sourceDocuments.length,
     });
 
-    const script = await this.generateScript({
+    const script = await this.runPodcastStage('script-generation', () => this.generateScript({
       topic: normalizedTopic,
       audience,
       tone,
@@ -1484,6 +1563,14 @@ class PodcastService {
       reasoningEffort: params.reasoningEffort || context.reasoningEffort || undefined,
       requestTimeoutMs: podcastScriptRequestTimeoutMs,
       videoFormat: params.includeVideo === true,
+    }), {
+      sessionId,
+      topic: normalizedTopic,
+      durationMinutes,
+      includeVideo: params.includeVideo === true,
+      sourceCount: sources.length,
+      hostCount: hosts.length,
+      model: resolvePodcastScriptModelCandidates(params, context)[0] || '',
     });
     const turnVoicePlan = resolveTurnVoicePlan(script.turns, hosts, {
       cycleHostVoices: params.cycleHostVoices === true,
@@ -1512,7 +1599,7 @@ class PodcastService {
       params.includeVideo === true && params.cycleHostVoices !== false
     );
     const allowVoiceFallback = params.allowVoiceFallback !== false;
-    const speechWavBuffer = await this.synthesizeTurns(
+    const speechWavBuffer = await this.runPodcastStage('tts-synthesis', () => this.synthesizeTurns(
       turnVoicePlan.plans,
       hosts,
       {
@@ -1523,9 +1610,18 @@ class PodcastService {
         cycleHostVoices,
         allowVoiceFallback,
       },
-    );
+    ), {
+      sessionId,
+      topic: normalizedTopic,
+      turnCount: turnVoicePlan.plans.length,
+      hostCount: hosts.length,
+      ttsProvider: synthesisProvider,
+      ttsConcurrency: podcastTtsConcurrency,
+      ttsTimeoutMs: podcastTtsTimeoutMs,
+      ttsChunkMaxChars: podcastChunkMaxChars,
+    });
     const finalAudioBuffer = (wantsMixing || wantsEnhancement)
-      ? await this.retryTransientOperation(
+      ? await this.runPodcastStage('audio-post-processing', () => this.retryTransientOperation(
         () => this.audioProcessingService.composePodcastAudio({
           speechWavBuffer,
           includeIntro: params.includeIntro === true,
@@ -1546,13 +1642,19 @@ class PodcastService {
           retryDelayMs: 900,
           shouldRetry: isRetryablePodcastAudioError,
         },
-      )
+      ), {
+        sessionId,
+        topic: normalizedTopic,
+        mixed: wantsMixing,
+        enhanced: wantsEnhancement,
+        musicBedApplied: useMusicBed,
+      })
       : speechWavBuffer;
     const episodeTitle = sanitizePodcastText(params.title || script.title || `${normalizedTopic} Podcast`);
     const persistedArtifacts = [];
     const audioVariants = [];
 
-    const persistedWav = await this.persistGeneratedAudio({
+    const persistedWav = await this.runPodcastStage('persist-wav', () => this.persistGeneratedAudio({
       sessionId,
       sourceMode: String(context?.clientSurface || context?.taskType || 'chat').trim() || 'chat',
       text: transcript,
@@ -1597,6 +1699,10 @@ class PodcastService {
           ttsChunkMaxChars: podcastChunkMaxChars,
         },
       },
+    }), {
+      sessionId,
+      topic: normalizedTopic,
+      ttsProvider: synthesisProvider,
     });
     if (persistedWav.artifact) {
       persistedArtifacts.push(persistedWav.artifact);
@@ -1610,7 +1716,7 @@ class PodcastService {
 
     let persistedMp3 = null;
     if (wantsMp3) {
-      const mp3Buffer = await this.retryTransientOperation(
+      const mp3Buffer = await this.runPodcastStage('mp3-export', () => this.retryTransientOperation(
         () => this.audioProcessingService.transcodeWavToMp3({
           wavBuffer: finalAudioBuffer,
           bitrateKbps: params.mp3BitrateKbps,
@@ -1621,8 +1727,12 @@ class PodcastService {
           retryDelayMs: 900,
           shouldRetry: isRetryablePodcastAudioError,
         },
-      );
-      persistedMp3 = await this.persistGeneratedAudio({
+      ), {
+        sessionId,
+        topic: normalizedTopic,
+        mp3Exported: true,
+      });
+      persistedMp3 = await this.runPodcastStage('persist-mp3', () => this.persistGeneratedAudio({
         sessionId,
         sourceMode: String(context?.clientSurface || context?.taskType || 'chat').trim() || 'chat',
         text: transcript,
@@ -1666,6 +1776,10 @@ class PodcastService {
             ttsChunkMaxChars: podcastChunkMaxChars,
           },
         },
+      }), {
+        sessionId,
+        topic: normalizedTopic,
+        mp3Exported: true,
       });
       if (persistedMp3.artifact) {
         persistedArtifacts.push(persistedMp3.artifact);
@@ -1679,7 +1793,10 @@ class PodcastService {
     }
 
     if (persistedArtifacts.length > 0) {
-      await this.updateGeneratedAudioSessionState(sessionId, persistedArtifacts);
+      await this.runPodcastStage('session-audio-state', () => this.updateGeneratedAudioSessionState(sessionId, persistedArtifacts), {
+        sessionId,
+        topic: normalizedTopic,
+      });
     }
     const primaryAudio = persistedMp3?.audio || persistedWav.audio || null;
     const primaryArtifact = persistedMp3?.artifact || persistedWav.artifact || null;

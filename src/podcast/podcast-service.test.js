@@ -205,6 +205,41 @@ describe('PodcastService', () => {
     expect(result.processing.enhanced).toBe(true);
   });
 
+  test('annotates and logs the failing podcast stage', async () => {
+    const service = new PodcastService();
+    const logSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const executeTool = jest.fn(async () => {
+      const error = new Error('Search backend unavailable');
+      error.code = 'web_search_unavailable';
+      throw error;
+    });
+
+    await expect(service.createPodcast({
+      topic: 'How grid batteries work',
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+      toolManager: { executeTool },
+    })).rejects.toMatchObject({
+      message: 'Search backend unavailable',
+      podcastStage: 'research',
+      podcastDiagnostics: expect.objectContaining({
+        stage: 'research',
+        sessionId: 'session-1',
+        topic: 'How grid batteries work',
+      }),
+    });
+
+    expect(logSpy).toHaveBeenCalledWith('[PodcastService] Stage failed: research', expect.objectContaining({
+      code: 'web_search_unavailable',
+      message: 'Search backend unavailable',
+      sessionId: 'session-1',
+      topic: 'How grid batteries work',
+    }));
+
+    logSpy.mockRestore();
+  });
+
   test('does not create a synthetic music bed when music is requested but no bed asset exists', async () => {
     const service = new PodcastService();
     const executeTool = jest.fn(async (toolId) => {

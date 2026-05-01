@@ -3841,10 +3841,29 @@ class ToolManager {
             }
 
             const videoService = resolvePodcastVideoService(context);
-            const videoData = await videoService.createVideoFromPodcast(podcast, {
-              sessionId: context.sessionId,
-              options: buildPodcastVideoOptions(params, context),
-            });
+            let videoData = null;
+            try {
+              videoData = await videoService.createVideoFromPodcast(podcast, {
+                sessionId: context.sessionId,
+                options: buildPodcastVideoOptions(params, context),
+              });
+            } catch (error) {
+              error.podcastStage = error.podcastStage || 'video-render';
+              error.podcastDiagnostics = {
+                ...(error.podcastDiagnostics || {}),
+                stage: error.podcastStage,
+                sessionId: context.sessionId || null,
+                topic: params.topic || params.prompt || params.subject || '',
+                includeVideo: true,
+              };
+              console.error('[ToolManager] Podcast video stage failed', {
+                stage: error.podcastStage,
+                code: error.code || null,
+                statusCode: error.statusCode || error.status || null,
+                message: error.message,
+              });
+              throw error;
+            }
             const artifacts = [
               ...(Array.isArray(podcast.artifacts) ? podcast.artifacts : []),
               videoData.artifact,
@@ -5007,10 +5026,29 @@ class ToolManager {
                 error,
               }),
             }
+          : id === 'podcast'
+            ? {
+                podcast: {
+                  stage: error?.podcastStage || error?.podcastDiagnostics?.stage || 'tool-handler',
+                  code: error?.code || null,
+                  statusCode: error?.statusCode || error?.status || null,
+                  ...(error?.podcastDiagnostics || {}),
+                },
+              }
           : null;
+        if (id === 'podcast') {
+          console.error('[ToolManager] Podcast tool failed', {
+            stage: diagnostics?.podcast?.stage || 'tool-handler',
+            code: error?.code || null,
+            statusCode: error?.statusCode || error?.status || null,
+            message: error.message,
+          });
+        }
         result = {
           success: false,
           error: error.message,
+          ...(error?.code ? { errorCode: error.code } : {}),
+          ...(Number.isFinite(Number(error?.statusCode || error?.status)) ? { statusCode: Number(error.statusCode || error.status) } : {}),
           duration: Date.now() - startedAt,
           toolId: id,
           timestamp: new Date().toISOString(),
