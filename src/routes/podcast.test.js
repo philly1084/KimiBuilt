@@ -285,6 +285,7 @@ describe('/api/podcast', () => {
       topic: 'battery storage',
       includeVideo: true,
       videoAspectRatio: '9:16',
+      videoRenderMode: 'storyboard',
       videoImageMode: 'generated',
       videoGenerateImages: true,
     }), expect.any(Object));

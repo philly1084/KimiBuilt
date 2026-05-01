@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Podcast Video - Lilly</title>
+  <title>Podcast Wave - Lilly</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -13,39 +13,32 @@
         <a class="back-link" href="/">Lilly</a>
         <div>
           <p class="eyebrow">Studio</p>
-          <h1>Podcast Video</h1>
+          <h1>Podcast Wave</h1>
         </div>
         <div class="runtime" id="runtime-status">Checking runtime...</div>
       </header>
 
       <div class="layout">
         <form class="control-panel" id="render-form">
+          <input name="renderMode" type="hidden" value="waveform-card">
+          <input name="generateImages" type="hidden" value="false">
+          <input name="visualEffects" type="hidden" value="false">
+
           <div class="section-heading">
-            <h2>Source</h2>
-            <p>Upload podcast audio and optionally paste the transcript for tighter scene timing.</p>
+            <h2>Audio</h2>
           </div>
 
           <label class="field">
-            <span>Podcast title</span>
+            <span>Title</span>
             <input name="title" type="text" placeholder="Episode title">
           </label>
 
           <label class="drop-zone" id="drop-zone">
             <input name="audio" id="audio-input" type="file" accept="audio/*,video/mp4,video/webm">
             <span class="drop-zone__icon">+</span>
-            <span class="drop-zone__text">Choose podcast audio</span>
+            <span class="drop-zone__text">Choose audio</span>
             <span class="drop-zone__meta" id="file-meta">WAV, MP3, M4A, MP4, or WebM</span>
           </label>
-
-          <label class="field">
-            <span>Transcript</span>
-            <textarea name="transcript" rows="8" placeholder="Paste transcript here, or leave blank to transcribe the upload."></textarea>
-          </label>
-
-          <div class="section-heading">
-            <h2>Visual Build</h2>
-            <p>Scenes are planned from the transcript, then filled from web search, Unsplash, generated images, or fallback frames.</p>
-          </div>
 
           <div class="field-grid">
             <label class="field">
@@ -57,67 +50,35 @@
               </select>
             </label>
 
-            <label class="field">
-              <span>Images</span>
-              <select name="imageMode">
-                <option value="mixed">Web + Unsplash</option>
-                <option value="web">Web search</option>
-                <option value="unsplash">Unsplash</option>
-                <option value="generated">Generated</option>
-                <option value="fallback">Fallback frames</option>
-              </select>
-            </label>
-          </div>
-
-          <div class="field-grid">
-            <label class="field">
-              <span>Scene count</span>
-              <input name="sceneCount" type="number" min="1" max="36" placeholder="Auto">
-            </label>
-
             <label class="check-field">
-              <input name="generateImages" type="checkbox" checked>
-              <span>Allow generated images</span>
+              <input name="enhanceAudio" type="checkbox">
+              <span>Audio repair</span>
             </label>
           </div>
-
-          <label class="check-field">
-            <input name="visualEffects" type="checkbox" checked>
-            <span>Subtle background fades and motion</span>
-          </label>
-
-          <label class="check-field">
-            <input name="enhanceAudio" type="checkbox">
-            <span>Optional audio repair</span>
-          </label>
 
           <label class="field">
-            <span>Visual style</span>
-            <input name="visualStyle" type="text" placeholder="Documentary, polished, warm, realistic">
+            <span>Transcript</span>
+            <textarea name="transcript" rows="6" placeholder="Optional"></textarea>
           </label>
 
           <button class="primary-action" type="submit" id="render-button">Render MP4</button>
         </form>
 
         <section class="preview-panel">
-          <div class="preview-hero">
-            <div class="frame-stack" aria-hidden="true">
-              <div class="frame frame--one"></div>
-              <div class="frame frame--two"></div>
-              <div class="frame frame--three"></div>
-            </div>
-            <div>
-              <p class="eyebrow">Timeline</p>
-              <h2>Audio-aligned visual scenes</h2>
-              <p class="preview-copy">The renderer creates timed image backgrounds with subtle fades and motion, clean speech audio, and saved artifact output.</p>
+          <div class="wave-preview" aria-hidden="true">
+            <div class="wave-preview__rail">
+              <span></span><span></span><span></span><span></span><span></span>
+              <span></span><span></span><span></span><span></span><span></span>
+              <span></span><span></span><span></span><span></span><span></span>
+              <span></span><span></span><span></span><span></span><span></span>
             </div>
           </div>
 
           <div class="status-card" id="status-card">
             <div class="status-card__dot"></div>
             <div>
-              <h3 id="status-title">Ready</h3>
-              <p id="status-message">Choose an audio file to start a render.</p>
+              <h2 id="status-title">Ready</h2>
+              <p id="status-message">Choose an audio file to render a waveform MP4.</p>
             </div>
           </div>
 
@@ -129,13 +90,20 @@
             </div>
           </div>
 
-          <div class="storyboard">
-            <div class="storyboard__header">
-              <h3>Storyboard</h3>
-              <span id="scene-count">No scenes yet</span>
+          <dl class="render-details" id="render-details" hidden>
+            <div>
+              <dt>Mode</dt>
+              <dd id="detail-mode">waveform-card</dd>
             </div>
-            <ol id="scene-list"></ol>
-          </div>
+            <div>
+              <dt>Duration</dt>
+              <dd id="detail-duration">0:00</dd>
+            </div>
+            <div>
+              <dt>Output</dt>
+              <dd id="detail-output">MP4 H.264 / AAC</dd>
+            </div>
+          </dl>
         </section>
       </div>
     </section>

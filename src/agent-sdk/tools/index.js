@@ -3643,7 +3643,7 @@ class ToolManager {
         id: 'podcast',
         name: 'Podcast',
         category: 'system',
-        description: 'Research a topic, script a two-host episode, synthesize both voices with local TTS, stitch the final podcast audio into a saved artifact, and optionally render an MP4 podcast video with scene images.',
+        description: 'Research a topic, script a two-host episode, synthesize both voices with local TTS, stitch the final podcast audio into a saved artifact, and optionally render an MP4 podcast video. The default MP4 is a reliable waveform card; scene images require storyboard mode.',
         backend: {
           handler: async (params = {}, context = {}) => {
             const service = resolvePodcastService(context);
@@ -3771,7 +3771,7 @@ class ToolManager {
                 enhanceAudio: { type: 'boolean' },
                 visualEffects: { type: 'boolean' },
                 sceneCount: { type: 'integer', minimum: 1, maximum: 36 },
-                renderMode: { type: 'string', enum: ['static-card', 'storyboard'] },
+                renderMode: { type: 'string', enum: ['waveform-card', 'static-card', 'storyboard'] },
                 visualStyle: { type: 'string' },
                 imageModel: { type: 'string' },
                 model: { type: 'string' },
@@ -3789,8 +3789,8 @@ class ToolManager {
             videoVisualEffects: { type: 'boolean' },
             visualEffects: { type: 'boolean' },
             videoSceneCount: { type: 'integer', minimum: 1, maximum: 36 },
-            videoRenderMode: { type: 'string', enum: ['static-card', 'storyboard'] },
-            renderMode: { type: 'string', enum: ['static-card', 'storyboard'] },
+            videoRenderMode: { type: 'string', enum: ['waveform-card', 'static-card', 'storyboard'] },
+            renderMode: { type: 'string', enum: ['waveform-card', 'static-card', 'storyboard'] },
             videoVisualStyle: { type: 'string' },
             videoImageModel: { type: 'string' },
             videoModel: { type: 'string' },

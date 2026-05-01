@@ -18,6 +18,7 @@ jest.mock('./session-store', () => ({
 const { artifactService } = require('./artifacts/artifact-service');
 const { sessionStore } = require('./session-store');
 const { persistGeneratedImages } = require('./generated-image-artifacts');
+const { config } = require('./config');
 
 function buildPngBuffer({ width = 2, height = 2 } = {}) {
     const buffer = Buffer.alloc(32);
@@ -237,7 +238,7 @@ describe('generated-image-artifacts', () => {
         expect(result.artifactPersistence.attempts[0]).toEqual(expect.objectContaining({
             status: 'skipped',
             reason: 'missing_session_id',
-            payloadSource: 'inline_base64',
+            payloadSource: 'b64_json',
             hasDecodedImage: true,
         }));
     });
@@ -245,10 +246,20 @@ describe('generated-image-artifacts', () => {
     test('reports undecodable provider URLs as an artifact persistence skip reason', async () => {
         global.fetch = jest.fn(async () => ({
             ok: true,
+            status: 200,
+            statusText: 'OK',
             headers: {
-                get: (name) => (String(name).toLowerCase() === 'content-type' ? 'text/html' : null),
+                get: (name) => {
+                    const normalized = String(name).toLowerCase();
+                    if (normalized === 'content-type') return 'text/html';
+                    if (normalized === 'content-length') return '25';
+                    return null;
+                },
             },
-            arrayBuffer: async () => Buffer.from('<html>not an image</html>').buffer,
+            arrayBuffer: async () => {
+                const body = Buffer.from('<html>not an image</html>');
+                return body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength);
+            },
         }));
 
         const result = await persistGeneratedImages({
@@ -268,15 +279,83 @@ describe('generated-image-artifacts', () => {
             requested: 1,
             persisted: 0,
             skipped: 1,
-            primaryReason: 'no_decodable_image_payload',
+            primaryReason: 'remote_url_non_image_response',
         }));
         expect(result.artifactPersistence.attempts[0]).toEqual(expect.objectContaining({
             status: 'skipped',
-            reason: 'no_decodable_image_payload',
+            reason: 'remote_url_non_image_response',
             payloadSource: 'remote_url',
             hasSessionId: true,
             hasDecodedImage: false,
+            remoteDownload: expect.objectContaining({
+                reason: 'non_image_response',
+                authHeadersAttached: false,
+                timeoutMs: 15000,
+                redirected: false,
+                redirectCount: 0,
+                status: 200,
+                contentType: 'text/html',
+                contentLength: '25',
+                bodySniff: expect.objectContaining({
+                    detected: 'html_or_xml',
+                    firstBytesHex: expect.stringContaining('3C 68 74 6D 6C'),
+                }),
+                responsePreview: '<html>not an image</html>',
+                url: expect.objectContaining({
+                    host: 'example.com',
+                    redactedUrl: 'https://example.com/image.png',
+                }),
+                finalUrl: expect.objectContaining({
+                    host: 'example.com',
+                    redactedUrl: 'https://example.com/image.png',
+                }),
+            }),
         }));
+    });
+
+    test('uses configured gateway auth headers when downloading provider image URLs from the same origin', async () => {
+        const originalOpenAiBaseUrl = config.openai.baseURL;
+        const originalOpenAiApiKey = config.openai.apiKey;
+        config.openai.baseURL = 'https://gateway.example/v1';
+        config.openai.apiKey = 'test-gateway-key';
+        global.fetch = jest.fn(async () => ({
+            ok: true,
+            status: 200,
+            statusText: 'OK',
+            headers: {
+                get: (name) => (String(name).toLowerCase() === 'content-type' ? 'image/png' : null),
+            },
+            arrayBuffer: async () => buildPngBuffer(),
+        }));
+
+        try {
+            const result = await persistGeneratedImages({
+                sessionId: 'session-1',
+                sourceMode: 'image',
+                prompt: 'Gateway image',
+                model: 'gateway-image-model',
+                images: [{
+                    url: 'https://gateway.example/v1/files/file-123/content?sig=secret',
+                    revised_prompt: 'Gateway image',
+                }],
+            });
+
+            expect(global.fetch).toHaveBeenCalledWith(
+                'https://gateway.example/v1/files/file-123/content?sig=secret',
+                expect.objectContaining({
+                    headers: expect.objectContaining({
+                        Accept: 'image/*',
+                        Authorization: 'Bearer test-gateway-key',
+                        'x-api-key': 'test-gateway-key',
+                    }),
+                }),
+            );
+            expect(result.artifactIds).toEqual(['artifact-1']);
+            expect(result.artifactPersistence.primaryReason).toBe('persisted');
+        } finally {
+            config.openai.baseURL = originalOpenAiBaseUrl;
+            config.openai.apiKey = originalOpenAiApiKey;
+        }
     });
 
     test('does not persist one-pixel placeholder image payloads as artifacts', async () => {

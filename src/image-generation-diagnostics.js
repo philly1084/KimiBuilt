@@ -48,6 +48,28 @@ function getObjectKeys(value = {}, limit = 24) {
   return Object.keys(value).slice(0, limit);
 }
 
+function summarizeImageUrl(value = '') {
+  const normalized = String(value || '').trim();
+  if (!normalized) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(normalized);
+    return {
+      absolute: true,
+      host: parsed.host,
+      path: parsed.pathname.slice(0, 160),
+      queryPresent: Boolean(parsed.search),
+    };
+  } catch (_error) {
+    return {
+      absolute: false,
+      preview: truncate(normalized, 160),
+    };
+  }
+}
+
 function summarizeArray(value = []) {
   if (!Array.isArray(value)) {
     return null;
@@ -58,11 +80,19 @@ function summarizeArray(value = []) {
       return { type: typeof entry };
     }
 
+    const url = entry.url || entry.image_url || entry.imageUrl || entry.file_uri || entry.fileUri || '';
+    const b64 = entry.b64_json || entry.b64 || entry.base64 || entry.image_base64 || entry.imageBase64 || '';
+
     return {
       keys: getObjectKeys(entry, 12),
       type: normalizeText(entry.type || entry.object || entry.kind || ''),
       status: normalizeText(entry.status || ''),
       hasImagePayload: hasImagePayloadReference(entry),
+      hasUrl: Boolean(url),
+      hasB64Json: Boolean(entry.b64_json || entry.b64 || entry.base64 || entry.image_base64 || entry.imageBase64),
+      urlHost: summarizeImageUrl(url)?.host || '',
+      urlAbsolute: summarizeImageUrl(url)?.absolute ?? null,
+      b64Length: typeof b64 === 'string' ? b64.length : 0,
     };
   });
 
@@ -515,6 +545,7 @@ function buildImageGenerationDiagnostics({
       baseUrl: summarizeBaseUrl(providerBaseUrl || metadata.baseURL || metadata.baseUrl || error?.baseURL || error?.baseUrl),
       endpoint: normalizeText(metadata.endpoint || error?.endpoint || ''),
       status: metadata.status || error?.status || error?.statusCode || null,
+      requestId: normalizeText(metadata.requestId || metadata.requestID || error?.requestId || ''),
       requestHadResponseFormat: metadata.requestHadResponseFormat === true || error?.requestHadResponseFormat === true,
       requestVariant: metadata.requestVariant ?? error?.requestVariant ?? null,
     },
@@ -538,6 +569,25 @@ function buildImageGenerationDiagnostics({
             mimeType: normalizeText(attempt?.mimeType || ''),
             extension: normalizeText(attempt?.extension || ''),
             byteLength: Number(attempt?.byteLength || 0),
+            remoteDownload: attempt?.remoteDownload && typeof attempt.remoteDownload === 'object'
+              ? {
+                reason: normalizeText(attempt.remoteDownload.reason || ''),
+                url: attempt.remoteDownload.url || null,
+                finalUrl: attempt.remoteDownload.finalUrl || null,
+                authHeadersAttached: attempt.remoteDownload.authHeadersAttached === true,
+                timeoutMs: Number(attempt.remoteDownload.timeoutMs || 0),
+                redirected: attempt.remoteDownload.redirected === true,
+                redirectCount: attempt.remoteDownload.redirectCount ?? null,
+                status: attempt.remoteDownload.status || null,
+                statusText: normalizeText(attempt.remoteDownload.statusText || ''),
+                contentType: normalizeText(attempt.remoteDownload.contentType || ''),
+                contentLength: attempt.remoteDownload.contentLength || null,
+                byteLength: Number(attempt.remoteDownload.byteLength || 0),
+                bodySniff: attempt.remoteDownload.bodySniff || null,
+                responsePreview: truncate(attempt.remoteDownload.responsePreview || '', 240),
+                error: attempt.remoteDownload.error || null,
+              }
+              : null,
             error: attempt?.error || null,
           }))
           : [],

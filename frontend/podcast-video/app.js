@@ -11,8 +11,10 @@
   const resultVideo = document.getElementById('result-video');
   const downloadLink = document.getElementById('download-link');
   const artifactLink = document.getElementById('artifact-link');
-  const sceneList = document.getElementById('scene-list');
-  const sceneCount = document.getElementById('scene-count');
+  const renderDetails = document.getElementById('render-details');
+  const detailMode = document.getElementById('detail-mode');
+  const detailDuration = document.getElementById('detail-duration');
+  const detailOutput = document.getElementById('detail-output');
 
   function setStatus(kind, title, message) {
     statusCard.classList.toggle('is-working', kind === 'working');
@@ -28,38 +30,32 @@
     return `${minutes}:${String(seconds).padStart(2, '0')}`;
   }
 
-  function renderStoryboard(storyboard) {
-    const scenes = Array.isArray(storyboard?.scenes) ? storyboard.scenes : [];
-    sceneCount.textContent = scenes.length === 1 ? '1 scene' : `${scenes.length} scenes`;
-    sceneList.innerHTML = '';
+  function updateDetails(payload) {
+    const storyboard = payload?.storyboard || {};
+    const metadata = payload?.artifact?.metadata || {};
+    const duration = payload?.durationSeconds || storyboard.durationSeconds || metadata.durationSeconds || 0;
 
-    scenes.forEach((scene) => {
-      const item = document.createElement('li');
-      const source = scene.image?.source || scene.imageSource || 'planned';
-      item.innerHTML = `
-        <span class="scene-time">${formatSeconds(scene.start)}-${formatSeconds(scene.end)}</span>
-        <div>
-          <p class="scene-title"></p>
-          <p class="scene-caption"></p>
-        </div>
-        <span class="scene-source"></span>
-      `;
-      item.querySelector('.scene-title').textContent = scene.summary || scene.visualQuery || 'Scene';
-      item.querySelector('.scene-caption').textContent = scene.caption || scene.narration || '';
-      item.querySelector('.scene-source').textContent = source;
-      sceneList.appendChild(item);
-    });
+    detailMode.textContent = metadata.renderMode || storyboard.renderMode || 'waveform-card';
+    detailDuration.textContent = formatSeconds(duration);
+    detailOutput.textContent = 'MP4 H.264 / AAC';
+    renderDetails.hidden = false;
   }
 
   async function loadRuntime() {
+    if (window.location.protocol === 'file:') {
+      runtimeStatus.textContent = 'Static preview';
+      return;
+    }
+
     try {
       const response = await fetch('/api/podcast/runtime', {
         headers: { Accept: 'application/json' },
       });
       const data = await response.json();
       const video = data.video || {};
+      const defaults = video.defaults || {};
       runtimeStatus.textContent = video.configured
-        ? `Video ready: ${video.provider || 'ffmpeg'}`
+        ? `Ready: ${defaults.renderMode || 'waveform-card'}`
         : 'Video renderer unavailable';
     } catch (_error) {
       runtimeStatus.textContent = 'Runtime check failed';
@@ -69,7 +65,7 @@
   audioInput.addEventListener('change', () => {
     const file = audioInput.files?.[0] || null;
     fileMeta.textContent = file
-      ? `${file.name} (${Math.round(file.size / 1024 / 1024 * 10) / 10} MB)`
+      ? `${file.name} (${Math.round((file.size / 1024 / 1024) * 10) / 10} MB)`
       : 'WAV, MP3, M4A, MP4, or WebM';
   });
 
@@ -77,19 +73,21 @@
     event.preventDefault();
     const file = audioInput.files?.[0] || null;
     if (!file) {
-      setStatus('error', 'Audio required', 'Choose a podcast audio file before rendering.');
+      setStatus('error', 'Audio required', 'Choose an audio file before rendering.');
       return;
     }
 
     const data = new FormData(form);
     data.set('audio', file);
-    data.set('generateImages', form.elements.generateImages.checked ? 'true' : 'false');
+    data.set('renderMode', 'waveform-card');
+    data.set('generateImages', 'false');
+    data.set('visualEffects', 'false');
     data.set('enhanceAudio', form.elements.enhanceAudio.checked ? 'true' : 'false');
-    data.set('visualEffects', form.elements.visualEffects.checked ? 'true' : 'false');
 
     renderButton.disabled = true;
     result.hidden = true;
-    setStatus('working', 'Rendering', 'Planning scenes, sourcing images, applying background fades, and muxing the MP4. Long podcasts can take several minutes.');
+    renderDetails.hidden = true;
+    setStatus('working', 'Rendering', 'Building the waveform card and muxing the audio into an MP4.');
 
     try {
       const response = await fetch('/api/podcast/video/render', {
@@ -107,10 +105,10 @@
       downloadLink.href = downloadUrl;
       artifactLink.href = payload.artifact?.downloadUrl || downloadUrl;
       result.hidden = false;
-      renderStoryboard(payload.storyboard);
-      setStatus('ready', 'Render complete', 'The MP4 artifact is ready with timed visual backgrounds and clean speech audio.');
+      updateDetails(payload);
+      setStatus('ready', 'Render complete', 'The waveform MP4 artifact is ready.');
     } catch (error) {
-      setStatus('error', 'Render failed', error.message || 'The video render could not be completed.');
+      setStatus('error', 'Render failed', error.message || 'The waveform MP4 could not be completed.');
     } finally {
       renderButton.disabled = false;
     }

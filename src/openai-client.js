@@ -997,12 +997,18 @@ async function postImageGenerationToProvider(params, imageProvider) {
 
             if (response.ok) {
                 const responseBody = await response.json();
+                const requestId = response.headers?.get?.('x-request-id')
+                    || response.headers?.get?.('openai-request-id')
+                    || response.headers?.get?.('x-openai-request-id')
+                    || response.headers?.get?.('cf-ray')
+                    || '';
                 return attachImageProviderMetadata(responseBody, {
                     providerSource: imageProvider.source,
                     providerFamily,
                     baseURL,
                     endpoint,
                     status: response.status,
+                    requestId,
                     requestVariant: index,
                     requestHadResponseFormat: Object.prototype.hasOwnProperty.call(requestBody, 'response_format'),
                     model: requestBody.model || params.model || imageProvider.imageModel || '',
@@ -1015,6 +1021,11 @@ async function postImageGenerationToProvider(params, imageProvider) {
             error.status = response.status;
             error.baseURL = baseURL;
             error.provider = imageProvider.source;
+            error.requestId = response.headers?.get?.('x-request-id')
+                || response.headers?.get?.('openai-request-id')
+                || response.headers?.get?.('x-openai-request-id')
+                || response.headers?.get?.('cf-ray')
+                || '';
             error.providerResponse = parsedErrorBody;
             error.responseBodyPreview = String(errorBody || '').slice(0, 2000);
             if (parsedErrorBody?.diagnostics && typeof parsedErrorBody.diagnostics === 'object') {
@@ -3386,7 +3397,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
 
     if (automaticTools.some((entry) => entry.id === 'podcast')) {
         guidance.push('- Use `podcast` when the user asks for a podcast deliverable. It can research, script, synthesize the episode, persist audio/script artifacts, and render an MP4 when requested.');
-        guidance.push('- For video podcast, podcast video, MP4, visual podcast, scene image, or cover-art requests, call `podcast` with `includeVideo: true`, `videoImageMode: "mixed"`, and `videoGenerateImages: true` unless the user explicitly asks not to generate images.');
+        guidance.push('- For video podcast, podcast video, or MP4 podcast requests, call `podcast` with `includeVideo: true` and use the default waveform-card MP4 unless the user explicitly asks for scene imagery. For visual podcast, scene image, or cover-art requests, set `videoRenderMode: "storyboard"`, `videoImageMode: "mixed"`, and `videoGenerateImages: true` unless the user explicitly asks not to generate images.');
         guidance.push('- For training or manual podcast requests, treat the episode as instructional: clarify or infer learner audience, learning objectives, segment pacing, practice prompts, and assessment/checkpoint moments; use sources and vector context when the topic requires grounding.');
         guidance.push('- Do not answer that encoded video files cannot be generated when the `podcast` tool is attached; use the tool and report the returned audio, script, and video artifacts.');
     }

@@ -79,6 +79,11 @@ function inferPodcastVideoSceneCount(text = '') {
     return Math.max(1, Math.min(36, Math.round(count)));
 }
 
+function hasExplicitPodcastStoryboardIntent(text = '') {
+    return /\b(?:generated images?|ai images?|custom images?|illustrations?|visuals?|scene images?|cover art|artwork|storyboards?|slides?|stock photos?|web images?|unsplash)\b/i
+        .test(String(text || ''));
+}
+
 function inferPodcastVideoOptions(text = '') {
     if (!hasExplicitPodcastVideoIntent(text)) {
         return {};
@@ -87,12 +92,14 @@ function inferPodcastVideoOptions(text = '') {
     const imageMode = inferPodcastVideoImageMode(text);
     const generateImages = !/\b(?:no generated images?|no ai images?|do not generate images?|without generated images?)\b/i.test(String(text || ''));
     const sceneCount = inferPodcastVideoSceneCount(text);
+    const useStoryboard = hasExplicitPodcastStoryboardIntent(text);
 
     return {
         includeVideo: true,
         videoAspectRatio: inferPodcastVideoAspectRatio(text),
-        videoImageMode: imageMode,
-        videoGenerateImages: generateImages,
+        videoRenderMode: useStoryboard ? 'storyboard' : 'waveform-card',
+        videoImageMode: useStoryboard ? imageMode : 'fallback',
+        videoGenerateImages: useStoryboard ? generateImages : false,
         ...(sceneCount ? { videoSceneCount: sceneCount } : {}),
     };
 }

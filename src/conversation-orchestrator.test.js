@@ -5020,6 +5020,7 @@ describe('ConversationOrchestrator', () => {
                 durationMinutes: 10,
                 includeVideo: true,
                 videoAspectRatio: '9:16',
+                videoRenderMode: 'storyboard',
                 videoImageMode: 'generated',
                 videoGenerateImages: true,
             },

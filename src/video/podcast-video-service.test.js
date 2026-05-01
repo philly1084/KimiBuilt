@@ -121,7 +121,7 @@ describe('PodcastVideoService', () => {
     }));
   });
 
-  test('defaults to multiple subtle-effect H.264 AVC scene-card renders for compatibility', async () => {
+  test('defaults to a deterministic waveform-card H.264 AVC render for compatibility', async () => {
     const service = new PodcastVideoService({
       audioProcessingService: {
         assertConfigured: jest.fn(),
@@ -158,31 +158,27 @@ describe('PodcastVideoService', () => {
       maxFfmpegTimeoutMs: 300000,
     });
 
-    expect(result.renderMode).toBe('storyboard');
-    expect(ffmpegCalls).toHaveLength(3);
+    expect(result.renderMode).toBe('waveform-card');
+    expect(ffmpegCalls).toHaveLength(1);
     expect(ffmpegCalls[0].args).toEqual(expect.arrayContaining([
       '-loop', '1',
+      '-filter_complex',
       '-c:v', 'libx264',
       '-profile:v', 'main',
       '-level:v', '4.1',
       '-pix_fmt', 'yuv420p',
       '-tag:v', 'avc1',
-    ]));
-    expect(ffmpegCalls[0].args.join(' ')).toContain('zoompan');
-    expect(ffmpegCalls[0].args.join(' ')).toContain('fade=t');
-    expect(ffmpegCalls[2].args).toEqual(expect.arrayContaining([
-      '-f', 'concat',
-      '-c:v', 'copy',
       '-c:a', 'aac',
       '-ac', '2',
       '-ar', '48000',
     ]));
+    expect(ffmpegCalls[0].args.join(' ')).toContain('showwaves');
     expect(ffmpegCalls[0].options).toEqual(expect.objectContaining({
-      timeoutMs: 240000,
-      stage: 'scene 1/2',
+      timeoutMs: 180000,
+      stage: 'waveform-card render',
     }));
     expect(result.scenes[0].image).toEqual(expect.objectContaining({
-      source: 'fallback',
+      source: 'waveform-card',
     }));
   }, 10000);
 
@@ -214,7 +210,7 @@ describe('PodcastVideoService', () => {
       }],
     });
 
-    const muxArgs = ffmpegCalls[1].args;
+    const muxArgs = ffmpegCalls[0].args;
     expect(muxArgs).not.toEqual(expect.arrayContaining([
       '-af', 'repair-filter',
     ]));
@@ -255,7 +251,7 @@ describe('PodcastVideoService', () => {
       }],
     });
 
-    const muxArgs = ffmpegCalls[1].args;
+    const muxArgs = ffmpegCalls[0].args;
     expect(muxArgs).toEqual(expect.arrayContaining([
       '-af', 'repair-filter',
       '-c:a', 'aac',
@@ -263,6 +259,50 @@ describe('PodcastVideoService', () => {
       '-ac', '2',
       '-ar', '48000',
     ]));
+  });
+
+  test('can render the default waveform card from an upload without transcript transcription', async () => {
+    const transcriptionService = {
+      transcribe: jest.fn(),
+    };
+    const service = new PodcastVideoService({
+      transcriptionService,
+      isUnsplashConfigured: () => false,
+    });
+    jest.spyOn(service, 'getAudioDurationSeconds').mockResolvedValue(8);
+    jest.spyOn(service, 'renderMp4').mockResolvedValue({
+      buffer: Buffer.from('mp4'),
+      scenes: [{
+        id: 'scene-01',
+        image: { source: 'waveform-card' },
+      }],
+      dimensions: { width: 1280, height: 720 },
+      renderMode: 'waveform-card',
+      audioRepairEnabled: false,
+      visualEffectsEnabled: false,
+    });
+    jest.spyOn(service, 'persistVideo').mockResolvedValue({
+      artifact: { id: 'artifact-video-1' },
+      video: { artifactId: 'artifact-video-1' },
+    });
+
+    const result = await service.createVideoFromAudioUpload({
+      sessionId: 'session-1',
+      file: {
+        buffer: Buffer.from('audio'),
+        filename: 'episode.wav',
+        mimeType: 'audio/wav',
+      },
+      fields: {
+        title: 'Episode',
+      },
+    });
+
+    expect(transcriptionService.transcribe).not.toHaveBeenCalled();
+    expect(service.renderMp4).toHaveBeenCalledWith(expect.objectContaining({
+      renderMode: 'waveform-card',
+    }));
+    expect(result.video).toEqual({ artifactId: 'artifact-video-1' });
   });
 
   test('supports explicit single static-card mode when requested', async () => {

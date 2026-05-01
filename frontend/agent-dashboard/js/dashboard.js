@@ -1415,6 +1415,8 @@ class Dashboard {
         const details = this.normalizeTraceDetails(step.details);
         const diagnosticSummary = this.formatTraceDiagnosticSummary(details);
         const imageDiagnostics = this.getTraceImageDiagnostics(details) || {};
+        const artifactAttempt = imageDiagnostics.artifactPersistence?.attempts?.[0] || null;
+        const remoteDownload = artifactAttempt?.remoteDownload || null;
         const fields = [
             ['Phase', details.phase],
             ['Transport', details.transport],
@@ -1430,8 +1432,19 @@ class Dashboard {
             ['Diagnostic stage', imageDiagnostics.stage],
             ['Provider', imageDiagnostics.provider?.source],
             ['Provider URL', imageDiagnostics.provider?.baseUrl],
+            ['Provider request ID', imageDiagnostics.provider?.requestId],
             ['Provider transport', imageDiagnostics.transport?.category],
             ['Artifact persistence', imageDiagnostics.artifactPersistence?.primaryReason],
+            ['Artifact attempt', artifactAttempt?.reason],
+            ['Remote download', remoteDownload?.reason],
+            ['Remote status', remoteDownload?.status],
+            ['Remote content type', remoteDownload?.contentType],
+            ['Remote URL host', remoteDownload?.url?.host],
+            ['Remote auth attached', remoteDownload?.authHeadersAttached],
+            ['Remote timeout ms', remoteDownload?.timeoutMs],
+            ['Remote redirected', remoteDownload?.redirected],
+            ['Remote final host', remoteDownload?.finalUrl?.host],
+            ['Remote body sniff', remoteDownload?.bodySniff?.detected],
             ['Params', details.paramKeys],
             ['State changed', details.stateChanged],
         ].filter(([, value]) => value != null && value !== '' && !(Array.isArray(value) && value.length === 0));

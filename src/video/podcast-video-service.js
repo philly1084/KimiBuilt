@@ -42,7 +42,7 @@ const DEFAULT_MUX_TIMEOUT_MS = 900000;
 const DEFAULT_MAX_FFMPEG_TIMEOUT_MS = 1800000;
 const DEFAULT_X264_PRESET = 'veryfast';
 const DEFAULT_X264_CRF = 23;
-const DEFAULT_RENDER_MODE = 'storyboard';
+const DEFAULT_RENDER_MODE = 'waveform-card';
 const X264_PRESETS = new Set([
   'ultrafast',
   'superfast',
@@ -54,7 +54,7 @@ const X264_PRESETS = new Set([
   'slower',
   'veryslow',
 ]);
-const RENDER_MODES = new Set(['static-card', 'storyboard']);
+const RENDER_MODES = new Set(['waveform-card', 'static-card', 'storyboard']);
 
 function createServiceError(statusCode, message, code = 'podcast_video_error') {
   const error = new Error(message);
@@ -95,6 +95,20 @@ function normalizePositiveInteger(value, fallback) {
 
 function normalizeRenderMode(value = DEFAULT_RENDER_MODE) {
   const normalized = String(value || DEFAULT_RENDER_MODE).trim().toLowerCase();
+  if ([
+    'wave',
+    'waves',
+    'waveform',
+    'waveform-video',
+    'wave-card',
+    'podcast-wave',
+    'audio-wave',
+    'audio-visualizer',
+    'visualizer',
+    'visualiser',
+  ].includes(normalized)) {
+    return 'waveform-card';
+  }
   if (normalized === 'single-image' || normalized === 'single-picture' || normalized === 'static') {
     return 'static-card';
   }
@@ -600,7 +614,6 @@ function buildPlaceholderFrameBuffer(width = DEFAULT_WIDTH, height = DEFAULT_HEI
   const [r2, g2, b2] = endColor;
   const header = Buffer.from(`P6\n${width} ${height}\n255\n`, 'ascii');
   const pixels = Buffer.alloc(width * height * 3);
-  const phase = ((hash[1] || 0) / 255) * Math.PI * 2;
   const clampByte = (value) => Math.max(0, Math.min(255, Math.round(value)));
 
   for (let y = 0; y < height; y += 1) {
@@ -608,19 +621,101 @@ function buildPlaceholderFrameBuffer(width = DEFAULT_WIDTH, height = DEFAULT_HEI
       const t = ((x / Math.max(1, width - 1)) * 0.65) + ((y / Math.max(1, height - 1)) * 0.35);
       const normalizedX = x / Math.max(1, width - 1);
       const normalizedY = y / Math.max(1, height - 1);
-      const waveY = 0.52 + (Math.sin((normalizedX * Math.PI * 5) + phase) * 0.09);
-      const waveform = Math.max(0, 1 - (Math.abs(normalizedY - waveY) / 0.018));
       const grid = ((x + (hash[2] || 0)) % 96 < 3 || (y + (hash[3] || 0)) % 96 < 3) ? 1 : 0;
       const spotlight = Math.max(0, 1 - Math.hypot(normalizedX - 0.72, normalizedY - 0.28) * 1.75);
+      const accent = Math.max(0, 1 - Math.abs(normalizedY - (0.19 + (normalizedX * 0.1))) / 0.012);
+      const panel = normalizedX > 0.12 && normalizedX < 0.88 && normalizedY > 0.38 && normalizedY < 0.74 ? 1 : 0;
+      const panelEdge = panel && (
+        normalizedX < 0.123
+        || normalizedX > 0.877
+        || normalizedY < 0.383
+        || normalizedY > 0.737
+      ) ? 1 : 0;
       const vignette = Math.hypot(normalizedX - 0.5, normalizedY - 0.5) * 24;
       const offset = (y * width + x) * 3;
-      pixels[offset] = clampByte(r1 + (r2 - r1) * t + (waveform * 42) + (grid * 12) + (spotlight * 26) - vignette);
-      pixels[offset + 1] = clampByte(g1 + (g2 - g1) * t + (waveform * 46) + (grid * 12) + (spotlight * 30) - vignette);
-      pixels[offset + 2] = clampByte(b1 + (b2 - b1) * t + (waveform * 38) + (grid * 12) + (spotlight * 34) - vignette);
+      pixels[offset] = clampByte(r1 + (r2 - r1) * t + (grid * 10) + (spotlight * 26) + (accent * 34) - (panel * 12) + (panelEdge * 42) - vignette);
+      pixels[offset + 1] = clampByte(g1 + (g2 - g1) * t + (grid * 10) + (spotlight * 30) + (accent * 44) - (panel * 12) + (panelEdge * 46) - vignette);
+      pixels[offset + 2] = clampByte(b1 + (b2 - b1) * t + (grid * 10) + (spotlight * 34) + (accent * 36) - (panel * 10) + (panelEdge * 40) - vignette);
     }
   }
 
   return Buffer.concat([header, pixels]);
+}
+
+function buildWaveformCardFrameBuffer(width = DEFAULT_WIDTH, height = DEFAULT_HEIGHT, seed = '') {
+  const hash = Buffer.from(String(seed || 'podcast-wave'));
+  const palettes = [
+    [[15, 18, 22], [26, 39, 42], [116, 217, 159]],
+    [[17, 19, 24], [38, 40, 57], [116, 183, 255]],
+    [[18, 20, 23], [45, 39, 34], [239, 189, 106]],
+    [[13, 21, 23], [25, 50, 54], [128, 205, 193]],
+  ];
+  const [startColor, endColor, accentColor] = palettes[(hash[0] || 0) % palettes.length];
+  const [r1, g1, b1] = startColor;
+  const [r2, g2, b2] = endColor;
+  const [ar, ag, ab] = accentColor;
+  const header = Buffer.from(`P6\n${width} ${height}\n255\n`, 'ascii');
+  const pixels = Buffer.alloc(width * height * 3);
+  const clampByte = (value) => Math.max(0, Math.min(255, Math.round(value)));
+  const waveLeft = 0.12;
+  const waveRight = 0.88;
+  const waveTop = 0.47;
+  const waveBottom = 0.72;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const normalizedX = x / Math.max(1, width - 1);
+      const normalizedY = y / Math.max(1, height - 1);
+      const t = (normalizedX * 0.55) + (normalizedY * 0.45);
+      const centerGlow = Math.max(0, 1 - Math.hypot(normalizedX - 0.5, normalizedY - 0.52) * 1.45);
+      const topGlow = Math.max(0, 1 - Math.hypot(normalizedX - 0.25, normalizedY - 0.16) * 2.1);
+      const diagonal = Math.max(0, 1 - Math.abs(normalizedY - (0.16 + (normalizedX * 0.14))) / 0.01);
+      const grid = ((x + (hash[1] || 0)) % 80 < 2 || (y + (hash[2] || 0)) % 80 < 2) ? 1 : 0;
+      const inWavePanel = normalizedX >= waveLeft && normalizedX <= waveRight && normalizedY >= waveTop && normalizedY <= waveBottom;
+      const wavePanelEdge = inWavePanel && (
+        normalizedX < waveLeft + 0.004
+        || normalizedX > waveRight - 0.004
+        || normalizedY < waveTop + 0.006
+        || normalizedY > waveBottom - 0.006
+      );
+      const lowerBand = normalizedY > 0.80 ? 1 : 0;
+      const vignette = Math.hypot(normalizedX - 0.5, normalizedY - 0.5) * 30;
+      const offset = (y * width + x) * 3;
+
+      pixels[offset] = clampByte(
+        r1 + ((r2 - r1) * t) + (centerGlow * 14) + (topGlow * 16) + (grid * 7)
+        + (diagonal * ar * 0.24) + (wavePanelEdge ? ar * 0.36 : 0) - (inWavePanel ? 10 : 0)
+        - (lowerBand * 4) - vignette,
+      );
+      pixels[offset + 1] = clampByte(
+        g1 + ((g2 - g1) * t) + (centerGlow * 17) + (topGlow * 14) + (grid * 7)
+        + (diagonal * ag * 0.24) + (wavePanelEdge ? ag * 0.36 : 0) - (inWavePanel ? 10 : 0)
+        - (lowerBand * 4) - vignette,
+      );
+      pixels[offset + 2] = clampByte(
+        b1 + ((b2 - b1) * t) + (centerGlow * 16) + (topGlow * 18) + (grid * 7)
+        + (diagonal * ab * 0.24) + (wavePanelEdge ? ab * 0.36 : 0) - (inWavePanel ? 8 : 0)
+        - (lowerBand * 4) - vignette,
+      );
+    }
+  }
+
+  return Buffer.concat([header, pixels]);
+}
+
+function buildWaveformFilterGraph(dimensions = {}) {
+  const width = Math.max(1, Number(dimensions.width) || DEFAULT_WIDTH);
+  const height = Math.max(1, Number(dimensions.height) || DEFAULT_HEIGHT);
+  const waveWidth = Math.max(320, Math.round(width * 0.76));
+  const waveHeight = Math.max(96, Math.round(height * 0.22));
+  const waveX = Math.round((width - waveWidth) / 2);
+  const waveY = Math.round(height * 0.485);
+
+  return [
+    `[1:a]aformat=channel_layouts=mono,showwaves=s=${waveWidth}x${waveHeight}:mode=line:rate=${DEFAULT_FPS}:colors=0x74D99F,format=rgba[wave]`,
+    `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1[bg]`,
+    `[bg][wave]overlay=x=${waveX}:y=${waveY}:shortest=1,format=yuv420p[v]`,
+  ].join(';');
 }
 
 function analyzePpmImage(buffer) {
@@ -1405,6 +1500,54 @@ class PodcastVideoService {
     };
   }
 
+  async renderWaveformCardMp4({
+    audioPath,
+    outputPath,
+    tempDir,
+    title = 'Podcast video',
+    durationSeconds = 0,
+    dimensions,
+    enhanceAudio = false,
+    runtime,
+  } = {}) {
+    const cardPath = path.join(tempDir, 'waveform-card.ppm');
+    await fs.writeFile(cardPath, buildWaveformCardFrameBuffer(
+      dimensions.width,
+      dimensions.height,
+      title,
+    ));
+
+    await this.runFfmpeg([
+      '-y',
+      '-loop', '1',
+      '-framerate', String(DEFAULT_FPS),
+      '-i', cardPath,
+      '-i', audioPath,
+      '-filter_complex', buildWaveformFilterGraph(dimensions),
+      '-map', '[v]',
+      '-map', '1:a:0',
+      '-shortest',
+      '-r', String(DEFAULT_FPS),
+      ...buildCompatibleH264VideoArgs(runtime),
+      ...this.buildPodcastVideoAudioArgs({ enhanceAudio }),
+      '-movflags', '+faststart',
+      outputPath,
+    ], {
+      timeoutMs: resolveAdaptiveFfmpegTimeoutMs(runtime.muxTimeoutMs, durationSeconds, {
+        fixedMs: 120000,
+        perSecondMs: 1000,
+        maxTimeoutMs: runtime.maxFfmpegTimeoutMs,
+      }),
+      stage: 'waveform-card render',
+    });
+
+    return {
+      source: 'waveform-card',
+      url: null,
+      attribution: null,
+    };
+  }
+
   async renderMp4({
     audioBuffer,
     audioMimeType = 'audio/wav',
@@ -1458,6 +1601,31 @@ class PodcastVideoService {
         (sum, scene) => sum + Math.max(MIN_SCENE_SECONDS, Number(scene.duration) || 0),
         0,
       );
+
+      if (runtime.renderMode === 'waveform-card') {
+        const image = await this.renderWaveformCardMp4({
+          audioPath,
+          outputPath,
+          tempDir,
+          title,
+          durationSeconds: totalDurationSeconds,
+          dimensions,
+          enhanceAudio,
+          runtime,
+        });
+
+        return {
+          buffer: await fs.readFile(outputPath),
+          scenes: normalizedScenes.map((scene) => ({
+            ...scene,
+            image,
+          })),
+          dimensions,
+          renderMode: runtime.renderMode,
+          audioRepairEnabled: normalizeVideoAudioRepair(enhanceAudio),
+          visualEffectsEnabled: false,
+        };
+      }
 
       if (runtime.renderMode === 'static-card') {
         const image = await this.renderStaticCardMp4({
@@ -1663,20 +1831,27 @@ class PodcastVideoService {
     audioMimeType = 'audio/wav',
     options = {},
   } = {}) {
+    const requestedRenderMode = normalizeRenderMode(
+      options.renderMode || options.videoRenderMode || config.podcastVideo?.renderMode || DEFAULT_RENDER_MODE,
+    );
     const resolvedTranscript = sanitizeText(transcript)
       || (Array.isArray(turns) ? turns.map((turn) => `${sanitizeText(turn?.speaker)}: ${sanitizeText(turn?.text)}`).join('\n') : '');
-    if (!resolvedTranscript) {
+    if (!resolvedTranscript && requestedRenderMode !== 'waveform-card') {
       throw createServiceError(400, 'A transcript or script turns are required to create a podcast video.', 'podcast_video_transcript_required');
     }
 
     const durationSeconds = Number(options.durationSeconds)
       || await this.getAudioDurationSeconds(audioBuffer, audioMimeType)
       || 0;
-    const imageMode = normalizeImageMode(options.imageMode || 'mixed');
-    const generateImages = normalizeBooleanOption(
-      options.generateImages,
-      ['mixed', 'generated'].includes(imageMode),
-    );
+    const imageMode = requestedRenderMode === 'waveform-card'
+      ? 'fallback'
+      : normalizeImageMode(options.imageMode || 'mixed');
+    const generateImages = requestedRenderMode === 'waveform-card'
+      ? false
+      : normalizeBooleanOption(
+        options.generateImages,
+        ['mixed', 'generated'].includes(imageMode),
+      );
     const storyboard = Array.isArray(options.scenes) && options.scenes.length > 0
       ? {
         title: sanitizeText(title) || 'Podcast video',
@@ -1684,6 +1859,18 @@ class PodcastVideoService {
         scenes: options.scenes.map((scene, index) => normalizeScene(scene, index)),
         planning: { provider: 'provided', model: null },
       }
+      : requestedRenderMode === 'waveform-card'
+        ? {
+          title: sanitizeText(title) || 'Podcast wave',
+          durationSeconds,
+          scenes: buildFallbackStoryboard({
+            title: sanitizeText(title) || 'Podcast wave',
+            transcript: resolvedTranscript || sanitizeText(title) || 'Podcast audio waveform',
+            durationSeconds,
+            sceneCount: 1,
+          }),
+          planning: { provider: 'waveform-card', model: null },
+        }
       : await this.planStoryboard({
         title,
         transcript: resolvedTranscript,
@@ -1711,7 +1898,7 @@ class PodcastVideoService {
       maxFfmpegTimeoutMs: options.maxFfmpegTimeoutMs || options.videoMaxFfmpegTimeoutMs || null,
       x264Preset: options.x264Preset || options.videoX264Preset || null,
       x264Crf: options.x264Crf || options.videoX264Crf || null,
-      renderMode: options.renderMode || options.videoRenderMode || null,
+      renderMode: requestedRenderMode,
       enhanceAudio: options.enhanceAudio ?? options.videoEnhanceAudio ?? options.repairAudio ?? options.cleanAudio,
       visualEffects: options.visualEffects ?? options.videoVisualEffects,
       toolManager: options.toolManager || null,
@@ -1761,7 +1948,10 @@ class PodcastVideoService {
 
     let transcript = sanitizeText(fields.transcript || '');
     let transcription = null;
-    if (!transcript) {
+    const requestedRenderMode = normalizeRenderMode(
+      fields.renderMode || fields.videoRenderMode || config.podcastVideo?.renderMode || DEFAULT_RENDER_MODE,
+    );
+    if (!transcript && requestedRenderMode !== 'waveform-card') {
       transcription = await this.transcriptionService.transcribe({
         audioBuffer: file.buffer,
         filename: file.filename || 'podcast-audio.wav',
@@ -1782,6 +1972,7 @@ class PodcastVideoService {
       audioMimeType: file.mimeType || 'audio/wav',
       options: {
         ...fields,
+        renderMode: requestedRenderMode,
         transcription,
         sceneCount: Number(fields.sceneCount) || undefined,
         ...(hasGenerateImagesField ? { generateImages: normalizeBooleanOption(fields.generateImages, false) } : {}),

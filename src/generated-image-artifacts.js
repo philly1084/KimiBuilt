@@ -280,7 +280,7 @@ function inferGeneratedImagePayloadSource(image = {}) {
     if (directInlineValue) {
         return /^data:image\//i.test(String(directInlineValue).trim())
             ? 'data_url'
-            : 'inline_base64';
+            : 'b64_json';
     }
 
     const urlValue = String(
@@ -304,7 +304,7 @@ function inferGeneratedImagePayloadSource(image = {}) {
         return 'local_path';
     }
 
-    return getGeneratedImageStringFields(image).length > 0 ? 'unrecognized_payload' : 'missing_payload';
+    return 'missing';
 }
 
 function buildPersistenceAttempt({
@@ -314,6 +314,7 @@ function buildPersistenceAttempt({
     reason = '',
     decoded = null,
     error = null,
+    remoteDownload = null,
 } = {}) {
     const payloadSource = inferGeneratedImagePayloadSource(image);
     return {
@@ -326,6 +327,7 @@ function buildPersistenceAttempt({
         mimeType: decoded?.mimeType || null,
         extension: decoded?.extension || null,
         byteLength: decoded?.buffer?.length || 0,
+        remoteDownload,
         error: error ? {
             message: String(error.message || error).slice(0, 240),
             name: String(error.name || '').trim() || null,
@@ -425,6 +427,166 @@ function inferMimeTypeFromUrl(url = '') {
     return 'image/png';
 }
 
+function parseUrlSafely(value = '') {
+    try {
+        return new URL(String(value || '').trim());
+    } catch (_error) {
+        return null;
+    }
+}
+
+function summarizeRemoteImageUrl(value = '') {
+    const parsed = parseUrlSafely(value);
+    if (!parsed) {
+        return null;
+    }
+
+    return {
+        host: parsed.host,
+        protocol: parsed.protocol.replace(/:$/, ''),
+        path: parsed.pathname.slice(0, 240),
+        queryPresent: Boolean(parsed.search),
+        redactedUrl: `${parsed.origin}${parsed.pathname}`.slice(0, 320),
+    };
+}
+
+function configuredBaseUrlMatches(url = '', baseUrl = '') {
+    const parsedUrl = parseUrlSafely(url);
+    const parsedBase = parseUrlSafely(baseUrl);
+    return Boolean(parsedUrl && parsedBase && parsedUrl.origin === parsedBase.origin);
+}
+
+function buildGeneratedImageDownloadRequest(imageUrl = '') {
+    const headers = {
+        Accept: 'image/*',
+    };
+    const openaiApiKey = String(config.openai?.apiKey || '').trim();
+    const mediaApiKey = String(config.media?.apiKey || '').trim();
+    const matchesOpenAiBase = configuredBaseUrlMatches(imageUrl, config.openai?.baseURL);
+    const matchesMediaBase = configuredBaseUrlMatches(imageUrl, config.media?.baseURL);
+    const apiKey = matchesMediaBase && mediaApiKey ? mediaApiKey : openaiApiKey;
+
+    let authHeadersAttached = false;
+    if ((matchesOpenAiBase || matchesMediaBase) && apiKey) {
+        headers.Authorization = `Bearer ${apiKey}`;
+        headers['x-api-key'] = apiKey;
+        authHeadersAttached = true;
+    }
+
+    return {
+        headers,
+        authHeadersAttached,
+    };
+}
+
+function summarizeBufferSignature(buffer = null) {
+    if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+        return {
+            firstBytesHex: '',
+            asciiPreview: '',
+            detected: 'empty',
+        };
+    }
+
+    const firstBytes = buffer.subarray(0, Math.min(buffer.length, 16));
+    const firstBytesHex = Array.from(firstBytes)
+        .map((byte) => byte.toString(16).padStart(2, '0').toUpperCase())
+        .join(' ');
+    const asciiPreview = firstBytes
+        .toString('latin1')
+        .replace(/[^\x20-\x7E]/g, '.');
+    let detected = 'unknown';
+    if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+        detected = 'png';
+    } else if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+        detected = 'jpeg';
+    } else if (buffer.length >= 12
+        && buffer.subarray(0, 4).toString('ascii') === 'RIFF'
+        && buffer.subarray(8, 12).toString('ascii') === 'WEBP') {
+        detected = 'webp';
+    } else if (buffer.length >= 6 && /^GIF8[79]a$/.test(buffer.subarray(0, 6).toString('ascii'))) {
+        detected = 'gif';
+    } else if (/^\s*(?:<\?xml\b|<svg\b)/i.test(buffer.subarray(0, Math.min(buffer.length, 256)).toString('utf8'))) {
+        detected = 'svg';
+    } else if (/^\s*[{[]/.test(buffer.subarray(0, Math.min(buffer.length, 32)).toString('utf8'))) {
+        detected = 'json_or_text';
+    } else if (/^\s*</.test(buffer.subarray(0, Math.min(buffer.length, 32)).toString('utf8'))) {
+        detected = 'html_or_xml';
+    }
+
+    return {
+        firstBytesHex,
+        asciiPreview,
+        detected,
+    };
+}
+
+function buildResponsePreview(buffer = null, contentType = '') {
+    if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+        return '';
+    }
+
+    const normalizedContentType = String(contentType || '').toLowerCase();
+    if (!/^(text\/|application\/(?:json|xml|problem\+json)\b)/i.test(normalizedContentType)) {
+        return '';
+    }
+
+    return redactDiagnosticText(buffer
+        .subarray(0, 400)
+        .toString('utf8')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 240));
+}
+
+function redactDiagnosticText(value = '') {
+    return String(value || '')
+        .replace(/(authorization|api[_-]?key|token|signature|sig|secret|password)=([^&\s"'<>]+)/gi, '$1=[redacted]')
+        .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]')
+        .replace(/sk-[A-Za-z0-9_-]{12,}/gi, 'sk-[redacted]');
+}
+
+function buildRemoteDownloadFailure({
+    imageUrl = '',
+    reason = '',
+    response = null,
+    contentType = '',
+    buffer = null,
+    error = null,
+    authHeadersAttached = false,
+    timeoutMs = 15000,
+} = {}) {
+    const contentLength = response?.headers?.get?.('content-length') || null;
+    const finalUrl = response?.url || imageUrl;
+    const redirected = response?.redirected === true || finalUrl !== imageUrl;
+    return {
+        reason,
+        url: summarizeRemoteImageUrl(imageUrl),
+        finalUrl: summarizeRemoteImageUrl(finalUrl),
+        authHeadersAttached,
+        timeoutMs,
+        redirected,
+        redirectCount: redirected ? null : 0,
+        status: response?.status || null,
+        statusText: response?.statusText || '',
+        contentType: contentType || '',
+        contentLength,
+        byteLength: Buffer.isBuffer(buffer) ? buffer.length : 0,
+        bodySniff: summarizeBufferSignature(buffer),
+        responsePreview: buildResponsePreview(buffer, contentType),
+        error: error ? {
+            message: String(error.message || error).slice(0, 240),
+            name: String(error.name || '').trim() || null,
+            code: error.code || error.cause?.code || null,
+            cause: error.cause ? {
+                message: String(error.cause.message || '').slice(0, 240),
+                name: String(error.cause.name || '').trim() || null,
+                code: error.cause.code || null,
+            } : null,
+        } : null,
+    };
+}
+
 async function downloadGeneratedImage(image = {}) {
     const imageUrl = String(
         image?.url
@@ -435,40 +597,80 @@ async function downloadGeneratedImage(image = {}) {
         || '',
     ).trim();
     if (!/^https?:\/\//i.test(imageUrl) || typeof fetch !== 'function') {
-        return null;
+        return {
+            decoded: null,
+            failure: null,
+        };
     }
 
     const controller = typeof AbortController === 'function' ? new AbortController() : null;
-    const timeoutId = controller ? setTimeout(() => controller.abort(), 15000) : null;
+    const timeoutMs = 15000;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    const request = buildGeneratedImageDownloadRequest(imageUrl);
 
     try {
         const response = await fetch(imageUrl, {
             method: 'GET',
             signal: controller?.signal,
-            headers: {
-                Accept: 'image/*',
-            },
+            redirect: 'follow',
+            headers: request.headers,
         });
+        const contentType = String(response.headers?.get?.('content-type') || '').trim().toLowerCase();
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
 
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            return {
+                decoded: null,
+                failure: buildRemoteDownloadFailure({
+                    imageUrl,
+                    reason: 'http_error',
+                    response,
+                    contentType,
+                    buffer,
+                    authHeadersAttached: request.authHeadersAttached,
+                    timeoutMs,
+                }),
+            };
         }
 
-        const contentType = String(response.headers?.get?.('content-type') || '').trim().toLowerCase();
         const mimeType = contentType.startsWith('image/')
             ? contentType.split(';')[0].trim()
             : inferMimeTypeFromUrl(imageUrl);
-        const arrayBuffer = await response.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
         const decoded = normalizeDecodedImageBuffer(buffer, mimeType);
         if (!decoded) {
-            throw new Error('Downloaded response was not a usable image');
+            return {
+                decoded: null,
+                failure: buildRemoteDownloadFailure({
+                    imageUrl,
+                    reason: contentType && !contentType.startsWith('image/')
+                        ? 'non_image_response'
+                        : 'invalid_image_bytes',
+                    response,
+                    contentType,
+                    buffer,
+                    authHeadersAttached: request.authHeadersAttached,
+                    timeoutMs,
+                }),
+            };
         }
 
-        return decoded;
+        return {
+            decoded,
+            failure: null,
+        };
     } catch (error) {
         console.warn('[Images] Failed to download generated image URL for persistence:', error.message);
-        return null;
+        return {
+            decoded: null,
+            failure: buildRemoteDownloadFailure({
+                imageUrl,
+                reason: 'fetch_failed',
+                error,
+                authHeadersAttached: request.authHeadersAttached,
+                timeoutMs,
+            }),
+        };
     } finally {
         if (timeoutId) {
             clearTimeout(timeoutId);
@@ -560,9 +762,14 @@ async function persistGeneratedImages({
         const imagePrompt = String(image?.prompt || prompt || '').trim();
         let storedArtifact = null;
         let persistenceAttempt = null;
-        const decoded = decodeGeneratedImage(image)
-            || await readGeneratedImageFromLocalPath(image)
-            || await downloadGeneratedImage(image);
+        let remoteDownloadFailure = null;
+        let decoded = decodeGeneratedImage(image)
+            || await readGeneratedImageFromLocalPath(image);
+        if (!decoded) {
+            const download = await downloadGeneratedImage(image);
+            decoded = download?.decoded || null;
+            remoteDownloadFailure = download?.failure || null;
+        }
 
         if (!sessionId) {
             persistenceAttempt = buildPersistenceAttempt({
@@ -577,8 +784,11 @@ async function persistGeneratedImages({
                 index,
                 image,
                 status: 'skipped',
-                reason: 'no_decodable_image_payload',
+                reason: remoteDownloadFailure?.reason
+                    ? `remote_url_${remoteDownloadFailure.reason}`
+                    : 'no_decodable_image_payload',
                 decoded,
+                remoteDownload: remoteDownloadFailure,
             });
             persistenceAttempt.hasSessionId = true;
         } else {

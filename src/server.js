@@ -253,8 +253,8 @@ app.get('/', (_req, res) => {
             <p>Visual canvas with Lilly drawing tools</p>
         </a>
         <a href="/podcast-video/" class="card">
-            <h3>Podcast Video</h3>
-            <p>Turn podcast audio into timed image video</p>
+            <h3>Podcast Wave</h3>
+            <p>Turn podcast audio into waveform MP4</p>
         </a>
         <a href="/admin/" class="card" style="border-color: #22c55e;">
             <h3>🎛️ Admin Dashboard</h3>

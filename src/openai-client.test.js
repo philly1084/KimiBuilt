@@ -1133,6 +1133,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(__testUtils.inferPodcastVideoOptions('Make a vertical video podcast about battery storage with generated images.')).toEqual({
             includeVideo: true,
             videoAspectRatio: '9:16',
+            videoRenderMode: 'storyboard',
             videoImageMode: 'generated',
             videoGenerateImages: true,
         });
@@ -1171,6 +1172,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
                     topic: 'battery storage',
                     includeVideo: true,
                     videoAspectRatio: '9:16',
+                    videoRenderMode: 'storyboard',
                     videoImageMode: 'generated',
                     videoGenerateImages: true,
                 },
@@ -2285,6 +2287,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
                 topic: 'battery storage',
                 includeVideo: true,
                 videoAspectRatio: '9:16',
+                videoRenderMode: 'storyboard',
                 videoImageMode: 'generated',
                 videoGenerateImages: true,
             }),
