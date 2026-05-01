@@ -321,6 +321,50 @@ describe('PodcastService', () => {
     }));
   });
 
+  test('uses the action model from tool context metadata when present', async () => {
+    const service = new PodcastService();
+    const executeTool = jest.fn(async (toolId) => {
+      if (toolId === 'web-search') {
+        return {
+          success: true,
+          data: {
+            results: [
+              { title: 'Grid battery guide', url: 'https://example.com/batteries', snippet: 'Battery storage helps balance power systems.' },
+            ],
+          },
+        };
+      }
+
+      if (toolId === 'web-fetch') {
+        return {
+          success: true,
+          data: {
+            headers: { 'content-type': 'text/html' },
+            body: '<article><p>Battery systems absorb excess power and discharge it later.</p></article>',
+          },
+        };
+      }
+
+      throw new Error(`Unexpected tool: ${toolId}`);
+    });
+
+    await service.createPodcast({
+      topic: 'How grid batteries work',
+      model: 'gpt-4o',
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+      toolContext: { model: 'gpt-5.3-instant' },
+      toolManager: { executeTool },
+    });
+
+    expect(createResponse).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'gpt-5.3-instant',
+      requestTimeoutMs: 300000,
+      requestMaxRetries: 0,
+    }));
+  });
+
   test('uses the active chat model instead of an unsafe generated mini model', async () => {
     const service = new PodcastService();
     const executeTool = jest.fn(async (toolId) => {
