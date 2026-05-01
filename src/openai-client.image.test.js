@@ -351,6 +351,29 @@ describe('openai-client image generation', () => {
         ]);
     });
 
+    test('includes the attempted endpoint in HTTP image generation errors', async () => {
+        process.env.OPENAI_BASE_URL = 'https://gateway.example/v1';
+        process.env.OPENAI_IMAGE_MODEL = 'gpt-image-2';
+        global.fetch = jest.fn(async () => ({
+            ok: false,
+            status: 404,
+            text: async () => JSON.stringify({ error: { message: 'not found' } }),
+            headers: { get: () => '' },
+        }));
+
+        const { generateImage } = require('./openai-client');
+        try {
+            await generateImage({
+                prompt: 'Generate a hero image',
+                model: 'gpt-image-2',
+            });
+            throw new Error('Expected generateImage to throw');
+        } catch (error) {
+            expect(error.endpoint).toBe('https://gateway.example/images/generations');
+            expect(error.baseURL).toBe('https://gateway.example');
+        }
+    });
+
     test('can opt in to official media fallback after the router endpoint fails', async () => {
         process.env.OPENAI_BASE_URL = 'https://gateway.example/v1';
         process.env.OPENAI_IMAGE_MODEL = 'gpt-image-2';
