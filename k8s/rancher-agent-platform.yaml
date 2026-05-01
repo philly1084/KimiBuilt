@@ -311,9 +311,15 @@ spec:
                   ;;
               esac
               if [ ! -s /etc/gitlab-runner/config.toml ]; then
+                register_token_flag="--registration-token"
+                case "$RUNNER_TOKEN" in
+                  glrt-*|glrtr-*)
+                    register_token_flag="--token"
+                    ;;
+                esac
                 gitlab-runner register --non-interactive \
                   --url "$CI_SERVER_URL" \
-                  --token "$RUNNER_TOKEN" \
+                  "$register_token_flag" "$RUNNER_TOKEN" \
                   --name "${RUNNER_NAME:-agent-platform-runner}" \
                   --executor shell \
                   --tag-list "${RUNNER_TAG_LIST:-kimibuilt,buildkit}" \

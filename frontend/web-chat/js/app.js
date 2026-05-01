@@ -6140,11 +6140,13 @@ curl -fsSIL --max-time 20 "https://$host"`;
         const counts = diagnostics.counts || {};
         const flags = diagnostics.flags || {};
         const provider = diagnostics.provider || {};
+        const transport = diagnostics.transport || {};
         const parts = [
             diagnostics.code || 'image_diagnostics',
             diagnostics.stage ? `stage=${diagnostics.stage}` : '',
             provider.source ? `provider=${provider.source}` : '',
             provider.status ? `providerStatus=${provider.status}` : '',
+            transport.category ? `transport=${transport.category}` : '',
             `parsed=${Number(counts.parsedImageRecords || 0)}`,
             `returned=${Number(counts.returnedImageRecords || 0)}`,
             `usable=${Number(counts.usableReturnedImageRecords || 0)}`,
@@ -6154,9 +6156,11 @@ curl -fsSIL --max-time 20 "https://$host"`;
         const artifactCount = Number(counts.artifacts || 0);
         const likely = (flags.likelyArtifactPersistenceIssue || (usableCount > 0 && artifactCount === 0))
             ? 'Backend parsed usable image data, but no reusable artifact was persisted; inspect artifact persistence/image validation path.'
-            : flags.likelyFrontendReceiveOrParserIssue
-                ? 'Backend sent usable persisted image data; inspect the web chat receive/parser path.'
-                : (diagnostics.likelyCause || '');
+            : flags.providerSocketClosedByPeer
+                ? 'Provider/router closed the socket before an HTTP response completed; inspect gateway logs, upstream connectivity, and proxy timeouts.'
+                : flags.likelyFrontendReceiveOrParserIssue
+                    ? 'Backend sent usable persisted image data; inspect the web chat receive/parser path.'
+                    : (diagnostics.likelyCause || '');
 
         return `${parts.join(' | ')}${likely ? ` | ${likely}` : ''}`;
     }

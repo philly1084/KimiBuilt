@@ -275,6 +275,46 @@ describe('openai-client image generation', () => {
         }));
     });
 
+    test('parses image payloads from raw wrappers with blank output text', async () => {
+        process.env.OPENAI_BASE_URL = 'https://gateway.example/v1';
+        process.env.OPENAI_IMAGE_MODEL = 'gateway-image-model';
+        global.fetch = jest.fn(async () => ({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                created: 123,
+                outputText: '',
+                raw: {
+                    data: [{
+                        b64_json: 'aGVsbG8=',
+                        revised_prompt: 'A cat',
+                    }],
+                },
+            }),
+        }));
+
+        const { generateImage } = require('./openai-client');
+        const result = await generateImage({
+            prompt: 'Generate a cat image',
+            model: 'gateway-image-model',
+        });
+
+        expect(result.data).toEqual([
+            expect.objectContaining({
+                url: 'data:image/png;base64,aGVsbG8=',
+                b64_json: 'aGVsbG8=',
+                revised_prompt: 'A cat',
+            }),
+        ]);
+        expect(result.diagnostics.imageGeneration).toEqual(expect.objectContaining({
+            code: 'backend_sent_usable_unpersisted_images',
+            counts: expect.objectContaining({
+                parsedImageRecords: 1,
+                usableReturnedImageRecords: 1,
+            }),
+        }));
+    });
+
     test('keeps gateway/router image requests on the configured OpenAI endpoint by default', async () => {
         process.env.OPENAI_BASE_URL = 'https://gateway.example/v1';
         process.env.OPENAI_IMAGE_MODEL = 'gpt-image-2';

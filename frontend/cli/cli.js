@@ -656,11 +656,13 @@ function formatImageDiagnostics(diagnostics = null) {
   const counts = imageDiagnostics.counts || {};
   const flags = imageDiagnostics.flags || {};
   const provider = imageDiagnostics.provider || {};
+  const transport = imageDiagnostics.transport || {};
   const parts = [
     imageDiagnostics.code || 'image_diagnostics',
     imageDiagnostics.stage ? `stage=${imageDiagnostics.stage}` : '',
     provider.source ? `provider=${provider.source}` : '',
     provider.status ? `providerStatus=${provider.status}` : '',
+    transport.category ? `transport=${transport.category}` : '',
     `parsed=${Number(counts.parsedImageRecords || 0)}`,
     `returned=${Number(counts.returnedImageRecords || 0)}`,
     `usable=${Number(counts.usableReturnedImageRecords || 0)}`,
@@ -670,9 +672,11 @@ function formatImageDiagnostics(diagnostics = null) {
   const artifactCount = Number(counts.artifacts || 0);
   const likely = (flags.likelyArtifactPersistenceIssue || (usableCount > 0 && artifactCount === 0))
     ? 'Backend parsed usable image data, but no reusable artifact was persisted; inspect artifact persistence/image validation path.'
-    : flags.likelyFrontendReceiveOrParserIssue
-      ? 'Backend sent usable persisted image data; inspect the CLI receive/parser path.'
-      : (imageDiagnostics.likelyCause || '');
+    : flags.providerSocketClosedByPeer
+      ? 'Provider/router closed the socket before an HTTP response completed; inspect gateway logs, upstream connectivity, and proxy timeouts.'
+      : flags.likelyFrontendReceiveOrParserIssue
+        ? 'Backend sent usable persisted image data; inspect the CLI receive/parser path.'
+        : (imageDiagnostics.likelyCause || '');
 
   return `${parts.join(' | ')}${likely ? ` | ${likely}` : ''}`;
 }

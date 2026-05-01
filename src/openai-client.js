@@ -761,7 +761,21 @@ function extractProviderImageRecords(value, depth = 0) {
         return [normalizeProviderImageRecord(value)];
     }
 
-    const nestedKeys = ['data', 'images', 'generated_images', 'generatedImages', 'output', 'result', 'content', 'parts', 'candidates'];
+    const nestedKeys = [
+        'data',
+        'images',
+        'generated_images',
+        'generatedImages',
+        'output',
+        'result',
+        'raw',
+        'payload',
+        'body',
+        'response',
+        'content',
+        'parts',
+        'candidates',
+    ];
     return nestedKeys.flatMap((key) => extractProviderImageRecords(value[key], depth + 1));
 }
 
@@ -960,11 +974,26 @@ async function postImageGenerationToProvider(params, imageProvider) {
             if (imageProvider.source === 'gateway') {
                 headers['x-api-key'] = imageProvider.apiKey;
             }
-            const response = await fetch(`${baseURL}/images/generations`, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify(requestBody),
-            });
+            const endpoint = `${baseURL}/images/generations`;
+            let response;
+            try {
+                response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify(requestBody),
+                });
+            } catch (error) {
+                error.baseURL = error.baseURL || baseURL;
+                error.provider = error.provider || imageProvider.source;
+                error.providerFamily = error.providerFamily || providerFamily;
+                error.endpoint = error.endpoint || endpoint;
+                error.requestVariant = error.requestVariant ?? index;
+                error.requestHadResponseFormat = error.requestHadResponseFormat
+                    || Object.prototype.hasOwnProperty.call(requestBody, 'response_format');
+                error.model = error.model || requestBody.model || params.model || imageProvider.imageModel || '';
+                lastError = error;
+                throw error;
+            }
 
             if (response.ok) {
                 const responseBody = await response.json();
@@ -972,7 +1001,7 @@ async function postImageGenerationToProvider(params, imageProvider) {
                     providerSource: imageProvider.source,
                     providerFamily,
                     baseURL,
-                    endpoint: `${baseURL}/images/generations`,
+                    endpoint,
                     status: response.status,
                     requestVariant: index,
                     requestHadResponseFormat: Object.prototype.hasOwnProperty.call(requestBody, 'response_format'),

@@ -222,8 +222,71 @@ function summarizeBaseUrl(value = '') {
   }
 }
 
+function summarizeProviderTransportFailure(error = null) {
+  if (!error) {
+    return null;
+  }
+
+  const message = normalizeText(error.message || error);
+  const cause = error.cause && typeof error.cause === 'object' ? error.cause : {};
+  const causeMessage = normalizeText(cause.message || '');
+  const code = normalizeText(error.code || '');
+  const causeCode = normalizeText(cause.code || '');
+  const normalizedCode = String(code || causeCode || '').toUpperCase();
+  const normalizedText = `${message} ${causeMessage}`.toLowerCase();
+  const socketClosedByPeer = normalizedCode === 'UND_ERR_SOCKET'
+    || /\b(other side closed|socket hang up|socket closed|premature close|premature socket close|closed before|terminated)\b/i.test(normalizedText);
+  const dnsError = ['ENOTFOUND', 'EAI_AGAIN'].includes(normalizedCode);
+  const connectionRefused = normalizedCode === 'ECONNREFUSED';
+  const connectionReset = normalizedCode === 'ECONNRESET';
+  const timeout = ['ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT'].includes(normalizedCode)
+    || /\b(timeout|timed out)\b/i.test(normalizedText);
+  const fetchFailed = /\bfetch failed\b/i.test(normalizedText)
+    || socketClosedByPeer
+    || dnsError
+    || connectionRefused
+    || connectionReset
+    || timeout;
+  let category = fetchFailed ? 'fetch_failed' : '';
+  if (socketClosedByPeer) {
+    category = 'socket_closed_by_peer';
+  } else if (dnsError) {
+    category = 'dns_resolution_failed';
+  } else if (connectionRefused) {
+    category = 'connection_refused';
+  } else if (connectionReset) {
+    category = 'connection_reset';
+  } else if (timeout) {
+    category = 'timeout';
+  }
+
+  return {
+    category,
+    fetchFailed,
+    socketClosedByPeer,
+    dnsError,
+    connectionRefused,
+    connectionReset,
+    timeout,
+    code,
+    name: normalizeText(error.name || ''),
+    message: truncate(message, 240),
+    cause: causeMessage || causeCode || normalizeText(cause.name || '')
+      ? {
+        name: normalizeText(cause.name || ''),
+        message: truncate(causeMessage, 240),
+        code: causeCode || null,
+        errno: cause.errno || null,
+        syscall: cause.syscall || null,
+        hostname: cause.hostname || null,
+      }
+      : null,
+  };
+}
+
 function classifyImageDiagnostics({
   error = null,
+  transportFailure = null,
   providerResponseReceived = false,
   parsedImageCount = 0,
   returnedImageCount = 0,
@@ -232,22 +295,28 @@ function classifyImageDiagnostics({
 } = {}) {
   if (error) {
     const message = normalizeText(error.message || error).toLowerCase();
-    const causeMessage = normalizeText(error.cause?.message || '').toLowerCase();
-    const code = normalizeText(error.code || error.cause?.code || '').toLowerCase();
-    const isFetchFailure = message.includes('fetch failed')
-      || causeMessage.includes('fetch failed')
-      || ['enotfound', 'econnrefused', 'econnreset', 'etimedout', 'eai_again', 'und_err_connect_timeout'].includes(code);
+    const transport = transportFailure || summarizeProviderTransportFailure(error);
+    const isFetchFailure = transport?.fetchFailed === true;
 
     if (isFetchFailure) {
+      const socketClosedByPeer = transport?.socketClosedByPeer === true;
       return {
         status: 'failed',
         code: 'provider_fetch_failed',
         stage: 'provider_request',
-        likelyCause: 'The backend image tool could not reach the configured image provider/router before any image response was returned.',
-        hints: [
-          'Check OPENAI_BASE_URL, OPENAI_MEDIA_BASE_URL, image provider routing, DNS, TLS, and network access from the backend host.',
-          'If this only happens through the agent tool path, inspect the backend runner/container network rather than the frontend parser.',
-        ],
+        likelyCause: socketClosedByPeer
+          ? 'The backend reached the image provider/router, but the remote side closed the socket before returning a complete HTTP response.'
+          : 'The backend image tool could not reach the configured image provider/router before any image response was returned.',
+        hints: socketClosedByPeer
+          ? [
+            'Inspect the image gateway/router pod logs for crashes, upstream disconnects, request body limits, or proxy timeout resets.',
+            'Check whether the gateway can reach its upstream image provider and whether it closes long-running image requests before they finish.',
+            'This is a provider/router transport failure, not a frontend receive/parser issue.',
+          ]
+          : [
+            'Check OPENAI_BASE_URL, OPENAI_MEDIA_BASE_URL, image provider routing, DNS, TLS, and network access from the backend host.',
+            'If this only happens through the agent tool path, inspect the backend runner/container network rather than the frontend parser.',
+          ],
       };
     }
 
@@ -378,6 +447,7 @@ function buildImageGenerationDiagnostics({
   const providerResponse = response || (error?.providerResponse && typeof error.providerResponse === 'object'
     ? error.providerResponse
     : null);
+  const transportFailure = summarizeProviderTransportFailure(error);
   const errorImageDiagnostics = error?.diagnostics?.imageGeneration
     || error?.providerResponse?.diagnostics?.imageGeneration
     || null;
@@ -390,6 +460,7 @@ function buildImageGenerationDiagnostics({
   const artifactCount = artifactRecords.length;
   const classification = classifyImageDiagnostics({
     error,
+    transportFailure,
     providerResponseReceived,
     parsedImageCount,
     returnedImageCount,
@@ -416,6 +487,12 @@ function buildImageGenerationDiagnostics({
       backendReturnedImageRecords: returnedImageCount > 0,
       backendReturnedUsableImageRecords: usableImageCount > 0,
       artifactsPersisted: artifactCount > 0,
+      likelyProviderTransportIssue: transportFailure?.fetchFailed === true,
+      providerSocketClosedByPeer: transportFailure?.socketClosedByPeer === true,
+      providerDnsIssue: transportFailure?.dnsError === true,
+      providerConnectionRefused: transportFailure?.connectionRefused === true,
+      providerConnectionReset: transportFailure?.connectionReset === true,
+      providerTimeout: transportFailure?.timeout === true,
       likelyBackendParserIssue: providerResponseReceived && parsedImageCount === 0,
       likelyBackendResponseIssue: parsedImageCount > 0 && usableImageCount === 0,
       likelyArtifactPersistenceIssue: usableImageCount > 0 && artifactCount === 0,
@@ -430,13 +507,27 @@ function buildImageGenerationDiagnostics({
     },
     provider: {
       source: normalizeText(providerSource || metadata.providerSource || metadata.source || error?.provider),
-      family: normalizeText(metadata.providerFamily || metadata.family),
+      family: normalizeText(metadata.providerFamily || metadata.family || error?.providerFamily),
       baseUrl: summarizeBaseUrl(providerBaseUrl || metadata.baseURL || metadata.baseUrl || error?.baseURL || error?.baseUrl),
-      endpoint: normalizeText(metadata.endpoint || ''),
+      endpoint: normalizeText(metadata.endpoint || error?.endpoint || ''),
       status: metadata.status || error?.status || error?.statusCode || null,
-      requestHadResponseFormat: metadata.requestHadResponseFormat === true,
-      requestVariant: metadata.requestVariant ?? null,
+      requestHadResponseFormat: metadata.requestHadResponseFormat === true || error?.requestHadResponseFormat === true,
+      requestVariant: metadata.requestVariant ?? error?.requestVariant ?? null,
     },
+    transport: transportFailure
+      ? {
+        category: transportFailure.category,
+        socketClosedByPeer: transportFailure.socketClosedByPeer,
+        dnsError: transportFailure.dnsError,
+        connectionRefused: transportFailure.connectionRefused,
+        connectionReset: transportFailure.connectionReset,
+        timeout: transportFailure.timeout,
+        code: transportFailure.code || null,
+        name: transportFailure.name || null,
+        message: transportFailure.message || null,
+        cause: transportFailure.cause,
+      }
+      : null,
     request: {
       model: normalizeText(model || metadata.model),
       size: normalizeText(size),
@@ -488,11 +579,13 @@ function formatImageDiagnosticsSummary(diagnostics = null) {
   const counts = diag.counts || {};
   const flags = diag.flags || {};
   const provider = diag.provider || {};
+  const transport = diag.transport || {};
   const parts = [
     diag.code || 'image_diagnostics',
     diag.stage ? `stage=${diag.stage}` : '',
     provider.source ? `provider=${provider.source}` : '',
     provider.status ? `providerStatus=${provider.status}` : '',
+    transport.category ? `transport=${transport.category}` : '',
     `parsed=${Number(counts.parsedImageRecords || 0)}`,
     `returned=${Number(counts.returnedImageRecords || 0)}`,
     `usable=${Number(counts.usableReturnedImageRecords || 0)}`,
@@ -502,9 +595,11 @@ function formatImageDiagnosticsSummary(diagnostics = null) {
   const artifactCount = Number(counts.artifacts || 0);
   const likely = (flags.likelyArtifactPersistenceIssue || (usableCount > 0 && artifactCount === 0))
     ? 'backend parsed usable image data, but no reusable artifact was persisted; inspect artifact persistence/image validation path'
-    : flags.likelyFrontendReceiveOrParserIssue
-      ? 'backend sent usable persisted image data; inspect frontend receive/parser path'
-      : (diag.likelyCause || '');
+    : flags.providerSocketClosedByPeer
+      ? 'provider/router closed the socket before an HTTP response completed; inspect gateway logs, upstream connectivity, and proxy timeouts'
+      : flags.likelyFrontendReceiveOrParserIssue
+        ? 'backend sent usable persisted image data; inspect frontend receive/parser path'
+        : (diag.likelyCause || '');
 
   return `${parts.join(' | ')}${likely ? ` | ${likely}` : ''}`;
 }
