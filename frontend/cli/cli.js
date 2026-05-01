@@ -657,12 +657,14 @@ function formatImageDiagnostics(diagnostics = null) {
   const flags = imageDiagnostics.flags || {};
   const provider = imageDiagnostics.provider || {};
   const transport = imageDiagnostics.transport || {};
+  const artifactPersistence = imageDiagnostics.artifactPersistence || {};
   const parts = [
     imageDiagnostics.code || 'image_diagnostics',
     imageDiagnostics.stage ? `stage=${imageDiagnostics.stage}` : '',
     provider.source ? `provider=${provider.source}` : '',
     provider.status ? `providerStatus=${provider.status}` : '',
     transport.category ? `transport=${transport.category}` : '',
+    artifactPersistence.primaryReason ? `artifactPersistence=${artifactPersistence.primaryReason}` : '',
     `parsed=${Number(counts.parsedImageRecords || 0)}`,
     `returned=${Number(counts.returnedImageRecords || 0)}`,
     `usable=${Number(counts.usableReturnedImageRecords || 0)}`,

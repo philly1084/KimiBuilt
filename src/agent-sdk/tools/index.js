@@ -3416,6 +3416,7 @@ class ToolManager {
               parsedImages: response?.data || [],
               returnedImages: persistedImages.images || [],
               artifacts: persistedImages.artifacts || [],
+              artifactPersistence: persistedImages.artifactPersistence || null,
               requestedCount,
               model: response.model || params.model || null,
               size: response.size || params.size || 'auto',
@@ -3432,6 +3433,9 @@ class ToolManager {
               inlinePath: image.inlinePath || null,
               alt: params.alt || `${params.prompt} ${index + 1}`.trim(),
             }));
+            const persistedMarkdownImages = images
+              .filter((image) => image.artifactId && image.url)
+              .map((image) => `![${image.alt}](${image.url})`);
             const usableImageCount = countUsableImageRecords(images);
             const diagnosticSummary = formatImageDiagnosticsSummary(diagnostics);
 
@@ -3446,16 +3450,13 @@ class ToolManager {
               images,
               artifacts: persistedImages.artifacts || [],
               artifactIds: (persistedImages.artifactIds || []).slice(),
+              artifactPersistence: persistedImages.artifactPersistence || null,
               diagnostics: {
                 imageGeneration: diagnostics,
               },
               diagnosticSummary,
-              markdownImage: images[0]?.url
-                ? `![${images[0].alt}](${images[0].url})`
-                : null,
-              markdownImages: images
-                .filter((image) => image.url)
-                .map((image) => `![${image.alt}](${image.url})`),
+              markdownImage: persistedMarkdownImages[0] || null,
+              markdownImages: persistedMarkdownImages,
             };
           },
           sideEffects: ['network'],

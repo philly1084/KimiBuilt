@@ -6141,12 +6141,14 @@ curl -fsSIL --max-time 20 "https://$host"`;
         const flags = diagnostics.flags || {};
         const provider = diagnostics.provider || {};
         const transport = diagnostics.transport || {};
+        const artifactPersistence = diagnostics.artifactPersistence || {};
         const parts = [
             diagnostics.code || 'image_diagnostics',
             diagnostics.stage ? `stage=${diagnostics.stage}` : '',
             provider.source ? `provider=${provider.source}` : '',
             provider.status ? `providerStatus=${provider.status}` : '',
             transport.category ? `transport=${transport.category}` : '',
+            artifactPersistence.primaryReason ? `artifactPersistence=${artifactPersistence.primaryReason}` : '',
             `parsed=${Number(counts.parsedImageRecords || 0)}`,
             `returned=${Number(counts.returnedImageRecords || 0)}`,
             `usable=${Number(counts.usableReturnedImageRecords || 0)}`,

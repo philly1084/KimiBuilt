@@ -434,6 +434,7 @@ function buildImageGenerationDiagnostics({
   parsedImages = [],
   returnedImages = null,
   artifacts = [],
+  artifactPersistence = null,
   requestedCount = 0,
   model = '',
   size = '',
@@ -444,6 +445,9 @@ function buildImageGenerationDiagnostics({
   const parsedImageRecords = Array.isArray(parsedImages) ? parsedImages : [];
   const returnedImageRecords = Array.isArray(returnedImages) ? returnedImages : parsedImageRecords;
   const artifactRecords = Array.isArray(artifacts) ? artifacts : [];
+  const persistence = artifactPersistence && typeof artifactPersistence === 'object'
+    ? artifactPersistence
+    : null;
   const providerResponse = response || (error?.providerResponse && typeof error.providerResponse === 'object'
     ? error.providerResponse
     : null);
@@ -514,6 +518,31 @@ function buildImageGenerationDiagnostics({
       requestHadResponseFormat: metadata.requestHadResponseFormat === true || error?.requestHadResponseFormat === true,
       requestVariant: metadata.requestVariant ?? error?.requestVariant ?? null,
     },
+    artifactPersistence: persistence
+      ? {
+        sessionIdPresent: persistence.sessionIdPresent === true,
+        requested: Number(persistence.requested || 0),
+        attempted: Number(persistence.attempted || 0),
+        persisted: Number(persistence.persisted || 0),
+        failed: Number(persistence.failed || 0),
+        skipped: Number(persistence.skipped || 0),
+        primaryReason: normalizeText(persistence.primaryReason || ''),
+        attempts: Array.isArray(persistence.attempts)
+          ? persistence.attempts.slice(0, 5).map((attempt) => ({
+            index: Number(attempt?.index || 0),
+            status: normalizeText(attempt?.status || ''),
+            reason: normalizeText(attempt?.reason || ''),
+            payloadSource: normalizeText(attempt?.payloadSource || ''),
+            hasSessionId: attempt?.hasSessionId === true,
+            hasDecodedImage: attempt?.hasDecodedImage === true,
+            mimeType: normalizeText(attempt?.mimeType || ''),
+            extension: normalizeText(attempt?.extension || ''),
+            byteLength: Number(attempt?.byteLength || 0),
+            error: attempt?.error || null,
+          }))
+          : [],
+      }
+      : null,
     transport: transportFailure
       ? {
         category: transportFailure.category,
@@ -580,12 +609,14 @@ function formatImageDiagnosticsSummary(diagnostics = null) {
   const flags = diag.flags || {};
   const provider = diag.provider || {};
   const transport = diag.transport || {};
+  const artifactPersistence = diag.artifactPersistence || {};
   const parts = [
     diag.code || 'image_diagnostics',
     diag.stage ? `stage=${diag.stage}` : '',
     provider.source ? `provider=${provider.source}` : '',
     provider.status ? `providerStatus=${provider.status}` : '',
     transport.category ? `transport=${transport.category}` : '',
+    artifactPersistence.primaryReason ? `artifactPersistence=${artifactPersistence.primaryReason}` : '',
     `parsed=${Number(counts.parsedImageRecords || 0)}`,
     `returned=${Number(counts.returnedImageRecords || 0)}`,
     `usable=${Number(counts.usableReturnedImageRecords || 0)}`,

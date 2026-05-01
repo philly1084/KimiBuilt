@@ -214,6 +214,71 @@ describe('generated-image-artifacts', () => {
         }));
     });
 
+    test('reports missing session ids as an artifact persistence skip reason', async () => {
+        const result = await persistGeneratedImages({
+            sessionId: '',
+            sourceMode: 'image',
+            prompt: 'Cat portrait',
+            model: 'gateway-image-model',
+            images: [{
+                b64_json: buildPngBuffer().toString('base64'),
+                revised_prompt: 'Cat portrait',
+            }],
+        });
+
+        expect(artifactService.createStoredArtifact).not.toHaveBeenCalled();
+        expect(result.artifactPersistence).toEqual(expect.objectContaining({
+            sessionIdPresent: false,
+            requested: 1,
+            persisted: 0,
+            skipped: 1,
+            primaryReason: 'missing_session_id',
+        }));
+        expect(result.artifactPersistence.attempts[0]).toEqual(expect.objectContaining({
+            status: 'skipped',
+            reason: 'missing_session_id',
+            payloadSource: 'inline_base64',
+            hasDecodedImage: true,
+        }));
+    });
+
+    test('reports undecodable provider URLs as an artifact persistence skip reason', async () => {
+        global.fetch = jest.fn(async () => ({
+            ok: true,
+            headers: {
+                get: (name) => (String(name).toLowerCase() === 'content-type' ? 'text/html' : null),
+            },
+            arrayBuffer: async () => Buffer.from('<html>not an image</html>').buffer,
+        }));
+
+        const result = await persistGeneratedImages({
+            sessionId: 'session-1',
+            sourceMode: 'image',
+            prompt: 'Cat portrait',
+            model: 'gateway-image-model',
+            images: [{
+                url: 'https://example.com/image.png',
+                revised_prompt: 'Cat portrait',
+            }],
+        });
+
+        expect(artifactService.createStoredArtifact).not.toHaveBeenCalled();
+        expect(result.artifactPersistence).toEqual(expect.objectContaining({
+            sessionIdPresent: true,
+            requested: 1,
+            persisted: 0,
+            skipped: 1,
+            primaryReason: 'no_decodable_image_payload',
+        }));
+        expect(result.artifactPersistence.attempts[0]).toEqual(expect.objectContaining({
+            status: 'skipped',
+            reason: 'no_decodable_image_payload',
+            payloadSource: 'remote_url',
+            hasSessionId: true,
+            hasDecodedImage: false,
+        }));
+    });
+
     test('does not persist one-pixel placeholder image payloads as artifacts', async () => {
         const result = await persistGeneratedImages({
             sessionId: 'session-1',

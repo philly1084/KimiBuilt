@@ -6675,6 +6675,73 @@ function extractImageDiagnosticsFromToolEvents(toolEvents = []) {
     return null;
 }
 
+function getImageDiagnosticsFromToolEvent(event = {}) {
+    return event?.result?.diagnostics?.imageGeneration
+        || event?.diagnostics?.imageGeneration
+        || event?.result?.data?.diagnostics?.imageGeneration
+        || null;
+}
+
+function isUnpersistedImageGenerationEvent(event = {}) {
+    const toolId = String(event?.toolCall?.function?.name || event?.result?.toolId || '').trim();
+    if (toolId !== 'image-generate') {
+        return false;
+    }
+
+    const diagnostics = getImageDiagnosticsFromToolEvent(event);
+    const counts = diagnostics?.counts || {};
+    const flags = diagnostics?.flags || {};
+    return flags.likelyArtifactPersistenceIssue === true
+        || (Number(counts.usableReturnedImageRecords || 0) > 0 && Number(counts.artifacts || 0) === 0);
+}
+
+function hasUnpersistedImageGeneration(toolEvents = []) {
+    return (Array.isArray(toolEvents) ? toolEvents : []).some((event) => isUnpersistedImageGenerationEvent(event));
+}
+
+function summarizeImageGenerateToolEvent(event = {}) {
+    const result = event?.result || {};
+    const data = result?.data || {};
+    const success = result?.success !== false;
+    const diagnostics = getImageDiagnosticsFromToolEvent(event);
+    const diagnosticSummary = diagnostics ? formatImageDiagnosticsSummary(diagnostics) : '';
+    const counts = diagnostics?.counts || {};
+    const artifactIds = [
+        ...(Array.isArray(data.artifactIds) ? data.artifactIds : []),
+        ...(Array.isArray(data.artifacts) ? data.artifacts.map((artifact) => artifact?.id) : []),
+    ].map((id) => String(id || '').trim()).filter(Boolean);
+    const uniqueArtifactIds = Array.from(new Set(artifactIds));
+    const usableCount = Number(data.usableCount || counts.usableReturnedImageRecords || 0);
+
+    if (!success) {
+        return [
+            '- image-generate: failed.',
+            result.error ? `Error: ${truncateText(normalizeInlineText(result.error), 220)}.` : '',
+            diagnosticSummary ? `Diagnostics: ${diagnosticSummary}.` : '',
+        ].filter(Boolean).join(' ');
+    }
+
+    if (uniqueArtifactIds.length > 0) {
+        return [
+            '- image-generate: succeeded.',
+            `Persisted ${uniqueArtifactIds.length} reusable image artifact${uniqueArtifactIds.length === 1 ? '' : 's'}.`,
+            `Artifact ID${uniqueArtifactIds.length === 1 ? '' : 's'}: ${uniqueArtifactIds.slice(0, 5).join(', ')}.`,
+        ].filter(Boolean).join(' ');
+    }
+
+    if (usableCount > 0) {
+        return [
+            '- image-generate: completed but no reusable image artifact was persisted.',
+            diagnosticSummary ? `Diagnostics: ${diagnosticSummary}.` : '',
+        ].filter(Boolean).join(' ');
+    }
+
+    return [
+        '- image-generate: completed without usable image data.',
+        diagnosticSummary ? `Diagnostics: ${diagnosticSummary}.` : '',
+    ].filter(Boolean).join(' ');
+}
+
 function summarizeToolEventForUser(event = {}) {
     const tool = String(event?.toolCall?.function?.name || event?.result?.toolId || 'tool').trim();
     const reason = String(event?.reason || '').trim();
@@ -6686,6 +6753,10 @@ function summarizeToolEventForUser(event = {}) {
     const error = String(result?.error || '').trim();
     const exitCode = Number.isFinite(Number(data?.exitCode)) ? Number(data.exitCode) : null;
     let preview = '';
+
+    if (tool === 'image-generate') {
+        return summarizeImageGenerateToolEvent(event);
+    }
 
     if (tool === 'web-search') {
         preview = summarizeSearchResults(data?.results || []);
@@ -6863,6 +6934,12 @@ function buildCompactToolSynthesisPrompt({
             ? [
                 'Research dossier:',
                 researchDossier,
+                '',
+            ]
+            : []),
+        ...(hasUnpersistedImageGeneration(events)
+            ? [
+                'Image generation warning: the tool returned usable image data but no reusable artifact was persisted. Do not invent image URLs; state the diagnostic summary instead.',
                 '',
             ]
             : []),
@@ -7280,8 +7357,19 @@ function normalizeToolResult(result, fallbackToolId, timing = {}) {
 
 function extractVerifiedImageEmbeds(toolEvents = []) {
     return toolEvents.flatMap((event) => {
+        const toolId = String(event?.toolCall?.function?.name || event?.result?.toolId || '').trim();
         const data = event?.result?.data || {};
         const embeds = [];
+
+        if (toolId === 'image-generate') {
+            const diagnostics = getImageDiagnosticsFromToolEvent(event);
+            const artifactCount = Number(diagnostics?.counts?.artifacts || 0)
+                || (Array.isArray(data.artifacts) ? data.artifacts.length : 0)
+                || (Array.isArray(data.artifactIds) ? data.artifactIds.length : 0);
+            if (artifactCount <= 0) {
+                return [];
+            }
+        }
 
         if (typeof data.markdownImage === 'string' && data.markdownImage.trim()) {
             embeds.push(data.markdownImage.trim());
@@ -11409,6 +11497,12 @@ class ConversationOrchestrator extends EventEmitter {
                 ? [
                     'Research dossier:',
                     buildResearchDossierFromToolEvents({ objective, toolEvents }),
+                    '',
+                ]
+                : []),
+            ...(hasUnpersistedImageGeneration(toolEvents)
+                ? [
+                    'Image generation warning: the tool returned usable image data but no reusable artifact was persisted. Do not invent image URLs; state the diagnostic summary instead.',
                     '',
                 ]
                 : []),

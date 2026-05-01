@@ -12,6 +12,22 @@ describe('image generation diagnostics', () => {
       parsedImages: [{ b64_json: 'abc123' }],
       returnedImages: [{ b64_json: 'abc123' }],
       artifacts: [],
+      artifactPersistence: {
+        sessionIdPresent: true,
+        requested: 1,
+        attempted: 1,
+        persisted: 0,
+        skipped: 1,
+        primaryReason: 'no_decodable_image_payload',
+        attempts: [{
+          index: 1,
+          status: 'skipped',
+          reason: 'no_decodable_image_payload',
+          payloadSource: 'inline_base64',
+          hasSessionId: true,
+          hasDecodedImage: false,
+        }],
+      },
       requestedCount: 1,
       model: 'gpt-image-2',
       prompt: 'can you generate a cat image',
@@ -32,8 +48,15 @@ describe('image generation diagnostics', () => {
         usableReturnedImageRecords: 1,
         artifacts: 0,
       }),
+      artifactPersistence: expect.objectContaining({
+        sessionIdPresent: true,
+        primaryReason: 'no_decodable_image_payload',
+      }),
     });
 
+    expect(formatImageDiagnosticsSummary(diagnostics)).toContain(
+      'artifactPersistence=no_decodable_image_payload',
+    );
     expect(formatImageDiagnosticsSummary(diagnostics)).toContain(
       'no reusable artifact was persisted; inspect artifact persistence/image validation path',
     );

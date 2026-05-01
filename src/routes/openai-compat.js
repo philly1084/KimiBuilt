@@ -2559,6 +2559,7 @@ router.post('/images/generations', async (req, res, next) => {
             parsedImages: response?.data || [],
             returnedImages: normalizedResponse.data || [],
             artifacts: persistedImages.artifacts || [],
+            artifactPersistence: persistedImages.artifactPersistence || null,
             requestedCount,
             model: normalizedResponse.model || model || null,
             size: normalizedResponse.size || size,

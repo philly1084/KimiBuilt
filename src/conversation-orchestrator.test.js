@@ -6329,6 +6329,102 @@ describe('ConversationOrchestrator', () => {
         expect(modelTrace.details.diagnosticSummary).toContain('Provider returned no parseable image data');
     });
 
+    test('does not pass unpersisted generated image urls as verified embeds for synthesis', async () => {
+        const diagnostics = {
+            imageGeneration: {
+                code: 'backend_sent_usable_unpersisted_images',
+                status: 'warning',
+                stage: 'tool_response_build',
+                flags: {
+                    backendReturnedUsableImageRecords: true,
+                    likelyArtifactPersistenceIssue: true,
+                    likelyFrontendReceiveOrParserIssue: false,
+                },
+                counts: {
+                    parsedImageRecords: 1,
+                    returnedImageRecords: 1,
+                    usableReturnedImageRecords: 1,
+                    artifacts: 0,
+                },
+                artifactPersistence: {
+                    sessionIdPresent: true,
+                    primaryReason: 'no_decodable_image_payload',
+                },
+                likelyCause: 'The backend parsed and returned usable image payloads, but no reusable artifact was persisted.',
+            },
+        };
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(
+                buildResponse('Image generation completed, but no reusable image artifact was persisted.', 'resp_image_unpersisted'),
+            ),
+            complete: jest.fn(),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                toolId === 'image-generate'
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn().mockResolvedValue({
+                success: true,
+                toolId: 'image-generate',
+                data: {
+                    source: 'generated',
+                    prompt: 'generate a cat image',
+                    count: 1,
+                    usableCount: 1,
+                    image: {
+                        url: 'https://example.com/image.png',
+                        artifactId: null,
+                    },
+                    images: [{
+                        url: 'https://example.com/image.png',
+                        artifactId: null,
+                        alt: 'Generated cat image',
+                    }],
+                    artifacts: [],
+                    artifactIds: [],
+                    markdownImage: '![Generated cat image](https://example.com/image.png)',
+                    markdownImages: ['![Generated cat image](https://example.com/image.png)'],
+                },
+                diagnostics,
+            }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-image-unpersisted', metadata: {} }),
+            getOrCreate: jest.fn().mockResolvedValue({ id: 'session-image-unpersisted', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        await orchestrator.executeConversation({
+            input: 'generate a cat image',
+            sessionId: 'session-image-unpersisted',
+            stream: false,
+        });
+
+        const synthesisPrompt = llmClient.createResponse.mock.calls
+            .map(([request]) => String(request?.input || ''))
+            .find((input) => input.includes('Verified tool results:'));
+
+        expect(synthesisPrompt).toContain('Image generation warning');
+        expect(synthesisPrompt).toContain('no reusable image artifact was persisted');
+        expect(synthesisPrompt).not.toContain('Verified embeddable images:');
+        expect(synthesisPrompt).not.toContain('https://example.com/image.png');
+    });
+
     test('notes synthesis instructions keep repaired answers on the page instead of drifting into workspace writes', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {

@@ -244,6 +244,115 @@ function decodeGeneratedImage(image = {}) {
     );
 }
 
+function getGeneratedImageStringFields(image = {}) {
+    return [
+        image?.b64_json,
+        image?.b64,
+        image?.base64,
+        image?.image_base64,
+        image?.imageBase64,
+        image?.data,
+        image?.inline_data?.data,
+        image?.inlineData?.data,
+        image?.url,
+        image?.image_url,
+        image?.imageUrl,
+        image?.file_uri,
+        image?.fileUri,
+        image?.path,
+        image?.file,
+        image?.file_path,
+        image?.filePath,
+    ].filter((value) => typeof value === 'string' && value.trim());
+}
+
+function inferGeneratedImagePayloadSource(image = {}) {
+    const directInlineValue = [
+        image?.b64_json,
+        image?.b64,
+        image?.base64,
+        image?.image_base64,
+        image?.imageBase64,
+        image?.data,
+        image?.inline_data?.data,
+        image?.inlineData?.data,
+    ].find((value) => typeof value === 'string' && value.trim());
+    if (directInlineValue) {
+        return /^data:image\//i.test(String(directInlineValue).trim())
+            ? 'data_url'
+            : 'inline_base64';
+    }
+
+    const urlValue = String(
+        image?.url
+        || image?.image_url
+        || image?.imageUrl
+        || image?.file_uri
+        || image?.fileUri
+        || '',
+    ).trim();
+    if (/^data:image\//i.test(urlValue)) return 'data_url';
+    if (/^https?:\/\//i.test(urlValue)) return 'remote_url';
+    if (resolveGeneratedImageLocalPath(
+        urlValue
+        || image?.path
+        || image?.file
+        || image?.file_path
+        || image?.filePath
+        || '',
+    )) {
+        return 'local_path';
+    }
+
+    return getGeneratedImageStringFields(image).length > 0 ? 'unrecognized_payload' : 'missing_payload';
+}
+
+function buildPersistenceAttempt({
+    index = 0,
+    image = {},
+    status = 'skipped',
+    reason = '',
+    decoded = null,
+    error = null,
+} = {}) {
+    const payloadSource = inferGeneratedImagePayloadSource(image);
+    return {
+        index: index + 1,
+        status,
+        reason,
+        payloadSource,
+        hasSessionId: false,
+        hasDecodedImage: Boolean(decoded?.buffer?.length),
+        mimeType: decoded?.mimeType || null,
+        extension: decoded?.extension || null,
+        byteLength: decoded?.buffer?.length || 0,
+        error: error ? {
+            message: String(error.message || error).slice(0, 240),
+            name: String(error.name || '').trim() || null,
+            code: error.code || null,
+        } : null,
+    };
+}
+
+function summarizeArtifactPersistence({ sessionId = '', images = [], attempts = [], artifacts = [] } = {}) {
+    const normalizedAttempts = Array.isArray(attempts) ? attempts : [];
+    const persisted = Array.isArray(artifacts) ? artifacts.length : 0;
+    const failed = normalizedAttempts.filter((attempt) => attempt.status === 'failed').length;
+    const skipped = normalizedAttempts.filter((attempt) => attempt.status === 'skipped').length;
+    const primaryProblem = normalizedAttempts.find((attempt) => attempt.status !== 'persisted') || null;
+
+    return {
+        sessionIdPresent: Boolean(String(sessionId || '').trim()),
+        requested: Array.isArray(images) ? images.length : 0,
+        attempted: normalizedAttempts.length,
+        persisted,
+        failed,
+        skipped,
+        primaryReason: primaryProblem?.reason || (persisted > 0 ? 'persisted' : ''),
+        attempts: normalizedAttempts.slice(0, 5),
+    };
+}
+
 function resolveGeneratedImageLocalPath(url = '') {
     const normalized = String(url || '').trim();
     if (!normalized) {
@@ -444,16 +553,35 @@ async function persistGeneratedImages({
 }) {
     const normalizedImages = [];
     const artifacts = [];
+    const persistenceAttempts = [];
 
     for (let index = 0; index < (Array.isArray(images) ? images : []).length; index += 1) {
         const image = images[index] || {};
         const imagePrompt = String(image?.prompt || prompt || '').trim();
         let storedArtifact = null;
+        let persistenceAttempt = null;
         const decoded = decodeGeneratedImage(image)
             || await readGeneratedImageFromLocalPath(image)
             || await downloadGeneratedImage(image);
 
-        if (sessionId && decoded?.buffer?.length) {
+        if (!sessionId) {
+            persistenceAttempt = buildPersistenceAttempt({
+                index,
+                image,
+                status: 'skipped',
+                reason: 'missing_session_id',
+                decoded,
+            });
+        } else if (!decoded?.buffer?.length) {
+            persistenceAttempt = buildPersistenceAttempt({
+                index,
+                image,
+                status: 'skipped',
+                reason: 'no_decodable_image_payload',
+                decoded,
+            });
+            persistenceAttempt.hasSessionId = true;
+        } else {
             try {
                 const stored = await artifactService.createStoredArtifact({
                     sessionId,
@@ -483,20 +611,45 @@ async function persistGeneratedImages({
                     inlinePath: buildArtifactInlinePath(storedArtifact.id),
                     absoluteInlineUrl: toAbsoluteInternalUrl(buildArtifactInlinePath(storedArtifact.id)),
                 });
+                persistenceAttempt = buildPersistenceAttempt({
+                    index,
+                    image,
+                    status: 'persisted',
+                    reason: 'persisted',
+                    decoded,
+                });
+                persistenceAttempt.hasSessionId = true;
             } catch (error) {
                 console.warn('[Images] Failed to persist generated image artifact:', error.message);
+                persistenceAttempt = buildPersistenceAttempt({
+                    index,
+                    image,
+                    status: 'failed',
+                    reason: 'artifact_store_failed',
+                    decoded,
+                    error,
+                });
+                persistenceAttempt.hasSessionId = true;
             }
         }
 
+        persistenceAttempts.push(persistenceAttempt);
         normalizedImages.push(normalizeGeneratedImageRecord(image, storedArtifact));
     }
 
     await updateGeneratedImageSessionState(sessionId, artifacts);
+    const artifactPersistence = summarizeArtifactPersistence({
+        sessionId,
+        images,
+        attempts: persistenceAttempts,
+        artifacts,
+    });
 
     return {
         images: normalizedImages,
         artifacts,
         artifactIds: artifacts.map((artifact) => artifact.id),
+        artifactPersistence,
     };
 }
 

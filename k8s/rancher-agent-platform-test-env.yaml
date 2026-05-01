@@ -14,7 +14,7 @@ metadata:
 type: Opaque
 stringData:
   username: root
-  password: z9Q!4vL#72pR@mX6
+  password: R8v_mQ42_pL9zXw7!
   email: admin@demoserver2.buzz
 ---
 apiVersion: v1
@@ -35,7 +35,7 @@ type: Opaque
 stringData:
   gitlab-registry-host: registry.gitlab.demoserver2.buzz
   gitlab-registry-username: root
-  gitlab-registry-password: z9Q!4vL#72pR@mX6
+  gitlab-registry-password: R8v_mQ42_pL9zXw7!
   kimibuilt-build-events-url: https://kimibuilt.demoserver2.buzz/api/integrations/gitlab/build-events
   kimibuilt-build-events-secret: KbTestHook-X3nV8qT6cW2a!
   kimibuilt-build-events-insecure: "0"

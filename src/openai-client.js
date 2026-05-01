@@ -4140,6 +4140,13 @@ function buildDirectArtifactSummary(toolEvent = {}) {
 function buildDirectImageToolSummary(result = {}) {
     const data = result?.data || {};
     const images = Array.isArray(data.images) ? data.images.filter((image) => image && typeof image === 'object') : [];
+    const artifactCount = Array.isArray(data.artifacts)
+        ? data.artifacts.length
+        : (Array.isArray(data.artifactIds) ? data.artifactIds.length : 0);
+    const diagnostics = result?.diagnostics?.imageGeneration
+        || data?.diagnostics?.imageGeneration
+        || null;
+    const diagnosticSummary = diagnostics ? formatImageDiagnosticsSummary(diagnostics) : '';
     const count = Math.max(
         Number(data.count) || 0,
         Number(data.requestedCount) || 0,
@@ -4149,6 +4156,10 @@ function buildDirectImageToolSummary(result = {}) {
 
     if (!count) {
         return '';
+    }
+
+    if (artifactCount <= 0 && diagnosticSummary) {
+        return `Image generation completed, but no reusable image artifact was persisted. Diagnostics: ${diagnosticSummary}`;
     }
 
     if (count === 1) {
