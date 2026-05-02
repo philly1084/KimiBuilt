@@ -59,10 +59,12 @@ jobs:
 
       - name: Update deployment image
         env:
-          IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && format('sha-{0}', github.sha) || format('sha-{0}', github.event.workflow_run.head_sha) }}
+          IMAGE_SHA: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
         run: |
+          image_tag="sha-${IMAGE_SHA:0:7}"
+
           # Update the image tag in deployment
-          sed -i "s|image: .*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}|g" k8s/backend-deployment.yaml
+          sed -i "s|image: .*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${image_tag}|g" k8s/backend-deployment.yaml
           
           # Verify the change
           grep "image:" k8s/backend-deployment.yaml
