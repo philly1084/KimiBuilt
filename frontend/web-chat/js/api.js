@@ -60,6 +60,22 @@ const filterChatModelsForWebChat = gatewayStreamHelpers.filterChatModels
             'realtime',
             'moderation',
         ];
+        const nonChatCapabilities = new Set([
+            'image',
+            'image_generation',
+            'image-generation',
+            'images',
+            'embedding',
+            'embeddings',
+            'text-embedding',
+            'tts',
+            'speech',
+            'audio',
+            'transcription',
+            'transcribe',
+            'moderation',
+            'realtime',
+        ]);
 
         return (Array.isArray(models) ? models : []).filter((model) => {
             const id = String(model?.id || '').trim();
@@ -68,7 +84,8 @@ const filterChatModelsForWebChat = gatewayStreamHelpers.filterChatModels
                 ? model.capabilities.map((capability) => String(capability || '').trim().toLowerCase()).filter(Boolean)
                 : [];
             const chatCapable = capabilities.includes('chat')
-                || (capabilities.length === 0 && !nonChatTokens.some((token) => lower.includes(token)));
+                || (!capabilities.some((capability) => nonChatCapabilities.has(capability))
+                    && !nonChatTokens.some((token) => lower.includes(token)));
 
             if (!id || seen.has(id) || !chatCapable) {
                 return false;

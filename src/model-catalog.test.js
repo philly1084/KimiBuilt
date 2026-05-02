@@ -7,12 +7,18 @@ const {
 describe('model-catalog', () => {
     test('keeps router-provided chat models even when the family is not hardcoded', () => {
         expect(isPublicChatModel('my-router/smart-chat-v2')).toBe(true);
+        expect(isPublicChatModel('gpt-5.5-tools')).toBe(true);
         expect(toPublicChatModelList([
             { id: 'my-router/smart-chat-v2', owned_by: 'custom-router' },
+            { id: 'gpt-5.5-tools', owned_by: 'internal-router' },
         ])).toEqual([
             expect.objectContaining({
                 id: 'my-router/smart-chat-v2',
                 owned_by: 'custom-router',
+            }),
+            expect.objectContaining({
+                id: 'gpt-5.5-tools',
+                owned_by: 'internal-router',
             }),
         ]);
     });

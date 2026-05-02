@@ -29,8 +29,6 @@ const NON_CHAT_MODEL_TOKENS = [
     'moderation',
     'omni-moderation',
     'vision-preview',
-    'preview-tools',
-    '-tools',
 ];
 
 function isPublicChatModel(modelId = '') {

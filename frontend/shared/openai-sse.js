@@ -96,6 +96,27 @@
       : [];
   }
 
+  function hasExplicitNonChatCapability(capabilities = []) {
+    const nonChatCapabilities = new Set([
+      'image',
+      'image_generation',
+      'image-generation',
+      'images',
+      'embedding',
+      'embeddings',
+      'text-embedding',
+      'tts',
+      'speech',
+      'audio',
+      'transcription',
+      'transcribe',
+      'moderation',
+      'realtime',
+    ]);
+
+    return capabilities.some((capability) => nonChatCapabilities.has(capability));
+  }
+
   function isChatModel(modelOrId = '') {
     const normalizedId = normalizeModelId(modelOrId).toLowerCase();
     if (!normalizedId) {
@@ -108,7 +129,7 @@
     if (capabilities.includes('chat')) {
       return true;
     }
-    if (capabilities.some((capability) => capability !== 'chat')) {
+    if (hasExplicitNonChatCapability(capabilities)) {
       return false;
     }
 

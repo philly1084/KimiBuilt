@@ -402,11 +402,12 @@ describe('openai-sse helpers', () => {
       { id: 'gpt-image-2', capabilities: ['image_generation'] },
       { id: 'imagen-4.0-generate-preview-06-06', capabilities: ['image_generation'] },
       { id: 'gpt-5.4-mini', capabilities: ['chat'] },
+      { id: 'gpt-5.5-tools', capabilities: ['tools', 'streaming'] },
       { id: 'text-embedding-3-large', capabilities: ['embeddings'] },
     ];
 
     expect(isChatModel(models[0])).toBe(false);
-    expect(filterChatModels(models).map((model) => model.id)).toEqual(['gpt-5.4-mini']);
+    expect(filterChatModels(models).map((model) => model.id)).toEqual(['gpt-5.4-mini', 'gpt-5.5-tools']);
     expect(resolvePreferredChatModel(models, 'gpt-image-2')).toBe(DEFAULT_CODEX_MODEL_ID);
   });
 });
