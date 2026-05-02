@@ -84,7 +84,7 @@ app.use(helmet({
     contentSecurityPolicy: false,
     originAgentCluster: false,
 }));
-app.use(cors(buildCorsOptions()));
+app.use((req, res, next) => cors(buildCorsOptions(config.security, req))(req, res, next));
 app.use(express.json({ limit: '10mb' }));
 
 const loginRateLimit = createRateLimit({

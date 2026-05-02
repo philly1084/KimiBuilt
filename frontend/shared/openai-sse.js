@@ -90,10 +90,66 @@
     return normalizedId.includes('codex') || normalizedId.includes('gpt-5');
   }
 
-  function filterCodexBackedModels(models = []) {
+  function getModelCapabilities(model = {}) {
+    return Array.isArray(model?.capabilities)
+      ? model.capabilities.map((capability) => String(capability || '').trim().toLowerCase()).filter(Boolean)
+      : [];
+  }
+
+  function isChatModel(modelOrId = '') {
+    const normalizedId = normalizeModelId(modelOrId).toLowerCase();
+    if (!normalizedId) {
+      return false;
+    }
+
+    const capabilities = modelOrId && typeof modelOrId === 'object'
+      ? getModelCapabilities(modelOrId)
+      : [];
+    if (capabilities.includes('chat')) {
+      return true;
+    }
+    if (capabilities.some((capability) => capability !== 'chat')) {
+      return false;
+    }
+
+    return ![
+      'embed',
+      'embedding',
+      'image',
+      'gpt-image',
+      'dall-e',
+      'dalle',
+      'imagen',
+      'flux',
+      'diffusion',
+      'tts',
+      'speech',
+      'audio',
+      'transcribe',
+      'whisper',
+      'realtime',
+      'moderation',
+    ].some((token) => normalizedId.includes(token));
+  }
+
+  function filterChatModels(models = []) {
     const seen = new Set();
 
     return (Array.isArray(models) ? models : []).filter((model) => {
+      const id = normalizeModelId(model);
+      if (!id || seen.has(id) || !isChatModel(model)) {
+        return false;
+      }
+
+      seen.add(id);
+      return true;
+    });
+  }
+
+  function filterCodexBackedModels(models = []) {
+    const seen = new Set();
+
+    return filterChatModels(models).filter((model) => {
       const id = normalizeModelId(model);
       if (!id || seen.has(id) || !isCodexBackedModel(id)) {
         return false;
@@ -131,7 +187,7 @@
   }
 
   function resolvePreferredChatModel(models = [], preferredModel = '', fallbackModel = DEFAULT_CODEX_MODEL_ID) {
-    const availableModels = Array.isArray(models) ? models : [];
+    const availableModels = filterChatModels(models);
     const availableIds = new Set(
       availableModels
         .map((model) => normalizeModelId(model))
@@ -140,7 +196,7 @@
     const preferredId = normalizeModelId(preferredModel);
     const fallbackId = normalizeModelId(fallbackModel) || DEFAULT_CODEX_MODEL_ID;
 
-    if (preferredId && (availableIds.size === 0 || availableIds.has(preferredId))) {
+    if (preferredId && isChatModel(preferredId) && (availableIds.size === 0 || availableIds.has(preferredId))) {
       return preferredId;
     }
 
@@ -1071,7 +1127,9 @@
     extractSSEData,
     extractStreamMetadata,
     extractToolEvents,
+    filterChatModels,
     filterCodexBackedModels,
+    isChatModel,
     isCodexBackedModel,
     isFunctionCallItem,
     isTerminalFinishReason,

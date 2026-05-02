@@ -58,6 +58,24 @@ describe('security middleware', () => {
         expect(response.headers['access-control-allow-origin']).toBe('https://kimibuilt.example');
     });
 
+    test('allows same-origin browser requests even when the configured allowlist is stale', async () => {
+        const app = express();
+        app.use((req, res, next) => cors(buildCorsOptions({
+            allowedOrigins: ['https://old.example'],
+        }, req))(req, res, next));
+        app.post('/api/auth/login', (_req, res) => res.json({ ok: true }));
+
+        const response = await request(app)
+            .post('/api/auth/login')
+            .set('Host', 'kimibuilt.secdevsolutions.help')
+            .set('X-Forwarded-Proto', 'https')
+            .set('Origin', 'https://kimibuilt.secdevsolutions.help')
+            .send({ username: 'admin', password: 'secret' })
+            .expect(200);
+
+        expect(response.headers['access-control-allow-origin']).toBe('https://kimibuilt.secdevsolutions.help');
+    });
+
     test('rate limits repeated login attempts', async () => {
         const app = express();
         app.post('/api/auth/login', createRateLimit({

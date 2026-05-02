@@ -51,6 +51,15 @@
     console.warn('[Agent Integration] Agent SDK not loaded');
     return;
   }
+
+  const gatewayHelpers = window.KimiBuiltGatewaySSE || {};
+  const buildGatewayHeaders = gatewayHelpers.buildGatewayHeaders || ((headers = {}) => ({
+    ...headers,
+    Authorization: 'Bearer any-key',
+  }));
+  const resolvePreferredChatModel = gatewayHelpers.resolvePreferredChatModel || ((_models, preferredModel = '', fallbackModel = 'gpt-5.4-mini') => (
+    String(preferredModel || '').trim() || fallbackModel
+  ));
   
   /**
    * ChatAgentBridge - Bridges the Agent SDK with the Web Chat
@@ -72,7 +81,7 @@
       // Create LLM client using existing OpenAI SDK integration
       const llmClient = {
         complete: async (prompt, options = {}) => {
-          const model = options.model || window.ChatAPI?.getSelectedModel?.() || 'gpt-4';
+          const model = resolvePreferredChatModel([], options.model || window.ChatAPI?.getSelectedModel?.(), 'gpt-5.4-mini');
           
           const messages = [
             { role: 'system', content: this.getSystemPrompt() },
@@ -82,12 +91,21 @@
           
           const response = await fetch('/v1/chat/completions', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: buildGatewayHeaders({ 'Content-Type': 'application/json' }),
+            credentials: 'same-origin',
             body: JSON.stringify({
               model,
               messages,
               stream: false,
-              temperature: options.temperature || 0.7
+              temperature: options.temperature || 0.7,
+              enableConversationExecutor: true,
+              taskType: 'chat',
+              clientSurface: 'web-chat',
+              metadata: {
+                clientSurface: 'web-chat',
+                sessionIsolation: true,
+                enableConversationExecutor: true,
+              },
             })
           });
           
@@ -96,7 +114,7 @@
         },
         
         completeStream: async (prompt, options = {}) => {
-          const model = options.model || window.ChatAPI?.getSelectedModel?.() || 'gpt-4';
+          const model = resolvePreferredChatModel([], options.model || window.ChatAPI?.getSelectedModel?.(), 'gpt-5.4-mini');
           
           const messages = [
             { role: 'system', content: this.getSystemPrompt() },
@@ -106,12 +124,21 @@
           
           const response = await fetch('/v1/chat/completions', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: buildGatewayHeaders({ 'Content-Type': 'application/json' }),
+            credentials: 'same-origin',
             body: JSON.stringify({
               model,
               messages,
               stream: true,
-              temperature: options.temperature || 0.7
+              temperature: options.temperature || 0.7,
+              enableConversationExecutor: true,
+              taskType: 'chat',
+              clientSurface: 'web-chat',
+              metadata: {
+                clientSurface: 'web-chat',
+                sessionIsolation: true,
+                enableConversationExecutor: true,
+              },
             })
           });
           
@@ -124,7 +151,8 @@
         embed: async (text) => {
           const response = await fetch('/v1/embeddings', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: buildGatewayHeaders({ 'Content-Type': 'application/json' }),
+            credentials: 'same-origin',
             body: JSON.stringify({ input: text, model: 'text-embedding-3-small' })
           });
           const data = await response.json();

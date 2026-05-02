@@ -23,6 +23,7 @@ jest.mock('../memory/memory-service', () => ({
 
 jest.mock('../openai-client', () => ({
     generateImage: jest.fn(),
+    listImageModels: jest.fn(),
     listModels: jest.fn(),
 }));
 
@@ -341,6 +342,47 @@ describe('/v1/chat/completions stream forwarding', () => {
                 reasoning_tokens: 4,
             },
         });
+    });
+
+    test('ignores non-chat model ids before routing web-chat completions', async () => {
+        executeConversationRuntime.mockResolvedValue({
+            handledPersistence: true,
+            response: {
+                id: 'resp-compat-non-chat-model-1',
+                model: 'gpt-5.4-mini',
+                output_text: 'Answer',
+                output: [{
+                    type: 'message',
+                    role: 'assistant',
+                    content: [{ type: 'output_text', text: 'Answer' }],
+                }],
+                metadata: {
+                    toolEvents: [],
+                },
+            },
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use('/v1', openAiCompatRouter);
+
+        const response = await request(app)
+            .post('/v1/chat/completions')
+            .send({
+                model: 'gpt-image-2',
+                messages: [
+                    { role: 'user', content: 'Hello.' },
+                ],
+                taskType: 'chat',
+                clientSurface: 'web-chat',
+                stream: false,
+                session_id: 'web-chat-stream-1',
+            });
+
+        expect(response.status).toBe(200);
+        expect(executeConversationRuntime).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+            model: null,
+        }));
     });
 
     test('reuses client-provided message ids when persisting a durable web-chat turn', async () => {

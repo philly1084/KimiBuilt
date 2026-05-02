@@ -15,12 +15,37 @@ function normalizeOrigin(value = '') {
     }
 }
 
-function buildCorsOptions(securityConfig = config.security) {
+function normalizeForwardedHeaderValue(value = '') {
+    return String(value || '')
+        .split(',')[0]
+        .trim();
+}
+
+function getRequestOriginCandidates(req = {}) {
+    const candidates = new Set();
+    const host = normalizeForwardedHeaderValue(req.headers?.['x-forwarded-host'] || req.headers?.host);
+    if (!host) {
+        return candidates;
+    }
+
+    const forwardedProto = normalizeForwardedHeaderValue(req.headers?.['x-forwarded-proto']);
+    const protocol = forwardedProto
+        || (req.protocol ? String(req.protocol).trim() : '')
+        || (req.secure ? 'https' : 'http');
+    if (protocol) {
+        candidates.add(normalizeOrigin(`${protocol}://${host}`));
+    }
+
+    return candidates;
+}
+
+function buildCorsOptions(securityConfig = config.security, req = null) {
     const allowedOrigins = new Set(
         (securityConfig?.allowedOrigins || [])
             .map(normalizeOrigin)
             .filter(Boolean),
     );
+    const requestOriginCandidates = getRequestOriginCandidates(req || {});
 
     return {
         origin(origin, callback) {
@@ -29,7 +54,11 @@ function buildCorsOptions(securityConfig = config.security) {
             }
 
             const normalizedOrigin = normalizeOrigin(origin);
-            if (allowedOrigins.has('*') || allowedOrigins.has(normalizedOrigin)) {
+            if (
+                allowedOrigins.has('*')
+                || allowedOrigins.has(normalizedOrigin)
+                || requestOriginCandidates.has(normalizedOrigin)
+            ) {
                 return callback(null, true);
             }
 
@@ -102,5 +131,6 @@ function isToolInvokePath(req = {}) {
 module.exports = {
     buildCorsOptions,
     createRateLimit,
+    getRequestOriginCandidates,
     isToolInvokePath,
 };

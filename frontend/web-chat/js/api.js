@@ -39,9 +39,48 @@ const buildGatewayRealtimeUrl = gatewayStreamHelpers.buildGatewayRealtimeUrl
             return normalizedPath;
         }
     });
+const filterChatModelsForWebChat = gatewayStreamHelpers.filterChatModels
+    || ((models = []) => {
+        const seen = new Set();
+        const nonChatTokens = [
+            'embed',
+            'embedding',
+            'image',
+            'gpt-image',
+            'dall-e',
+            'dalle',
+            'imagen',
+            'flux',
+            'diffusion',
+            'tts',
+            'speech',
+            'audio',
+            'transcribe',
+            'whisper',
+            'realtime',
+            'moderation',
+        ];
+
+        return (Array.isArray(models) ? models : []).filter((model) => {
+            const id = String(model?.id || '').trim();
+            const lower = id.toLowerCase();
+            const capabilities = Array.isArray(model?.capabilities)
+                ? model.capabilities.map((capability) => String(capability || '').trim().toLowerCase()).filter(Boolean)
+                : [];
+            const chatCapable = capabilities.includes('chat')
+                || (capabilities.length === 0 && !nonChatTokens.some((token) => lower.includes(token)));
+
+            if (!id || seen.has(id) || !chatCapable) {
+                return false;
+            }
+
+            seen.add(id);
+            return true;
+        });
+    });
 const resolvePreferredChatModelForWebChat = gatewayStreamHelpers.resolvePreferredChatModel
     || ((models, preferredModel = '', fallbackModel = DEFAULT_CHAT_MODEL) => {
-        const availableModels = Array.isArray(models) ? models : [];
+        const availableModels = filterChatModelsForWebChat(models);
         const availableIds = new Set(
             availableModels
                 .map((entry) => String(entry?.id || '').trim())
@@ -49,8 +88,9 @@ const resolvePreferredChatModelForWebChat = gatewayStreamHelpers.resolvePreferre
         );
         const preferredId = String(preferredModel || '').trim();
         const fallbackId = String(fallbackModel || '').trim() || DEFAULT_CHAT_MODEL;
+        const preferredIsChat = preferredId && filterChatModelsForWebChat([{ id: preferredId }]).length > 0;
 
-        if (preferredId && (availableIds.size === 0 || availableIds.has(preferredId))) {
+        if (preferredIsChat && (availableIds.size === 0 || availableIds.has(preferredId))) {
             return preferredId;
         }
 
@@ -1001,7 +1041,11 @@ class OpenAIAPIClient extends EventTarget {
      * @returns {AsyncGenerator} - Yields delta content
      */
     async *streamChat(messages, model = DEFAULT_CHAT_MODEL, signal = null, reasoningEffort = '', requestOptions = {}) {
-        const selectedModel = resolvePreferredChatModelForWebChat(this.modelsCache?.data || [], model, DEFAULT_CHAT_MODEL);
+        const selectedModel = resolvePreferredChatModelForWebChat(
+            filterChatModelsForWebChat(this.modelsCache?.data || []),
+            model,
+            DEFAULT_CHAT_MODEL,
+        );
         const params = {
             model: selectedModel,
             messages,
@@ -1443,7 +1487,11 @@ class OpenAIAPIClient extends EventTarget {
      * @returns {Object} - Response with content and sessionId
      */
     async chat(messages, model = DEFAULT_CHAT_MODEL, reasoningEffort = '', requestOptions = {}) {
-        const selectedModel = resolvePreferredChatModelForWebChat(this.modelsCache?.data || [], model, DEFAULT_CHAT_MODEL);
+        const selectedModel = resolvePreferredChatModelForWebChat(
+            filterChatModelsForWebChat(this.modelsCache?.data || []),
+            model,
+            DEFAULT_CHAT_MODEL,
+        );
         const params = {
             model: selectedModel,
             messages,
@@ -1666,9 +1714,7 @@ class OpenAIAPIClient extends EventTarget {
     }
 
     filterChatModels(models = []) {
-        return Array.isArray(models)
-            ? models.filter((model) => Boolean(String(model?.id || '').trim()))
-            : [];
+        return filterChatModelsForWebChat(models);
     }
 
     getDefaultImageModels() {

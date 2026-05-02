@@ -2,7 +2,9 @@ const {
   DEFAULT_CODEX_MODEL_ID,
   buildGatewayRealtimeUrl,
   extractSSEData,
+  filterChatModels,
   filterCodexBackedModels,
+  isChatModel,
   normalizeGatewayEventPayload,
   resolvePreferredChatModel,
   selectPreferredCodexModel,
@@ -393,5 +395,18 @@ describe('openai-sse helpers', () => {
     expect(resolvePreferredChatModel(models, 'claude-3-sonnet')).toBe('claude-3-sonnet');
     expect(resolvePreferredChatModel([], 'claude-3-sonnet')).toBe('claude-3-sonnet');
     expect(resolvePreferredChatModel(models, 'missing-model')).toBe(DEFAULT_CODEX_MODEL_ID);
+  });
+
+  test('excludes image models from chat selection and stale preferences', () => {
+    const models = [
+      { id: 'gpt-image-2', capabilities: ['image_generation'] },
+      { id: 'imagen-4.0-generate-preview-06-06', capabilities: ['image_generation'] },
+      { id: 'gpt-5.4-mini', capabilities: ['chat'] },
+      { id: 'text-embedding-3-large', capabilities: ['embeddings'] },
+    ];
+
+    expect(isChatModel(models[0])).toBe(false);
+    expect(filterChatModels(models).map((model) => model.id)).toEqual(['gpt-5.4-mini']);
+    expect(resolvePreferredChatModel(models, 'gpt-image-2')).toBe(DEFAULT_CODEX_MODEL_ID);
   });
 });

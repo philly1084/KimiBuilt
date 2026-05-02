@@ -5,6 +5,15 @@
 
 const webChatGatewayHelpers = window.KimiBuiltGatewaySSE || {};
 const WEB_CHAT_DEFAULT_MODEL = webChatGatewayHelpers.DEFAULT_CODEX_MODEL_ID || 'gpt-5.4-mini';
+const webChatFilterChatModels = webChatGatewayHelpers.filterChatModels || ((models = []) => (
+    Array.isArray(models) ? models.filter((model) => Boolean(String(model?.id || '').trim())) : []
+));
+const webChatIsChatModel = webChatGatewayHelpers.isChatModel || ((modelOrId = '') => {
+    const id = typeof modelOrId === 'object'
+        ? String(modelOrId?.id || '').trim()
+        : String(modelOrId || '').trim();
+    return Boolean(id) && !/(embed|image|gpt-image|dall-e|dalle|imagen|flux|diffusion|tts|speech|audio|transcribe|whisper|realtime|moderation)/i.test(id);
+});
 const WEB_CHAT_SHARED_THEMES = window.KimiBuiltThemePresets || {};
 const WEB_CHAT_THEME_PRESET_STORAGE_KEY = WEB_CHAT_SHARED_THEMES.storageKeys?.preset || 'kimibuilt_theme_preset';
 const WEB_CHAT_THEME_MODE_STORAGE_KEY = WEB_CHAT_SHARED_THEMES.storageKeys?.mode || 'kimibuilt_theme';
@@ -592,9 +601,9 @@ const WEB_CHAT_THEME_PRESETS = WEB_CHAT_SHARED_THEMES.presets || Object.freeze([
 const WEB_CHAT_THEME_PRESET_MAP = WEB_CHAT_SHARED_THEMES.map || new Map(WEB_CHAT_THEME_PRESETS.map((preset) => [preset.id, preset]));
 
 function webChatSelectPreferredModel(models = [], preferredModel = '') {
-    const availableModels = Array.isArray(models) ? models : [];
+    const availableModels = webChatFilterChatModels(models);
     const preferredId = String(preferredModel || '').trim();
-    if (preferredId && availableModels.some((model) => String(model?.id || '').trim() === preferredId)) {
+    if (preferredId && webChatIsChatModel(preferredId) && availableModels.some((model) => String(model?.id || '').trim() === preferredId)) {
         return preferredId;
     }
 

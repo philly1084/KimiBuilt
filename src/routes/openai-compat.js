@@ -56,7 +56,7 @@ const {
 } = require('../foreground-request-registry');
 const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
 const { extractArtifactsFromToolEvents, mergeRuntimeArtifacts } = require('../runtime-artifacts');
-const { toPublicModelList } = require('../model-catalog');
+const { isPublicChatModel, toPublicModelList } = require('../model-catalog');
 const {
     buildScopedMemoryMetadata,
     buildScopedSessionMetadata,
@@ -863,7 +863,7 @@ router.post('/chat/completions', async (req, res, next) => {
     const startedAt = Date.now();
     try {
         const {
-            model,
+            model: requestedModel,
             messages,
             stream = false,
             reasoning: _ignoredReasoning = null,
@@ -873,6 +873,10 @@ router.post('/chat/completions', async (req, res, next) => {
             metadata: requestMetadata = {},
         } = req.body;
         streamRequested = stream === true;
+        const model = isPublicChatModel(requestedModel) ? requestedModel : null;
+        if (requestedModel && !model) {
+            console.warn(`[OpenAICompat] Ignoring non-chat model for chat/completions: ${requestedModel}`);
+        }
         const reasoningEffort = resolveReasoningEffort(req.body);
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
         const ownerId = getRequestOwnerId(req);
