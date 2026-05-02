@@ -203,6 +203,15 @@ function inferProviderFamily({
     return 'generic';
 }
 
+function isOpenAIBaseURL(baseURL = '') {
+    try {
+        const parsed = new URL(String(baseURL || 'https://api.openai.com/v1'));
+        return /(^|\.)openai\.com$/i.test(parsed.hostname);
+    } catch (_error) {
+        return false;
+    }
+}
+
 function resolveOpenAIApiMode({
     baseURL = config.openai.baseURL,
     requestedMode = config.openai.apiMode,
@@ -870,8 +879,11 @@ function buildImageGenerationParamsForProvider(params = {}, imageProvider = getI
         baseURL: imageProvider.baseURL,
         model: imageProvider.imageModel || params.model,
     });
-    const isOpenAIStyleProvider = providerFamily === 'openai'
-        || shouldUseOfficialOpenAIImageCatalogForGateway(imageProvider);
+    const gatewayUsesOfficialOpenAICatalog = shouldUseOfficialOpenAIImageCatalogForGateway(imageProvider);
+    const isOpenAIStyleProvider = providerFamily === 'openai' || gatewayUsesOfficialOpenAICatalog;
+    const explicitResponseFormat = Object.prototype.hasOwnProperty.call(nextParams, 'response_format')
+        ? nextParams.response_format
+        : undefined;
 
     if (isOpenAIStyleProvider) {
         const officialModel = getOfficialOpenAIConfiguredImageModel(
@@ -888,6 +900,14 @@ function buildImageGenerationParamsForProvider(params = {}, imageProvider = getI
 
         nextParams.model = officialModel;
         normalizeOfficialOpenAIImageParams(nextParams);
+        const isExternalGateway = gatewayUsesOfficialOpenAICatalog
+            && imageProvider.source === 'gateway'
+            && !isOpenAIBaseURL(imageProvider.baseURL);
+        if (isExternalGateway
+            && explicitResponseFormat != null
+            && !Object.prototype.hasOwnProperty.call(nextParams, 'response_format')) {
+            nextParams.response_format = explicitResponseFormat;
+        }
     }
 
     return nextParams;
@@ -4208,6 +4228,40 @@ function formatDirectToolResultMessage(toolEvent = {}) {
         return sections.join('\n\n');
     }
 
+    if (toolId === 'remote-cli-agent') {
+        if (!result.success) {
+            const diagnostics = result?.diagnostics?.remoteCliAgent || {};
+            const sections = [
+                `remote-cli-agent failed: ${result.error || 'Unknown error'}`,
+            ];
+
+            if (diagnostics.stage || diagnostics.model || diagnostics.apiMode) {
+                sections.push([
+                    `Stage: ${diagnostics.stage || 'unknown'}.`,
+                    diagnostics.model ? `Model: ${diagnostics.model}.` : '',
+                    diagnostics.apiMode ? `API mode: ${diagnostics.apiMode}.` : '',
+                ].filter(Boolean).join(' '));
+            }
+
+            if (diagnostics.agentBaseURL || diagnostics.mcpURL) {
+                sections.push([
+                    diagnostics.agentBaseURL ? `Model gateway: ${diagnostics.agentBaseURL}.` : '',
+                    diagnostics.mcpURL ? `MCP gateway: ${diagnostics.mcpURL}.` : '',
+                ].filter(Boolean).join(' '));
+            }
+
+            if (diagnostics.hint) {
+                sections.push(`Next check: ${diagnostics.hint}`);
+            }
+
+            return sections.join('\n\n');
+        }
+
+        const data = result?.data || {};
+        return String(data.finalOutput || '').trim()
+            || `remote-cli-agent completed for target ${data.targetId || 'default target'}.`;
+    }
+
     if (!result.success) {
         const diagnosticSummary = toolId === 'image-generate'
             ? formatImageDiagnosticsSummary(result.diagnostics)
@@ -4362,7 +4416,7 @@ async function runDirectRequiredToolAction({
     toolContext = {},
     model = null,
 }) {
-    if (!['ssh-execute', 'remote-command', 'web-scrape', 'agent-workload', 'podcast'].includes(requiredToolId)) {
+    if (!['ssh-execute', 'remote-command', 'remote-cli-agent', 'web-scrape', 'agent-workload', 'podcast'].includes(requiredToolId)) {
         return null;
     }
 
@@ -4414,16 +4468,22 @@ async function runDirectRequiredToolAction({
     const actions = buildDeterministicPreflightActions(selectedTools, prompt)
         .filter((action) => action.toolId === requiredToolId);
 
-    if (!actions.length) {
+    if (!actions.length && requiredToolId !== 'remote-cli-agent') {
         return null;
     }
 
+    const params = requiredToolId === 'remote-cli-agent'
+        ? {
+            task: prompt,
+            adminMode: hasRemoteSoftwareDeploymentIntent(prompt),
+        }
+        : actions[0].params;
     const toolCall = {
         id: 'direct_required_tool_1',
         type: 'function',
         function: {
             name: requiredToolId,
-            arguments: JSON.stringify(actions[0].params),
+            arguments: JSON.stringify(params),
         },
     };
 

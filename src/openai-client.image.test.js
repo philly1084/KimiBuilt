@@ -605,6 +605,33 @@ describe('openai-client image generation', () => {
         expect(global.fetch.mock.calls[0][0]).toBe('https://gateway.example/v1/images/generations');
     });
 
+    test('preserves explicit base64 response format requests for OpenAI-style gateway image calls', async () => {
+        process.env.OPENAI_BASE_URL = 'https://gateway.example/v1';
+        process.env.OPENAI_IMAGE_MODEL = 'gpt-image-2';
+        global.fetch = jest.fn(async (_url, init = {}) => ({
+            ok: true,
+            json: async () => ({
+                created: 123,
+                data: [{
+                    b64_json: 'aGVsbG8=',
+                }],
+            }),
+        }));
+
+        const { generateImage } = require('./openai-client');
+        await generateImage({
+            prompt: 'Generate a hero image',
+            model: 'gpt-image-2',
+            response_format: 'b64_json',
+        });
+
+        expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual(expect.objectContaining({
+            model: 'gpt-image-2',
+            response_format: 'b64_json',
+        }));
+        expect(global.fetch.mock.calls[0][0]).toBe('https://gateway.example/v1/images/generations');
+    });
+
     test('passes structured prompts and image passthrough fields to the configured gateway endpoint', async () => {
         process.env.OPENAI_BASE_URL = 'https://gateway.example/openai/v1';
         process.env.OPENAI_IMAGE_MODEL = 'gpt-image-2';
@@ -647,7 +674,9 @@ describe('openai-client image generation', () => {
             user: 'frontend-user',
         }));
         expect(JSON.parse(global.fetch.mock.calls[0][1].body)).not.toHaveProperty('style');
-        expect(JSON.parse(global.fetch.mock.calls[0][1].body)).not.toHaveProperty('response_format');
+        expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual(expect.objectContaining({
+            response_format: 'b64_json',
+        }));
         expect(result.data[0]).toEqual(expect.objectContaining({
             url: 'data:image/png;base64,aGVsbG8=',
             b64_json: 'aGVsbG8=',

@@ -80,6 +80,9 @@ class ToolBase {
       return {
         success: false,
         error: error.message,
+        ...(error.code ? { errorCode: error.code } : {}),
+        ...(Number.isFinite(Number(error.statusCode || error.status)) ? { statusCode: Number(error.statusCode || error.status) } : {}),
+        ...(error.diagnostics ? { diagnostics: error.diagnostics } : {}),
         errorType: error.name,
         duration,
         sideEffects: this.sideEffectTracker.getAll(),

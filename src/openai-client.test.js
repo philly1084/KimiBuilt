@@ -472,6 +472,7 @@ function createToolManager() {
         ['migration-create', { enabled: true, triggerPatterns: ['create migration', 'schema migration'], requiresConfirmation: true }],
         ['ssh-execute', { enabled: true, triggerPatterns: ['ssh', 'remote command'], requiresConfirmation: true }],
         ['remote-command', { enabled: true, triggerPatterns: ['remote command', 'execute remotely'], requiresConfirmation: true }],
+        ['remote-cli-agent', { enabled: true, triggerPatterns: ['remote cli agent', 'remote software deployment'], requiresConfirmation: true }],
         ['k3s-deploy', { enabled: true, triggerPatterns: ['deploy to k3s', 'kubectl apply', 'rollout status'], requiresConfirmation: true }],
         ['code-sandbox', { enabled: true, triggerPatterns: ['sandbox', 'run code'], requiresConfirmation: false }],
         ['user-checkpoint', { enabled: true, triggerPatterns: ['ask a checkpoint question'], requiresConfirmation: false }],
@@ -503,6 +504,35 @@ function createToolManager() {
                         stdout: 'deployment.apps/backend configured',
                         stderr: '',
                         host: 'default-host:22',
+                    },
+                };
+            }
+
+            if (id === 'remote-cli-agent') {
+                if (/fail remote cli/i.test(params.task || '')) {
+                    return {
+                        success: false,
+                        toolId: id,
+                        error: 'remote-cli-agent model run failed (gpt-5.5): Connection error.',
+                        diagnostics: {
+                            remoteCliAgent: {
+                                stage: 'agent_run',
+                                model: 'gpt-5.5',
+                                apiMode: 'chat',
+                                agentBaseURL: 'http://gateway.example.com/v1',
+                                mcpURL: 'http://gateway.example.com/mcp',
+                                hint: 'Verify REMOTE_CLI_AGENT_MODEL or OPENAI_MODEL is accepted by that gateway: gpt-5.5.',
+                            },
+                        },
+                    };
+                }
+
+                return {
+                    success: true,
+                    toolId: id,
+                    data: {
+                        finalOutput: 'Remote app deployed.\nPUBLIC_HOST=app.demoserver2.buzz',
+                        targetId: 'prod',
                     },
                 };
             }
@@ -2293,6 +2323,60 @@ describe('openai-client automatic tool orchestration helpers', () => {
             }),
             expect.any(Object),
         );
+    });
+
+    test('runs required remote-cli-agent deployment requests directly without final model synthesis', async () => {
+        const toolManager = createToolManager();
+        const prompt = 'Build and deploy a dashboard app on the remote k3s server at app.demoserver2.buzz.';
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            prompt,
+            { executionProfile: 'remote-build' },
+        );
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            prompt,
+            { toolContext: { executionProfile: 'remote-build' } },
+        );
+
+        const response = await __testUtils.runDirectRequiredToolAction({
+            toolManager,
+            requiredToolId: 'remote-cli-agent',
+            selectedTools,
+            prompt,
+            toolContext: { executionProfile: 'remote-build' },
+            model: 'gpt-5.5',
+        });
+
+        expect(response.output[0].content[0].text).toContain('Remote app deployed.');
+        expect(toolManager.executeTool).toHaveBeenCalledWith(
+            'remote-cli-agent',
+            expect.objectContaining({
+                task: prompt,
+                adminMode: true,
+            }),
+            expect.any(Object),
+        );
+    });
+
+    test('surfaces remote-cli-agent diagnostics directly on connection failure', async () => {
+        const toolManager = createToolManager();
+        const prompt = 'Build and deploy an app on the remote k3s server, but fail remote cli.';
+
+        const response = await __testUtils.runDirectRequiredToolAction({
+            toolManager,
+            requiredToolId: 'remote-cli-agent',
+            selectedTools: [{ id: 'remote-cli-agent' }],
+            prompt,
+            toolContext: { executionProfile: 'remote-build' },
+            model: 'gpt-5.5',
+        });
+
+        const text = response.output[0].content[0].text;
+        expect(text).toContain('remote-cli-agent failed: remote-cli-agent model run failed (gpt-5.5): Connection error.');
+        expect(text).toContain('Stage: agent_run.');
+        expect(text).toContain('Model gateway: http://gateway.example.com/v1.');
+        expect(text).toContain('Next check: Verify REMOTE_CLI_AGENT_MODEL');
     });
 
     test('runs explicit web-scrape requests directly for sensitive image capture flows', async () => {

@@ -155,10 +155,14 @@ const API = (function() {
             )
             : '';
 
-        let imageUrl = inlineUrl || buildArtifactDisplayUrl(image.url || '') || image.url || '';
-        if (!imageUrl && typeof image.b64_json === 'string' && !/\[truncated \d+ chars\]/.test(image.b64_json)) {
-            imageUrl = `data:image/png;base64,${image.b64_json}`;
-        }
+        const base64Image = typeof image.b64_json === 'string'
+            && image.b64_json.trim()
+            && !/\[truncated \d+ chars\]/.test(image.b64_json)
+            ? (image.b64_json.startsWith('data:')
+                ? image.b64_json
+                : `data:image/png;base64,${image.b64_json}`)
+            : '';
+        let imageUrl = inlineUrl || base64Image || buildArtifactDisplayUrl(image.url || '') || image.url || '';
 
         if (!imageUrl) {
             return null;

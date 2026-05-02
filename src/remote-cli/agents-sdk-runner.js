@@ -7,6 +7,19 @@ function normalizeText(value = '') {
   return String(value || '').trim();
 }
 
+function maskSecretValue(value = '') {
+  const normalized = normalizeText(value);
+  if (!normalized) {
+    return '';
+  }
+
+  if (normalized.length <= 8) {
+    return '[set]';
+  }
+
+  return `${normalized.slice(0, 4)}...${normalized.slice(-4)}`;
+}
+
 function trimTrailingSlash(value = '') {
   return normalizeText(value).replace(/\/+$/, '');
 }
@@ -152,6 +165,99 @@ function resolveAgentsApiMode({ requestedMode = '', baseURL = '' } = {}) {
     return normalized;
   }
   return isOfficialOpenAIBaseURL(baseURL) ? 'responses' : 'chat';
+}
+
+function summarizeUrl(value = '') {
+  const normalized = normalizeText(value);
+  if (!normalized) {
+    return '';
+  }
+
+  try {
+    const parsed = new URL(normalized);
+    return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
+  } catch (_error) {
+    return normalized.replace(/([?&](?:token|key|api_key|apikey|bearer|password|secret)=)[^&]+/gi, '$1[redacted]');
+  }
+}
+
+function summarizeRemoteCliError(error = null) {
+  const statusCode = Number(error?.statusCode || error?.status || error?.response?.status) || null;
+  const code = normalizeText(error?.code || error?.type || error?.name);
+  const causeMessage = normalizeText(error?.cause?.message || error?.cause);
+  const responseError = error?.response?.data?.error || error?.response?.error || error?.error;
+  const responseMessage = normalizeText(
+    typeof responseError === 'string'
+      ? responseError
+      : (responseError?.message || error?.body?.error?.message || error?.body?.message),
+  );
+  const message = normalizeText(error?.message || responseMessage || causeMessage || 'Connection error.');
+
+  return {
+    message,
+    ...(code ? { code } : {}),
+    ...(statusCode ? { statusCode } : {}),
+    ...(causeMessage && causeMessage !== message ? { causeMessage } : {}),
+    ...(responseMessage && responseMessage !== message ? { responseMessage } : {}),
+  };
+}
+
+function buildRemoteCliDiagnostics({
+  stage,
+  error,
+  model,
+  apiMode,
+  targetId,
+  cwd,
+  config: runnerConfig = {},
+  mcpSessionId = '',
+} = {}) {
+  const errorSummary = summarizeRemoteCliError(error);
+  const agentBaseURL = normalizeText(runnerConfig.agentBaseURL);
+  const mcpURL = normalizeText(runnerConfig.url);
+  const hintParts = [];
+
+  if (/^connection error\.?$/i.test(errorSummary.message)) {
+    hintParts.push('The upstream SDK only reported a connection error; check the remote-cli MCP URL, gateway reachability, and the model gateway route from the backend pod.');
+  }
+  if (apiMode === 'chat') {
+    hintParts.push('REMOTE_CLI_AGENT_OPENAI_API_MODE is chat, so the configured base URL must implement /v1/chat/completions for the selected model.');
+  }
+  if (model) {
+    hintParts.push(`Verify REMOTE_CLI_AGENT_MODEL or OPENAI_MODEL is accepted by that gateway: ${model}.`);
+  }
+
+  return {
+    remoteCliAgent: {
+      stage,
+      model: model || null,
+      apiMode: apiMode || null,
+      targetId: targetId || null,
+      cwd: cwd || null,
+      mcpSessionId: mcpSessionId || null,
+      mcpURL: summarizeUrl(mcpURL) || null,
+      agentBaseURL: summarizeUrl(agentBaseURL) || null,
+      hasMcpToken: Boolean(normalizeText(runnerConfig.apiKey)),
+      mcpTokenFingerprint: maskSecretValue(runnerConfig.apiKey),
+      hasAgentApiKey: Boolean(normalizeText(runnerConfig.agentApiKey)),
+      agentApiKeyFingerprint: maskSecretValue(runnerConfig.agentApiKey),
+      error: errorSummary,
+      hint: hintParts.join(' '),
+    },
+  };
+}
+
+function createRemoteCliAgentError(message, diagnostics = {}, cause = null) {
+  const error = new Error(message || 'remote-cli-agent failed.');
+  error.name = 'RemoteCliAgentError';
+  error.code = 'REMOTE_CLI_AGENT_FAILED';
+  error.diagnostics = diagnostics;
+  if (cause) {
+    error.cause = cause;
+    error.status = cause.status || cause.statusCode || cause.response?.status || undefined;
+    error.statusCode = cause.statusCode || cause.status || cause.response?.status || undefined;
+  }
+  return error;
 }
 
 function resolveConfiguredGitProviderContext() {
@@ -398,7 +504,26 @@ class RemoteCliAgentsSdkRunner {
     });
 
     try {
-      await remoteCli.connect();
+      try {
+        await remoteCli.connect();
+      } catch (error) {
+        const diagnostics = buildRemoteCliDiagnostics({
+          stage: 'mcp_connect',
+          error,
+          model,
+          apiMode,
+          targetId,
+          cwd,
+          config: this.config,
+          mcpSessionId: input.mcpSessionId,
+        });
+        throw createRemoteCliAgentError(
+          `remote-cli-agent could not connect to the MCP gateway: ${summarizeRemoteCliError(error).message}`,
+          diagnostics,
+          error,
+        );
+      }
+
       const result = await runner.run(agent, buildRemoteCliPrompt({
         task,
         targetId,
@@ -429,6 +554,26 @@ class RemoteCliAgentsSdkRunner {
         model,
         apiMode,
       };
+    } catch (error) {
+      if (error?.name === 'RemoteCliAgentError') {
+        throw error;
+      }
+
+      const diagnostics = buildRemoteCliDiagnostics({
+        stage: 'agent_run',
+        error,
+        model,
+        apiMode,
+        targetId,
+        cwd,
+        config: this.config,
+        mcpSessionId: remoteCli.sessionId || input.mcpSessionId,
+      });
+      throw createRemoteCliAgentError(
+        `remote-cli-agent model run failed (${model}): ${summarizeRemoteCliError(error).message}`,
+        diagnostics,
+        error,
+      );
     } finally {
       await remoteCli.close().catch((error) => {
         console.warn('[RemoteCliAgentsSdkRunner] Failed to close MCP connection:', error.message);
@@ -449,6 +594,8 @@ module.exports = {
   resolveConfiguredGiteaContext,
   resolveConfiguredGitProviderContext,
   resolveAgentsApiMode,
+  buildRemoteCliDiagnostics,
+  summarizeRemoteCliError,
   hasRemoteSoftwareDeploymentIntent,
   resolveAdminMode,
   trimTrailingSlash,

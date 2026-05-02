@@ -4544,7 +4544,7 @@ class UIHelpers {
                 ? imageData.b64_json
                 : `data:image/png;base64,${imageData.b64_json}`)
             : '';
-        const imageUrl = imageData.url || imageData.inlineUrl || imageData.downloadUrl || base64Image;
+        const imageUrl = imageData.inlineUrl || base64Image || imageData.url || imageData.downloadUrl;
         
         // Create new message element with the image data
         const newMessage = {

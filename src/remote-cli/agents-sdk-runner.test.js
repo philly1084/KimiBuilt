@@ -6,6 +6,7 @@ const {
   extractRemoteCliRunMetadata,
   hasRemoteSoftwareDeploymentIntent,
   resolveAgentsApiMode,
+  buildRemoteCliDiagnostics,
   resolveAdminMode,
   resolveRemoteCliTargetId,
 } = require('./agents-sdk-runner');
@@ -123,6 +124,43 @@ describe('RemoteCliAgentsSdkRunner', () => {
     })).toBe('responses');
   });
 
+  test('builds actionable diagnostics for generic remote CLI connection errors', () => {
+    const diagnostics = buildRemoteCliDiagnostics({
+      stage: 'agent_run',
+      error: new Error('Connection error.'),
+      model: 'gpt-5.5',
+      apiMode: 'chat',
+      targetId: 'prod',
+      cwd: '/srv/apps/my-app',
+      config: {
+        url: 'http://gateway.example.com/mcp?token=secret',
+        apiKey: 'gateway-secret-token',
+        agentApiKey: 'sk-openai-secret',
+        agentBaseURL: 'http://gateway.example.com/v1',
+      },
+      mcpSessionId: 'mcp-session-1',
+    });
+
+    expect(diagnostics.remoteCliAgent).toMatchObject({
+      stage: 'agent_run',
+      model: 'gpt-5.5',
+      apiMode: 'chat',
+      targetId: 'prod',
+      cwd: '/srv/apps/my-app',
+      mcpSessionId: 'mcp-session-1',
+      mcpURL: 'http://gateway.example.com/mcp',
+      agentBaseURL: 'http://gateway.example.com/v1',
+      hasMcpToken: true,
+      hasAgentApiKey: true,
+      error: {
+        message: 'Connection error.',
+      },
+    });
+    expect(diagnostics.remoteCliAgent.hint).toContain('/v1/chat/completions');
+    expect(JSON.stringify(diagnostics)).not.toContain('gateway-secret-token');
+    expect(JSON.stringify(diagnostics)).not.toContain('sk-openai-secret');
+  });
+
   test('connects Streamable HTTP MCP with bearer auth and closes it after the run', async () => {
     const calls = {
       apiModes: [],
@@ -236,6 +274,67 @@ describe('RemoteCliAgentsSdkRunner', () => {
       gitCommit: 'abcdef123456',
       uiCheckReport: '/srv/apps/my-app/ui-checks/ui-check-report.json',
       uiScreenshots: ['/srv/apps/my-app/ui-checks/my-app-desktop.png'],
+    });
+  });
+
+  test('wraps runner failures with model, API mode, and gateway diagnostics', async () => {
+    class FakeMCPServerStreamableHttp {
+      constructor() {
+        this.sessionId = 'mcp-session-2';
+      }
+
+      async connect() {}
+
+      async close() {}
+    }
+
+    class FakeAgent {}
+
+    class FakeOpenAIProvider {}
+
+    class FakeRunner {
+      async run() {
+        throw new Error('Connection error.');
+      }
+    }
+
+    const runner = new RemoteCliAgentsSdkRunner({
+      config: {
+        enabled: true,
+        url: 'https://gateway.example.com/mcp',
+        name: 'remote-cli',
+        apiKey: 'gateway-secret',
+        agentApiKey: 'openai-secret',
+        agentBaseURL: 'http://gateway.example.com/v1',
+        agentApiMode: 'chat',
+        agentModel: 'gpt-5.5',
+        defaultTargetId: 'prod',
+        defaultCwd: '/srv/apps/my-app',
+      },
+      sdkLoader: () => ({
+        Agent: FakeAgent,
+        MCPServerStreamableHttp: FakeMCPServerStreamableHttp,
+        OpenAIProvider: FakeOpenAIProvider,
+        Runner: FakeRunner,
+        setOpenAIAPI: () => {},
+      }),
+    });
+
+    await expect(runner.run({
+      task: 'Deploy the app remotely',
+      adminMode: true,
+    })).rejects.toMatchObject({
+      name: 'RemoteCliAgentError',
+      code: 'REMOTE_CLI_AGENT_FAILED',
+      message: 'remote-cli-agent model run failed (gpt-5.5): Connection error.',
+      diagnostics: {
+        remoteCliAgent: {
+          stage: 'agent_run',
+          model: 'gpt-5.5',
+          apiMode: 'chat',
+          mcpSessionId: 'mcp-session-2',
+        },
+      },
     });
   });
 });

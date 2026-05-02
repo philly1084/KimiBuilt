@@ -2984,7 +2984,9 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
                 const timestamp = Date.now();
                 const fileIds = generatedImages
                     .map((image, index) => {
-                        const imageUrl = image.url || (image.b64_json ? `data:image/png;base64,${image.b64_json}` : null);
+                        const imageUrl = image.b64_json
+                            ? `data:image/png;base64,${image.b64_json}`
+                            : image.url || null;
                         if (!imageUrl) {
                             return null;
                         }
