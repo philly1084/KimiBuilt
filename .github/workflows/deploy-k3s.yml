@@ -52,6 +52,11 @@ jobs:
           test -s "$HOME/.kube/config"
           kubectl config current-context
 
+      - name: Normalize image name
+        run: |
+          image_name="$(echo "${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')"
+          echo "IMAGE_NAME=${image_name}" >> "$GITHUB_ENV"
+
       - name: Update deployment image
         env:
           IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && format('sha-{0}', github.sha) || format('sha-{0}', github.event.workflow_run.head_sha) }}
