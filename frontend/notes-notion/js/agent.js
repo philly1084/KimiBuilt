@@ -2903,6 +2903,7 @@ const Agent = (function() {
         const designSchemeChecklist = buildDesignSchemeChecklist(question, pageContext, templateMatches);
         const blockPatternGuidance = buildBlockDesignPatternGuidance(question, pageContext, templateMatches);
         const blockPatternChecklist = buildBlockDesignPatternChecklist(question, pageContext, templateMatches);
+        const symphonyUnderstanding = buildSymphonyUnderstandingGuidance(question, pageContext, templateMatches);
         const designCriteria = [
             buildPageDesignCriteria(pageContext),
             ...templateMatches.flatMap((template) => template.designRules.map((rule) => `- Template cue (${template.name}): ${rule}`)),
@@ -2943,6 +2944,9 @@ ROUTING PRIORITY:
 - If the user is asking to build, fill, rewrite, reorganize, or polish the current notes page, prefer notes-actions that update the page blocks instead of artifact, file, or export output.
 - Only switch to artifact, download, export, link, or standalone-file behavior when the user explicitly asks for that delivery mode.
 - Supporting research is allowed only to improve the page; it should not replace page edits.
+
+SYMPHONY REQUEST UNDERSTANDING:
+${symphonyUnderstanding}
 
 CURRENT VISUAL ANCHORS:
 ${visualAnchors}
@@ -3124,6 +3128,9 @@ ROUTING PRIORITY:
 - If the user is asking to build, fill, rewrite, reorganize, or polish the current notes page, prefer notes-actions that update the page blocks instead of artifact, file, or export output.
 - Only switch to artifact, download, export, link, or standalone-file behavior when the user explicitly asks for that delivery mode.
 - Supporting research is allowed only to improve the page; it should not replace page edits.
+
+SYMPHONY REQUEST UNDERSTANDING:
+${symphonyUnderstanding}
 
 CURRENT VISUAL ANCHORS:
 ${visualAnchors}
@@ -3624,6 +3631,136 @@ GUIDELINES:
         return isExplicitPageEditIntent(question)
             || isImplicitPageBuildIntent(question, context, requestOptions)
             || shouldUseMultiPassNotesDraft(question, context, requestOptions);
+    }
+
+    function getFallbackLayoutForTemplate(templateId = '') {
+        const fallbackLayouts = {
+            brief: { index: 1, name: 'Executive Brief', id: 'executive-brief' },
+            explainer: { index: 2, name: 'Editorial Explainer', id: 'editorial-explainer' },
+            research: { index: 3, name: 'Research Hub', id: 'research-hub' },
+            project: { index: 4, name: 'Operator Board', id: 'operator-board' },
+            dashboard: { index: 4, name: 'Operator Board', id: 'operator-board' },
+            sales: { index: 5, name: 'Sales Proof Stack', id: 'sales-proof-stack' },
+            documentation: { index: 6, name: 'Guided Procedure', id: 'guided-procedure' },
+            meeting: { index: 7, name: 'Session Record', id: 'session-record' },
+            journal: { index: 7, name: 'Session Record', id: 'session-record' },
+        };
+
+        return fallbackLayouts[templateId] || fallbackLayouts.explainer;
+    }
+
+    function getBestFitIndexedLayout(templateMatches = []) {
+        const leadTemplate = Array.isArray(templateMatches) && templateMatches.length > 0 ? templateMatches[0] : null;
+        const fallback = getFallbackLayoutForTemplate(leadTemplate?.id);
+        const catalog = window.NotesLayoutCatalog?.getPageLayouts?.() || [];
+        if (!catalog.length) {
+            return fallback;
+        }
+
+        const matchById = catalog.find((layout) => layout.id === fallback.id);
+        if (matchById) {
+            return {
+                index: matchById.index,
+                id: matchById.id,
+                name: matchById.name,
+            };
+        }
+
+        return {
+            index: catalog[0].index,
+            id: catalog[0].id,
+            name: catalog[0].name,
+        };
+    }
+
+    function buildRequestUnderstanding(question = '', context = null, requestOptions = {}) {
+        const normalized = String(question || '').trim();
+        const templateMatches = selectNotesPageTemplates(normalized, context, { limit: 2 });
+        const designSchemes = selectNotesDesignSchemes(normalized, context, templateMatches);
+        const leadTemplate = templateMatches[0] || null;
+        const leadScheme = designSchemes[0] || null;
+        const layout = getBestFitIndexedLayout(templateMatches);
+        const outputFormat = requestOptions?.outputFormat || inferRequestedArtifactFormat(normalized);
+        const suppressedOutput = shouldSuppressRequestedArtifactFormat(normalized, context, outputFormat);
+
+        let route = 'chat';
+        let label = 'Answer in chat';
+        let strategy = 'Respond directly unless the user asks for page changes.';
+        let confidence = 0.54;
+
+        if (hasNonPageRuntimeIntent(normalized, requestOptions)) {
+            route = 'external_runtime';
+            label = 'External work';
+            strategy = 'Do not force notes-actions; handle the runtime, website, deployment, or diagnostic request directly.';
+            confidence = 0.9;
+        } else if (outputFormat && !suppressedOutput) {
+            route = 'artifact';
+            label = `${String(outputFormat).toUpperCase()} artifact`;
+            strategy = 'Create the requested explicit export or artifact and only mirror useful context into notes.';
+            confidence = 0.86;
+        } else if (isPlanningConversationIntent(normalized, context)) {
+            route = 'planning';
+            label = 'Plan before editing';
+            strategy = 'Discuss 2-3 directions, then wait for or invite a concrete page edit.';
+            confidence = 0.82;
+        } else if (shouldUseMultiPassNotesDraft(normalized, context, requestOptions)) {
+            route = 'symphony_page_draft';
+            label = 'Symphony page draft';
+            strategy = 'Run architecture, section-agent expansion, and final polish before applying page blocks.';
+            confidence = 0.88;
+        } else if (shouldForcePageEditActions(normalized, context, requestOptions)) {
+            route = 'page_edit';
+            label = 'Edit current page';
+            strategy = 'Return notes-actions that update the current page instead of chat-only prose.';
+            confidence = isExplicitPageEditIntent(normalized) ? 0.9 : 0.76;
+        } else if (normalized.length > 0 && ((context?.blockCount || 0) > 0 || (context?.outline?.length || 0) > 0)) {
+            route = 'page_aware_chat';
+            label = 'Page-aware answer';
+            strategy = 'Use the page as context while keeping the answer conversational.';
+            confidence = 0.62;
+        }
+
+        const signals = [
+            shouldUseMultiPassNotesDraft(normalized, context, requestOptions) ? 'multi-pass page build' : '',
+            shouldForcePageEditActions(normalized, context, requestOptions) ? 'notes-actions likely' : '',
+            suppressedOutput ? 'artifact wording suppressed for notes page' : '',
+            leadTemplate?.name ? `template: ${leadTemplate.name}` : '',
+            layout?.name ? `layout: ${layout.name}` : '',
+            leadScheme?.name ? `scheme: ${leadScheme.name}` : '',
+        ].filter(Boolean);
+
+        return {
+            route,
+            label,
+            confidence,
+            strategy,
+            template: leadTemplate ? {
+                id: leadTemplate.id,
+                name: leadTemplate.name,
+                score: leadTemplate.score || 0,
+            } : null,
+            layout,
+            designScheme: leadScheme ? {
+                id: leadScheme.id,
+                name: leadScheme.name,
+            } : null,
+            signals,
+        };
+    }
+
+    function buildSymphonyUnderstandingGuidance(question = '', pageContext = null, templateMatches = []) {
+        const understanding = buildRequestUnderstanding(question, pageContext, {});
+        const leadTemplate = understanding.template || templateMatches[0] || null;
+        return [
+            `Route: ${understanding.label} [${understanding.route}]`,
+            `Confidence: ${Math.round((understanding.confidence || 0) * 100)}%`,
+            leadTemplate?.name ? `Template: ${leadTemplate.name}` : '',
+            understanding.layout?.name ? `Indexed layout: #${understanding.layout.index} ${understanding.layout.name}` : '',
+            understanding.designScheme?.name ? `Design scheme: ${understanding.designScheme.name}` : '',
+            `Strategy: ${understanding.strategy}`,
+            understanding.signals?.length ? `Signals: ${understanding.signals.join(' | ')}` : '',
+            'Before answering, reconcile the route, template, layout, and page context. If they conflict, preserve the user request first, then the current page, then visual polish.',
+        ].filter(Boolean).join('\n');
     }
 
     function looksLikeShortAcknowledgement(text = '') {
@@ -9104,6 +9241,7 @@ Silently verify the lead cluster, section order, and final polish before returni
             ...(requestedArtifactFormat ? { outputFormat: requestedArtifactFormat } : {}),
             reasoningEffort: 'medium'
         };
+        const requestUnderstanding = buildRequestUnderstanding(question, context, requestOptions);
         
         // Build messages array with enhanced system prompt
         const systemPrompt = buildSystemPrompt(context || {
@@ -9373,6 +9511,7 @@ Silently verify the lead cluster, section order, and final polish before returni
                             model,
                             tokensUsed: estimateTokens(question + visibleResponse),
                             source: 'api',
+                            requestUnderstanding,
                             appliedCount: (preparedResponse.appliedCount || 0)
                                 + (mermaidArtifactApplyResult.appliedCount || 0)
                                 + (blindArtifactSelectionResult.appliedCount || 0),
@@ -9422,6 +9561,8 @@ Silently verify the lead cluster, section order, and final polish before returni
     // Stub mode for offline/no API
     async function askWithStub(question, context, options) {
         const { onChunk, onStreamComplete, onComplete, onError, hiddenAssistantMessage = false } = options;
+        const requestUnderstanding = buildRequestUnderstanding(question, context, {});
+        const generatedToolEvents = [];
         
         try {
             // Simulate processing delay
@@ -9477,6 +9618,7 @@ Silently verify the lead cluster, section order, and final polish before returni
                     model: state.selectedModel,
                     tokensUsed: estimateTokens(question + visibleResponse),
                     source: 'stub',
+                    requestUnderstanding,
                     appliedCount: preparedResponse.appliedCount || 0
                 });
 
@@ -9959,6 +10101,7 @@ Silently verify the lead cluster, section order, and final polish before returni
         getPageContext,
         getFullPageContent,
         getBlockDesignOptions: getLiveBlockDesignOptions,
+        getRequestUnderstanding: buildRequestUnderstanding,
         getDesignLayoutCatalog: () => window.NotesLayoutCatalog?.getPageLayouts?.() || [],
         getOutline,
         getPageMetadata,
@@ -10004,6 +10147,7 @@ Silently verify the lead cluster, section order, and final polish before returni
         _buildSystemPrompt: buildSystemPrompt,
         _selectNotesPageTemplates: selectNotesPageTemplates,
         _selectNotesDesignSchemes: selectNotesDesignSchemes,
+        _buildRequestUnderstanding: buildRequestUnderstanding,
         _selectNotesBlockDesignPatterns: selectNotesBlockDesignPatterns,
         _applyNotesActions: applyNotesActions,
         _extractNotesActionPlan: extractNotesActionPlan,

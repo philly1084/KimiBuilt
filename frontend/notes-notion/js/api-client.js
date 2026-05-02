@@ -8,17 +8,15 @@
 // Configuration
 // ============================================
 
-const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
-const CURRENT_HOSTNAME = window.location.hostname;
 const CURRENT_ORIGIN = `${window.location.protocol}//${window.location.host}`;
-
-const API_BASE_URL = LOCAL_HOSTNAMES.has(CURRENT_HOSTNAME)
-    ? 'http://localhost:3000/v1'
-    : `${CURRENT_ORIGIN}/v1`;
-
-const BASE_URL_WITHOUT_API = LOCAL_HOSTNAMES.has(CURRENT_HOSTNAME)
-    ? 'http://localhost:3000'
+const FILE_PREVIEW_BACKEND_ORIGIN = 'http://localhost:3000';
+const API_ORIGIN = window.location.protocol === 'file:'
+    ? FILE_PREVIEW_BACKEND_ORIGIN
     : CURRENT_ORIGIN;
+
+const API_BASE_URL = `${API_ORIGIN}/v1`;
+
+const BASE_URL_WITHOUT_API = API_ORIGIN;
 const NOTES_TASK_TYPE = 'notes';
 const NOTES_CLIENT_SURFACE = 'notes';
 const NOTES_REMOTE_BUILD_AUTONOMY_APPROVED = true;

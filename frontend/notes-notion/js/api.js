@@ -8,12 +8,12 @@ const API = (function() {
     const NOTES_CLIENT_SURFACE = 'notes';
 
     // Auto-detect backend URL
-    const localHostnames = new Set(['localhost', '127.0.0.1', '[::1]']);
-    const currentHost = window.location.hostname;
     const currentOrigin = `${window.location.protocol}//${window.location.host}`;
-    const BASE_URL = localHostnames.has(currentHost)
-        ? 'http://localhost:3000/v1'
-        : `${currentOrigin}/v1`;
+    const filePreviewBackendOrigin = 'http://localhost:3000';
+    const apiOrigin = window.location.protocol === 'file:'
+        ? filePreviewBackendOrigin
+        : currentOrigin;
+    const BASE_URL = `${apiOrigin}/v1`;
     const notesGatewayHelpers = window.KimiBuiltGatewaySSE || {};
     const buildGatewayHeaders = notesGatewayHelpers.buildGatewayHeaders || ((headers = {}) => ({
         ...headers,

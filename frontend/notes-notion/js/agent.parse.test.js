@@ -349,6 +349,47 @@ Approved page plan:
         expect(agent._shouldForcePageEditActions(question, context, {})).toBe(true);
     });
 
+    test('classifies substantial notes requests as Symphony page drafts with page design context', () => {
+        const agent = loadAgent();
+        const understanding = agent._buildRequestUnderstanding(
+            'Build this page into a polished research brief with better section flow and sources.',
+            {
+                title: 'Penguin Notes',
+                blockCount: 8,
+                outline: [{ id: 'h1', content: 'Penguins' }, { id: 'h2', content: 'Habitat' }],
+                blocks: [
+                    { id: 'b1', type: 'heading_1', content: 'Penguin Notes' },
+                    { id: 'b2', type: 'text', content: 'Penguins are strong swimmers.' },
+                ],
+            },
+            {},
+        );
+
+        expect(understanding.route).toBe('symphony_page_draft');
+        expect(understanding.label).toBe('Symphony page draft');
+        expect(understanding.template.name).toBe('Research Page');
+        expect(understanding.layout.name).toBe('Research Hub');
+        expect(understanding.signals).toEqual(expect.arrayContaining([
+            'multi-pass page build',
+            'notes-actions likely',
+        ]));
+    });
+
+    test('does not route explicit website review requests into notes Symphony drafts', () => {
+        const agent = loadAgent();
+        const understanding = agent._buildRequestUnderstanding(
+            'Review this website https://example.com and tell me what changed.',
+            {
+                blockCount: 8,
+                outline: [{ id: 'h1', content: 'Site Notes' }],
+            },
+            {},
+        );
+
+        expect(understanding.route).toBe('external_runtime');
+        expect(understanding.strategy).toContain('Do not force notes-actions');
+    });
+
     test('keeps research-backed page builds on the notes page-edit path', () => {
         const agent = loadAgent();
         const question = 'Create a research brief about penguins with sources and key findings.';
@@ -388,6 +429,9 @@ Approved page plan:
 
         expect(prompt).toContain('CURRENT PAGE CONTENT (excerpt):');
         expect(prompt).toContain('ROUTING PRIORITY:');
+        expect(prompt).toContain('SYMPHONY REQUEST UNDERSTANDING:');
+        expect(prompt).toContain('Route: Symphony page draft [symphony_page_draft]');
+        expect(prompt).toContain('Indexed layout: #3 Research Hub');
         expect(prompt).toContain('PAGE DESIGN CRITERIA:');
         expect(prompt).toContain('SECTION EDIT MAP:');
         expect(prompt).toContain('PAGE EDIT WORKFLOW:');

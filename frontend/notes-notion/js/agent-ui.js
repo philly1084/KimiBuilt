@@ -45,6 +45,14 @@ const AgentUI = (function() {
         }
 
         const contextIndicator = document.querySelector('.context-indicator');
+        let understandingCard = document.getElementById('agent-request-understanding');
+        if (!understandingCard && contextIndicator?.parentElement) {
+            understandingCard = document.createElement('div');
+            understandingCard.id = 'agent-request-understanding';
+            understandingCard.className = 'agent-request-understanding';
+            contextIndicator.parentElement.appendChild(understandingCard);
+        }
+
         let composerDesignTray = document.getElementById('agent-chat-design-tray');
         if (!composerDesignTray && contextIndicator?.parentElement) {
             composerDesignTray = document.createElement('div');
@@ -70,6 +78,7 @@ const AgentUI = (function() {
             modelList: document.getElementById('model-list'),
             chatModelName: document.getElementById('agent-chat-model-name'),
             contextIndicator,
+            understandingCard,
             composerDesignTray,
             agentStatus: document.querySelector('.agent-status'),
             agentStatusText: document.querySelector('.agent-status-text')
@@ -133,6 +142,7 @@ const AgentUI = (function() {
             elements.input.addEventListener('input', () => {
                 autoResizeInput();
                 renderComposerDesignOptions();
+                renderRequestUnderstanding();
                 if (!streamState.active && !streamState.error && getVisibleMessages().length === 0) {
                     renderMessages();
                 }
@@ -210,6 +220,7 @@ const AgentUI = (function() {
         });
 
         updateContextIndicator();
+        renderRequestUnderstanding();
         renderMessages();
         renderComposerDesignOptions();
 
@@ -377,6 +388,7 @@ const AgentUI = (function() {
     function scheduleContextRefresh() {
         window.requestAnimationFrame(() => {
             updateContextIndicator();
+            renderRequestUnderstanding();
             renderComposerDesignOptions();
         });
     }
@@ -410,6 +422,57 @@ const AgentUI = (function() {
                 ${escapeHtml(action.label)}
             </button>
         `).join('');
+    }
+
+    function getDraftUnderstanding() {
+        if (!window.Agent?.getRequestUnderstanding) {
+            return null;
+        }
+
+        const draftPrompt = elements.input?.value?.trim() || '';
+        if (!draftPrompt) {
+            return null;
+        }
+
+        try {
+            return window.Agent.getRequestUnderstanding(draftPrompt, window.Agent.getPageContext?.() || null, {});
+        } catch (error) {
+            console.warn('AgentUI: failed to classify draft request', error);
+            return null;
+        }
+    }
+
+    function renderRequestUnderstanding() {
+        if (!elements.understandingCard) return;
+
+        const understanding = getDraftUnderstanding();
+        if (!understanding) {
+            elements.understandingCard.hidden = true;
+            elements.understandingCard.innerHTML = '';
+            return;
+        }
+
+        const confidence = Math.round((understanding.confidence || 0) * 100);
+        const template = understanding.template?.name || 'General notes';
+        const layout = understanding.layout?.name
+            ? `#${understanding.layout.index} ${understanding.layout.name}`
+            : 'Adaptive layout';
+        const scheme = understanding.designScheme?.name || 'Current page scheme';
+
+        elements.understandingCard.hidden = false;
+        elements.understandingCard.innerHTML = `
+            <div class="agent-understanding-topline">
+                <span class="agent-understanding-kicker">Symphony read</span>
+                <strong>${escapeHtml(understanding.label || 'Page-aware answer')}</strong>
+                <span class="agent-understanding-confidence">${confidence}%</span>
+            </div>
+            <div class="agent-understanding-grid">
+                <span>Template</span><b>${escapeHtml(template)}</b>
+                <span>Layout</span><b>${escapeHtml(layout)}</b>
+                <span>Design</span><b>${escapeHtml(scheme)}</b>
+            </div>
+            <p>${escapeHtml(understanding.strategy || '')}</p>
+        `;
     }
 
     function getLiveDesignOptions(limit = 4) {
@@ -509,6 +572,7 @@ const AgentUI = (function() {
             : promptText;
         autoResizeInput();
         renderComposerDesignOptions();
+        renderRequestUnderstanding();
 
         if (!streamState.active && !streamState.error && getVisibleMessages().length === 0) {
             renderMessages();
@@ -654,6 +718,7 @@ const AgentUI = (function() {
             : '';
 
         const reasoningSummary = !isUser ? extractReasoningSummary(message) : '';
+        const requestUnderstanding = !isUser ? extractRequestUnderstanding(message) : null;
         const reasoningMarkup = reasoningSummary ? `
             <details class="agent-reasoning-card" ${message.reasoningLive ? 'open' : ''}>
                 <summary>
@@ -663,10 +728,18 @@ const AgentUI = (function() {
                 <div class="agent-reasoning-body">${escapeHtml(reasoningSummary).replace(/\n/g, '<br>')}</div>
             </details>
         ` : '';
+        const understandingMarkup = requestUnderstanding ? `
+            <div class="agent-understanding-chipset" title="${escapeHtmlAttr(requestUnderstanding.strategy || '')}">
+                <span>${escapeHtml(requestUnderstanding.label || 'Symphony read')}</span>
+                ${requestUnderstanding.template?.name ? `<span>${escapeHtml(requestUnderstanding.template.name)}</span>` : ''}
+                ${requestUnderstanding.layout?.name ? `<span>#${escapeHtml(requestUnderstanding.layout.index)} ${escapeHtml(requestUnderstanding.layout.name)}</span>` : ''}
+            </div>
+        ` : '';
 
         div.innerHTML = `
             <div class="agent-message-avatar">${avatar}</div>
             <div class="agent-message-content">
+                ${understandingMarkup}
                 ${reasoningMarkup}
                 <div class="agent-message-text">${markdownToHtml(message.content)}</div>
                 ${timestamp ? `<div class="agent-message-time">${timestamp}</div>` : ''}
@@ -686,6 +759,17 @@ const AgentUI = (function() {
             || message.metadata?.reasoningSummary
             || ''
         ).trim();
+    }
+
+    function extractRequestUnderstanding(message = {}) {
+        const value = message.requestUnderstanding
+            || message.request_understanding
+            || message.assistantMetadata?.requestUnderstanding
+            || message.assistant_metadata?.requestUnderstanding
+            || message.metadata?.requestUnderstanding
+            || null;
+
+        return value && typeof value === 'object' ? value : null;
     }
 
     function truncateText(value = '', maxLength = 96) {
@@ -718,6 +802,7 @@ const AgentUI = (function() {
 
     function handleConversationContextChange() {
         updateContextIndicator();
+        renderRequestUnderstanding();
         renderMessages();
         renderComposerDesignOptions();
     }

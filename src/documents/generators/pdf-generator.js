@@ -16,14 +16,37 @@ class PdfGenerator {
    */
   async initialize() {
     if (!this.pdfMake) {
-      const pdfMakeModule = await import('pdfmake');
-      const pdfFonts = await import('pdfmake/build/vfs_fonts.js');
+      const pdfMakeModule = require('pdfmake/build/pdfmake');
+      const pdfFonts = require('pdfmake/build/vfs_fonts');
       
       this.pdfMake = pdfMakeModule.default || pdfMakeModule;
       this.vfs = pdfFonts.default || pdfFonts;
       
       this.pdfMake.vfs = this.vfs.pdfMake ? this.vfs.pdfMake.vfs : this.vfs;
+
+      if (typeof this.pdfMake.createPdf !== 'function') {
+        throw new Error('PDF renderer failed to initialize: pdfmake createPdf API is unavailable');
+      }
     }
+  }
+
+  async createPdfBuffer(docDefinition) {
+    await this.initialize();
+
+    return new Promise((resolve, reject) => {
+      try {
+        const pdfDocGenerator = this.pdfMake.createPdf(docDefinition);
+        pdfDocGenerator.getBuffer((buffer) => {
+          if (!buffer || buffer.length === 0) {
+            reject(new Error('PDF renderer returned an empty document'));
+            return;
+          }
+          resolve(Buffer.from(buffer));
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
   }
 
   /**
@@ -33,23 +56,16 @@ class PdfGenerator {
    * @returns {Promise<Object>} Generated PDF
    */
   async generate(template, options = {}) {
-    await this.initialize();
-
     const docDefinition = this.buildDocumentDefinition(template, options);
-    
-    const pdfDocGenerator = this.pdfMake.createPdf(docDefinition);
-    
-    return new Promise((resolve, reject) => {
-      pdfDocGenerator.getBuffer((buffer) => {
-        resolve({
-          buffer,
-          metadata: {
-            format: 'pdf',
-            pages: docDefinition.content.length
-          }
-        });
-      });
-    });
+    const buffer = await this.createPdfBuffer(docDefinition);
+
+    return {
+      buffer,
+      metadata: {
+        format: 'pdf',
+        pages: docDefinition.content.length
+      }
+    };
   }
 
   /**
@@ -59,51 +75,38 @@ class PdfGenerator {
    * @returns {Promise<Object>} Generated PDF
    */
   async generateFromContent(content, options = {}) {
-    await this.initialize();
-
     const docDefinition = this.buildContentDefinition(content, options);
-    
-    const pdfDocGenerator = this.pdfMake.createPdf(docDefinition);
-    
-    return new Promise((resolve, reject) => {
-      pdfDocGenerator.getBuffer((buffer) => {
-        resolve({
-          buffer,
-          metadata: {
-            format: 'pdf',
-            title: content.title,
-            sections: content.sections?.length || 0,
-            design: options.designPlan
-              ? {
-                blueprint: options.designPlan.blueprint?.id,
-                theme: options.designPlan.theme?.id,
-                outlineItems: options.designPlan.outline?.length || 0,
-              }
-              : undefined,
+    const buffer = await this.createPdfBuffer(docDefinition);
+
+    return {
+      buffer,
+      metadata: {
+        format: 'pdf',
+        title: content.title,
+        sections: content.sections?.length || 0,
+        design: options.designPlan
+          ? {
+            blueprint: options.designPlan.blueprint?.id,
+            theme: options.designPlan.theme?.id,
+            outlineItems: options.designPlan.outline?.length || 0,
           }
-        });
-      });
-    });
+          : undefined,
+      }
+    };
   }
 
   async generateFromNotesPage(page, options = {}) {
-    await this.initialize();
-
     const docDefinition = this.buildNotesPageDefinition(page, options);
-    const pdfDocGenerator = this.pdfMake.createPdf(docDefinition);
+    const buffer = await this.createPdfBuffer(docDefinition);
 
-    return new Promise((resolve, reject) => {
-      pdfDocGenerator.getBuffer((buffer) => {
-        resolve({
-          buffer,
-          metadata: {
-            format: 'pdf',
-            title: page?.title || 'Untitled',
-            blockCount: Array.isArray(page?.blocks) ? page.blocks.length : 0,
-          }
-        });
-      });
-    });
+    return {
+      buffer,
+      metadata: {
+        format: 'pdf',
+        title: page?.title || 'Untitled',
+        blockCount: Array.isArray(page?.blocks) ? page.blocks.length : 0,
+      }
+    };
   }
 
   /**
