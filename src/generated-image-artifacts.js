@@ -689,13 +689,14 @@ function buildGeneratedImageFilename(prompt = '', index = 0, extension = 'png') 
     return `${base}-${String(index + 1).padStart(2, '0')}.${extension}`;
 }
 
-function normalizeGeneratedImageRecord(image = {}, storedArtifact = null) {
+function normalizeGeneratedImageRecord(image = {}, storedArtifact = null, options = {}) {
     const revisedPrompt = image?.revised_prompt || image?.revisedPrompt || null;
     const prompt = String(image?.prompt || '').trim() || null;
     if (!storedArtifact?.id) {
+        const includeOriginalPayload = options.includeOriginalPayload !== false;
         return {
-            url: image?.url || null,
-            b64_json: image?.b64_json || null,
+            url: includeOriginalPayload ? image?.url || null : null,
+            b64_json: includeOriginalPayload ? image?.b64_json || null : null,
             revised_prompt: revisedPrompt,
             revisedPrompt,
             prompt,
@@ -844,7 +845,9 @@ async function persistGeneratedImages({
         }
 
         persistenceAttempts.push(persistenceAttempt);
-        normalizedImages.push(normalizeGeneratedImageRecord(image, storedArtifact));
+        normalizedImages.push(normalizeGeneratedImageRecord(image, storedArtifact, {
+            includeOriginalPayload: Boolean(decoded?.buffer?.length),
+        }));
     }
 
     await updateGeneratedImageSessionState(sessionId, artifacts);

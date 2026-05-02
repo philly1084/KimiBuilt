@@ -373,7 +373,33 @@ describe('generated-image-artifacts', () => {
         expect(artifactService.createStoredArtifact).not.toHaveBeenCalled();
         expect(result.images[0]).toEqual(expect.objectContaining({
             artifactId: null,
-            b64_json: expect.any(String),
+            b64_json: null,
+        }));
+        expect(result.artifactPersistence.primaryReason).toBe('no_decodable_image_payload');
+    });
+
+    test('does not return invalid inline base64 as a usable image fallback', async () => {
+        const result = await persistGeneratedImages({
+            sessionId: 'session-1',
+            sourceMode: 'image',
+            prompt: 'Invalid payload',
+            model: 'gateway-image-model',
+            images: [{
+                b64_json: 'aGVsbG8=',
+                revised_prompt: 'Invalid payload',
+            }],
+        });
+
+        expect(artifactService.createStoredArtifact).not.toHaveBeenCalled();
+        expect(result.images[0]).toEqual(expect.objectContaining({
+            url: null,
+            b64_json: null,
+            artifactId: null,
+        }));
+        expect(result.artifactPersistence).toEqual(expect.objectContaining({
+            persisted: 0,
+            skipped: 1,
+            primaryReason: 'no_decodable_image_payload',
         }));
     });
 });
