@@ -33,6 +33,9 @@ class CodeCLIApp {
         this.pixelStreamWaiters = [];
         this.voxelPersonality = this.loadVoxelPersonality();
         this.activeVoxelTool = 'chat';
+        this.liveProgressState = null;
+        this.liveReasoningSummary = '';
+        this.liveToolEvents = [];
         
         // Session file storage
         this.sessionFiles = [];
@@ -1292,31 +1295,30 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
                     this.pulseVoxelStreaming();
                     this.appendToCurrentOutput(chunk.content);
                 } else if (chunk.type === 'progress') {
-                    const detail = String(chunk.detail || chunk.progress?.detail || '').trim();
-                    const phase = String(chunk.phase || chunk.progress?.phase || 'working').trim();
-                    this.updateProgressLine(detail || phase);
+                    this.updateLiveProgressCardFromChunk(chunk);
                 } else if (chunk.type === 'reasoning_summary_delta') {
                     const summary = String(chunk.summary || chunk.content || '').replace(/\s+/g, ' ').trim();
                     if (summary) {
-                        this.updateProgressLine(`Reasoning: ${summary}`);
+                        this.updateLiveReasoningSummary(summary);
                     }
                 } else if (chunk.type === 'tool_event') {
                     this.recordVoxelToolUse('tool');
-                    this.updateProgressLine(chunk.detail || 'Running tool');
+                    this.updateLiveToolEvent(chunk);
                 }
             }, null, chatOptions);
             
-            // Finalize streaming output after the pixel reveal buffer catches up.
-            await this.finalizeStreamingOutput(response.content || 'No response');
-            this.finalizeProgressLine();
             const reasoningSummary = String(
                 response.assistantMetadata?.reasoningSummary
                 || response.assistantMetadata?.reasoning_summary
                 || '',
             ).replace(/\s+/g, ' ').trim();
             if (reasoningSummary) {
-                this.printSystem(`Reasoning summary: ${reasoningSummary}`);
+                this.updateLiveReasoningSummary(reasoningSummary);
             }
+
+            // Finalize streaming output after the pixel reveal buffer catches up.
+            await this.finalizeStreamingOutput(response.content || 'No response');
+            this.finalizeLiveProgressCard();
             const addedArtifactFiles = this.syncArtifactsToSessionFiles([
                 ...(Array.isArray(response.artifacts) ? response.artifacts : []),
                 ...this.collectArtifactsFromValue(response.toolEvents || []),
@@ -1336,6 +1338,9 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
             this.recordVoxelInteraction(input, response.content || '');
             
         } catch (error) {
+            if (this.liveProgressState) {
+                this.finalizeLiveProgressCard({ phase: 'blocked', detail: error.message });
+            }
             this.printError(`Request failed: ${error.message}`);
             this.handlePetAction('guard', { silent: true });
             this.setStatus('error');
@@ -1570,6 +1575,270 @@ Session Statistics:
         line.innerHTML = `<span class="timestamp">${this.getTimestamp()}</span> ? ${this.escapeHtml(text)}`;
         this.terminalOutput.appendChild(line);
         this.scrollToBottom();
+    }
+
+    normalizeProgressStepStatus(status = '') {
+        switch (String(status || '').trim().toLowerCase()) {
+            case 'completed':
+            case 'complete':
+            case 'done':
+            case 'success':
+                return 'completed';
+            case 'in_progress':
+            case 'running':
+            case 'active':
+            case 'working':
+                return 'in_progress';
+            case 'failed':
+            case 'error':
+            case 'blocked':
+                return 'failed';
+            case 'skipped':
+                return 'skipped';
+            default:
+                return 'pending';
+        }
+    }
+
+    normalizeProgressStepTitle(value = null, fallback = '') {
+        const raw = typeof value === 'string'
+            ? value
+            : String(value?.title || value?.label || value?.summary || value?.reason || value?.text || fallback || '');
+        return raw
+            .replace(/\s*\[truncated\s+\d+\s+chars\]\s*$/i, '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 180);
+    }
+
+    buildFallbackProgressSteps(phase = 'thinking', detail = '') {
+        const normalizedPhase = String(phase || '').toLowerCase();
+        const labels = normalizedPhase.includes('tool') || normalizedPhase.includes('checking')
+            ? ['Plan request', 'Run tool', 'Review result', 'Answer']
+            : ['Understand request', 'Plan next steps', 'Execute work', 'Summarize result'];
+        const activeMap = {
+            planning: 1,
+            reasoning: 1,
+            thinking: 1,
+            executing: 2,
+            'checking-tools': 2,
+            writing: 3,
+            finalizing: 3,
+            ready: 3,
+        };
+        const activeIndex = Number.isInteger(activeMap[normalizedPhase]) ? activeMap[normalizedPhase] : 1;
+        return labels.map((title, index) => ({
+            id: `fallback-${index + 1}`,
+            title: index === activeIndex && detail ? this.normalizeProgressStepTitle(detail, title) : title,
+            status: index < activeIndex ? 'completed' : (index === activeIndex ? 'in_progress' : 'pending'),
+        }));
+    }
+
+    normalizeProgressState(rawProgress = {}, options = {}) {
+        const progress = rawProgress && typeof rawProgress === 'object' ? rawProgress : {};
+        const phase = String(progress.phase || options.phase || 'thinking').trim() || 'thinking';
+        const detail = String(progress.detail || options.detail || '').replace(/\s+/g, ' ').trim();
+        let steps = (Array.isArray(progress.steps) ? progress.steps : [])
+            .map((step, index) => {
+                const title = this.normalizeProgressStepTitle(step, `Step ${index + 1}`);
+                if (!title) {
+                    return null;
+                }
+                return {
+                    id: String(step?.id || `step-${index + 1}`),
+                    title,
+                    status: this.normalizeProgressStepStatus(step?.status),
+                };
+            })
+            .filter(Boolean);
+
+        if (steps.length < 2) {
+            steps = this.buildFallbackProgressSteps(phase, detail);
+        }
+
+        const totalSteps = Math.max(steps.length, Number(progress.totalSteps || progress.total_steps || steps.length) || steps.length);
+        const completedHint = Number(progress.completedSteps ?? progress.completed_steps);
+        const activeStepId = String(progress.activeStepId || progress.active_step_id || '').trim();
+        let activeStepIndex = Number.isFinite(Number(progress.activeStepIndex ?? progress.active_step_index))
+            ? Math.max(0, Math.min(steps.length - 1, Math.round(Number(progress.activeStepIndex ?? progress.active_step_index))))
+            : steps.findIndex((step) => activeStepId && step.id === activeStepId);
+
+        if (Number.isFinite(completedHint) && completedHint >= 0) {
+            steps = steps.map((step, index) => (
+                index < completedHint && !['failed', 'skipped'].includes(step.status)
+                    ? { ...step, status: 'completed' }
+                    : step
+            ));
+        }
+
+        if (activeStepIndex < 0) {
+            activeStepIndex = steps.findIndex((step) => step.status === 'in_progress');
+        }
+        if (activeStepIndex < 0) {
+            activeStepIndex = steps.findIndex((step) => step.status === 'pending');
+        }
+        if (activeStepIndex >= 0 && steps[activeStepIndex]?.status === 'pending') {
+            steps = steps.map((step, index) => index === activeStepIndex
+                ? { ...step, status: 'in_progress' }
+                : step);
+        }
+
+        const completedSteps = steps.filter((step) => ['completed', 'skipped'].includes(step.status)).length;
+        const progressUnits = progress.terminal === true
+            ? totalSteps
+            : Math.min(totalSteps, completedSteps + (activeStepIndex >= 0 && completedSteps < totalSteps ? 0.45 : 0));
+        const percent = totalSteps > 0
+            ? Math.max(8, Math.min(100, Math.round((progressUnits / totalSteps) * 100)))
+            : 0;
+
+        return {
+            ...progress,
+            phase,
+            detail,
+            summary: String(progress.summary || `${completedSteps}/${totalSteps} steps complete`).trim(),
+            terminal: progress.terminal === true || options.terminal === true,
+            totalSteps,
+            completedSteps,
+            activeStepIndex,
+            percent,
+            steps,
+        };
+    }
+
+    ensureLiveProgressCard() {
+        const existing = this.terminalOutput.querySelector('.line-output.agent-progress-card-line.stream-progress');
+        if (existing) {
+            return existing;
+        }
+
+        const line = document.createElement('div');
+        line.className = 'line line-output system agent-progress-card-line stream-progress';
+        this.terminalOutput.appendChild(line);
+        return line;
+    }
+
+    getProgressPhaseLabel(phase = '') {
+        const normalized = String(phase || '').toLowerCase();
+        const labels = {
+            planning: 'Planning',
+            reasoning: 'Reasoning',
+            thinking: 'Thinking',
+            executing: 'Working',
+            'checking-tools': 'Using tools',
+            writing: 'Writing',
+            finalizing: 'Finalizing',
+            ready: 'Ready',
+            blocked: 'Blocked',
+        };
+        return labels[normalized] || 'Working';
+    }
+
+    renderLiveProgressCard() {
+        const progressState = this.liveProgressState;
+        if (!progressState) {
+            return;
+        }
+
+        const line = this.ensureLiveProgressCard();
+        const phaseLabel = this.getProgressPhaseLabel(progressState.phase);
+        const reasoning = this.liveReasoningSummary || progressState.detail || progressState.summary || 'Working through the next step.';
+        const toolEvents = this.liveToolEvents.slice(-3);
+        const toolMarkup = toolEvents.length
+            ? `<div class="agent-progress-card__tools">${toolEvents.map((event) => `
+                <span class="agent-progress-card__tool agent-progress-card__tool--${this.escapeHtmlAttr(event.stage || 'started')}">
+                    ${this.escapeHtml(event.detail || event.toolName || 'Tool event')}
+                </span>
+            `).join('')}</div>`
+            : '';
+        const stepsMarkup = progressState.steps.map((step, index) => {
+            const isActive = index === progressState.activeStepIndex;
+            return `
+                <li class="agent-progress-card__step agent-progress-card__step--${this.escapeHtmlAttr(step.status)}${isActive ? ' is-active' : ''}">
+                    <span class="agent-progress-card__step-dot" aria-hidden="true"></span>
+                    <span class="agent-progress-card__step-title">${this.escapeHtml(step.title)}</span>
+                </li>
+            `;
+        }).join('');
+
+        line.innerHTML = `
+            <div class="agent-progress-card${progressState.terminal ? ' is-terminal' : ' is-live'}" aria-live="polite">
+                <div class="agent-progress-card__header">
+                    <span class="agent-progress-card__phase">${this.escapeHtml(phaseLabel)}</span>
+                    <span class="agent-progress-card__badge">${progressState.terminal ? 'Final' : 'Live'}</span>
+                </div>
+                <div class="agent-progress-card__summary">${this.escapeHtml(reasoning)}</div>
+                <div class="agent-progress-card__bar" aria-hidden="true"><span style="width:${progressState.percent}%"></span></div>
+                <ol class="agent-progress-card__steps">${stepsMarkup}</ol>
+                ${toolMarkup}
+            </div>
+        `;
+        this.scrollToBottom();
+    }
+
+    updateLiveProgressCardFromChunk(chunk = {}) {
+        const progress = chunk.progress && typeof chunk.progress === 'object' ? chunk.progress : {};
+        this.liveProgressState = this.normalizeProgressState(progress, {
+            phase: chunk.phase || progress.phase || 'thinking',
+            detail: chunk.detail || progress.detail || '',
+        });
+        this.renderLiveProgressCard();
+    }
+
+    updateLiveReasoningSummary(summary = '') {
+        const normalized = String(summary || '').replace(/\s+/g, ' ').trim();
+        if (!normalized) {
+            return;
+        }
+        this.liveReasoningSummary = normalized;
+        this.liveProgressState = this.normalizeProgressState(this.liveProgressState || {}, {
+            phase: 'reasoning',
+            detail: normalized,
+        });
+        this.renderLiveProgressCard();
+    }
+
+    updateLiveToolEvent(chunk = {}) {
+        const event = {
+            stage: String(chunk.stage || '').toLowerCase().includes('complete') ? 'completed' : 'started',
+            toolName: String(chunk.toolName || chunk.tool_name || 'tool'),
+            detail: String(chunk.detail || 'Running tool').replace(/\s+/g, ' ').trim(),
+        };
+        this.liveToolEvents.push(event);
+        this.liveToolEvents = this.liveToolEvents.slice(-8);
+        this.liveProgressState = this.normalizeProgressState(this.liveProgressState || {}, {
+            phase: event.stage === 'completed' ? 'checking-tools' : 'executing',
+            detail: event.detail,
+        });
+        this.renderLiveProgressCard();
+    }
+
+    finalizeLiveProgressCard(options = {}) {
+        const existing = this.terminalOutput.querySelector('.line-output.agent-progress-card-line.stream-progress');
+        if (!existing && !this.liveProgressState) {
+            return;
+        }
+
+        if (this.liveProgressState) {
+            this.liveProgressState = this.normalizeProgressState({
+                ...this.liveProgressState,
+                terminal: true,
+                completedSteps: this.liveProgressState.totalSteps,
+                steps: this.liveProgressState.steps.map((step) => (
+                    step.status === 'failed' ? step : { ...step, status: 'completed' }
+                )),
+                phase: options.phase || 'ready',
+                detail: options.detail || this.liveProgressState.detail,
+            }, { terminal: true });
+            this.renderLiveProgressCard();
+        }
+
+        const line = this.terminalOutput.querySelector('.line-output.agent-progress-card-line.stream-progress');
+        if (line) {
+            line.classList.remove('stream-progress');
+        }
+        this.liveProgressState = null;
+        this.liveReasoningSummary = '';
+        this.liveToolEvents = [];
     }
 
     updateProgressLine(text) {
@@ -1904,6 +2173,67 @@ Examples:
         return lines.join('\n');
     }
 
+    extractRemoteAgentActionItems(text = '') {
+        const lines = String(text || '').split(/\r?\n/);
+        const actionItems = [];
+        let capture = false;
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (/^(#+\s*)?(next steps?|actions?|action items?|todo|follow[- ]?ups?)\b/i.test(trimmed)) {
+                capture = true;
+                continue;
+            }
+            if (capture && /^#{1,6}\s+\S/.test(trimmed)) {
+                break;
+            }
+            if (capture) {
+                const item = trimmed.match(/^[-*]\s+\[[ xX]\]\s+(.+)$/)
+                    || trimmed.match(/^[-*]\s+(.+)$/)
+                    || trimmed.match(/^\d+[.)]\s+(.+)$/);
+                if (item?.[1]) {
+                    actionItems.push(item[1].trim());
+                } else if (!trimmed && actionItems.length > 0) {
+                    break;
+                }
+            }
+        }
+
+        return actionItems.slice(0, 8);
+    }
+
+    formatRemoteAgentResult(result = {}) {
+        const finalOutput = String(result.finalOutput || result.output || '').trim();
+        const lines = ['## Remote CLI Agent Result', ''];
+        const metadata = [
+            result.targetId ? `Target: \`${result.targetId}\`` : '',
+            result.cwd ? `Workspace: \`${result.cwd}\`` : '',
+            result.sessionId ? `Remote session: \`${result.sessionId}\`` : '',
+            result.mcpSessionId ? `MCP session: \`${result.mcpSessionId}\`` : '',
+            result.model ? `Agent model: \`${result.model}\`` : '',
+            result.gitRepo ? `Repo: \`${result.gitRepo}\`` : '',
+            result.gitCommit ? `Commit: \`${result.gitCommit}\`` : '',
+            result.publicHost ? `Public host: \`${result.publicHost}\`` : '',
+            result.uiCheckReport ? `UI check: \`${result.uiCheckReport}\`` : '',
+        ].filter(Boolean);
+
+        if (metadata.length > 0) {
+            lines.push('### Run Metadata', '', ...metadata.map((item) => `- ${item}`), '');
+        }
+
+        const actionItems = this.extractRemoteAgentActionItems(finalOutput);
+        if (actionItems.length > 0) {
+            lines.push('### Action Items', '', ...actionItems.map((item) => `- ${item}`), '');
+        }
+
+        if (Array.isArray(result.uiScreenshots) && result.uiScreenshots.length > 0) {
+            lines.push('### Screenshots', '', ...result.uiScreenshots.slice(0, 6).map((item) => `- \`${item}\``), '');
+        }
+
+        lines.push('### Agent Report', '', finalOutput || 'Remote CLI agent completed.');
+        return lines.join('\n');
+    }
+
     async loadRemoteToolCatalog() {
         const response = await api.getAvailableTools('ssh', {
             executionProfile: 'remote-build',
@@ -2030,8 +2360,31 @@ Raw expert access remains available:
             this.setStatus('thinking');
             this.recordVoxelToolUse('tool');
             try {
+                this.liveProgressState = this.normalizeProgressState({
+                    phase: 'planning',
+                    detail: 'Preparing the remote CLI agent and target workspace.',
+                    steps: [
+                        { id: 'catalog', title: 'Load remote runner catalog', status: 'in_progress' },
+                        { id: 'launch', title: 'Launch remote CLI agent', status: 'pending' },
+                        { id: 'run', title: 'Run remote coding loop', status: 'pending' },
+                        { id: 'report', title: 'Format result and action items', status: 'pending' },
+                    ],
+                });
+                this.renderLiveProgressCard();
                 const { runtime, tools } = await this.loadRemoteToolCatalog();
                 const remoteAgent = tools.find((tool) => tool.id === 'remote-cli-agent') || null;
+                this.liveProgressState = this.normalizeProgressState({
+                    ...this.liveProgressState,
+                    phase: 'executing',
+                    detail: 'Remote CLI agent is running. This can include repo edits, deploy checks, and verification.',
+                    steps: [
+                        { id: 'catalog', title: 'Load remote runner catalog', status: 'completed' },
+                        { id: 'launch', title: 'Launch remote CLI agent', status: 'completed' },
+                        { id: 'run', title: 'Run remote coding loop', status: 'in_progress' },
+                        { id: 'report', title: 'Format result and action items', status: 'pending' },
+                    ],
+                });
+                this.renderLiveProgressCard();
                 const invocation = await api.invokeTool('remote-cli-agent', {
                     task: rest,
                     cwd: remoteAgent?.runtime?.defaultCwd || runtime?.remoteRunner?.defaultWorkspace || '',
@@ -2047,14 +2400,31 @@ Raw expert access remains available:
                     },
                 });
                 const result = invocation?.result?.data || invocation?.result?.result || invocation?.result || {};
-                const lines = ['## Remote CLI Agent Result', ''];
-                if (result.targetId) lines.push(`Target: \`${result.targetId}\``);
-                if (result.cwd) lines.push(`Workspace: \`${result.cwd}\``);
-                if (result.sessionId) lines.push(`Remote session: \`${result.sessionId}\``);
-                if (result.mcpSessionId) lines.push(`MCP session: \`${result.mcpSessionId}\``);
-                lines.push('', result.finalOutput || result.output || 'Remote CLI agent completed.');
-                this.printAI(lines.join('\n'));
+                this.liveProgressState = this.normalizeProgressState({
+                    ...this.liveProgressState,
+                    phase: 'finalizing',
+                    detail: 'Remote CLI agent returned a report. Extracting metadata and next actions.',
+                    steps: [
+                        { id: 'catalog', title: 'Load remote runner catalog', status: 'completed' },
+                        { id: 'launch', title: 'Launch remote CLI agent', status: 'completed' },
+                        { id: 'run', title: 'Run remote coding loop', status: 'completed' },
+                        { id: 'report', title: 'Format result and action items', status: 'in_progress' },
+                    ],
+                });
+                this.renderLiveProgressCard();
+                this.finalizeLiveProgressCard({ detail: 'Remote CLI agent completed.' });
+                this.printAI(this.formatRemoteAgentResult(result));
             } catch (error) {
+                this.liveProgressState = this.normalizeProgressState({
+                    ...(this.liveProgressState || {}),
+                    phase: 'blocked',
+                    detail: error.message,
+                    steps: (this.liveProgressState?.steps || []).map((step) => (
+                        step.status === 'in_progress' ? { ...step, status: 'failed' } : step
+                    )),
+                });
+                this.renderLiveProgressCard();
+                this.finalizeLiveProgressCard({ phase: 'blocked', detail: error.message });
                 this.printError(`Remote agent failed: ${error.message}`);
             } finally {
                 this.setStatus('ready');

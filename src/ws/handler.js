@@ -14,6 +14,7 @@ const {
     shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
     shouldSuppressWebChatImplicitHtmlArtifact,
+    isArtifactStorageAvailable,
     resolveSshRequestContext,
     extractSshSessionMetadataFromToolEvents,
     inferOutputFormatFromSession,
@@ -368,6 +369,10 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
     })) {
         effectiveOutputFormat = null;
     }
+    if (effectiveOutputFormat && !outputFormat && !isArtifactStorageAvailable()) {
+        console.warn('[WS] Artifact storage unavailable; handling implicit artifact request as normal chat.');
+        effectiveOutputFormat = null;
+    }
     const recentMessagesForWorkloadPreflight = effectiveOutputFormat
         ? await sessionStore.getRecentMessages(session.id, WORKLOAD_PREFLIGHT_RECENT_LIMIT)
         : [];
@@ -464,7 +469,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                     timezone: requestTimezone,
                     now: requestNow,
                     artifactIds: preparedImages.artifactIds,
-                    workloadService: ws.app.locals.agentWorkloadService,
+                    workloadService: ws.app?.locals?.agentWorkloadService || null,
                 },
                 executionProfile,
             });
@@ -588,7 +593,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                 timezone: requestTimezone,
                 now: requestNow,
                 artifactIds: effectiveArtifactIds,
-                workloadService: ws.app.locals.agentWorkloadService,
+                workloadService: ws.app?.locals?.agentWorkloadService || null,
                 userCheckpointPolicy,
             },
             executionProfile,

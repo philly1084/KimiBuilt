@@ -5,15 +5,30 @@ function setDashboardController(controller) {
 }
 
 function startRuntimeTask(payload) {
-  return dashboardController?.recordRuntimeTaskStart(payload) || null;
+  try {
+    return dashboardController?.recordRuntimeTaskStart(payload) || null;
+  } catch (error) {
+    console.warn(`[RuntimeMonitor] Failed to record task start: ${error.message}`);
+    return null;
+  }
 }
 
 function completeRuntimeTask(taskId, payload) {
-  return dashboardController?.recordRuntimeTaskComplete(taskId, payload) || null;
+  try {
+    return dashboardController?.recordRuntimeTaskComplete(taskId, payload) || null;
+  } catch (error) {
+    console.warn(`[RuntimeMonitor] Failed to record task completion: ${error.message}`);
+    return null;
+  }
 }
 
 function failRuntimeTask(taskId, payload) {
-  return dashboardController?.recordRuntimeTaskError(taskId, payload) || null;
+  try {
+    return dashboardController?.recordRuntimeTaskError(taskId, payload) || null;
+  } catch (error) {
+    console.warn(`[RuntimeMonitor] Failed to record task failure: ${error.message}`);
+    return null;
+  }
 }
 
 module.exports = {

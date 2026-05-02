@@ -20,6 +20,11 @@ const {
     resolveClientSurface,
     resolveSessionScope,
 } = require('../session-scope');
+const {
+    buildNaturalContext,
+    buildNaturalContextInstructions,
+    buildSkillsTreeInstructions,
+} = require('../natural-context');
 
 const router = Router();
 
@@ -60,6 +65,7 @@ const canvasSchema = {
     useAgentExecutor: { required: false, type: 'boolean' },
     executionProfile: { required: false, type: 'string' },
     memoryKeywords: { required: false, type: 'array' },
+    metadata: { required: false, type: 'object' },
     templateId: { required: false, type: 'string' },
     templateIds: { required: false, type: 'array' },
     templateVariables: { required: false, type: 'object' },
@@ -194,6 +200,17 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             templateIds,
             templateVariables,
         });
+        const naturalContext = buildNaturalContext({
+            session,
+            metadata: effectiveRequestMetadata,
+            clientSurface,
+            taskType: 'canvas',
+            userText: message,
+        });
+        const naturalInstructions = [
+            buildSkillsTreeInstructions({ clientSurface, taskType: 'canvas' }),
+            buildNaturalContextInstructions(naturalContext),
+        ].filter(Boolean).join('\n\n');
 
         runtimeTask = startRuntimeTask({
             sessionId,
@@ -205,7 +222,10 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
         });
         const instructions = await buildInstructionsWithArtifacts(
             session,
-            buildCanvasInstructions(canvasType, existingContent, message, templateSelection.context),
+            [
+                buildCanvasInstructions(canvasType, existingContent, message, templateSelection.context),
+                naturalInstructions,
+            ].filter(Boolean).join('\n\n'),
             artifactIds,
         );
 
@@ -242,6 +262,7 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             metadata: {
                 ...effectiveRequestMetadata,
                 clientSurface,
+                naturalContext,
             },
             ownerId,
         });

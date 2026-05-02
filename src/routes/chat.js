@@ -59,6 +59,11 @@ const {
     buildForegroundTurnMessageOptions,
     persistForegroundTurnMessages,
 } = require('../foreground-turn-state');
+const {
+    buildNaturalContext,
+    buildNaturalContextInstructions,
+    buildSkillsTreeInstructions,
+} = require('../natural-context');
 
 const router = Router();
 const WORKLOAD_PREFLIGHT_RECENT_LIMIT = config.memory.recentTranscriptLimit;
@@ -798,10 +803,26 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             clientSurface,
             taskType,
         });
+        const naturalContext = buildNaturalContext({
+            session: effectiveSession,
+            metadata: effectiveRequestMetadata,
+            clientSurface,
+            taskType,
+            userText: message,
+        });
+        effectiveRequestMetadata = {
+            ...effectiveRequestMetadata,
+            naturalContext,
+        };
+        const naturalInstructions = [
+            buildSkillsTreeInstructions({ clientSurface, taskType }),
+            buildNaturalContextInstructions(naturalContext),
+        ].filter(Boolean).join('\n\n');
         const instructions = await buildInstructionsWithArtifacts(
             effectiveSession,
             [
                 buildContinuityInstructions(buildUserCheckpointInstructions(userCheckpointPolicy)),
+                naturalInstructions,
                 responseFormattingInstructions,
             ].filter(Boolean).join('\n\n'),
             effectiveArtifactIds,

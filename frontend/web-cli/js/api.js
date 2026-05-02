@@ -93,6 +93,41 @@ function appendReasoningSummary(currentValue = '', nextValue = '') {
     return `${current}${next}`.replace(/\s+/g, ' ').trim();
 }
 
+function truncateNaturalContextText(value = '', limit = 1200) {
+    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!text || text.length <= limit) {
+        return text;
+    }
+    return `${text.slice(0, Math.max(0, limit - 24)).trim()}...[truncated]`;
+}
+
+function buildWebCliNaturalContext({ message = '', mode = 'chat', conversationHistory = [], existingContent = '', extras = {} } = {}) {
+    const recentHistory = Array.isArray(conversationHistory) ? conversationHistory.slice(-8) : [];
+    return {
+        activeSurface: WEB_CLI_CLIENT_SURFACE,
+        activeMode: mode || WEB_CLI_TASK_TYPE,
+        recentTargets: [
+            mode ? `${mode} mode` : '',
+            ...recentHistory
+                .map((entry) => String(entry?.content || '').match(/^#{1,6}\s+(.+)$/m)?.[1] || '')
+                .filter(Boolean),
+        ].map((entry) => truncateNaturalContextText(entry, 90)).filter(Boolean).slice(-10),
+        lastVisibleMessages: recentHistory.map((entry) => ({
+            role: entry?.role || '',
+            content: truncateNaturalContextText(entry?.content || '', 500),
+        })),
+        activeCanvas: existingContent
+            ? {
+                type: mode,
+                contentExcerpt: String(existingContent || '').slice(0, 2400),
+                contentLength: String(existingContent || '').length,
+            }
+            : null,
+        lastUserRequest: truncateNaturalContextText(message, 600),
+        ...(extras && typeof extras === 'object' && !Array.isArray(extras) ? extras : {}),
+    };
+}
+
 class WebCLIAPI {
     constructor() {
         this.sessionId = localStorage.getItem(WEB_CLI_ACTIVE_SESSION_KEY) || null;
@@ -538,6 +573,12 @@ class WebCLIAPI {
                 clientSurface: WEB_CLI_CLIENT_SURFACE,
                 memoryScope: WEB_CLI_CLIENT_SURFACE,
                 sessionIsolation: WEB_CLI_SESSION_ISOLATION,
+                naturalContext: buildWebCliNaturalContext({
+                    message,
+                    mode,
+                    conversationHistory,
+                    extras: options.naturalContext,
+                }),
                 ...(options.metadata && typeof options.metadata === 'object' ? options.metadata : {}),
             },
         };
@@ -796,6 +837,13 @@ class WebCLIAPI {
                     canvasType,
                     existingContent,
                     sessionId: this.sessionId,
+                    metadata: {
+                        naturalContext: buildWebCliNaturalContext({
+                            message,
+                            mode: canvasType,
+                            existingContent,
+                        }),
+                    },
                 }),
             }, MAX_RETRIES, this.getChatTimeout(this.currentModel, false));
 

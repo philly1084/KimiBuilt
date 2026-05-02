@@ -761,6 +761,9 @@ class CanvasApp {
                 existingContent: context || this.editor.getValue(),
                 model: selectedModel,
                 reasoningEffort,
+                metadata: {
+                    naturalContext: this.buildNaturalContextSnapshot(context || this.editor.getValue()),
+                },
             });
 
             this.handleAIResponse(response);
@@ -771,6 +774,32 @@ class CanvasApp {
         } finally {
             this.showLoading(false);
         }
+    }
+
+    buildNaturalContextSnapshot(content = '') {
+        const selectedText = this.editor?.getSelection ? this.editor.getSelection() : '';
+        const cursor = this.editor?.getCursorPosition ? this.editor.getCursorPosition() : null;
+        const metadata = this.state.metadata || {};
+
+        return {
+            activeSurface: 'canvas',
+            activeMode: 'canvas',
+            activeCanvas: {
+                type: this.state.canvasType,
+                title: metadata.title || '',
+                language: metadata.language || '',
+                selectedText,
+                selectionLabel: selectedText ? 'current selection' : '',
+                cursorLine: cursor?.line || null,
+                contentExcerpt: String(content || '').slice(0, 2400),
+                contentLength: String(content || '').length,
+            },
+            recentTargets: [
+                metadata.title || '',
+                selectedText ? 'current selection' : '',
+                `${this.state.canvasType} canvas`,
+            ].filter(Boolean),
+        };
     }
 
     /**

@@ -620,6 +620,192 @@ body[data-theme="voxel"] .line-output.error {
     margin-bottom: 0;
 }
 
+.agent-progress-card-line {
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.agent-progress-card {
+    margin: 10px 0;
+    padding: 12px;
+    color: var(--text-primary);
+    background:
+        linear-gradient(180deg, rgba(117, 183, 255, 0.08), transparent),
+        var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-left: 4px solid var(--info);
+    border-radius: 8px;
+}
+
+body[data-theme="voxel"] .agent-progress-card {
+    border-width: 2px;
+    border-left-width: 6px;
+    border-radius: 4px;
+    background:
+        linear-gradient(90deg, rgba(73, 211, 167, 0.08) 1px, transparent 1px),
+        linear-gradient(0deg, rgba(117, 183, 255, 0.055) 1px, transparent 1px),
+        var(--voxel-panel);
+    background-size: 14px 14px, 14px 14px, auto;
+    box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.22);
+}
+
+.agent-progress-card.is-terminal {
+    border-left-color: var(--success-bright);
+}
+
+.agent-progress-card__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.agent-progress-card__phase {
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.agent-progress-card__badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 20px;
+    padding: 2px 7px;
+    color: var(--success-bright);
+    background: rgba(63, 185, 80, 0.12);
+    border: 1px solid rgba(63, 185, 80, 0.28);
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.agent-progress-card.is-live .agent-progress-card__badge::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    margin-right: 6px;
+    border-radius: 50%;
+    background: var(--success-bright);
+    animation: voxelBlink 1s steps(2, start) infinite;
+}
+
+.agent-progress-card__summary {
+    margin-bottom: 10px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.agent-progress-card__bar {
+    height: 7px;
+    margin-bottom: 10px;
+    overflow: hidden;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+}
+
+.agent-progress-card__bar > span {
+    display: block;
+    height: 100%;
+    width: 8%;
+    background: linear-gradient(90deg, var(--info), var(--success-bright));
+    transition: width 220ms ease;
+}
+
+.agent-progress-card__steps {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px 10px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.agent-progress-card__step {
+    display: grid;
+    grid-template-columns: 12px minmax(0, 1fr);
+    gap: 7px;
+    align-items: start;
+    min-width: 0;
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.agent-progress-card__step-dot {
+    width: 9px;
+    height: 9px;
+    margin-top: 4px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 50%;
+}
+
+.agent-progress-card__step-title {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.agent-progress-card__step--completed,
+.agent-progress-card__step--skipped {
+    color: var(--text-secondary);
+}
+
+.agent-progress-card__step--completed .agent-progress-card__step-dot,
+.agent-progress-card__step--skipped .agent-progress-card__step-dot {
+    background: var(--success-bright);
+    border-color: var(--success-bright);
+}
+
+.agent-progress-card__step--in_progress,
+.agent-progress-card__step.is-active {
+    color: var(--text-primary);
+}
+
+.agent-progress-card__step--in_progress .agent-progress-card__step-dot,
+.agent-progress-card__step.is-active .agent-progress-card__step-dot {
+    background: var(--warning);
+    border-color: var(--warning);
+    box-shadow: 0 0 0 3px rgba(244, 201, 93, 0.12);
+}
+
+.agent-progress-card__step--failed .agent-progress-card__step-dot {
+    background: var(--error);
+    border-color: var(--error);
+}
+
+.agent-progress-card__tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.agent-progress-card__tool {
+    min-width: 0;
+    max-width: 100%;
+    padding: 3px 7px;
+    color: var(--text-secondary);
+    background: rgba(117, 183, 255, 0.08);
+    border: 1px solid rgba(117, 183, 255, 0.22);
+    border-radius: 999px;
+    font-size: 11px;
+    overflow-wrap: anywhere;
+}
+
+.agent-progress-card__tool--completed {
+    color: var(--success-bright);
+    border-color: rgba(63, 185, 80, 0.28);
+    background: rgba(63, 185, 80, 0.1);
+}
+
 body[data-theme="voxel"] .streaming .voxel-response-head::after {
     content: " live";
     color: var(--success-bright);
@@ -1563,6 +1749,14 @@ body[data-theme="voxel"] .autocomplete-item.selected {
 
     .voxel-command-grid {
         grid-template-columns: 1fr;
+    }
+
+    .agent-progress-card__steps {
+        grid-template-columns: 1fr;
+    }
+
+    .agent-progress-card__header {
+        align-items: flex-start;
     }
 
     body[data-theme="voxel"] .terminal-output {

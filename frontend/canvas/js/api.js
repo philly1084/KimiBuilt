@@ -35,12 +35,13 @@ class CanvasAPI {
         return `${this.baseURL}${path}`;
     }
 
-    async sendCanvasRequest({ message, sessionId, canvasType = 'code', existingContent, model, reasoningEffort }) {
+    async sendCanvasRequest({ message, sessionId, canvasType = 'code', existingContent, model, reasoningEffort, metadata = {} }) {
         const payload = {
             message,
             sessionId: sessionId || this.sessionId,
             canvasType,
             existingContent,
+            metadata,
         };
 
         if (model) {

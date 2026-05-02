@@ -91,6 +91,35 @@ function buildClientClockMetadata() {
     };
 }
 
+function truncateNaturalContextText(value = '', limit = 1200) {
+    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!text || text.length <= limit) {
+        return text;
+    }
+    return `${text.slice(0, Math.max(0, limit - 24)).trim()}...[truncated]`;
+}
+
+function buildNaturalInteractionContext(messages = [], extras = {}) {
+    const recentMessages = Array.isArray(messages) ? messages.slice(-6) : [];
+    const recentTargets = [];
+    recentMessages.forEach((message) => {
+        const content = String(message?.content || '').trim();
+        const headingMatches = content.match(/^#{1,6}\s+.+$/gm) || [];
+        headingMatches.slice(-4).forEach((heading) => recentTargets.push(heading.replace(/^#{1,6}\s+/, '').trim()));
+    });
+
+    return {
+        activeSurface: WEB_CHAT_API_CLIENT_SURFACE,
+        activeMode: WEB_CHAT_API_TASK_TYPE,
+        recentTargets: [...new Set(recentTargets.map((entry) => truncateNaturalContextText(entry, 90)).filter(Boolean))].slice(-8),
+        lastVisibleMessages: recentMessages.map((message) => ({
+            role: message?.role || '',
+            content: truncateNaturalContextText(message?.content || '', 500),
+        })),
+        ...(extras && typeof extras === 'object' && !Array.isArray(extras) ? extras : {}),
+    };
+}
+
 // Retry configuration
 const RETRY_CONFIG = {
     maxRetries: 3,
@@ -984,6 +1013,7 @@ class OpenAIAPIClient extends EventTarget {
                 clientSurface: WEB_CHAT_API_CLIENT_SURFACE,
                 sessionIsolation: true,
                 enableConversationExecutor: true,
+                naturalContext: buildNaturalInteractionContext(messages, requestOptions?.naturalContext || {}),
                 ...buildClientClockMetadata(),
                 ...(requestOptions?.metadata && typeof requestOptions.metadata === 'object'
                     ? requestOptions.metadata

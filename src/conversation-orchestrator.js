@@ -73,6 +73,12 @@ const {
 } = require('./conversation-continuity');
 const { parseLenientJson } = require('./utils/lenient-json');
 const { stripNullCharacters } = require('./utils/text');
+const {
+    buildNaturalContext,
+    buildNaturalContextInstructions,
+    buildSkillsTreeInstructions,
+    buildNaturalContextUpdate,
+} = require('./natural-context');
 const { formatImageDiagnosticsSummary } = require('./image-generation-diagnostics');
 const {
     DEFAULT_EXECUTION_PROFILE,
@@ -7692,15 +7698,34 @@ class ConversationOrchestrator extends EventEmitter {
                 ? memoryRecall.contextMessages
             : [];
         const memoryTrace = Array.isArray(memoryRecall) ? null : (memoryRecall?.trace || null);
+        const naturalContext = buildNaturalContext({
+            session,
+            metadata,
+            clientSurface,
+            taskType,
+            userText: rawObjective,
+        });
+        const incomingInstructions = String(instructions || '');
+        const hasNaturalInstructions = /<natural_context>|<skills_tree>/i.test(incomingInstructions);
+        const naturalContextInstructions = hasNaturalInstructions
+            ? ''
+            : [
+                buildSkillsTreeInstructions({ clientSurface, taskType }),
+                buildNaturalContextInstructions(naturalContext),
+            ].filter(Boolean).join('\n\n');
+        const effectiveInstructionsBase = [
+            incomingInstructions,
+            naturalContextInstructions,
+        ].filter(Boolean).join('\n\n');
         const effectiveInstructions = (taskFrameObjective.usedTaskFrameContext || transcriptObjective.usedTranscriptContext)
             ? [
-                instructions || '',
+                effectiveInstructionsBase,
                 ...(taskFrameObjective.usedTaskFrameContext
                     ? ['An active task frame already exists for this session. Prefer continuing that same project-local objective before asking the user to restate context.']
                     : []),
                 'The current user turn may be abbreviated or cut off. Use the recent transcript to resolve the intended task and continue without asking the user to restate prior context unless the transcript is genuinely insufficient.',
             ].filter(Boolean).join('\n\n')
-            : instructions;
+            : effectiveInstructionsBase;
         const requestClassification = isJudgmentV2Enabled()
             ? classifyRequestIntent({
                 objective,
@@ -9508,6 +9533,7 @@ class ConversationOrchestrator extends EventEmitter {
                     ...foregroundContinuationGatePatch,
                     ...(activeProjectPlan ? { projectPlan: activeProjectPlan } : {}),
                 },
+                naturalContext,
             });
         } catch (error) {
             this.emit('task:error', {
@@ -11883,11 +11909,21 @@ class ConversationOrchestrator extends EventEmitter {
         executionTrace = [],
         stream = false,
         controlStatePatch = {},
+        naturalContext = null,
     } = {}) {
         const responseArtifacts = mergeRuntimeArtifacts(
             finalResponse?.metadata?.artifacts || [],
             extractArtifactsFromToolEvents(toolEvents),
         );
+        const nextNaturalContext = buildNaturalContextUpdate({
+            previous: naturalContext || metadata?.naturalContext || {},
+            metadata,
+            clientSurface,
+            taskType,
+            userText,
+            assistantText: output,
+            artifacts: responseArtifacts,
+        });
         const activeTaskFrame = normalizeActiveTaskFrame(controlStatePatch?.activeTaskFrame) || buildActiveTaskFrame({
             objective,
             projectKey: toolPolicy?.projectKey || '',
@@ -11945,6 +11981,7 @@ class ConversationOrchestrator extends EventEmitter {
             agencyProfile: toolPolicy?.agencyProfile || null,
             rolePipeline: toolPolicy?.rolePipeline || null,
             ...(harnessSummary ? { harness: harnessSummary } : {}),
+            naturalContext: nextNaturalContext,
             perceivedIntelligenceScores: intelligenceSummary.perceivedIntelligenceScores,
             failureTags: intelligenceSummary.failureTags,
             ...(aggregatedUsage ? { usage: aggregatedUsage, tokenUsage: aggregatedUsage } : {}),
@@ -11981,6 +12018,7 @@ class ConversationOrchestrator extends EventEmitter {
             controlStatePatch: finalControlStatePatch,
             artifacts: responseArtifacts,
             assistantMetadata: tracedResponse?.metadata || null,
+            naturalContext: nextNaturalContext,
         });
 
         const trace = {
@@ -12076,6 +12114,7 @@ class ConversationOrchestrator extends EventEmitter {
         artifacts = [],
         assistantMetadata = null,
         foregroundTurn = null,
+        naturalContext = null,
     }) {
         const currentSession = ownerId && this.sessionStore?.getOwned
             ? await this.sessionStore.getOwned(sessionId, ownerId)
@@ -12215,6 +12254,7 @@ class ConversationOrchestrator extends EventEmitter {
                     ...(executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
                         ? { remoteBuildAutonomyApproved: autonomyApproved }
                         : {}),
+                    ...(naturalContext ? { naturalContext } : {}),
                     projectMemory,
                 },
             });
