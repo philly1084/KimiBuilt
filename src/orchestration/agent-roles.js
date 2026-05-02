@@ -9,6 +9,20 @@ const ROLE_IDS = Object.freeze({
   INTEGRATOR: 'integrator',
 });
 
+const IMPRESSIVE_FRONTEND_QUALITY_BAR = Object.freeze({
+  name: 'impressive-frontend-websites',
+  appliesTo: ['website', 'dashboard', 'app-workspace', 'landing-page', 'frontend-demo', 'html-prototype', 'ui-mockup'],
+  requiredPractices: [
+    'infer a compact brief when the user gives sparse context',
+    'make the first viewport specific to the product, place, workflow, offer, or audience',
+    'build the usable experience with real controls, states, data regions, and purposeful interactions',
+    'use relevant visual assets that reveal the product, workflow, audience, place, or state',
+    'avoid generic placeholders, one-note palettes, decorative blobs, nested cards, clipped labels, and horizontal overflow',
+    'verify desktop, mobile, opened interactive surfaces, contrast, console errors, broken images, and nonblank canvas or 3D rendering',
+    'iterate after the first working render for non-trivial frontend builds',
+  ],
+});
+
 function normalizeText(value = '') {
   return String(value || '').trim();
 }
@@ -127,7 +141,7 @@ function inferAgentRolePipeline({
       tools: ['design-resource-search', 'image-search-unsplash', 'image-generate', 'graph-diagram'],
       outputContract: {
         format: 'design-brief',
-        required: ['audience', 'layoutPlan', 'visualDirection', 'componentMap', 'visualQaPlan'],
+        required: ['audience', 'layoutPlan', 'visualDirection', 'assetPlan', 'componentMap', 'visualQaPlan'],
       },
     }));
   }
@@ -143,7 +157,7 @@ function inferAgentRolePipeline({
       outputContract: {
         format: websiteBuild ? 'sandbox-project' : 'document-artifact',
         required: websiteBuild
-          ? ['workspacePath', 'previewUrl', 'files']
+          ? ['workspacePath', 'previewUrl', 'files', 'interactiveStates', 'responsivePlan']
           : ['artifactUrl', 'format'],
       },
     }));
@@ -157,7 +171,7 @@ function inferAgentRolePipeline({
       tools: ['code-sandbox', 'web-fetch', 'web-scrape'],
       outputContract: {
         format: 'qa-report',
-        required: ['checks', 'screenshots', 'issues', 'ready'],
+        required: ['checks', 'screenshots', 'openedStates', 'issues', 'refinements', 'ready'],
       },
     }));
   }
@@ -186,6 +200,7 @@ function inferAgentRolePipeline({
     requiresSandbox: websiteBuild,
     maxRoundsHint: websiteBuild ? 4 : (researchNeeded && documentBuild ? 3 : 2),
     maxToolCallsHint: websiteBuild ? 10 : 7,
+    qualityBar: websiteBuild ? IMPRESSIVE_FRONTEND_QUALITY_BAR : null,
     sandboxPolicy: websiteBuild
       ? {
         required: true,
@@ -215,6 +230,7 @@ function formatAgentRolePipelineForPrompt(pipeline = null) {
     requiresDesign: pipeline.requiresDesign,
     requiresBuild: pipeline.requiresBuild,
     sandboxPolicy: pipeline.sandboxPolicy,
+    qualityBar: pipeline.qualityBar,
     roles: pipeline.roles.map((role) => ({
       id: role.id,
       label: role.label,
@@ -228,6 +244,7 @@ function formatAgentRolePipelineForPrompt(pipeline = null) {
 
 module.exports = {
   ROLE_IDS,
+  IMPRESSIVE_FRONTEND_QUALITY_BAR,
   formatAgentRolePipelineForPrompt,
   hasDocumentBuildIntent,
   hasResearchIntent,

@@ -44,6 +44,8 @@ describe('/api/canvas helpers', () => {
         expect(instructions).toContain('metadata.handoff');
         expect(instructions).toContain('<frontend_format_router>');
         expect(instructions).toContain('documentation-site');
+        expect(instructions).toContain('<impressive_frontend_website_standard>');
+        expect(instructions).toContain('opened UI surfaces');
         expect(instructions).toContain('Existing demo');
     });
 

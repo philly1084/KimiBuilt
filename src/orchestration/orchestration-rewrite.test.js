@@ -188,9 +188,20 @@ describe('orchestration rewrite policy', () => {
       ROLE_IDS.QA,
       ROLE_IDS.INTEGRATOR,
     ]));
+    expect(pipeline.qualityBar).toEqual(expect.objectContaining({
+      name: 'impressive-frontend-websites',
+      requiredPractices: expect.arrayContaining([
+        expect.stringContaining('iterate after the first working render'),
+      ]),
+    }));
+    const designRole = pipeline.roles.find((role) => role.id === ROLE_IDS.DESIGN);
+    expect(designRole.outputContract.required).toContain('assetPlan');
+    const builderRole = pipeline.roles.find((role) => role.id === ROLE_IDS.BUILDER);
+    expect(builderRole.outputContract.required).toContain('interactiveStates');
     const qaRole = pipeline.roles.find((role) => role.id === ROLE_IDS.QA);
     expect(qaRole.tools).toContain('web-scrape');
     expect(qaRole.outputContract.required).toContain('screenshots');
+    expect(qaRole.outputContract.required).toContain('openedStates');
   });
 
   test('allows previewable code-sandbox project mode but blocks executable sandbox mode', () => {
