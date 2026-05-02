@@ -850,10 +850,42 @@ class Dashboard {
     /**
      * Setup WebSocket connection
      */
-    setupWebSocket() {
+    async getAuthenticatedWebSocketUrl(pathname = '/ws') {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const socketUrl = `${protocol}//${window.location.host}${pathname}`;
+
         try {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            this.ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+            const response = await fetch('/api/auth/ws-token', {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                credentials: 'same-origin',
+                cache: 'no-store',
+            });
+
+            if (!response.ok) {
+                return socketUrl;
+            }
+
+            const data = await response.json().catch(() => ({}));
+            const token = String(data?.token || '').trim();
+            if (!token) {
+                return socketUrl;
+            }
+
+            const url = new URL(socketUrl);
+            url.searchParams.set('access_token', token);
+            return url.toString();
+        } catch (_error) {
+            return socketUrl;
+        }
+    }
+
+    async setupWebSocket() {
+        try {
+            this.ws = new WebSocket(await this.getAuthenticatedWebSocketUrl('/ws'));
 
             this.ws.addEventListener('open', () => {
                 this.updateConnectionStatus(true);
