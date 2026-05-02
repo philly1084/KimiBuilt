@@ -1,6 +1,14 @@
 const MAX_EXCERPT_CHARS = 2400;
 const MAX_TARGET_CHARS = 90;
 const MAX_TARGETS = 12;
+let skillStore = null;
+
+function getSkillStore() {
+    if (!skillStore) {
+        ({ skillStore } = require('./skills/skill-store'));
+    }
+    return skillStore;
+}
 
 function normalizeText(value = '') {
     return String(value || '').replace(/\s+/g, ' ').trim();
@@ -209,6 +217,47 @@ function buildSkillsTreeInstructions({ clientSurface = '', taskType = '' } = {})
     ].join('\n');
 }
 
+function normalizeToolIds(value = []) {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    return value
+        .map((entry) => normalizeText(typeof entry === 'string' ? entry : (entry?.id || entry?.tool || entry?.toolId || '')))
+        .filter(Boolean)
+        .slice(0, 20);
+}
+
+function buildRegisteredSkillsInstructions({
+    userText = '',
+    metadata = {},
+    toolIds = [],
+} = {}) {
+    try {
+        const selectedSkillIds = normalizeList(
+            metadata?.skillIds
+            || metadata?.skills
+            || metadata?.selectedSkills
+            || metadata?.registeredSkills
+            || [],
+        );
+        const metadataToolIds = normalizeToolIds(
+            metadata?.toolIds
+            || metadata?.tools
+            || metadata?.plannedTools
+            || [],
+        );
+
+        return getSkillStore().buildContextBlock({
+            text: userText,
+            toolIds: [...metadataToolIds, ...normalizeToolIds(toolIds)],
+            selectedSkillIds,
+        });
+    } catch (error) {
+        console.warn('[NaturalContext] Failed to build registered skill instructions:', error.message);
+        return '';
+    }
+}
+
 function buildNaturalContextUpdate({
     previous = {},
     metadata = {},
@@ -248,6 +297,7 @@ module.exports = {
     buildNaturalContext,
     buildNaturalContextInstructions,
     buildSkillsTreeInstructions,
+    buildRegisteredSkillsInstructions,
     buildNaturalContextUpdate,
     normalizeNaturalContext,
     _private: {

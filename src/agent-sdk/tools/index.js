@@ -50,6 +50,7 @@ const {
   normalizeCheckpointRequest,
   buildUserCheckpointMessage,
 } = require('../../user-checkpoints');
+const { skillStore } = require('../../skills/skill-store');
 const { buildToolContract } = require('../../orchestration/tool-contracts');
 const { validatePlanStep } = require('../../orchestration/plan-validator');
 const { getHostnameFromUrl, normalizeDomainList } = require('./categories/web/research-site-policy');
@@ -4812,8 +4813,204 @@ class ToolManager {
       new GitLocalTool(),
     ];
 
+    const skillTools = [
+      {
+        id: 'skill-list',
+        name: 'Skill List',
+        category: 'system',
+        description: 'List registered low-context skills that can complement tool workflows.',
+        backend: {
+          handler: async (params = {}) => ({
+            skills: skillStore.listSkills({
+              search: params.search || params.query || '',
+              includeDisabled: params.includeDisabled === true,
+              includeBody: params.includeBody === true,
+            }),
+            registry: skillStore.getSummary(),
+          }),
+          sideEffects: [],
+          timeout: 5000,
+        },
+        inputSchema: {
+          type: 'object',
+          properties: {
+            search: { type: 'string' },
+            query: { type: 'string' },
+            includeDisabled: { type: 'boolean' },
+            includeBody: { type: 'boolean' },
+          },
+          additionalProperties: false,
+        },
+        skill: {
+          triggerPatterns: ['list skills', 'show skills', 'registered skills', 'skill catalog'],
+          requiresConfirmation: false,
+        },
+        frontend: {
+          exposeToFrontend: true,
+          icon: 'brain',
+        },
+      },
+      {
+        id: 'skill-read',
+        name: 'Skill Read',
+        category: 'system',
+        description: 'Read one registered skill, including its compact workflow instructions.',
+        backend: {
+          handler: async (params = {}) => {
+            const skill = skillStore.readSkill(params.id || params.skillId || params.name || '', {
+              includeBody: params.includeBody !== false,
+            });
+            if (!skill) {
+              throw new Error('Skill not found.');
+            }
+            return { skill };
+          },
+          sideEffects: [],
+          timeout: 5000,
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string' },
+            skillId: { type: 'string' },
+            name: { type: 'string' },
+            includeBody: { type: 'boolean' },
+          },
+          additionalProperties: false,
+        },
+        skill: {
+          triggerPatterns: ['read skill', 'skill details', 'show skill instructions'],
+          requiresConfirmation: false,
+        },
+        frontend: {
+          exposeToFrontend: true,
+          icon: 'book-open',
+        },
+      },
+      {
+        id: 'skill-create',
+        name: 'Skill Create',
+        category: 'system',
+        description: 'Create a file-backed skill manifest under the registered skill location for reusable tool chains.',
+        backend: {
+          handler: async (params = {}) => ({
+            skill: skillStore.upsertSkill(params, { createOnly: true }),
+            registry: skillStore.getSummary(),
+          }),
+          sideEffects: ['write'],
+          timeout: 10000,
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['name'],
+          properties: {
+            id: { type: 'string' },
+            name: { type: 'string' },
+            description: { type: 'string' },
+            body: { type: 'string' },
+            instructions: { type: 'string' },
+            tools: { type: 'array', items: { type: 'string' } },
+            triggerPatterns: { type: 'array', items: { type: 'string' } },
+            chain: { type: 'array' },
+            contextPolicy: { type: 'object' },
+            enabled: { type: 'boolean' },
+          },
+          additionalProperties: true,
+        },
+        skill: {
+          triggerPatterns: ['create skill', 'make a skill', 'skill creator', 'save this workflow as a skill', 'register a skill'],
+          requiresConfirmation: false,
+        },
+        frontend: {
+          exposeToFrontend: true,
+          icon: 'plus-circle',
+        },
+      },
+      {
+        id: 'skill-update',
+        name: 'Skill Update',
+        category: 'system',
+        description: 'Update an existing file-backed skill manifest and instructions.',
+        backend: {
+          handler: async (params = {}) => ({
+            skill: skillStore.upsertSkill(params, { updateOnly: true }),
+            registry: skillStore.getSummary(),
+          }),
+          sideEffects: ['write'],
+          timeout: 10000,
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string' },
+            name: { type: 'string' },
+            description: { type: 'string' },
+            body: { type: 'string' },
+            instructions: { type: 'string' },
+            tools: { type: 'array', items: { type: 'string' } },
+            triggerPatterns: { type: 'array', items: { type: 'string' } },
+            chain: { type: 'array' },
+            contextPolicy: { type: 'object' },
+            enabled: { type: 'boolean' },
+          },
+          additionalProperties: true,
+        },
+        skill: {
+          triggerPatterns: ['update skill', 'edit skill', 'skill updater', 'revise this skill'],
+          requiresConfirmation: false,
+        },
+        frontend: {
+          exposeToFrontend: true,
+          icon: 'pencil',
+        },
+      },
+      {
+        id: 'skill-context',
+        name: 'Skill Context',
+        category: 'system',
+        description: 'Return the compact registered-skills prompt block that matches a request and optional tool ids.',
+        backend: {
+          handler: async (params = {}) => ({
+            context: skillStore.buildContextBlock({
+              text: params.text || params.prompt || params.request || '',
+              toolIds: params.toolIds || params.tools || [],
+              selectedSkillIds: params.skillIds || params.skills || [],
+              limit: params.limit,
+            }),
+            registry: skillStore.getSummary(),
+          }),
+          sideEffects: [],
+          timeout: 5000,
+        },
+        inputSchema: {
+          type: 'object',
+          properties: {
+            text: { type: 'string' },
+            prompt: { type: 'string' },
+            request: { type: 'string' },
+            toolIds: { type: 'array', items: { type: 'string' } },
+            tools: { type: 'array', items: { type: 'string' } },
+            skillIds: { type: 'array', items: { type: 'string' } },
+            skills: { type: 'array', items: { type: 'string' } },
+            limit: { type: 'integer' },
+          },
+          additionalProperties: false,
+        },
+        skill: {
+          triggerPatterns: ['skill context', 'match skills', 'skills for this request'],
+          requiresConfirmation: false,
+        },
+        frontend: {
+          exposeToFrontend: true,
+          icon: 'route',
+        },
+      },
+    ];
+
     // Register all system tools
-    [...fileTools, ...codeTools, ...docsTools, ...mediaTools, ...workloadTools, ...interactionTools].forEach(def => {
+    [...fileTools, ...codeTools, ...docsTools, ...mediaTools, ...workloadTools, ...interactionTools, ...skillTools].forEach(def => {
       this.registry.register({
         ...def,
         version: '1.0.0',

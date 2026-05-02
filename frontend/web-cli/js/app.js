@@ -50,6 +50,7 @@ class CodeCLIApp {
             '/help', '/?', '/clear', '/cls', '/new', '/sessions', '/switch', '/delete', '/models', '/model', '/theme', '/voxel',
             '/export', '/save', '/load', '/copy', '/image', '/image-models', '/unsplash', '/diagram',
             '/upload', '/session', '/history', '/artifacts', '/stats', '/shortcuts', '/keys', '/health', '/tools', '/tool', '/tool-help',
+            '/skills', '/skill', '/skill-create', '/skill-update',
             '/files', '/ls', '/download', '/open', '/pet', '/spawn', '/agent', '/voxel-agent', '/random-agent', '/creator', '/voxel-creator',
             '/buddy', '/toolbelt', '/build', '/remote', '/sandbox', '/sandbox-help',
         ];
@@ -1255,6 +1256,18 @@ ${this.voxelPet.trait} ${this.voxelPet.species} | ${this.voxelPet.palette.name} 
             case 'tool-help':
                 await this.showToolHelp(args);
                 break;
+            case 'skills':
+                await this.listSkills(args.join(' ').trim());
+                break;
+            case 'skill':
+                await this.showSkill(args);
+                break;
+            case 'skill-create':
+                await this.createSkillCommand(args);
+                break;
+            case 'skill-update':
+                await this.updateSkillCommand(args);
+                break;
             case 'files':
             case 'ls':
                 await this.listFiles();
@@ -1946,6 +1959,12 @@ Session Statistics:
   /tools [category]  List frontend-available tools
   /tool <id> <json>  Invoke a tool with JSON params
   /tool-help <id>    Show on-demand documentation for a tool
+  /skills [search]   List registered low-context skills
+  /skill <id>        Show one registered skill
+  /skill-create <json>
+                     Create a reusable skill chain
+  /skill-update <id> <json>
+                     Update a reusable skill chain
   /image <prompt>    Generate an image
                      Defaults to the backend image model (official OpenAI if configured)
                      Options: --model gpt-image-2|gpt-image-1.5|gpt-image-1|gpt-image-1-mini
@@ -1991,6 +2010,7 @@ Your buddy is focused on the three primary actions in the prompt bar.
 
 - Chat starts a normal Lilly conversation.
 - \`/tools [category]\` and \`/tool-help <id>\` inspect the backend tool catalog.
+- \`/skills\`, \`/skill-create {...}\`, and \`/skill-update <id> {...}\` manage reusable low-context chains.
 - \`/files\` and \`/open\` manage generated session files.
 
 Buddy stats: bond ${Math.round(personality.bond || 0)}%, guided runs ${personality.buildRuns || 0}, tool runs ${personality.toolRuns || 0}.`);
@@ -2535,6 +2555,91 @@ Raw expert access remains available:
             this.printError(`Tool help failed: ${error.message}`);
         } finally {
             this.setStatus('ready');
+        }
+    }
+
+    async listSkills(search = '') {
+        this.setActiveVoxelTool('tools');
+        try {
+            const response = await api.listSkills({ search });
+            const skills = Array.isArray(response) ? response : (response.skills || []);
+            const meta = response?.meta || {};
+
+            if (!skills.length) {
+                this.printSystem(search ? `No skills matched "${search}".` : 'No registered skills yet.');
+                return;
+            }
+
+            const lines = ['## Registered Skills', ''];
+            if (meta.root) {
+                lines.push(`Location: \`${meta.root}\``);
+                lines.push('');
+            }
+            skills.forEach((skill) => {
+                lines.push(`- \`${skill.id}\` - ${skill.name || skill.id}`);
+                if (skill.description) {
+                    lines.push(`  ${skill.description}`);
+                }
+                if (Array.isArray(skill.tools) && skill.tools.length > 0) {
+                    lines.push(`  Tools: ${skill.tools.map((tool) => `\`${tool}\``).join(', ')}`);
+                }
+            });
+            lines.push('');
+            lines.push('Usage: /skill <id>, /skill-create {...}, /skill-update <id> {...}');
+            this.printAI(lines.join('\n'));
+        } catch (error) {
+            this.printError(`Failed to load skills: ${error.message}`);
+        }
+    }
+
+    async showSkill(args) {
+        const [skillId] = args;
+        if (!skillId) {
+            this.printError('Usage: /skill <id>');
+            return;
+        }
+
+        this.setActiveVoxelTool('tools');
+        this.setStatus('thinking');
+        try {
+            const skill = await api.getSkill(skillId);
+            this.printAI(`## Skill: \`${skill.id}\`\n\n${skill.description || 'No description provided.'}\n\nTools: ${(skill.tools || []).map((tool) => `\`${tool}\``).join(', ') || 'none'}\n\nTriggers: ${(skill.triggerPatterns || []).map((trigger) => `\`${trigger}\``).join(', ') || 'none'}\n\n\`\`\`markdown\n${skill.body || ''}\n\`\`\``);
+        } catch (error) {
+            this.printError(`Skill read failed: ${error.message}`);
+        } finally {
+            this.setStatus('ready');
+        }
+    }
+
+    async createSkillCommand(args) {
+        const rawPayload = args.join(' ').trim();
+        if (!rawPayload) {
+            this.printError('Usage: /skill-create {"name":"...","description":"...","body":"...","tools":["image-generate"]}');
+            return;
+        }
+
+        try {
+            const response = await api.createSkill(JSON.parse(rawPayload));
+            const skill = response?.data || {};
+            this.printAI(`## Skill Saved\n\n\`${skill.id || 'unknown'}\` is registered in \`${response?.meta?.root || 'data/skills'}\`.`);
+        } catch (error) {
+            this.printError(`Skill create failed: ${error.message}`);
+        }
+    }
+
+    async updateSkillCommand(args) {
+        const [skillId, ...payloadParts] = args;
+        if (!skillId || payloadParts.length === 0) {
+            this.printError('Usage: /skill-update <id> {"description":"...","body":"..."}');
+            return;
+        }
+
+        try {
+            const response = await api.updateSkill(skillId, JSON.parse(payloadParts.join(' ')));
+            const skill = response?.data || {};
+            this.printAI(`## Skill Updated\n\n\`${skill.id || skillId}\` is registered in \`${response?.meta?.root || 'data/skills'}\`.`);
+        } catch (error) {
+            this.printError(`Skill update failed: ${error.message}`);
         }
     }
 

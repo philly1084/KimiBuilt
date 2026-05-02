@@ -760,6 +760,53 @@ class OpenAIClient {
     });
   }
 
+  async listSkills(options = {}) {
+    const params = new URLSearchParams();
+    if (options.search) {
+      params.set('search', options.search);
+    }
+    if (options.includeBody) {
+      params.set('includeBody', 'true');
+    }
+    if (options.includeDisabled) {
+      params.set('includeDisabled', 'true');
+    }
+
+    const query = params.toString();
+    return this.apiRequest(`/api/skills${query ? `?${query}` : ''}`, {
+      method: 'GET',
+      timeout: options.timeout || 10000,
+    });
+  }
+
+  async getSkill(skillId, options = {}) {
+    const params = new URLSearchParams();
+    if (options.includeBody !== false) {
+      params.set('includeBody', 'true');
+    }
+    const query = params.toString();
+    return this.apiRequest(`/api/skills/${encodeURIComponent(skillId)}${query ? `?${query}` : ''}`, {
+      method: 'GET',
+      timeout: options.timeout || 10000,
+    });
+  }
+
+  async createSkill(payload = {}) {
+    return this.apiRequest('/api/skills', {
+      method: 'POST',
+      timeout: 10000,
+      body: payload,
+    });
+  }
+
+  async updateSkill(skillId, payload = {}) {
+    return this.apiRequest(`/api/skills/${encodeURIComponent(skillId)}`, {
+      method: 'PUT',
+      timeout: 10000,
+      body: payload,
+    });
+  }
+
   async getToolDetails(toolId, options = {}) {
     return this.apiRequest(`/api/tools/${encodeURIComponent(toolId)}`, {
       method: 'GET',
@@ -1293,6 +1340,10 @@ module.exports = {
   getImageModels: () => client.getImageModels(),
   generateImage: (prompt, options) => client.generateImage(prompt, options),
   getAvailableTools: (options) => client.getAvailableTools(options),
+  listSkills: (options) => client.listSkills(options),
+  getSkill: (skillId, options) => client.getSkill(skillId, options),
+  createSkill: (payload) => client.createSkill(payload),
+  updateSkill: (skillId, payload) => client.updateSkill(skillId, payload),
   getToolDetails: (toolId, options) => client.getToolDetails(toolId, options),
   invokeTool: (toolId, params, options) => client.invokeTool(toolId, params, options),
   runRemoteCommand: (command, options) => client.runRemoteCommand(command, options),

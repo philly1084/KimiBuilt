@@ -4277,8 +4277,12 @@ class ChatApp {
         const isListCommand = trimmed === '/tools' || trimmed.startsWith('/tools ');
         const isInvokeCommand = trimmed.startsWith('/tool ');
         const isHelpCommand = trimmed.startsWith('/tool-help ');
+        const isSkillListCommand = trimmed === '/skills' || trimmed.startsWith('/skills ');
+        const isSkillReadCommand = trimmed.startsWith('/skill ');
+        const isSkillCreateCommand = trimmed.startsWith('/skill-create ');
+        const isSkillUpdateCommand = trimmed.startsWith('/skill-update ');
 
-        if (!isListCommand && !isInvokeCommand && !isHelpCommand) {
+        if (!isListCommand && !isInvokeCommand && !isHelpCommand && !isSkillListCommand && !isSkillReadCommand && !isSkillCreateCommand && !isSkillUpdateCommand) {
             return false;
         }
 
@@ -4304,6 +4308,37 @@ class ChatApp {
                 const category = trimmed.startsWith('/tools ') ? trimmed.slice('/tools '.length).trim() : null;
                 const toolResponse = await apiClient.getAvailableTools(category || null);
                 assistantContent = this.formatToolsList(toolResponse, category);
+            } else if (isSkillListCommand) {
+                const search = trimmed.startsWith('/skills ') ? trimmed.slice('/skills '.length).trim() : '';
+                const skillResponse = await apiClient.listSkills({ search });
+                assistantContent = this.formatSkillsList(skillResponse, search);
+            } else if (isSkillReadCommand) {
+                const skillId = trimmed.slice('/skill '.length).trim();
+                if (!skillId) {
+                    throw new Error('Usage: /skill <id>');
+                }
+                const skill = await apiClient.getSkill(skillId);
+                assistantContent = `## Skill: \`${skill.id}\`\n\n${skill.description || 'No description provided.'}\n\nTools: ${(skill.tools || []).map((tool) => `\`${tool}\``).join(', ') || 'none'}\n\nTriggers: ${(skill.triggerPatterns || []).map((trigger) => `\`${trigger}\``).join(', ') || 'none'}\n\n\`\`\`markdown\n${skill.body || ''}\n\`\`\``;
+            } else if (isSkillCreateCommand || isSkillUpdateCommand) {
+                const rawPayload = trimmed.slice((isSkillCreateCommand ? '/skill-create ' : '/skill-update ').length).trim();
+                if (!rawPayload) {
+                    throw new Error(isSkillCreateCommand
+                        ? 'Usage: /skill-create {"name":"...","description":"...","body":"...","tools":["image-generate"]}'
+                        : 'Usage: /skill-update <id> {"description":"...","body":"..."}');
+                }
+
+                let response;
+                if (isSkillCreateCommand) {
+                    response = await apiClient.createSkill(JSON.parse(rawPayload));
+                } else {
+                    const match = rawPayload.match(/^([^\s]+)\s+([\s\S]+)$/);
+                    if (!match) {
+                        throw new Error('Usage: /skill-update <id> {"description":"...","body":"..."}');
+                    }
+                    response = await apiClient.updateSkill(match[1], JSON.parse(match[2]));
+                }
+                const skill = response?.data || response?.skill || null;
+                assistantContent = `## Skill Saved\n\n\`${skill?.id || 'unknown'}\` is registered in \`${response?.meta?.root || 'data/skills'}\`.`;
             } else if (isHelpCommand) {
                 const toolId = trimmed.slice('/tool-help '.length).trim();
                 if (!toolId) {
@@ -4404,6 +4439,35 @@ class ChatApp {
         lines.push('');
         lines.push('Usage: `/tool <id> {"key":"value"}`');
         lines.push('Help: `/tool-help <id>`');
+        return lines.join('\n');
+    }
+
+    formatSkillsList(skillResponse, search = '') {
+        const skills = Array.isArray(skillResponse) ? skillResponse : (skillResponse?.skills || []);
+        const meta = skillResponse?.meta || {};
+
+        if (!skills.length) {
+            return search
+                ? `No registered skills matched \`${search}\`.`
+                : 'No registered skills yet. Create one with `/skill-create {"name":"...","description":"...","body":"..."}`.';
+        }
+
+        const lines = ['## Registered Skills', ''];
+        if (meta.root) {
+            lines.push(`Location: \`${meta.root}\``);
+            lines.push('');
+        }
+        skills.forEach((skill) => {
+            lines.push(`- \`${skill.id}\` - ${skill.name || skill.id}`);
+            if (skill.description) {
+                lines.push(`  ${skill.description}`);
+            }
+            if (Array.isArray(skill.tools) && skill.tools.length > 0) {
+                lines.push(`  Tools: ${skill.tools.map((tool) => `\`${tool}\``).join(', ')}`);
+            }
+        });
+        lines.push('');
+        lines.push('Usage: `/skill <id>`, `/skill-create {...}`, `/skill-update <id> {...}`');
         return lines.join('\n');
     }
 

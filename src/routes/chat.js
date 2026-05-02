@@ -62,6 +62,7 @@ const {
 const {
     buildNaturalContext,
     buildNaturalContextInstructions,
+    buildRegisteredSkillsInstructions,
     buildSkillsTreeInstructions,
 } = require('../natural-context');
 const {
@@ -962,6 +963,10 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         const naturalInstructions = [
             buildSkillsTreeInstructions({ clientSurface, taskType }),
             buildNaturalContextInstructions(naturalContext),
+            buildRegisteredSkillsInstructions({
+                userText: message,
+                metadata: effectiveRequestMetadata,
+            }),
         ].filter(Boolean).join('\n\n');
         const instructions = await buildInstructionsWithArtifacts(
             effectiveSession,

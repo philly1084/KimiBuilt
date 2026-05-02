@@ -76,6 +76,7 @@ const { stripNullCharacters } = require('./utils/text');
 const {
     buildNaturalContext,
     buildNaturalContextInstructions,
+    buildRegisteredSkillsInstructions,
     buildSkillsTreeInstructions,
     buildNaturalContextUpdate,
 } = require('./natural-context');
@@ -7712,6 +7713,10 @@ class ConversationOrchestrator extends EventEmitter {
             : [
                 buildSkillsTreeInstructions({ clientSurface, taskType }),
                 buildNaturalContextInstructions(naturalContext),
+                buildRegisteredSkillsInstructions({
+                    userText: rawObjective,
+                    metadata,
+                }),
             ].filter(Boolean).join('\n\n');
         const effectiveInstructionsBase = [
             incomingInstructions,

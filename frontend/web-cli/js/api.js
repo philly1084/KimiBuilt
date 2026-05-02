@@ -1109,6 +1109,98 @@ class WebCLIAPI {
         };
     }
 
+    async listSkills(options = {}) {
+        const params = new URLSearchParams();
+        if (options.search) {
+            params.set('search', String(options.search));
+        }
+        if (options.includeBody === true) {
+            params.set('includeBody', 'true');
+        }
+        if (options.includeDisabled === true) {
+            params.set('includeDisabled', 'true');
+        }
+
+        const response = await this.fetchWithTimeout(
+            `${BASE_URL_WITHOUT_API}/api/skills${params.toString() ? `?${params.toString()}` : ''}`,
+            {
+                method: 'GET',
+                headers: { 'Accept': 'application/json' },
+            },
+            options.timeout || 10000
+        );
+
+        if (!response.ok) {
+            throw new Error(`Skill list failed: HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        return {
+            skills: data.data || [],
+            meta: data.meta || {},
+        };
+    }
+
+    async getSkill(skillId, options = {}) {
+        const params = new URLSearchParams();
+        if (options.includeBody !== false) {
+            params.set('includeBody', 'true');
+        }
+        const response = await this.fetchWithTimeout(
+            `${BASE_URL_WITHOUT_API}/api/skills/${encodeURIComponent(skillId)}${params.toString() ? `?${params.toString()}` : ''}`,
+            {
+                method: 'GET',
+                headers: { 'Accept': 'application/json' },
+            },
+            options.timeout || 10000
+        );
+
+        if (!response.ok) {
+            throw new Error(`Skill read failed: HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.data || null;
+    }
+
+    async createSkill(payload = {}) {
+        const response = await this.fetchWithTimeout(
+            `${BASE_URL_WITHOUT_API}/api/skills`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            },
+            10000
+        );
+
+        if (!response.ok) {
+            const errorText = await this.parseErrorResponse(response);
+            throw new Error(errorText || `Skill create failed: HTTP ${response.status}`);
+        }
+
+        return response.json();
+    }
+
+    async updateSkill(skillId, payload = {}) {
+        const response = await this.fetchWithTimeout(
+            `${BASE_URL_WITHOUT_API}/api/skills/${encodeURIComponent(skillId)}`,
+            {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            },
+            10000
+        );
+
+        if (!response.ok) {
+            const errorText = await this.parseErrorResponse(response);
+            throw new Error(errorText || `Skill update failed: HTTP ${response.status}`);
+        }
+
+        return response.json();
+    }
+
     async getToolDoc(toolId) {
         const response = await this.fetchWithTimeout(
             `${BASE_URL_WITHOUT_API}/api/tools/docs/${encodeURIComponent(toolId)}`,

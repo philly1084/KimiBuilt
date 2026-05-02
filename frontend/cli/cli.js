@@ -52,7 +52,8 @@ const COMMANDS = [
   '/url', '/config', '/theme', '/export', '/import', '/rename', '/delete',
   '/copy', '/paste', '/undo', '/redo', '/search', '/settings', '/download-image',
   '/models', '/model', '/image', '/img', '/imgmodels', '/providers', '/attach',
-  '/provider-status', '/remote', '/.help', '/.status', '/.interrupt', '/.detach'
+  '/provider-status', '/remote', '/skills', '/skill', '/skill-create', '/skill-update',
+  '/.help', '/.status', '/.interrupt', '/.detach'
 ];
 
 const MODES = ['chat', 'canvas', 'notation'];
@@ -173,6 +174,10 @@ function printHelp() {
     ['/attach <provider> [cwd]', 'Attach to codex-cli, gemini-cli, or kimi-cli'],
     ['/provider-status', 'Show the active backend CLI session'],
     ['/remote <cmd>', 'Remote CLI status, tools, plan, run, agent, or verify'],
+    ['/skills [search]', 'List registered low-context skills'],
+    ['/skill <id>', 'Show one registered skill'],
+    ['/skill-create <json>', 'Create a reusable skill chain'],
+    ['/skill-update <id> <json>', 'Update a reusable skill chain'],
     ['/theme <name>', 'Set theme (default|minimal|colorful|dark)'],
     ['/export <file>', 'Export current session to file'],
     ['/import <file>', 'Import session from file'],
@@ -2031,6 +2036,83 @@ async function handleRemote(argString = '') {
   }
 }
 
+async function handleSkills(argString = '') {
+  const spinner = ora('Loading skills...').start();
+  try {
+    const response = await api.listSkills({ search: String(argString || '').trim() });
+    const skills = response.data || [];
+    spinner.stop();
+
+    console.log(chalk.cyan.bold('\nRegistered Skills'));
+    if (response.meta?.root) {
+      console.log(chalk.gray(`Location: ${response.meta.root}\n`));
+    }
+    if (!skills.length) {
+      console.log(chalk.gray('No registered skills found.\n'));
+      return;
+    }
+    skills.forEach((skill) => {
+      console.log(chalk.gray(`  ${chalk.cyan(String(skill.id || '').padEnd(24))} ${skill.description || skill.name || 'Reusable skill.'}`));
+      if (Array.isArray(skill.tools) && skill.tools.length > 0) {
+        console.log(chalk.gray(`  ${' '.repeat(24)} tools: ${skill.tools.join(', ')}`));
+      }
+    });
+    console.log('');
+  } catch (err) {
+    spinner.fail(chalk.red(`Skills failed: ${err.message}`));
+  }
+}
+
+async function handleSkillRead(argString = '') {
+  const skillId = String(argString || '').trim();
+  if (!skillId) {
+    console.error(chalk.red('Usage: /skill <id>'));
+    return;
+  }
+
+  const spinner = ora(`Loading ${skillId}...`).start();
+  try {
+    const response = await api.getSkill(skillId);
+    const skill = response.data || response;
+    spinner.stop();
+    console.log(marked(`## Skill: \`${skill.id}\`\n\n${skill.description || 'No description provided.'}\n\nTools: ${(skill.tools || []).map((tool) => `\`${tool}\``).join(', ') || 'none'}\n\nTriggers: ${(skill.triggerPatterns || []).map((trigger) => `\`${trigger}\``).join(', ') || 'none'}\n\n\`\`\`markdown\n${skill.body || ''}\n\`\`\``));
+  } catch (err) {
+    spinner.fail(chalk.red(`Skill read failed: ${err.message}`));
+  }
+}
+
+async function handleSkillCreate(argString = '') {
+  const rawPayload = String(argString || '').trim();
+  if (!rawPayload) {
+    console.error(chalk.red('Usage: /skill-create {"name":"...","description":"...","body":"...","tools":["image-generate"]}'));
+    return;
+  }
+
+  const spinner = ora('Creating skill...').start();
+  try {
+    const response = await api.createSkill(JSON.parse(rawPayload));
+    spinner.succeed(chalk.green(`Registered ${response.data?.id || 'skill'} in ${response.meta?.root || 'data/skills'}`));
+  } catch (err) {
+    spinner.fail(chalk.red(`Skill create failed: ${err.message}`));
+  }
+}
+
+async function handleSkillUpdate(argString = '') {
+  const match = String(argString || '').trim().match(/^([^\s]+)\s+([\s\S]+)$/);
+  if (!match) {
+    console.error(chalk.red('Usage: /skill-update <id> {"description":"...","body":"..."}'));
+    return;
+  }
+
+  const spinner = ora(`Updating ${match[1]}...`).start();
+  try {
+    const response = await api.updateSkill(match[1], JSON.parse(match[2]));
+    spinner.succeed(chalk.green(`Updated ${response.data?.id || match[1]} in ${response.meta?.root || 'data/skills'}`));
+  } catch (err) {
+    spinner.fail(chalk.red(`Skill update failed: ${err.message}`));
+  }
+}
+
 /**
  * Print version information.
  */
@@ -2113,6 +2195,18 @@ async function processInput(input) {
         return true;
       case 'remote':
         await handleRemote(args.trim());
+        return true;
+      case 'skills':
+        await handleSkills(args.trim());
+        return true;
+      case 'skill':
+        await handleSkillRead(args.trim());
+        return true;
+      case 'skill-create':
+        await handleSkillCreate(args.trim());
+        return true;
+      case 'skill-update':
+        await handleSkillUpdate(args.trim());
         return true;
       case 'export':
         await handleExport(args.trim() || null);

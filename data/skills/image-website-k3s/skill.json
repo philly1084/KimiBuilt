@@ -1,0 +1,49 @@
+{
+  "id": "image-website-k3s",
+  "name": "Image Website K3s Pipeline",
+  "description": "Reusable chain for generating visual assets, saving them, using them in a website, and deploying the result to the k3s cluster.",
+  "version": "1.0.0",
+  "enabled": true,
+  "tools": [
+    "image-generate",
+    "file-write",
+    "code-sandbox",
+    "remote-cli-agent",
+    "k3s-deploy"
+  ],
+  "triggerPatterns": [
+    "generate images for a website",
+    "use generated images in website design",
+    "deploy website to k3s",
+    "image to website to cluster",
+    "build and deploy visual site"
+  ],
+  "chain": [
+    {
+      "step": "Generate images",
+      "tool": "image-generate"
+    },
+    {
+      "step": "Persist selected image artifacts",
+      "tool": "file-write"
+    },
+    {
+      "step": "Build or update the static/frontend website using saved assets",
+      "tool": "code-sandbox"
+    },
+    {
+      "step": "Hand off git-backed implementation or deploy loop",
+      "tool": "remote-cli-agent"
+    },
+    {
+      "step": "Verify or roll out cluster manifests when needed",
+      "tool": "k3s-deploy"
+    }
+  ],
+  "contextPolicy": {
+    "maxChars": 1800,
+    "exposeBody": true
+  },
+  "createdAt": "2026-05-02T00:00:00.000Z",
+  "updatedAt": "2026-05-02T00:00:00.000Z"
+}
