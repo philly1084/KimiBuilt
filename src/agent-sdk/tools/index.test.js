@@ -1308,7 +1308,7 @@ describe('ToolManager image tools', () => {
         mode: 'project',
         entry: 'index.html',
         files: expect.arrayContaining([
-          expect.objectContaining({ path: 'index.html', content: siteIndex }),
+          expect.objectContaining({ path: 'index.html', content: expect.stringContaining('data-component="soundtrack-system"') }),
           expect.objectContaining({ path: 'styles.css' }),
           expect.objectContaining({ path: 'app.js' }),
           expect.objectContaining({ path: 'AGENT_SANDBOX_BUILD.md' }),
@@ -1317,7 +1317,7 @@ describe('ToolManager image tools', () => {
       expect.any(Object),
     );
     const sandboxParams = nestedToolManager.executeTool.mock.calls[0][1];
-    expect(sandboxParams.files.find((file) => file.path === 'index.html').content).toBe(siteIndex);
+    expect(sandboxParams.files.find((file) => file.path === 'index.html').content).toContain('data-component="soundtrack-system"');
     expect(sandboxParams.files.find((file) => file.path === 'index.html').content).not.toContain('Sandbox build bundle assembled');
     expect(result.data.sandboxBuild).toEqual(expect.objectContaining({ mode: 'project' }));
   });

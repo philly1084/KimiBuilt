@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-01T01:14:35.466Z",
+  "updatedAt": "2026-05-02T03:19:52.483Z",
   "targets": {
     "10.0.0.5:22": {
       "key": "10.0.0.5:22",
@@ -8,7 +8,7 @@
       "username": "ubuntu",
       "port": 22,
       "firstSeenAt": "2026-04-19T03:51:57.201Z",
-      "lastSeenAt": "2026-05-01T01:14:35.466Z",
+      "lastSeenAt": "2026-05-02T03:19:52.483Z",
       "paths": [
         "/etc/os-release",
         "/opt/kimibuilt",
@@ -30,7 +30,7 @@
         "deployment.apps"
       ],
       "lastObjective": "Reconnect to the Ubuntu server and continue the remote-build setup.",
-      "lastInspectionAt": "2026-05-01T01:14:35.404Z",
+      "lastInspectionAt": "2026-05-02T03:19:52.451Z",
       "lastStatus": "succeeded",
       "serverContext": {
         "hostname": "",
@@ -54,7 +54,7 @@
       "username": "root",
       "port": 22,
       "firstSeenAt": "2026-04-19T03:51:57.675Z",
-      "lastSeenAt": "2026-05-01T01:14:34.930Z",
+      "lastSeenAt": "2026-05-02T03:19:52.194Z",
       "paths": [
         "/tmp/website-html.yaml",
         "/opt/sophia-color-world/",
@@ -132,11 +132,11 @@
       "ingressClassName": "traefik",
       "tlsClusterIssuer": "letsencrypt-prod",
       "firstSeenAt": "2026-04-19T03:51:57.202Z",
-      "lastSeenAt": "2026-05-01T01:14:35.466Z",
+      "lastSeenAt": "2026-05-02T03:19:52.483Z",
       "lastAction": "remote-command",
       "lastTool": "remote-command",
-      "lastActionAt": "2026-05-01T01:14:35.462Z",
-      "lastSuccessAt": "2026-05-01T01:14:35.462Z",
+      "lastActionAt": "2026-05-02T03:19:52.481Z",
+      "lastSuccessAt": "2026-05-02T03:19:52.481Z",
       "lastFailureAt": null,
       "lastVerificationAt": null,
       "lastStatus": "succeeded",
@@ -182,11 +182,11 @@
       "ingressClassName": "traefik",
       "tlsClusterIssuer": "letsencrypt-prod",
       "firstSeenAt": "2026-04-19T03:51:57.675Z",
-      "lastSeenAt": "2026-05-01T01:14:34.930Z",
+      "lastSeenAt": "2026-05-02T03:19:52.194Z",
       "lastAction": "remote-command",
       "lastTool": "remote-command",
-      "lastActionAt": "2026-05-01T01:14:34.928Z",
-      "lastSuccessAt": "2026-05-01T01:14:34.928Z",
+      "lastActionAt": "2026-05-02T03:19:52.193Z",
+      "lastSuccessAt": "2026-05-02T03:19:52.193Z",
       "lastFailureAt": null,
       "lastVerificationAt": null,
       "lastStatus": "succeeded",
@@ -229,13 +229,13 @@
       "ingressClassName": "traefik",
       "tlsClusterIssuer": "letsencrypt-prod",
       "firstSeenAt": "2026-04-19T03:51:57.786Z",
-      "lastSeenAt": "2026-05-01T01:14:35.412Z",
+      "lastSeenAt": "2026-05-02T03:19:52.452Z",
       "lastAction": "verify-deployment",
       "lastTool": "remote-command",
-      "lastActionAt": "2026-05-01T01:14:35.404Z",
-      "lastSuccessAt": "2026-05-01T01:14:35.404Z",
-      "lastFailureAt": "2026-05-01T01:14:35.133Z",
-      "lastVerificationAt": "2026-05-01T01:14:35.404Z",
+      "lastActionAt": "2026-05-02T03:19:52.451Z",
+      "lastSuccessAt": "2026-05-02T03:19:52.451Z",
+      "lastFailureAt": "2026-05-02T03:19:52.287Z",
+      "lastVerificationAt": "2026-05-02T03:19:52.451Z",
       "lastStatus": "succeeded",
       "lastError": "",
       "lastCommand": "set -e kubectl get deploy -A -o wide kubectl get pods -A -o wide kubectl get svc,ingress -A -o wide",
@@ -254,8 +254,8 @@
         "ingress": true,
         "tls": false,
         "https": false,
-        "lastRolloutAt": "2026-05-01T01:14:35.404Z",
-        "lastVerifiedAt": "2026-05-01T01:14:35.404Z"
+        "lastRolloutAt": "2026-05-02T03:19:52.451Z",
+        "lastVerifiedAt": "2026-05-02T03:19:52.451Z"
       }
     },
     "10.0.0.5:22|ame|backend": {
@@ -275,11 +275,11 @@
       "ingressClassName": "traefik",
       "tlsClusterIssuer": "letsencrypt-prod",
       "firstSeenAt": "2026-04-19T03:51:57.810Z",
-      "lastSeenAt": "2026-05-01T01:14:35.411Z",
+      "lastSeenAt": "2026-05-02T03:19:52.452Z",
       "lastAction": "build-and-deploy-remote-workspace",
       "lastTool": "remote-command",
-      "lastActionAt": "2026-05-01T01:14:35.401Z",
-      "lastSuccessAt": "2026-05-01T01:14:35.401Z",
+      "lastActionAt": "2026-05-02T03:19:52.449Z",
+      "lastSuccessAt": "2026-05-02T03:19:52.449Z",
       "lastFailureAt": null,
       "lastVerificationAt": null,
       "lastStatus": "succeeded",
@@ -330,11 +330,11 @@
       "ingressClassName": "traefik",
       "tlsClusterIssuer": "letsencrypt-prod",
       "firstSeenAt": "2026-04-19T03:51:57.830Z",
-      "lastSeenAt": "2026-05-01T01:14:35.140Z",
+      "lastSeenAt": "2026-05-02T03:19:52.289Z",
       "lastAction": "remote-command",
       "lastTool": "remote-command",
-      "lastActionAt": "2026-05-01T01:14:35.135Z",
-      "lastSuccessAt": "2026-05-01T01:14:35.135Z",
+      "lastActionAt": "2026-05-02T03:19:52.288Z",
+      "lastSuccessAt": "2026-05-02T03:19:52.288Z",
       "lastFailureAt": null,
       "lastVerificationAt": null,
       "lastStatus": "succeeded",
@@ -373,11 +373,11 @@
       "ingressClassName": "traefik",
       "tlsClusterIssuer": "letsencrypt-prod",
       "firstSeenAt": "2026-04-19T03:51:57.866Z",
-      "lastSeenAt": "2026-05-01T01:14:35.168Z",
+      "lastSeenAt": "2026-05-02T03:19:52.316Z",
       "lastAction": "remote-command",
       "lastTool": "remote-command",
-      "lastActionAt": "2026-05-01T01:14:35.164Z",
-      "lastSuccessAt": "2026-05-01T01:14:35.164Z",
+      "lastActionAt": "2026-05-02T03:19:52.315Z",
+      "lastSuccessAt": "2026-05-02T03:19:52.315Z",
       "lastFailureAt": null,
       "lastVerificationAt": null,
       "lastStatus": "succeeded",
@@ -417,11 +417,11 @@
       "ingressClassName": "traefik",
       "tlsClusterIssuer": "letsencrypt-prod",
       "firstSeenAt": "2026-04-25T05:04:11.539Z",
-      "lastSeenAt": "2026-05-01T01:14:35.425Z",
+      "lastSeenAt": "2026-05-02T03:19:52.457Z",
       "lastAction": "implement-remote-workspace",
       "lastTool": "remote-command",
-      "lastActionAt": "2026-05-01T01:14:35.422Z",
-      "lastSuccessAt": "2026-05-01T01:14:35.422Z",
+      "lastActionAt": "2026-05-02T03:19:52.456Z",
+      "lastSuccessAt": "2026-05-02T03:19:52.456Z",
       "lastFailureAt": null,
       "lastVerificationAt": null,
       "lastStatus": "succeeded",
@@ -498,7 +498,7 @@
   "edgeRoutes": {},
   "recentActivity": [
     {
-      "timestamp": "2026-05-01T01:14:35.466Z",
+      "timestamp": "2026-05-02T03:19:52.483Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -510,7 +510,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-05-01T01:14:35.425Z",
+      "timestamp": "2026-05-02T03:19:52.457Z",
       "toolId": "remote-command",
       "action": "implement-remote-workspace",
       "status": "succeeded",
@@ -522,7 +522,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-05-01T01:14:35.412Z",
+      "timestamp": "2026-05-02T03:19:52.452Z",
       "toolId": "remote-command",
       "action": "verify-deployment",
       "status": "succeeded",
@@ -534,7 +534,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-05-01T01:14:35.411Z",
+      "timestamp": "2026-05-02T03:19:52.452Z",
       "toolId": "remote-command",
       "action": "build-and-deploy-remote-workspace",
       "status": "succeeded",
@@ -546,7 +546,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-05-01T01:14:35.411Z",
+      "timestamp": "2026-05-02T03:19:52.452Z",
       "toolId": "remote-command",
       "action": "implement-remote-workspace",
       "status": "succeeded",
@@ -558,7 +558,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-05-01T01:14:35.168Z",
+      "timestamp": "2026-05-02T03:19:52.316Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -570,7 +570,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-05-01T01:14:35.167Z",
+      "timestamp": "2026-05-02T03:19:52.316Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -582,7 +582,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-05-01T01:14:35.154Z",
+      "timestamp": "2026-05-02T03:19:52.300Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -594,7 +594,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-05-01T01:14:35.153Z",
+      "timestamp": "2026-05-02T03:19:52.300Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "failed",
@@ -606,7 +606,7 @@
       "error": "--- pod title --- --- public title ---"
     },
     {
-      "timestamp": "2026-05-01T01:14:35.140Z",
+      "timestamp": "2026-05-02T03:19:52.289Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -618,7 +618,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-05-01T01:14:35.140Z",
+      "timestamp": "2026-05-02T03:19:52.289Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "failed",
@@ -630,7 +630,7 @@
       "error": "Error from server (NotFound): deployments.apps \"svc\" not found Error from server (NotFound): deployments.apps \"ingress\" not found"
     },
     {
-      "timestamp": "2026-05-01T01:14:35.125Z",
+      "timestamp": "2026-05-02T03:19:52.283Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -642,7 +642,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-05-01T01:14:35.125Z",
+      "timestamp": "2026-05-02T03:19:52.283Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "failed",
@@ -654,7 +654,7 @@
       "error": "curl: (6) Could not resolve host: api"
     },
     {
-      "timestamp": "2026-05-01T01:14:35.104Z",
+      "timestamp": "2026-05-02T03:19:52.275Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -666,7 +666,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-05-01T01:14:35.103Z",
+      "timestamp": "2026-05-02T03:19:52.275Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -678,7 +678,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-05-01T01:14:35.090Z",
+      "timestamp": "2026-05-02T03:19:52.268Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -690,7 +690,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-05-01T01:14:35.090Z",
+      "timestamp": "2026-05-02T03:19:52.268Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -702,7 +702,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-05-01T01:14:35.089Z",
+      "timestamp": "2026-05-02T03:19:52.268Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -714,7 +714,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-05-01T01:14:35.070Z",
+      "timestamp": "2026-05-02T03:19:52.260Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -726,7 +726,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-05-01T01:14:35.070Z",
+      "timestamp": "2026-05-02T03:19:52.260Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "failed",
@@ -738,7 +738,7 @@
       "error": "Unit gitea.service could not be found."
     },
     {
-      "timestamp": "2026-05-01T01:14:35.053Z",
+      "timestamp": "2026-05-02T03:19:52.254Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -750,7 +750,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-05-01T01:14:35.053Z",
+      "timestamp": "2026-05-02T03:19:52.254Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -762,7 +762,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-05-01T01:14:35.053Z",
+      "timestamp": "2026-05-02T03:19:52.254Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",
@@ -774,7 +774,7 @@
       "error": ""
     },
     {
-      "timestamp": "2026-05-01T01:14:35.053Z",
+      "timestamp": "2026-05-02T03:19:52.253Z",
       "toolId": "remote-command",
       "action": "remote-command",
       "status": "succeeded",

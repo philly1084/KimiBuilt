@@ -180,15 +180,21 @@ function truncateText(value = '', limit = config.scrape.contentCharLimit) {
 function isInternalApiUrl(url = '') {
   try {
     const parsed = new URL(url);
-    const base = new URL(normalizeBrowserReachableUrl('/api/'));
-    return parsed.origin === base.origin && parsed.pathname.startsWith('/api/');
+    const hostname = String(parsed.hostname || '').toLowerCase();
+    const localHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]';
+    return parsed.pathname.startsWith('/api/') && (localHost || hostname === 'api');
   } catch (_error) {
     return false;
   }
 }
 
 function buildInternalBrowserHeaders(url = '') {
-  const apiKey = resolveFrontendApiKey();
+  const apiKey = String(
+    process.env.KIMIBUILT_FRONTEND_API_KEY
+    || process.env.FRONTEND_API_KEY
+    || resolveFrontendApiKey()
+    || '',
+  ).trim();
   if (!apiKey || !isInternalApiUrl(url)) {
     return {};
   }
