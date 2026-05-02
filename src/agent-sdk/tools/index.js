@@ -1036,17 +1036,33 @@ function tryParseDocumentWorkflowJson(value = '') {
 
 function resolveWorkflowFrontendBundle(document = null) {
   const metadataBundle = document?.metadata?.bundle || document?.metadata?.siteBundle || null;
-  const parsed = tryParseDocumentWorkflowJson(document?.content || document?.contentPreview || '');
+  const sourceText = String(document?.content || document?.contentPreview || '').trim();
+  const parsed = tryParseDocumentWorkflowJson(sourceText);
   const parsedBundle = parsed?.metadata?.bundle || parsed?.metadata?.siteBundle || parsed?.bundle || parsed?.siteBundle || null;
   const parsedContent = typeof parsed?.content === 'string' ? parsed.content : '';
+  const fallbackContent = parsedContent || (/<!doctype html|<html|<main|<body/i.test(sourceText) ? sourceText : '');
   const bundle = metadataBundle?.files ? metadataBundle : parsedBundle;
-  const normalized = normalizeFrontendBundle(bundle, parsedContent);
+  if (!bundle) {
+    return null;
+  }
+  const normalized = normalizeFrontendBundle(bundle, fallbackContent);
 
   if (!normalized.files.length) {
     return null;
   }
 
   return ensureFrontendBundleStyling(normalized);
+}
+
+function normalizeSandboxProjectLanguage(frameworkTarget = '') {
+  const normalized = String(frameworkTarget || '').trim().toLowerCase();
+  if (['html', 'vite', 'react', 'tailwind'].includes(normalized)) {
+    return normalized;
+  }
+  if (['static', 'vanilla', 'plain', 'html-static'].includes(normalized)) {
+    return 'html';
+  }
+  return 'vite';
 }
 
 function isPreviewableFrontendWorkflowRequest(prompt = '') {
@@ -1117,7 +1133,7 @@ async function buildDocumentWorkflowSandbox({
     ];
     return executeNestedTool(context, 'code-sandbox', {
       mode: 'project',
-      language: bundle.frameworkTarget || 'vite',
+      language: normalizeSandboxProjectLanguage(bundle.frameworkTarget),
       projectName: buildSafeDocumentBundlePath(title || prompt || 'frontend-sandbox', 'frontend-sandbox')
         .replace(/\.html$/i, ''),
       entry: bundle.entry || 'index.html',

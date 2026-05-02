@@ -15,6 +15,30 @@
         "authentication": "ON_INSTALL"
       },
       "category": "Developer Tools"
+    },
+    {
+      "name": "visual-interface-architect",
+      "source": {
+        "source": "local",
+        "path": "./plugins/visual-interface-architect"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    },
+    {
+      "name": "sub-agent-workshop",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sub-agent-workshop"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
     }
   ]
 }

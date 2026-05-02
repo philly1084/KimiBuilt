@@ -1,0 +1,44 @@
+{
+  "name": "sub-agent-workshop",
+  "version": "0.1.0",
+  "description": "Plan and run bounded sub-agent workstreams with personality, direction, separate chat windows, and an up-front fit check.",
+  "author": {
+    "name": "KimiBuilt",
+    "email": "philly1084@gmail.com",
+    "url": "https://demoserver2.buzz"
+  },
+  "homepage": "https://demoserver2.buzz",
+  "repository": "https://demoserver2.buzz",
+  "license": "MIT",
+  "keywords": [
+    "sub-agents",
+    "orchestration",
+    "delegation",
+    "parallel-work"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Sub-Agent Workshop",
+    "shortDescription": "Break suitable projects into independent sub-agent chat lanes.",
+    "longDescription": "Sub-Agent Workshop helps a lead agent decide whether a project can be cleanly split, define each sub-agent's personality and direction, open separate work lanes, and keep coupled or final-alignment-heavy work with a single agent.",
+    "developerName": "KimiBuilt",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Planning",
+      "Delegation",
+      "Multi-agent coordination"
+    ],
+    "websiteURL": "https://demoserver2.buzz",
+    "privacyPolicyURL": "https://demoserver2.buzz/privacy",
+    "termsOfServiceURL": "https://demoserver2.buzz/terms",
+    "defaultPrompt": [
+      "Break this project into independent sub-agent lanes and open chat windows only if it fits.",
+      "Create a sub-agent roster with personality, direction, ownership, and handoff expectations.",
+      "Decide which parts should stay with a single lead agent because they require final alignment."
+    ],
+    "brandColor": "#2563EB",
+    "composerIcon": "./assets/icon.svg",
+    "logo": "./assets/logo.svg",
+    "screenshots": []
+  }
+}

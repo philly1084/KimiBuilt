@@ -1,0 +1,57 @@
+{
+  "name": "visual-interface-architect",
+  "version": "0.1.0",
+  "description": "Grounded interface design, backend hook wiring, and visual QA workflows for stable, production-feeling UI.",
+  "author": {
+    "name": "KimiBuilt",
+    "email": "philly1084@gmail.com",
+    "url": "https://demoserver2.buzz"
+  },
+  "homepage": "https://demoserver2.buzz",
+  "repository": "https://demoserver2.buzz",
+  "license": "MIT",
+  "keywords": [
+    "ui",
+    "ux",
+    "design-systems",
+    "frontend",
+    "visual-qa",
+    "backend-integration"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks.json",
+  "mcpServers": "./.mcp.json",
+  "apps": "./.app.json",
+  "interface": {
+    "displayName": "Visual Interface Architect",
+    "shortDescription": "Research-grounded UI implementation with backend contracts and visual QA.",
+    "longDescription": "Improves interfaces by researching domain and platform conventions, designing stable component states and layout systems, wiring real backend hooks or contracts, and verifying the result with contrast, overflow, responsive, screenshot, and runtime checks.",
+    "developerName": "KimiBuilt",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Research",
+      "Design Systems",
+      "Frontend",
+      "Backend Integration",
+      "Testing",
+      "Screenshots",
+      "Accessibility"
+    ],
+    "websiteURL": "https://demoserver2.buzz",
+    "privacyPolicyURL": "https://demoserver2.buzz/privacy",
+    "termsOfServiceURL": "https://demoserver2.buzz/terms",
+    "defaultPrompt": [
+      "Improve this interface using grounded design research and wire it to the real backend contract.",
+      "Audit this UI for visual drift, layout mishape, contrast, and broken states, then patch it.",
+      "Build a production-feeling interface for this feature with responsive states and visual QA evidence."
+    ],
+    "brandColor": "#0F766E",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png",
+    "screenshots": [
+      "./assets/screenshot1.png",
+      "./assets/screenshot2.png",
+      "./assets/screenshot3.png"
+    ]
+  }
+}

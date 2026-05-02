@@ -1322,6 +1322,95 @@ describe('ToolManager image tools', () => {
     expect(result.data.sandboxBuild).toEqual(expect.objectContaining({ mode: 'project' }));
   });
 
+  test('builds website sandbox from serialized static bundle metadata', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const documentService = {
+      recommendDocumentWorkflow: jest.fn(() => ({
+        inferredType: 'document',
+        recommendedFormat: 'html',
+        blueprint: { label: 'Website Mockup' },
+      })),
+      buildDocumentPlan: jest.fn(),
+      aiGenerate: jest.fn(),
+      assemble: jest.fn(),
+      generatePresentation: jest.fn(),
+    };
+    const siteIndex = '<!DOCTYPE html><html><body><main data-component="soundtrack-system">Soundtrack System</main></body></html>';
+    artifactService.generateArtifact.mockResolvedValue({
+      artifact: {
+        id: 'artifact-site-summary-1',
+        filename: 'soundtrack-system.zip',
+        mimeType: 'application/zip',
+        sizeBytes: 4096,
+        downloadUrl: '/api/artifacts/artifact-site-summary-1/download',
+        bundleDownloadUrl: '/api/artifacts/artifact-site-summary-1/bundle',
+        preview: {
+          type: 'site',
+          entry: 'index.html',
+          fileCount: 3,
+        },
+        metadata: {
+          type: 'frontend',
+          frameworkTarget: 'static',
+          bundle: {
+            entry: 'index.html',
+            frameworkTarget: 'static',
+            fileCount: 3,
+            htmlPageCount: 1,
+            files: [
+              { path: 'index.html', language: 'html', purpose: 'Home page' },
+              { path: 'styles.css', language: 'css', purpose: 'Shared styles' },
+              { path: 'app.js', language: 'javascript', purpose: 'Interactions' },
+            ],
+          },
+        },
+      },
+      outputText: siteIndex,
+    });
+    const nestedToolManager = {
+      executeTool: jest.fn(async (id, params) => ({
+        success: true,
+        data: {
+          mode: 'project',
+          language: params.language,
+          entry: params.entry,
+          files: params.files.map((file) => ({ path: file.path, content: file.content })),
+        },
+      })),
+    };
+
+    const result = await toolManager.executeTool('document-workflow', {
+      action: 'generate-suite',
+      request: 'Mock me up a website with a soundtrack system.',
+      formats: ['html'],
+      buildMode: 'sandbox',
+      useSandbox: true,
+    }, {
+      sessionId: 'session-1',
+      documentService,
+      toolManager: nestedToolManager,
+      model: 'gpt-5.4-mini',
+    });
+
+    expect(result.success).toBe(true);
+    expect(nestedToolManager.executeTool).toHaveBeenCalledWith(
+      'code-sandbox',
+      expect.objectContaining({
+        mode: 'project',
+        language: 'html',
+        entry: 'index.html',
+        files: expect.arrayContaining([
+          expect.objectContaining({ path: 'index.html', content: expect.stringContaining('data-component="soundtrack-system"') }),
+          expect.objectContaining({ path: 'AGENT_SANDBOX_BUILD.md' }),
+        ]),
+      }),
+      expect.any(Object),
+    );
+    expect(result.data.sandboxBuild.files.find((file) => file.path === 'index.html').content).not.toContain('Document Suite');
+  });
+
   test('builds a sandbox project for single html document generation when requested', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();

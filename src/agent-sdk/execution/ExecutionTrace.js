@@ -157,17 +157,29 @@ class ExecutionTrace {
    */
   addStep(step) {
     this.steps.push(step);
-    this.metrics.totalSteps++;
+    this.updateMetricsForStep(step);
     
-    // Update metrics
-    if (step.type === 'tool-call') this.metrics.toolCalls++;
-    if (step.type === 'llm-call') this.metrics.llmCalls++;
-    if (step.error) this.metrics.errors++;
-    if (step.metadata.retries) this.metrics.retries += step.metadata.retries;
-    
-    this.metrics.totalTokens.input += step.metadata.tokens?.input || 0;
-    this.metrics.totalTokens.output += step.metadata.tokens?.output || 0;
-    
+    return this;
+  }
+
+  /**
+   * Updates aggregate metrics for a step and any nested substeps.
+   * @param {ExecutionStep} step - The step to aggregate
+   * @returns {ExecutionTrace} This trace for chaining
+   */
+  updateMetricsForStep(step) {
+    for (const current of this.flattenSteps([step])) {
+      this.metrics.totalSteps++;
+
+      if (current.type === 'tool-call') this.metrics.toolCalls++;
+      if (current.type === 'llm-call') this.metrics.llmCalls++;
+      if (current.error) this.metrics.errors++;
+      if (current.metadata.retries) this.metrics.retries += current.metadata.retries;
+
+      this.metrics.totalTokens.input += current.metadata.tokens?.input || 0;
+      this.metrics.totalTokens.output += current.metadata.tokens?.output || 0;
+    }
+
     return this;
   }
   
@@ -207,6 +219,25 @@ class ExecutionTrace {
     }
     return null;
   }
+
+  /**
+   * Flattens steps recursively while preserving traversal order.
+   * @param {ExecutionStep[]} steps - Steps to flatten
+   * @returns {ExecutionStep[]} Flattened step list
+   */
+  flattenSteps(steps = this.steps) {
+    const flattened = [];
+
+    for (const step of steps) {
+      flattened.push(step);
+
+      if (step.substeps.length > 0) {
+        flattened.push(...this.flattenSteps(step.substeps));
+      }
+    }
+
+    return flattened;
+  }
   
   /**
    * Filters steps by a predicate function.
@@ -214,7 +245,7 @@ class ExecutionTrace {
    * @returns {ExecutionStep[]} Filtered steps
    */
   filterSteps(predicate) {
-    return this.steps.filter(predicate);
+    return this.flattenSteps().filter(predicate);
   }
   
   /**
