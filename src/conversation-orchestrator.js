@@ -5518,6 +5518,11 @@ function inferCompletionEvidenceFromToolEvent(event = {}, { round = null } = {})
         data.buildStatus || '',
         JSON.stringify(data).slice(0, 1200),
     ].join('\n');
+    if (toolId === 'web-scrape'
+        && /\bAuthentication required\b/i.test(output)
+        && /\bmissing_token\b/i.test(output)) {
+        return [];
+    }
     const stateChanged = doesToolEventChangeState(event);
     const base = {
         tool: toolId,
@@ -10724,7 +10729,7 @@ class ConversationOrchestrator extends EventEmitter {
                     formatAgentRolePipelineForPrompt(toolPolicy.rolePipeline),
                     'Follow role order through handoff artifacts: research evidence first when required, design brief before build, sandbox/project build for websites, then QA/integration.',
                     'Use `design-resource-search` for the design role before generating design-sensitive websites, dashboards, documents, or page artifacts unless it has already succeeded in this run.',
-                    'For website, dashboard, landing-page, and frontend builds, prefer `document-workflow` with `action:"generate-suite"`, `formats:["html"]`, `buildMode:"sandbox"`, and `useSandbox:true`; direct `code-sandbox` calls must use `mode:"project"` rather than execute mode.',
+                    'For website, dashboard, landing-page, and frontend builds, prefer the Symphony-style sequence: design/resource context, `document-workflow generate-suite` with `formats:["html"]`, `buildMode:"sandbox"`, and `useSandbox:true`, then browser QA. Direct `code-sandbox` calls must use `mode:"project"` rather than execute mode.',
                     'For slides, slide decks, presentations, and PowerPoint requests, default the final deliverable to PPTX unless the user explicitly asks for interactive or HTML output. On web-chat, include an HTML sandbox companion preview only as a design/review stage, not as a replacement for the PPTX.',
                     'For explicit PDF/PPTX/HTML/XLSX packages or multi-format document requests, use `document-workflow generate-suite` with the requested `formats`. On web-chat, include an HTML companion preview when the main deliverable is PDF, PPTX, or XLSX.',
                 ]
@@ -10844,10 +10849,10 @@ class ConversationOrchestrator extends EventEmitter {
             'Every `document-workflow` step must include `params.action` set to `recommend`, `plan`, `generate`, `assemble`, or `generate-suite`.',
             'Use `document-workflow generate` for final briefs, reports, documents, HTML pages, and slide decks. For slides, slide decks, presentations, and PowerPoint requests, default the final deliverable to PPTX unless the user explicitly asks for interactive or HTML output.',
             'Do not ask the user to supply generic design-prompt quality wording for documents; document-workflow already applies built-in strategy, background design, evidence, accessibility, and final polish passes.',
-            'Use `document-workflow generate-suite` with `buildMode:"sandbox"` or `useSandbox:true` for previewable website/dashboard/front-end artifacts so the builder produces a sandbox project instead of only a template.',
+            'Use `document-workflow generate-suite` with `buildMode:"sandbox"` or `useSandbox:true` for previewable website/dashboard/front-end artifacts so the builder produces a sandbox project instead of only a template. Treat this as a Symphony build-review-iterate loop, not a one-shot template export.',
             'Use `document-workflow generate-suite` for requested output packages such as PDF + PPTX + HTML, or when web-chat needs an HTML preview companion for PDF/PPTX/XLSX deliverables.',
             'Every direct `code-sandbox` website build step must use `params.mode:"project"` plus previewable files. Do not use `code-sandbox` execute mode unless a separate confirmation policy explicitly allows executable code.',
-            'For screenshot QA after a sandbox build, set `web-scrape.params.url` to the verified preview/public URL. Use `browser:true` and `captureScreenshot:true`, omit `selectors` unless extracting fields, and never send `selectors` as an array. If the URL is produced earlier in the same plan, use `{{lastPreviewUrl}}`; the runtime also resolves legacy `{{steps[n].previewUrl}}` placeholders before browser execution.',
+            'For screenshot QA after a sandbox build, set `web-scrape.params.url` to the verified preview/public URL. Use `browser:true` and `captureScreenshot:true`, omit `selectors` unless extracting fields, and never send `selectors` as an array. If the URL is produced earlier in the same plan, use `{{lastPreviewUrl}}`; the runtime also resolves legacy `{{steps[n].previewUrl}}` placeholders before browser execution. Authentication walls, missing-token pages, empty bodies, low contrast, horizontal overflow, or page errors are blockers that require another build/repair pass instead of a final caveat.',
             'When the user wants a research-backed deliverable, prefer `web-search` and `web-fetch` first, then use `web-scrape` only when a page needs rendered or structured extraction before `document-workflow` with grounded `sources` derived from the verified tool results.',
             'Set `document-workflow.params.includeContent` to `true` only when a later step needs the full textual body for `file-write`; otherwise prefer the stored document download URL.',
             'Use `deep-research-presentation` when the user wants a research-backed deck handled as one ordered plan -> research -> images -> presentation workflow.',

@@ -1460,6 +1460,7 @@ function buildFrontendBundleGenerationInstructions({
         'Return valid JSON only. Do not use markdown fences.',
         'Use exactly this top-level shape: {"content":"...","metadata":{"title":"...","language":"html","frameworkTarget":"static|vite","previewMode":"site","bundle":{"entry":"index.html","files":[{"path":"index.html","language":"html","purpose":"Home page","content":"..."}]},"handoff":{"summary":"...","targetFramework":"...","componentMap":[{"name":"Hero","purpose":"...","targetPath":"src/components/Hero.jsx"}],"integrationSteps":["..."]}}}.',
         'The `content` field must contain the entry HTML file content, and that same entry file must also appear in `metadata.bundle.files`.',
+        'Use a Symphony-style internal loop: design the site architecture, build the bundle, critique it for originality/readability/responsiveness, then revise before returning JSON.',
         pageCountNote,
         'Choose the right site shape before writing: marketing landing page, dashboard, app workspace, documentation site, report/brief, editorial feature, campaign microsite, or portfolio showcase.',
         'Match the request instead of defaulting to the same landing-page stack.',
@@ -1478,6 +1479,7 @@ function buildFrontendBundleGenerationInstructions({
         'Use stable ids or data-component attributes on major sections to support later repo extraction.',
         'Never expose internal template labels, archetype names, or planning language in visible copy.',
         'Keep the content grounded, concrete, and production-like.',
+        'Do not return a generic suite index, placeholder shell, or template wrapper as the entry page. The entry page is the actual requested experience.',
         'The preview runs inside a sandbox that allows scripts but withholds same-origin privileges. Keep interactive behavior client-side, static-safe, and resilient without cookies or server mutation.',
         buildVisualSafetyInstructions(),
         buildDocumentImageInstructions(),
@@ -2011,6 +2013,8 @@ class ArtifactService {
                 interactiveInstructions,
                 'Return JSON only. No markdown fences.',
                 'Build a polished frontend demo instead of a plain document.',
+                'Work as an orchestrated product team: silently plan, build, critique, and revise the artifact before returning the final JSON.',
+                'The final bundle must look like a finished first-pass product surface, not a cheap template or a document-suite wrapper.',
                 'Choose the right HTML artifact family for the request: landing page, dashboard, app workspace, documentation site, report/brief, editorial feature, campaign microsite, or portfolio showcase.',
                 'Match the request instead of defaulting to the same landing-page stack.',
                 'Aim for a strong visual thesis, deliberate layout hierarchy, and a premium request-matched feel.',
@@ -2070,6 +2074,7 @@ class ArtifactService {
                 normalizedFormat === 'html'
                     ? 'For HTML outputs, add web-document affordances such as sticky wayfinding, details/summary disclosures, source cards, tasteful CSS motion, and responsive controls when they improve comprehension.'
                     : 'For PDF outputs, keep the HTML print-safe while still visually composed.',
+                'Before finalizing, silently run a quality pass for content depth, visual originality, responsive behavior, contrast, and asset integrity. Revise weak or templated sections instead of describing them.',
                 normalizedFormat === 'html' ? buildSandboxBrowserLibraryInstructions() : '',
             ].filter(Boolean).join('\n\n');
         }

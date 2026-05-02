@@ -1049,6 +1049,17 @@ function resolveWorkflowFrontendBundle(document = null) {
   return ensureFrontendBundleStyling(normalized);
 }
 
+function isPreviewableFrontendWorkflowRequest(prompt = '') {
+  const normalized = String(prompt || '').trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  return /\b(website|web page|webpage|landing page|homepage|microsite|marketing site|product page|campaign page|frontend|front-end|web app|app mockup|site prototype|site mockup|website mockup|ui mockup|interactive prototype|soundtrack system)\b/.test(normalized)
+    || /\b(3d|three\.?js|webgl|web gpu|webgpu|immersive scene|interactive scene|scene sandbox|shader|particles?|orbit controls?)\b/.test(normalized)
+    || isDashboardRequest(normalized);
+}
+
 function buildSandboxAgentHandoffPrompt(title = 'Document Suite') {
   return [
     '# Sandbox Build Handoff',
@@ -1090,6 +1101,30 @@ async function buildDocumentWorkflowSandbox({
   prompt = '',
   images = [],
 } = {}) {
+  const frontendBundles = (Array.isArray(documents) ? documents : [])
+    .map((entry) => resolveWorkflowFrontendBundle(entry?.document || null))
+    .filter(Boolean);
+  if (frontendBundles.length === 1) {
+    const bundle = frontendBundles[0];
+    const files = [
+      ...bundle.files,
+      {
+        path: 'AGENT_SANDBOX_BUILD.md',
+        content: buildSandboxAgentHandoffPrompt(title),
+        language: 'markdown',
+        purpose: 'Agent-to-agent sandbox build instructions',
+      },
+    ];
+    return executeNestedTool(context, 'code-sandbox', {
+      mode: 'project',
+      language: bundle.frameworkTarget || 'vite',
+      projectName: buildSafeDocumentBundlePath(title || prompt || 'frontend-sandbox', 'frontend-sandbox')
+        .replace(/\.html$/i, ''),
+      entry: bundle.entry || 'index.html',
+      files,
+    });
+  }
+
   const files = buildDocumentSuiteSandboxFiles(documents, title, images);
   if (!hasPreviewableSandboxOutput(files)) {
     return {
@@ -2773,7 +2808,7 @@ class ToolManager {
                 }
 
               if (resolvedFormat === 'html'
-                && isDashboardRequest(groundedPrompt)
+                && isPreviewableFrontendWorkflowRequest(groundedPrompt)
                 && context?.sessionId) {
                 try {
                   const generatedArtifact = await artifactService.generateArtifact({
@@ -2799,10 +2834,10 @@ class ToolManager {
                         documentType: resolvedDocumentType,
                         document: workflowDocument,
                       }],
-                      title: String(params.title || recommendation.blueprint?.label || 'Dashboard').trim() || 'Dashboard',
-                      prompt: groundedPrompt,
-                      images: imageAssets,
-                    })
+                    title: String(params.title || recommendation.blueprint?.label || 'Frontend Artifact').trim() || 'Frontend Artifact',
+                    prompt: groundedPrompt,
+                    images: imageAssets,
+                  })
                     : null;
 
                   return {
@@ -2813,7 +2848,7 @@ class ToolManager {
                     ...(sandboxBuild ? { sandboxBuild } : {}),
                   };
                 } catch (error) {
-                  console.warn(`[document-workflow] Dashboard HTML artifact generation failed, falling back to document service: ${error.message}`);
+                  console.warn(`[document-workflow] Frontend HTML artifact generation failed, falling back to document service: ${error.message}`);
                 }
               }
 
@@ -2910,7 +2945,7 @@ class ToolManager {
                 const suiteDocumentType = suiteRecommendation.inferredType || resolvedDocumentType;
 
                 if (suiteFormat === 'html'
-                  && isDashboardRequest(groundedPrompt)
+                  && isPreviewableFrontendWorkflowRequest(groundedPrompt)
                   && context?.sessionId) {
                   try {
                     const generatedArtifact = await artifactService.generateArtifact({
@@ -2933,7 +2968,7 @@ class ToolManager {
                     });
                     continue;
                   } catch (error) {
-                    console.warn(`[document-workflow] Dashboard HTML artifact generation failed, falling back to document service: ${error.message}`);
+                    console.warn(`[document-workflow] Frontend HTML artifact generation failed, falling back to document service: ${error.message}`);
                   }
                 }
 

@@ -1227,6 +1227,101 @@ describe('ToolManager image tools', () => {
     }));
   });
 
+  test('routes website sandbox generation through frontend artifacts without a suite wrapper', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const documentService = {
+      recommendDocumentWorkflow: jest.fn(() => ({
+        inferredType: 'document',
+        recommendedFormat: 'html',
+        blueprint: { label: 'Website Mockup' },
+      })),
+      buildDocumentPlan: jest.fn(),
+      aiGenerate: jest.fn(),
+      assemble: jest.fn(),
+      generatePresentation: jest.fn(),
+    };
+    const siteIndex = '<!DOCTYPE html><html><body><main data-component="soundtrack-system">Soundtrack System</main></body></html>';
+    artifactService.generateArtifact.mockResolvedValue({
+      artifact: {
+        id: 'artifact-site-1',
+        filename: 'soundtrack-system.html',
+        mimeType: 'text/html',
+        sizeBytes: 4096,
+        downloadUrl: '/api/artifacts/artifact-site-1/download',
+        previewUrl: '/api/artifacts/artifact-site-1/preview',
+        sandboxUrl: '/api/artifacts/artifact-site-1/sandbox',
+        preview: {
+          type: 'html',
+          content: siteIndex,
+        },
+        metadata: {
+          type: 'frontend',
+          frameworkTarget: 'static',
+          bundle: {
+            entry: 'index.html',
+            files: [
+              { path: 'index.html', language: 'html', purpose: 'Home page', content: siteIndex },
+              { path: 'styles.css', language: 'css', purpose: 'Shared styles', content: 'body{color:#111;background:#fff;}' },
+              { path: 'app.js', language: 'javascript', purpose: 'Interactions', content: 'document.body.dataset.ready = "true";' },
+            ],
+          },
+        },
+      },
+      outputText: siteIndex,
+    });
+    const nestedToolManager = {
+      executeTool: jest.fn(async (id, params) => ({
+        success: true,
+        data: {
+          mode: 'project',
+          entry: params.entry,
+          files: params.files.map((file) => ({ path: file.path, content: file.content })),
+        },
+      })),
+    };
+
+    const result = await toolManager.executeTool('document-workflow', {
+      action: 'generate-suite',
+      request: 'Mock me up a website with a soundtrack system. It needs to be cool and fully flushed out.',
+      formats: ['html'],
+      buildMode: 'sandbox',
+      useSandbox: true,
+    }, {
+      sessionId: 'session-1',
+      documentService,
+      toolManager: nestedToolManager,
+      model: 'gpt-5.4-mini',
+    });
+
+    expect(result.success).toBe(true);
+    expect(artifactService.generateArtifact).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-1',
+      format: 'html',
+      prompt: expect.stringContaining('soundtrack system'),
+    }));
+    expect(documentService.aiGenerate).not.toHaveBeenCalled();
+    expect(nestedToolManager.executeTool).toHaveBeenCalledWith(
+      'code-sandbox',
+      expect.objectContaining({
+        mode: 'project',
+        entry: 'index.html',
+        files: expect.arrayContaining([
+          expect.objectContaining({ path: 'index.html', content: siteIndex }),
+          expect.objectContaining({ path: 'styles.css' }),
+          expect.objectContaining({ path: 'app.js' }),
+          expect.objectContaining({ path: 'AGENT_SANDBOX_BUILD.md' }),
+        ]),
+      }),
+      expect.any(Object),
+    );
+    const sandboxParams = nestedToolManager.executeTool.mock.calls[0][1];
+    expect(sandboxParams.files.find((file) => file.path === 'index.html').content).toBe(siteIndex);
+    expect(sandboxParams.files.find((file) => file.path === 'index.html').content).not.toContain('Sandbox build bundle assembled');
+    expect(result.data.sandboxBuild).toEqual(expect.objectContaining({ mode: 'project' }));
+  });
+
   test('builds a sandbox project for single html document generation when requested', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();

@@ -6,6 +6,7 @@ const { promisify } = require('util');
 const { config } = require('../../../../config');
 const { artifactService } = require('../../../../artifacts/artifact-service');
 const { normalizeBrowserReachableUrl } = require('./internal-url');
+const { resolveFrontendApiKey } = require('../../../../auth/service');
 
 const execFileAsync = promisify(execFile);
 
@@ -174,6 +175,46 @@ function truncateText(value = '', limit = config.scrape.contentCharLimit) {
   }
 
   return text.slice(0, limit);
+}
+
+function isInternalApiUrl(url = '') {
+  try {
+    const parsed = new URL(url);
+    const base = new URL(normalizeBrowserReachableUrl('/api/'));
+    return parsed.origin === base.origin && parsed.pathname.startsWith('/api/');
+  } catch (_error) {
+    return false;
+  }
+}
+
+function buildInternalBrowserHeaders(url = '') {
+  const apiKey = resolveFrontendApiKey();
+  if (!apiKey || !isInternalApiUrl(url)) {
+    return {};
+  }
+
+  return {
+    'x-api-key': apiKey,
+  };
+}
+
+function assertNotAuthWall(snapshot = {}, url = '') {
+  const text = normalizeText([
+    snapshot.title || '',
+    snapshot.text || '',
+    snapshot.html || '',
+  ].join(' '));
+
+  if (/\bAuthentication required\b/i.test(text) && /\bmissing_token\b/i.test(text)) {
+    const error = new Error(`Browser QA hit an authentication wall for ${url}: missing_token`);
+    error.code = 'browser_auth_wall';
+    error.diagnostics = {
+      url,
+      title: snapshot.title || '',
+      reason: 'missing_token',
+    };
+    throw error;
+  }
 }
 
 async function captureScreenshotArtifact({ page, sessionId, url, title = '', contentText = '', fullPage = true, viewport = null }) {
@@ -474,6 +515,7 @@ async function browseWithPlaywright(normalizedUrl, options = {}) {
       ignoreHTTPSErrors: true,
       userAgent: DEFAULT_USER_AGENT,
       viewport,
+      extraHTTPHeaders: buildInternalBrowserHeaders(normalizedUrl),
     });
     page = await context.newPage();
     await page.goto(normalizedUrl, {
@@ -496,6 +538,7 @@ async function browseWithPlaywright(normalizedUrl, options = {}) {
     }
 
     const snapshot = await collectPageSnapshot(page, options);
+    assertNotAuthWall(snapshot, page.url());
     let screenshot = null;
     if (options.captureScreenshot) {
       screenshot = await captureScreenshotArtifact({
@@ -605,7 +648,7 @@ async function browseWithDumpDom(normalizedUrl, options = {}) {
       options.contentCharLimit || config.scrape.contentCharLimit,
     );
 
-    return {
+    const snapshot = {
       engine: 'dump-dom',
       url: normalizedUrl,
       title: normalizeText(titleMatch?.[1] || ''),
@@ -623,6 +666,8 @@ async function browseWithDumpDom(normalizedUrl, options = {}) {
         : null,
       actions: [],
     };
+    assertNotAuthWall(snapshot, normalizedUrl);
+    return snapshot;
   } finally {
     await fs.rm(userDataDir, { recursive: true, force: true }).catch(() => {});
   }
@@ -651,6 +696,8 @@ async function browsePage(url, options = {}) {
 }
 
 module.exports = {
+  assertNotAuthWall,
+  buildInternalBrowserHeaders,
   browsePage,
   normalizeBrowserUrl: normalizeUrl,
   normalizeBrowserViewport: normalizeViewport,
