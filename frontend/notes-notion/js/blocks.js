@@ -1819,24 +1819,29 @@ const Blocks = (function() {
                             || primaryImage?.inlineUrl
                             || primaryImage?.url
                             || null;
-                        let imageAssetId = block.content.imageAssetId || null;
-                        if (storedImageUrl && window.Storage?.saveImageAsset) {
-                            const assetUrl = await window.Storage.saveImageAsset(storedImageUrl);
-                            if (assetUrl) {
-                                storedImageUrl = assetUrl;
-                                imageAssetId = String(assetUrl).startsWith('asset://') ? String(assetUrl).slice('asset://'.length) : null;
-                            }
-                        }
+                        const persistedImage = storedImageUrl
+                            ? await persistAIImageSelection(block.content, storedImageUrl)
+                            : {
+                                imageUrl: null,
+                                imageAssetId: block.content.imageAssetId || null,
+                                resolvedImageUrl: null,
+                            };
+                        storedImageUrl = persistedImage.imageUrl;
                         
-                        block.content.imageUrl = storedImageUrl;
-                        block.content.generatedImages = generatedImages;
-                        block.content.imageAssetId = imageAssetId;
-                        block.content._resolvedImageUrl = storedImageUrl && !String(storedImageUrl).startsWith('asset://') ? storedImageUrl : null;
-                        block.content.downloadUrl = result.downloadUrl || primaryImage?.downloadUrl || storedImageUrl || null;
-                        block.content.artifactId = result.artifactId || primaryImage?.artifactId || null;
-                        block.content.selectedArtifactId = result.artifactId || primaryImage?.artifactId || null;
-                        block.content.status = 'done';
-                        block.content.revisedPrompt = result.revised_prompt;
+                        if (!storedImageUrl) {
+                            block.content.status = 'error';
+                            block.content.errorMessage = 'Image generation returned no renderable image.';
+                        } else {
+                            block.content.imageUrl = storedImageUrl;
+                            block.content.generatedImages = generatedImages;
+                            block.content.imageAssetId = persistedImage.imageAssetId;
+                            block.content._resolvedImageUrl = persistedImage.resolvedImageUrl;
+                            block.content.downloadUrl = result.downloadUrl || primaryImage?.downloadUrl || storedImageUrl || null;
+                            block.content.artifactId = result.artifactId || primaryImage?.artifactId || null;
+                            block.content.selectedArtifactId = result.artifactId || primaryImage?.artifactId || null;
+                            block.content.status = 'done';
+                            block.content.revisedPrompt = result.revised_prompt;
+                        }
                         wrapper.innerHTML = '';
                         wrapper.appendChild(renderAIImageBlock(block, isEditable));
                         

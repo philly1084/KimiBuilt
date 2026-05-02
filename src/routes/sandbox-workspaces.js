@@ -22,6 +22,7 @@ function escapeHtmlAttribute(value = '') {
 function applyPreviewHeaders(res, contentType) {
   res.setHeader('Content-Type', contentType);
   res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.setHeader('Origin-Agent-Cluster', '?0');
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -48,6 +49,7 @@ function applyPreviewHeaders(res, contentType) {
 function applyShellHeaders(res) {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.setHeader('Origin-Agent-Cluster', '?0');
   res.setHeader('X-Content-Type-Options', 'nosniff');

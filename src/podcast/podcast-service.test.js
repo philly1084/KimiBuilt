@@ -182,18 +182,17 @@ describe('PodcastService', () => {
     }), expect.any(Object));
     expect(createResponse).toHaveBeenCalled();
     expect(ttsService.synthesize).toHaveBeenCalled();
-    expect(audioProcessingService.composePodcastAudio).toHaveBeenCalledWith(expect.objectContaining({
-      enhanceSpeech: true,
-      includeIntro: false,
-      includeOutro: false,
-      includeMusicBed: false,
-    }));
+    expect(audioProcessingService.composePodcastAudio).not.toHaveBeenCalled();
     expect(persistGeneratedAudio).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'session-1',
       mimeType: 'audio/wav',
       metadata: expect.objectContaining({
         generatedBy: 'podcast',
         topic: 'How grid batteries work',
+        processing: expect.objectContaining({
+          voiceOnlyAudio: true,
+          packaging: 'native-wav',
+        }),
       }),
     }));
     expect(result.audio).toEqual(expect.objectContaining({
@@ -202,7 +201,9 @@ describe('PodcastService', () => {
     expect(result.script.turns).toHaveLength(8);
     expect(result.hosts).toHaveLength(2);
     expect(result.hosts[0].voiceId).not.toBe(result.hosts[1].voiceId);
-    expect(result.processing.enhanced).toBe(true);
+    expect(result.processing.enhanced).toBe(false);
+    expect(result.processing.voiceOnlyAudio).toBe(true);
+    expect(result.processing.packaging).toBe('native-wav');
   });
 
   test('annotates and logs the failing podcast stage', async () => {
@@ -262,11 +263,47 @@ describe('PodcastService', () => {
       toolManager: { executeTool },
     });
 
-    expect(audioProcessingService.composePodcastAudio).toHaveBeenCalledWith(expect.objectContaining({
-      includeMusicBed: false,
-      musicBedPath: '',
-    }));
+    expect(audioProcessingService.composePodcastAudio).not.toHaveBeenCalled();
+    expect(result.processing.voiceOnlyAudio).toBe(true);
     expect(result.processing.musicBedApplied).toBe(false);
+  });
+
+  test('strips non-speaker audio cues before TTS and transcript persistence', async () => {
+    createResponse.mockResolvedValueOnce({
+      output_text: JSON.stringify({
+        title: 'Cue Cleanup',
+        summary: 'A cue cleanup check.',
+        turns: [
+          { speaker: 'Maya', text: '[music fades] Welcome to the actual episode.' },
+          { speaker: 'June', text: 'SFX: soft chime\nThe real point is the spoken line.' },
+          { speaker: 'Maya', text: 'That means the packaged WAV should stay voice only.' },
+          { speaker: 'June', text: '(applause) Exactly, just the two speakers.' },
+        ],
+      }),
+    });
+    const service = new PodcastService();
+    const executeTool = jest.fn(async (toolId) => {
+      if (toolId === 'web-search') {
+        return { success: true, data: { results: [{ title: 'A', url: 'https://example.com/a', snippet: 'A' }] } };
+      }
+      if (toolId === 'web-fetch') {
+        return { success: true, data: { headers: { 'content-type': 'text/html' }, body: '<p>Podcast audio should be clean.</p>' } };
+      }
+      throw new Error(`Unexpected tool: ${toolId}`);
+    });
+
+    const result = await service.createPodcast({
+      topic: 'How to keep podcast audio clean',
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+      toolManager: { executeTool },
+    });
+
+    const synthesizedText = ttsService.synthesize.mock.calls.map(([call]) => call.text).join('\n');
+    expect(synthesizedText).not.toMatch(/music|SFX|applause/i);
+    expect(result.script.transcript).not.toMatch(/music|SFX|applause/i);
+    expect(result.processing.packaging).toBe('native-wav');
   });
 
   test('uses the active chat model for podcast script generation when no podcast-specific model is provided', async () => {
@@ -649,6 +686,8 @@ describe('PodcastService', () => {
     const result = await service.createPodcast({
       topic: 'How grid batteries work',
       exportMp3: true,
+      voiceOnlyAudio: false,
+      enhanceSpeech: true,
       includeIntro: true,
       includeMusicBed: true,
       musicBedPath: 'C:\\audio\\bed.wav',
@@ -712,6 +751,7 @@ describe('PodcastService', () => {
 
     const result = await service.createPodcast({
       topic: 'How grid batteries work',
+      voiceOnlyAudio: false,
       includeMusicBed: true,
     }, {
       sessionId: 'session-1',
@@ -764,6 +804,8 @@ describe('PodcastService', () => {
     const result = await service.createPodcast({
       topic: 'How grid batteries work',
       exportMp3: true,
+      voiceOnlyAudio: false,
+      enhanceSpeech: true,
       includeIntro: true,
     }, {
       sessionId: 'session-1',

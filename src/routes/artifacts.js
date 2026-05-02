@@ -53,6 +53,7 @@ const DEPLOYABLE_TEXT_EXTENSIONS = new Set([
 
 function applyPreviewResponseHeaders(res) {
     res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Access-Control-Allow-Origin', '*');
     // Generated previews are commonly embedded in sandboxed iframes, which
     // appear cross-origin to the browser and would otherwise trip Helmet's
     // default CORP protection for same-origin assets.
@@ -84,6 +85,7 @@ function applyPreviewResponseHeaders(res) {
 function applySandboxShellHeaders(res) {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');

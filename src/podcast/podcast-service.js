@@ -523,6 +523,16 @@ function shouldUsePodcastMusicBed(params = {}, audioProcessingConfig = null) {
     );
 }
 
+function shouldUseVoiceOnlyAudio(params = {}) {
+  if (params.voiceOnlyAudio === false
+    || params.speakerOnlyAudio === false
+    || params.voiceOnly === false) {
+    return false;
+  }
+
+  return true;
+}
+
 function uniqueUrls(items = []) {
   const seen = new Set();
   return (Array.isArray(items) ? items : []).filter((item) => {
@@ -762,9 +772,19 @@ function buildTranscript(turns = []) {
     .trim();
 }
 
+function stripPodcastAudioCues(value = '') {
+  return sanitizePodcastText(value, { preserveNewlines: true })
+    .replace(/\[(?:music|theme|intro|outro|sfx|sound effects?|transition|stinger|applause|laughter|laughs|chuckles?|sighs?|pause|beat|ad break)[^\]]*\]/gi, ' ')
+    .replace(/\((?:music|theme|intro|outro|sfx|sound effects?|transition|stinger|applause|laughter|laughs|chuckles?|sighs?|pause|beat|ad break)[^)]*\)/gi, ' ')
+    .replace(/^\s*(?:music|theme|intro|outro|sfx|sound effects?|transition|stinger|applause|laughter|laughs|chuckles?|sighs?|pause|beat|ad break)\s*:.*$/gim, ' ')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function normalizeTurn(turn = {}, allowedSpeakers = new Set(), speakerAliases = new Map()) {
   const speaker = sanitizePodcastText(turn?.speaker || '');
-  const text = sanitizePodcastText(turn?.text || '', { preserveNewlines: true });
+  const text = stripPodcastAudioCues(turn?.text || '');
   const resolvedSpeaker = allowedSpeakers.has(speaker)
     ? speaker
     : speakerAliases.get(speaker);
@@ -1578,17 +1598,15 @@ class PodcastService {
     const transcript = buildTranscript(script.turns);
     const wantsMp3 = prefersMp3(params);
     const audioProcessingConfig = this.audioProcessingService?.getPublicConfig?.() || null;
-    const useMusicBed = shouldUsePodcastMusicBed(params, audioProcessingConfig);
-    const wantsMixing = requestedMixing(params) || useMusicBed;
-    const defaultEnhanceSpeech = params.includeVideo === true ? false : (
-      audioProcessingConfig?.configured === true
-        && audioProcessingConfig?.defaults?.masteringEnabled !== false
-    );
+    const voiceOnlyAudio = shouldUseVoiceOnlyAudio(params);
+    const useMusicBed = !voiceOnlyAudio && shouldUsePodcastMusicBed(params, audioProcessingConfig);
+    const wantsMixing = !voiceOnlyAudio && (requestedMixing(params) || useMusicBed);
+    const defaultEnhanceSpeech = false;
     const wantsEnhancement = params.enhanceSpeech === false
       ? false
       : params.enhanceSpeech === true
         ? audioProcessingConfig?.configured === true
-        : defaultEnhanceSpeech;
+        : (!voiceOnlyAudio && defaultEnhanceSpeech);
 
     // Validate TTS compatibility before starting the full run.
     script.turns.forEach((turn) => {
@@ -1686,6 +1704,8 @@ class PodcastService {
         summary: script.summary,
         turnCount: script.turns.length,
         processing: {
+          voiceOnlyAudio,
+          packaging: wantsMixing || wantsEnhancement ? 'ffmpeg-post-process' : 'native-wav',
           mixed: wantsMixing,
           enhanced: wantsEnhancement,
           musicBedApplied: useMusicBed,
@@ -1764,6 +1784,8 @@ class PodcastService {
           summary: script.summary,
           turnCount: script.turns.length,
           processing: {
+            voiceOnlyAudio,
+            packaging: wantsMixing || wantsEnhancement ? 'ffmpeg-post-process' : 'native-wav',
             mixed: wantsMixing,
             enhanced: wantsEnhancement,
             musicBedApplied: useMusicBed,
@@ -1815,6 +1837,8 @@ class PodcastService {
         transcript,
       },
       processing: {
+        voiceOnlyAudio,
+        packaging: wantsMixing || wantsEnhancement ? 'ffmpeg-post-process' : 'native-wav',
         mixed: wantsMixing,
         enhanced: wantsEnhancement,
         musicBedApplied: useMusicBed,

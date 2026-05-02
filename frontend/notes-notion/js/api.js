@@ -127,6 +127,9 @@ const API = (function() {
         if (!normalizedPath) {
             return '';
         }
+        if (/^data:image\//i.test(normalizedPath)) {
+            return normalizedPath;
+        }
 
         try {
             const backendOrigin = BASE_URL.replace(/\/v1\/?$/i, '') || window.location.origin;
@@ -147,13 +150,21 @@ const API = (function() {
 
         const artifactId = image.artifactId || image.artifact_id || null;
         const fallbackDownloadPath = artifactId ? `/api/artifacts/${encodeURIComponent(artifactId)}/download` : '';
-        const downloadUrl = buildArtifactDisplayUrl(image.downloadPath || image.downloadUrl || fallbackDownloadPath || '');
-        const inlineUrl = downloadUrl
-            ? buildArtifactDisplayUrl(
-                image.inlinePath || image.inlineUrl || image.downloadPath || image.downloadUrl || fallbackDownloadPath || '',
-                { inline: true },
-            )
-            : '';
+        const rawDownloadUrl = image.downloadPath
+            || image.downloadUrl
+            || image.absoluteUrl
+            || fallbackDownloadPath
+            || '';
+        const rawInlineUrl = image.inlinePath
+            || image.inlineUrl
+            || image.absoluteInlineUrl
+            || image.downloadPath
+            || image.downloadUrl
+            || image.absoluteUrl
+            || fallbackDownloadPath
+            || '';
+        const downloadUrl = buildArtifactDisplayUrl(rawDownloadUrl);
+        const inlineUrl = buildArtifactDisplayUrl(rawInlineUrl, { inline: true });
 
         const base64Image = typeof image.b64_json === 'string'
             && image.b64_json.trim()
@@ -162,7 +173,10 @@ const API = (function() {
                 ? image.b64_json
                 : `data:image/png;base64,${image.b64_json}`)
             : '';
-        let imageUrl = inlineUrl || base64Image || buildArtifactDisplayUrl(image.url || '') || image.url || '';
+        const directUrl = buildArtifactDisplayUrl(
+            image.url || image.imageUrl || image.image_url || image.absoluteUrl || '',
+        ) || image.url || image.imageUrl || image.image_url || image.absoluteUrl || '';
+        let imageUrl = inlineUrl || base64Image || directUrl;
 
         if (!imageUrl) {
             return null;
@@ -172,7 +186,7 @@ const API = (function() {
             ...image,
             imageUrl,
             inlineUrl: inlineUrl || imageUrl,
-            downloadUrl: downloadUrl || buildArtifactDisplayUrl(image.url || '') || image.url || '',
+            downloadUrl: downloadUrl || directUrl || '',
             artifactId,
             filename: image.filename || null,
         };
@@ -635,7 +649,9 @@ const API = (function() {
             if (data.sessionId || data.session_id) {
                 currentSessionId = data.sessionId || data.session_id;
             }
-            const images = Array.isArray(data.data) ? data.data : [];
+            const images = Array.isArray(data.data) && data.data.length > 0
+                ? data.data
+                : (Array.isArray(data.artifacts) ? data.artifacts : []);
             const normalizedImages = images
                 .map((image) => normalizeGeneratedImage(image))
                 .filter(Boolean);

@@ -13,6 +13,7 @@ const router = Router();
 function applyLibraryHeaders(res, contentType = 'application/octet-stream') {
   res.setHeader('Content-Type', contentType);
   res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.setHeader('Origin-Agent-Cluster', '?0');
   res.setHeader('X-Content-Type-Options', 'nosniff');

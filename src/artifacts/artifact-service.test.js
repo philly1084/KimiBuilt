@@ -604,6 +604,84 @@ describe('ArtifactService', () => {
         }));
     });
 
+    test('stores 3D scene sandbox requests as zip bundles with separate scene files', async () => {
+        createResponse.mockResolvedValueOnce({
+            id: 'resp-3d-scene-1',
+            output: [{
+                type: 'message',
+                content: [{
+                    text: JSON.stringify({
+                        content: '<!DOCTYPE html><html><head><title>Orbit Lab</title><link rel="stylesheet" href="./styles.css"><script type="importmap">{"imports":{"three":"/api/sandbox-libraries/three/three.module.js","three/addons/":"/api/sandbox-libraries/three/addons/"}}</script></head><body><main id="scene-root"></main><script type="module" src="./scene.js"></script></body></html>',
+                        metadata: {
+                            title: 'Orbit Lab',
+                            frameworkTarget: 'static',
+                            bundle: {
+                                entry: 'index.html',
+                                files: [
+                                    {
+                                        path: 'index.html',
+                                        language: 'html',
+                                        purpose: '3D scene entry point',
+                                        content: '<!DOCTYPE html><html><head><title>Orbit Lab</title><link rel="stylesheet" href="./styles.css"><script type="importmap">{"imports":{"three":"/api/sandbox-libraries/three/three.module.js","three/addons/":"/api/sandbox-libraries/three/addons/"}}</script></head><body><main id="scene-root"></main><script type="module" src="./scene.js"></script></body></html>',
+                                    },
+                                    {
+                                        path: 'styles.css',
+                                        language: 'css',
+                                        purpose: 'Scene layout and fallback styling',
+                                        content: 'html, body, #scene-root { width: 100%; height: 100%; margin: 0; background: #07111f; color: #f8fafc; }',
+                                    },
+                                    {
+                                        path: 'scene.js',
+                                        language: 'javascript',
+                                        purpose: 'Three.js scene runtime',
+                                        content: 'import * as THREE from "three"; const scene = new THREE.Scene(); document.body.dataset.sceneReady = String(Boolean(scene));',
+                                    },
+                                ],
+                            },
+                            handoff: {
+                                summary: 'Standalone Three.js scene preview.',
+                                targetFramework: 'static',
+                            },
+                        },
+                    }),
+                }],
+            }],
+        });
+
+        await artifactService.generateArtifact({
+            session: { previousResponseId: 'prev-3d-scene', metadata: {} },
+            sessionId: 'session-1',
+            mode: 'chat',
+            prompt: 'Create a sandboxed immersive 3D scene in HTML with Three.js and a visible animated object.',
+            format: 'html',
+            artifactIds: [],
+            existingContent: '',
+            model: 'gpt-5.3',
+        });
+
+        expect(createResponse.mock.calls[0][0]?.instructions).toContain('For 3D, WebGL, Three.js');
+        expect(createResponse.mock.calls[0][0]?.instructions).toContain('`scene.js`');
+        expect(renderArtifact).not.toHaveBeenCalled();
+        expect(artifactStore.create).toHaveBeenCalledWith(expect.objectContaining({
+            extension: 'zip',
+            mimeType: 'application/zip',
+            metadata: expect.objectContaining({
+                generationStrategy: 'single-pass-frontend-demo',
+                siteBundle: expect.objectContaining({
+                    entry: 'index.html',
+                    fileCount: 3,
+                }),
+                bundle: expect.objectContaining({
+                    files: expect.arrayContaining([
+                        expect.objectContaining({ path: 'index.html' }),
+                        expect.objectContaining({ path: 'styles.css' }),
+                        expect.objectContaining({ path: 'scene.js' }),
+                    ]),
+                }),
+            }),
+        }));
+    });
+
     test('allows tool orchestration for research-backed frontend artifacts', async () => {
         createResponse.mockResolvedValueOnce({
             id: 'resp-frontend-research-1',

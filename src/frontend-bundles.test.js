@@ -1,5 +1,6 @@
 const {
     buildFrontendBundleArtifact,
+    isComplexFrontendBundleRequest,
     readFrontendBundleArchive,
 } = require('./frontend-bundles');
 
@@ -50,5 +51,10 @@ describe('frontend bundle styling safety net', () => {
 
         expect(indexHtml).toContain('href="assets/site.css"');
         expect(css).toContain('kimibuilt bundle style safety net');
+    });
+
+    test('treats 3D scene requests as bundle-worthy frontend work', () => {
+        expect(isComplexFrontendBundleRequest('Build a sandboxed Three.js 3D scene in HTML')).toBe(true);
+        expect(isComplexFrontendBundleRequest('Create an immersive WebGL particle scene')).toBe(true);
     });
 });
