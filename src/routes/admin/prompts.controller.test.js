@@ -212,6 +212,7 @@ describe('admin prompts controller', () => {
     expect(prompt.content).toContain('Treat "remote CLI", "direct CLI", and "remote command" as aliases for the `remote-command` tool.');
     expect(prompt.content).toContain('prefer `remote-cli-agent` so the remote coding agent owns authoring, build, deploy, and verification');
     expect(prompt.content).toContain('pass `params.adminMode:true`');
+    expect(prompt.content).toContain('use GitLab as the normal source-control layer');
     expect(prompt.content).toContain('USER_INPUT_REQUIRED');
     expect(prompt.content).toContain('avoid indentation-sensitive inline Python or YAML heredocs');
   });

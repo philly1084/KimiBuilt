@@ -22,7 +22,7 @@ class K3sDeployTool extends ToolBase {
     super({
       id: 'k3s-deploy',
       name: 'K3s Deploy',
-      description: 'Restricted k3s deployment actions over SSH for syncing a GitHub repo, applying manifests, and checking rollouts',
+      description: 'Restricted k3s deployment actions over SSH or runner for syncing a GitHub or configured GitLab repo, applying manifests, and checking rollouts',
       category: 'ssh',
       version: '1.0.0',
       backend: {
@@ -40,7 +40,7 @@ class K3sDeployTool extends ToolBase {
           },
           repositoryUrl: {
             type: 'string',
-            description: 'GitHub repository URL for sync-repo or sync-and-apply.',
+            description: 'GitHub or configured Git provider repository URL for sync-repo or sync-and-apply.',
           },
           ref: {
             type: 'string',

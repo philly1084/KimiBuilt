@@ -303,6 +303,7 @@ async function getRuntimeSupport(toolId) {
                 ? [
                     `Remote CLI MCP server ${publicConfig.name} is configured at ${publicConfig.url}.`,
                     `Default target is ${publicConfig.defaultTargetId}${publicConfig.defaultCwd ? ` with cwd ${publicConfig.defaultCwd}` : ''}.`,
+                    gitProviderConfig?.baseURL ? `Configured Git provider is ${gitProviderConfig.provider || 'gitlab'} at ${gitProviderConfig.baseURL}.` : 'No configured GitLab base URL is visible to the runtime; remote builds should fall back to local git/direct runner and report the missing source-control automation.',
                     'Use adminMode for scoped remote software deployment loops that need real changes through the admin-capable CLI runner lane.',
                 ]
                 : [

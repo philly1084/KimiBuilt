@@ -26,6 +26,8 @@ describe('RemoteCliAgentsSdkRunner', () => {
     expect(instructions).toContain('repo-map');
     expect(instructions).toContain('deploy-verify');
     expect(instructions).toContain('git-backed workspace');
+    expect(instructions).toContain('GitLab-backed source-control skill');
+    expect(instructions).toContain('direct BuildKit/kubectl runner path');
     expect(instructions).toContain('git user.name');
     expect(instructions).toContain('Playwright/Chromium screenshots');
     expect(instructions).toContain('kimibuilt-ui-check');
@@ -83,7 +85,7 @@ describe('RemoteCliAgentsSdkRunner', () => {
     });
 
     expect(instructions).toContain('Configured Git provider: gitlab at https://gitlab.demoserver2.buzz (group/org: agent-apps).');
-    expect(instructions).toContain('GITLAB_TOKEN');
+    expect(instructions).toContain('configured provider token');
     expect(instructions).not.toContain('hasToken');
   });
 
