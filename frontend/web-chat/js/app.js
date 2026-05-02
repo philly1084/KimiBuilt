@@ -6033,6 +6033,9 @@ curl -fsSIL --max-time 20 "https://$host"`;
         if (!normalizedPath) {
             return '';
         }
+        if (/^data:image\//i.test(normalizedPath)) {
+            return normalizedPath;
+        }
 
         try {
             const apiBase = typeof API_BASE_URL === 'string' && API_BASE_URL
@@ -6098,15 +6101,21 @@ curl -fsSIL --max-time 20 "https://$host"`;
 
         const artifactId = image.artifactId || image.artifact_id || '';
         const fallbackDownloadPath = artifactId ? `/api/artifacts/${encodeURIComponent(artifactId)}/download` : '';
-        const downloadUrl = this.buildArtifactUrl(
-            image.downloadPath || image.downloadUrl || fallbackDownloadPath || '',
-        );
-        const inlineUrl = downloadUrl
-            ? this.buildArtifactUrl(
-                image.inlinePath || image.inlineUrl || image.downloadPath || image.downloadUrl || fallbackDownloadPath || '',
-                { inline: true },
-            )
-            : '';
+        const rawDownloadUrl = image.downloadPath
+            || image.downloadUrl
+            || image.absoluteUrl
+            || fallbackDownloadPath
+            || '';
+        const rawInlineUrl = image.inlinePath
+            || image.inlineUrl
+            || image.absoluteInlineUrl
+            || image.downloadPath
+            || image.downloadUrl
+            || image.absoluteUrl
+            || fallbackDownloadPath
+            || '';
+        const downloadUrl = this.buildArtifactUrl(rawDownloadUrl);
+        const inlineUrl = this.buildArtifactUrl(rawInlineUrl, { inline: true });
 
         const base64Image = typeof image.b64_json === 'string'
             && image.b64_json.trim()
@@ -6115,7 +6124,10 @@ curl -fsSIL --max-time 20 "https://$host"`;
                 ? image.b64_json
                 : `data:image/png;base64,${image.b64_json}`)
             : '';
-        let imageUrl = inlineUrl || base64Image || this.buildArtifactUrl(image.url || '') || image.url || '';
+        const directUrl = this.buildArtifactUrl(
+            image.url || image.imageUrl || image.image_url || image.absoluteUrl || '',
+        ) || image.url || image.imageUrl || image.image_url || image.absoluteUrl || '';
+        let imageUrl = inlineUrl || base64Image || directUrl;
 
         if (!imageUrl) {
             return null;
@@ -6123,12 +6135,12 @@ curl -fsSIL --max-time 20 "https://$host"`;
 
         return {
             imageUrl,
-            thumbnailUrl: this.buildArtifactUrl(image.thumbnailUrl || '') || image.thumbnailUrl || imageUrl,
+            thumbnailUrl: this.buildArtifactUrl(image.thumbnailUrl || image.thumbUrl || '') || image.thumbnailUrl || image.thumbUrl || imageUrl,
             alt: image.alt || image.revisedPrompt || fallbackPrompt || 'Generated image',
             revisedPrompt: image.revisedPrompt || image.revised_prompt || '',
             prompt: fallbackPrompt,
             model: image.model || fallbackModel || '',
-            downloadUrl,
+            downloadUrl: downloadUrl || directUrl || '',
             artifactId,
             filename: image.filename || '',
             source: 'generated',
@@ -6385,7 +6397,10 @@ curl -fsSIL --max-time 20 "https://$host"`;
             }
 
             if (toolId === 'image-generate') {
-                const results = (Array.isArray(data.images) ? data.images : [])
+                const toolImages = Array.isArray(data.images) && data.images.length > 0
+                    ? data.images
+                    : (Array.isArray(data.artifacts) ? data.artifacts : []);
+                const results = toolImages
                     .map((image) => this.normalizeGeneratedImage(image, data.prompt || args.prompt || '', data.model || ''))
                     .filter(Boolean);
 
@@ -7636,7 +7651,10 @@ curl -fsSIL --max-time 20 "https://$host"`;
             }
             
             // Update the image message with the result
-            const generatedImages = (Array.isArray(result.data) ? result.data : [])
+            const resultImages = Array.isArray(result.data) && result.data.length > 0
+                ? result.data
+                : (Array.isArray(result.artifacts) ? result.artifacts : []);
+            const generatedImages = resultImages
                 .map((image) => this.normalizeGeneratedImage(image, options.prompt, result.model || options.model || ''))
                 .filter(Boolean);
 
