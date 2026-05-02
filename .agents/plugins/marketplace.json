@@ -1,0 +1,20 @@
+{
+  "name": "kimibuilt-local",
+  "interface": {
+    "displayName": "KimiBuilt Local Plugins"
+  },
+  "plugins": [
+    {
+      "name": "ai-harness-maintainer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ai-harness-maintainer"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

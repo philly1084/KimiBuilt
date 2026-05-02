@@ -17,6 +17,7 @@ const PLAYWRIGHT_BROWSER_ARGS = [
     '--disable-gpu',
     '--no-sandbox',
 ];
+const PDF_RENDER_CRASHLOG_DIR = path.join(process.cwd(), 'output', 'crashlogs', 'pdf-renderer');
 const GENERATED_ARTIFACT_STYLE_MARKER = 'data-kimibuilt-style-safety-net';
 const GENERATED_ARTIFACT_BASE_CSS = `
     :root {
@@ -126,6 +127,64 @@ const GENERATED_ARTIFACT_BASE_CSS = `
       nav { align-items: stretch; }
     }
 `;
+
+function serializePdfRenderError(error) {
+    return {
+        name: error?.name || 'Error',
+        message: error?.message || String(error || 'Unknown PDF render error'),
+        stack: error?.stack || '',
+        code: error?.code || '',
+        signal: error?.signal || '',
+        killed: Boolean(error?.killed),
+        stdout: typeof error?.stdout === 'string' ? error.stdout.slice(0, 20000) : '',
+        stderr: typeof error?.stderr === 'string' ? error.stderr.slice(0, 20000) : '',
+    };
+}
+
+async function writePdfRenderCrashLog({
+    stage = 'unknown',
+    error = null,
+    title = '',
+    browserPath = '',
+    htmlPath = '',
+    pdfPath = '',
+    html = '',
+} = {}) {
+    try {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const slug = createFriendlyFilenameBase(title || stage || 'pdf-render', 'pdf-render');
+        const baseName = `${timestamp}-${process.pid}-${slug}`.slice(0, 180);
+        await fs.mkdir(PDF_RENDER_CRASHLOG_DIR, { recursive: true });
+        const metadata = {
+            timestamp,
+            stage,
+            title,
+            pid: process.pid,
+            platform: process.platform,
+            node: process.version,
+            browserPath,
+            htmlPath,
+            pdfPath,
+            pdfTimeoutMs: config.artifacts.pdfTimeoutMs,
+            browserArgs: config.artifacts.browserArgs || '',
+            error: serializePdfRenderError(error),
+        };
+        await fs.writeFile(
+            path.join(PDF_RENDER_CRASHLOG_DIR, `${baseName}.json`),
+            `${JSON.stringify(metadata, null, 2)}\n`,
+            'utf8',
+        );
+        if (html) {
+            await fs.writeFile(
+                path.join(PDF_RENDER_CRASHLOG_DIR, `${baseName}.html`),
+                html,
+                'utf8',
+            );
+        }
+    } catch (logError) {
+        console.warn('[Artifacts] Failed to write PDF render crashlog:', logError.message);
+    }
+}
 
 function splitArgs(value = '') {
     return String(value || '')
@@ -1000,7 +1059,7 @@ async function renderPdfViaPlaywright(htmlPath, pdfPath, browserPath = null) {
         }).catch(() => {});
         await page.waitForTimeout(250);
 
-        return page.pdf({
+        return await page.pdf({
             path: pdfPath,
             printBackground: true,
             preferCSSPageSize: true,
@@ -1027,7 +1086,15 @@ async function renderPdfViaBrowser(html, title) {
         const playwrightBuffer = await renderPdfViaPlaywright(htmlPath, pdfPath, browserPath)
             .catch((error) => {
                 console.warn('[Artifacts] Playwright PDF rendering failed:', error.message);
-                return null;
+                return writePdfRenderCrashLog({
+                    stage: 'playwright',
+                    error,
+                    title,
+                    browserPath,
+                    htmlPath,
+                    pdfPath,
+                    html: pdfHtml,
+                }).then(() => null);
             });
         if (playwrightBuffer) {
             return Buffer.from(playwrightBuffer);
@@ -1035,14 +1102,36 @@ async function renderPdfViaBrowser(html, title) {
         if (!browserPath) {
             return null;
         }
-        await execFileAsync(browserPath, getBrowserArgs(pdfPath, htmlPath, pdfHtml), {
-            timeout: config.artifacts.pdfTimeoutMs,
-            windowsHide: true,
-        });
+        try {
+            await execFileAsync(browserPath, getBrowserArgs(pdfPath, htmlPath, pdfHtml), {
+                timeout: config.artifacts.pdfTimeoutMs,
+                windowsHide: true,
+            });
+        } catch (error) {
+            console.warn('[Artifacts] Browser PDF command failed:', error.message);
+            await writePdfRenderCrashLog({
+                stage: 'browser-command',
+                error,
+                title,
+                browserPath,
+                htmlPath,
+                pdfPath,
+                html: pdfHtml,
+            });
+            return null;
+        }
         const buffer = await fs.readFile(pdfPath);
         return buffer;
     } catch (error) {
         console.warn('[Artifacts] Browser PDF rendering failed:', error.message);
+        await writePdfRenderCrashLog({
+            stage: 'browser-pipeline',
+            error,
+            title,
+            browserPath,
+            htmlPath,
+            pdfPath,
+        });
         return null;
     } finally {
         await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});

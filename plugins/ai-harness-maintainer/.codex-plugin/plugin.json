@@ -1,0 +1,55 @@
+{
+  "name": "ai-harness-maintainer",
+  "version": "0.1.0",
+  "description": "Automates recurring research, maintenance, implementation, and visual verification for AI harness codebases.",
+  "author": {
+    "name": "KimiBuilt",
+    "email": "philly1084@gmail.com",
+    "url": "https://demoserver2.buzz"
+  },
+  "homepage": "https://demoserver2.buzz",
+  "repository": "https://demoserver2.buzz",
+  "license": "MIT",
+  "keywords": [
+    "ai-harness",
+    "automation",
+    "maintenance",
+    "research",
+    "verification"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks.json",
+  "mcpServers": "./.mcp.json",
+  "apps": "./.app.json",
+  "interface": {
+    "displayName": "AI Harness Maintainer",
+    "shortDescription": "Recurring codebase maintenance for AI harnesses.",
+    "longDescription": "Researches AI harness updates, applies scoped code changes, runs tests, verifies frontend or workflow behavior with screenshots when available, and reports evidence from each recurring maintenance pass.",
+    "developerName": "KimiBuilt",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Research",
+      "Write",
+      "Code Review",
+      "Testing",
+      "Screenshots",
+      "Automation"
+    ],
+    "websiteURL": "https://demoserver2.buzz",
+    "privacyPolicyURL": "https://demoserver2.buzz/privacy",
+    "termsOfServiceURL": "https://demoserver2.buzz/terms",
+    "defaultPrompt": [
+      "Run an AI harness maintenance pass on this repo.",
+      "Research new harness patterns and patch this codebase.",
+      "Verify the harness UI with screenshots after changes."
+    ],
+    "brandColor": "#2563EB",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png",
+    "screenshots": [
+      "./assets/screenshot1.png",
+      "./assets/screenshot2.png",
+      "./assets/screenshot3.png"
+    ]
+  }
+}
