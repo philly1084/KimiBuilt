@@ -1,6 +1,6 @@
 # Simplified Rancher Deployment - Same Domain
 # Backend serves frontend static files and API from the same pod.
-# Domain: kimibuilt.demoserver2.buzz
+# Domains: kimibuilt.secdevsolutions.help and kimibuilt.demoserver2.buzz
 # Requires existing secret: kimibuilt-secrets with OPENAI_API_KEY and POSTGRES_PASSWORD.
 # Optional remote deploy defaults are set below.
 # Optional SSH secret keys for backend-driven deploys:
@@ -23,9 +23,20 @@ metadata:
 spec:
   tls:
     - hosts:
+        - kimibuilt.secdevsolutions.help
         - kimibuilt.demoserver2.buzz
       secretName: kimibuilt-tls
   rules:
+    - host: kimibuilt.secdevsolutions.help
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 3000
     - host: kimibuilt.demoserver2.buzz
       http:
         paths:

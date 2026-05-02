@@ -3,7 +3,16 @@
 const { config } = require('../config');
 
 function normalizeOrigin(value = '') {
-    return String(value || '').trim().replace(/\/+$/, '');
+    const rawValue = String(value || '').trim().replace(/\/+$/, '');
+    if (!rawValue) {
+        return '';
+    }
+
+    try {
+        return new URL(rawValue).origin;
+    } catch (_error) {
+        return rawValue;
+    }
 }
 
 function buildCorsOptions(securityConfig = config.security) {

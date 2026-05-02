@@ -14,9 +14,21 @@ spec:
   ingressClassName: traefik
   tls:
     - hosts:
+        - kimibuilt.secdevsolutions.help
         - kimibuilt.demoserver2.buzz
       secretName: kimibuilt-tls
   rules:
+    - host: kimibuilt.secdevsolutions.help
+      http:
+        paths:
+          # Frontend files (root and all frontend paths)
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 3000
     - host: kimibuilt.demoserver2.buzz
       http:
         paths:

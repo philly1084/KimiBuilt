@@ -43,6 +43,21 @@ describe('security middleware', () => {
         expect(response.body.code).toBe('cors_origin_denied');
     });
 
+    test('normalizes configured origins before matching browser Origin headers', async () => {
+        const app = express();
+        app.use(cors(buildCorsOptions({
+            allowedOrigins: ['https://KIMIBUILT.example:443/'],
+        })));
+        app.get('/ok', (_req, res) => res.json({ ok: true }));
+
+        const response = await request(app)
+            .get('/ok')
+            .set('Origin', 'https://kimibuilt.example')
+            .expect(200);
+
+        expect(response.headers['access-control-allow-origin']).toBe('https://kimibuilt.example');
+    });
+
     test('rate limits repeated login attempts', async () => {
         const app = express();
         app.post('/api/auth/login', createRateLimit({

@@ -30,7 +30,8 @@ metadata:
   name: kimibuilt-config
   namespace: kimibuilt
 data:
-  API_BASE_URL: "https://kimibuilt.demoserver2.buzz"
+  API_BASE_URL: "https://kimibuilt.secdevsolutions.help"
+  KIMIBUILT_ALLOWED_ORIGINS: "https://kimibuilt.secdevsolutions.help,https://kimibuilt.demoserver2.buzz"
   OPENAI_BASE_URL: "http://n8n-openai-cli-gateway.n8n-openai-gateway.svc.cluster.local/v1"
   OPENAI_MODEL: "gpt-4o"
   OPENAI_IMAGE_MODEL: "gpt-image-2"
@@ -707,6 +708,7 @@ spec:
     accessControlAllowHeaders:
       - "*"
     accessControlAllowOriginList:
+      - "https://kimibuilt.secdevsolutions.help"
       - "https://kimibuilt.demoserver2.buzz"
       - "http://localhost:8080"
       - "http://localhost:3000"
@@ -730,9 +732,20 @@ metadata:
 spec:
   tls:
     - hosts:
+        - kimibuilt.secdevsolutions.help
         - kimibuilt.demoserver2.buzz
       secretName: kimibuilt-tls
   rules:
+    - host: kimibuilt.secdevsolutions.help
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
     - host: kimibuilt.demoserver2.buzz
       http:
         paths:
