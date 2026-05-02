@@ -2,11 +2,10 @@ const { config } = require('../../../../config');
 const settingsController = require('../../../../routes/admin/settings.controller');
 
 function getApiBaseUrl() {
-  const configured = String(
-    settingsController?.settings?.api?.baseURL
-    || process.env.API_BASE_URL
-    || `http://localhost:${config.port || 3000}`
-  ).trim();
+  const settingsBaseUrl = String(settingsController?.settings?.api?.baseURL || '').trim();
+  const envBaseUrl = String(process.env.API_BASE_URL || '').trim();
+  const fallbackBaseUrl = `http://localhost:${config.port || 3000}`;
+  const configured = selectApiBaseUrl(settingsBaseUrl, envBaseUrl, fallbackBaseUrl);
 
   if (!configured) {
     return null;
@@ -17,6 +16,34 @@ function getApiBaseUrl() {
   } catch (_error) {
     return null;
   }
+}
+
+function isLoopbackBaseUrl(value = '') {
+  const normalized = String(value || '').trim();
+  if (!normalized) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(normalized);
+    return ['localhost', '127.0.0.1', '0.0.0.0', '::1', '[::1]'].includes(
+      String(parsed.hostname || '').trim().toLowerCase(),
+    );
+  } catch (_error) {
+    return /^(?:https?:\/\/)?(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[?::1\]?)(?::\d+)?(?:\/|$)/i.test(normalized);
+  }
+}
+
+function selectApiBaseUrl(settingsBaseUrl = '', envBaseUrl = '', fallbackBaseUrl = '') {
+  const settingsValue = String(settingsBaseUrl || '').trim();
+  const envValue = String(envBaseUrl || '').trim();
+  const fallbackValue = String(fallbackBaseUrl || '').trim();
+
+  if (envValue && (!settingsValue || isLoopbackBaseUrl(settingsValue))) {
+    return envValue;
+  }
+
+  return settingsValue || envValue || fallbackValue;
 }
 
 function resolveInternalUrl(value, baseUrl = getApiBaseUrl()) {
@@ -81,6 +108,8 @@ function normalizeBrowserReachableUrl(value) {
 
 module.exports = {
   getApiBaseUrl,
+  isLoopbackBaseUrl,
   normalizeBrowserReachableUrl,
   resolveInternalUrl,
+  selectApiBaseUrl,
 };

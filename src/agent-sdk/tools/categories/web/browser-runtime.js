@@ -5,7 +5,7 @@ const { execFile } = require('child_process');
 const { promisify } = require('util');
 const { config } = require('../../../../config');
 const { artifactService } = require('../../../../artifacts/artifact-service');
-const { normalizeBrowserReachableUrl } = require('./internal-url');
+const { getApiBaseUrl, normalizeBrowserReachableUrl } = require('./internal-url');
 const { resolveFrontendApiKey } = require('../../../../auth/service');
 
 const execFileAsync = promisify(execFile);
@@ -182,7 +182,19 @@ function isInternalApiUrl(url = '') {
     const parsed = new URL(url);
     const hostname = String(parsed.hostname || '').toLowerCase();
     const localHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]';
-    return parsed.pathname.startsWith('/api/') && (localHost || hostname === 'api');
+    if (!parsed.pathname.startsWith('/api/')) {
+      return false;
+    }
+    if (localHost || hostname === 'api') {
+      return true;
+    }
+
+    const configured = getApiBaseUrl();
+    if (!configured) {
+      return false;
+    }
+    const configuredOrigin = new URL(configured).origin;
+    return parsed.origin === configuredOrigin;
   } catch (_error) {
     return false;
   }

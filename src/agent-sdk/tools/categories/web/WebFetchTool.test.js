@@ -16,8 +16,19 @@ const { WebFetchTool } = require('./WebFetchTool');
 const { artifactService } = require('../../../../artifacts/artifact-service');
 
 describe('WebFetchTool', () => {
+  const originalApiBaseUrl = process.env.API_BASE_URL;
+
+  afterEach(() => {
+    if (originalApiBaseUrl == null) {
+      delete process.env.API_BASE_URL;
+    } else {
+      process.env.API_BASE_URL = originalApiBaseUrl;
+    }
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
+    delete process.env.API_BASE_URL;
   });
 
   test('resolves internal artifact api paths against the configured base url', () => {
@@ -41,6 +52,16 @@ describe('WebFetchTool', () => {
     );
     expect(tool.normalizeUrl(`https://api/api/artifacts/${artifactId}/download`)).toBe(
       `http://localhost:3000/api/artifacts/${artifactId}/download`,
+    );
+  });
+
+  test('prefers public API_BASE_URL when saved admin settings still point at localhost', () => {
+    process.env.API_BASE_URL = 'https://kimibuilt.secdevsolutions.help';
+    const tool = new WebFetchTool();
+    const artifactId = '3ee64601-2cb4-43e1-b56b-973bc2856419';
+
+    expect(tool.normalizeUrl(`/api/artifacts/${artifactId}/sandbox`)).toBe(
+      `https://kimibuilt.secdevsolutions.help/api/artifacts/${artifactId}/sandbox`,
     );
   });
 

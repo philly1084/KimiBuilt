@@ -3,8 +3,8 @@
  */
 
 const { ToolBase } = require('../../ToolBase');
-const settingsController = require('../../../../routes/admin/settings.controller');
 const { artifactService } = require('../../../../artifacts/artifact-service');
+const { getApiBaseUrl, resolveInternalUrl } = require('./internal-url');
 
 class WebFetchTool extends ToolBase {
   constructor() {
@@ -289,63 +289,11 @@ class WebFetchTool extends ToolBase {
   }
 
   resolveInternalUrl(value) {
-    const normalized = String(value || '').trim();
-    if (!normalized) {
-      return null;
-    }
-
-    const baseUrl = this.getApiBaseUrl();
-    if (!baseUrl) {
-      return null;
-    }
-
-    if (/^\/api\/.+/i.test(normalized)) {
-      return new URL(normalized, baseUrl).toString();
-    }
-
-    if (/^api\/.+/i.test(normalized)) {
-      return new URL(`/${normalized}`, baseUrl).toString();
-    }
-
-    if (/^\/artifacts\/.+/i.test(normalized)) {
-      return new URL(`/api${normalized}`, baseUrl).toString();
-    }
-
-    if (/^artifacts\/.+/i.test(normalized)) {
-      return new URL(`/api/${normalized}`, baseUrl).toString();
-    }
-
-    try {
-      const parsed = new URL(normalized);
-      const hostname = String(parsed.hostname || '').toLowerCase();
-      const pathname = parsed.pathname || '';
-
-      if (hostname === 'api') {
-        if (/^\/api\/.+/i.test(pathname)) {
-          return new URL(pathname, baseUrl).toString();
-        }
-        if (/^\/artifacts\/.+/i.test(pathname)) {
-          return new URL(`/api${pathname}`, baseUrl).toString();
-        }
-      }
-    } catch (_error) {
-      return null;
-    }
-
-    return null;
+    return resolveInternalUrl(value, this.getApiBaseUrl());
   }
 
   getApiBaseUrl() {
-    const configured = String(settingsController?.settings?.api?.baseURL || process.env.API_BASE_URL || 'http://localhost:3000').trim();
-    if (!configured) {
-      return null;
-    }
-
-    try {
-      return new URL(configured).toString();
-    } catch (_error) {
-      return null;
-    }
+    return getApiBaseUrl();
   }
 
   formatFetchError(error, url, timeout) {

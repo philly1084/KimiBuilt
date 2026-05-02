@@ -13,6 +13,20 @@ const {
 } = require('./browser-runtime');
 
 describe('browser-runtime URL normalization', () => {
+  const originalApiBaseUrl = process.env.API_BASE_URL;
+
+  afterEach(() => {
+    if (originalApiBaseUrl == null) {
+      delete process.env.API_BASE_URL;
+    } else {
+      process.env.API_BASE_URL = originalApiBaseUrl;
+    }
+  });
+
+  beforeEach(() => {
+    delete process.env.API_BASE_URL;
+  });
+
   test('resolves internal preview paths against the configured backend base url', () => {
     expect(normalizeBrowserUrl('/api/sandbox-workspaces/demo/preview/')).toBe(
       'http://localhost:3000/api/sandbox-workspaces/demo/preview/',
@@ -28,11 +42,23 @@ describe('browser-runtime URL normalization', () => {
     );
   });
 
+  test('prefers public API_BASE_URL over default localhost settings for hosted previews', () => {
+    process.env.API_BASE_URL = 'https://kimibuilt.secdevsolutions.help';
+
+    expect(normalizeBrowserUrl('/api/artifacts/artifact-site-1/sandbox')).toBe(
+      'https://kimibuilt.secdevsolutions.help/api/artifacts/artifact-site-1/sandbox',
+    );
+  });
+
   test('adds the frontend API key for internal API preview URLs', () => {
     const original = process.env.KIMIBUILT_FRONTEND_API_KEY;
     process.env.KIMIBUILT_FRONTEND_API_KEY = 'frontend-test-key';
     try {
       expect(buildInternalBrowserHeaders('http://localhost:3000/api/artifacts/site/sandbox')).toEqual({
+        'x-api-key': 'frontend-test-key',
+      });
+      process.env.API_BASE_URL = 'https://kimibuilt.secdevsolutions.help';
+      expect(buildInternalBrowserHeaders('https://kimibuilt.secdevsolutions.help/api/artifacts/site/sandbox')).toEqual({
         'x-api-key': 'frontend-test-key',
       });
       expect(buildInternalBrowserHeaders('https://example.com/api/artifacts/site/sandbox')).toEqual({});
