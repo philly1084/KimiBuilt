@@ -64,6 +64,11 @@ const {
     buildNaturalContextInstructions,
     buildSkillsTreeInstructions,
 } = require('../natural-context');
+const {
+    buildDirectPodcastAssistantMessage,
+    buildDirectPodcastParams,
+    shouldUseDirectPodcastChat,
+} = require('../podcast/direct-podcast-chat');
 
 const router = Router();
 const WORKLOAD_PREFLIGHT_RECENT_LIMIT = config.memory.recentTranscriptLimit;
@@ -627,6 +632,146 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             transport: 'http',
             metadata: { route: '/api/chat', stream, phase: 'preflight', reasoningEffort },
         });
+
+        if (shouldUseDirectPodcastChat(message)) {
+            const podcastParams = buildDirectPodcastParams({
+                text: message,
+                artifactIds: effectiveArtifactIds,
+                model,
+                reasoningEffort,
+            });
+            if (podcastParams) {
+                if (stream) {
+                    activeSse = openSseStream(req, res, sessionId);
+                    writeSseProgressPayload(activeSse, sessionId, {
+                        phase: 'podcast',
+                        detail: 'Starting the podcast workflow.',
+                        summary: 'Creating podcast audio',
+                    });
+                }
+
+                const runtimeToolManager = await ensureRuntimeToolManager(req.app);
+                const result = await runtimeToolManager.executeTool('podcast', podcastParams, {
+                    sessionId,
+                    route: '/api/chat',
+                    transport: 'http',
+                    memoryService,
+                    ownerId,
+                    clientSurface,
+                    memoryScope,
+                    sessionIsolation,
+                    memoryKeywords,
+                    timezone: requestTimezone,
+                    now: requestNow,
+                    artifactIds: effectiveArtifactIds,
+                    workloadService: req.app.locals.agentWorkloadService,
+                    managedAppService: req.app.locals.managedAppService || null,
+                    model,
+                    reasoningEffort,
+                    executionProfile: podcastParams.includeVideo ? 'podcast-video' : 'podcast',
+                });
+                const toolEvents = [{
+                    toolCall: {
+                        function: {
+                            name: 'podcast',
+                            arguments: JSON.stringify(podcastParams),
+                        },
+                    },
+                    result,
+                }];
+                if (result?.success === false) {
+                    const error = new Error(result.error || 'Podcast workflow failed.');
+                    error.code = result.errorCode || result?.diagnostics?.podcast?.code || 'podcast_error';
+                    error.statusCode = Number(result.statusCode || result?.diagnostics?.podcast?.statusCode || 502);
+                    error.podcastDiagnostics = result?.diagnostics?.podcast || {};
+                    throw error;
+                }
+
+                const responseId = `podcast-${Date.now()}`;
+                const assistantText = buildDirectPodcastAssistantMessage(result.data || {});
+                const artifacts = extractArtifactsFromToolEvents(toolEvents);
+                await sessionStore.recordResponse(sessionId, responseId);
+                await sessionStore.update(sessionId, {
+                    metadata: {
+                        taskType,
+                        clientSurface: clientSurface || taskType,
+                        memoryScope,
+                        lastToolIntent: 'podcast',
+                        lastPodcastTopic: podcastParams.topic,
+                    },
+                });
+                memoryService.rememberResponse(sessionId, assistantText, buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                    sourceSurface: clientSurface || taskType,
+                    memoryKeywords,
+                    ...(sessionIsolation ? { sessionIsolation: true } : {}),
+                }));
+                if (artifacts.length > 0) {
+                    await Promise.all(artifacts.map((artifact) => memoryService.rememberArtifactResult(sessionId, {
+                        artifact,
+                        summary: `Created the podcast artifact (${artifact.filename}).`,
+                        sourceText: assistantText,
+                        metadata: buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                            sourceSurface: clientSurface || taskType,
+                            memoryKeywords,
+                            sourcePrompt: message,
+                            ...(sessionIsolation ? { sessionIsolation: true } : {}),
+                        }),
+                    })));
+                }
+                await sessionStore.appendMessages(sessionId, buildWebChatSessionMessages({
+                    userText: message,
+                    assistantText,
+                    toolEvents,
+                    artifacts,
+                    assistantMetadata: { directPodcast: true, toolEvents },
+                }));
+                await updateSessionProjectMemory(sessionId, {
+                    userText: message,
+                    assistantText,
+                    toolEvents,
+                    artifacts,
+                }, ownerId);
+
+                completeRuntimeTask(runtimeTask?.id, {
+                    responseId,
+                    output: assistantText,
+                    model: result.data?.model || model || session?.metadata?.model || null,
+                    duration: Date.now() - startedAt,
+                    metadata: {
+                        directPodcast: true,
+                        toolEvents,
+                        artifacts,
+                    },
+                });
+
+                if (stream) {
+                    res.write(`data: ${JSON.stringify({ type: 'delta', content: assistantText })}\n\n`);
+                    res.write(`data: ${JSON.stringify({
+                        type: 'done',
+                        sessionId,
+                        responseId,
+                        artifacts,
+                        toolEvents,
+                        assistant_metadata: buildFrontendAssistantMetadata({ directPodcast: true, artifacts }),
+                        assistantMetadata: buildFrontendAssistantMetadata({ directPodcast: true, artifacts }),
+                    })}\n\n`);
+                    res.write('data: [DONE]\n\n');
+                    res.end();
+                    return;
+                }
+
+                res.json({
+                    sessionId,
+                    responseId,
+                    message: assistantText,
+                    artifacts,
+                    toolEvents,
+                    assistant_metadata: buildFrontendAssistantMetadata({ directPodcast: true, artifacts }),
+                    assistantMetadata: buildFrontendAssistantMetadata({ directPodcast: true, artifacts }),
+                });
+                return;
+            }
+        }
 
         if (effectiveOutputFormat) {
             const toolManager = await ensureRuntimeToolManager(req.app);

@@ -148,6 +148,72 @@ describe('/api/chat route', () => {
         });
     });
 
+    test('runs explicit podcast requests through the podcast tool without chat orchestration', async () => {
+        const toolManager = {
+            executeTool: jest.fn().mockResolvedValue({
+                success: true,
+                data: {
+                    title: 'Cats in Conversation',
+                    summary: 'A short two-host episode about cats.',
+                    artifacts: [{
+                        id: 'artifact-podcast-1',
+                        filename: 'cats.wav',
+                        mimeType: 'audio/wav',
+                        downloadUrl: '/api/artifacts/artifact-podcast-1/download',
+                    }],
+                },
+            }),
+            getTool: jest.fn(),
+        };
+        ensureRuntimeToolManager.mockResolvedValue(toolManager);
+
+        const app = express();
+        app.use(express.json());
+        app.use('/api/chat', chatRouter);
+
+        const response = await request(app)
+            .post('/api/chat')
+            .send({
+                sessionId: 'session-1',
+                message: 'can you make a podcast on cats',
+                stream: false,
+                model: 'gpt-test',
+                metadata: {
+                    clientSurface: 'web-chat',
+                },
+            });
+
+        expect(response.status).toBe(200);
+        expect(toolManager.executeTool).toHaveBeenCalledWith(
+            'podcast',
+            expect.objectContaining({
+                topic: 'cats',
+                model: 'gpt-test',
+            }),
+            expect.objectContaining({
+                sessionId: 'session-1',
+                route: '/api/chat',
+                transport: 'http',
+                executionProfile: 'podcast',
+            }),
+        );
+        expect(executeConversationRuntime).not.toHaveBeenCalled();
+        expect(memoryService.process).not.toHaveBeenCalled();
+        expect(response.body.message).toContain('Cats in Conversation');
+        expect(response.body.artifacts).toEqual([
+            expect.objectContaining({
+                id: 'artifact-podcast-1',
+                filename: 'cats.wav',
+            }),
+        ]);
+        expect(sessionStore.appendMessages).toHaveBeenCalledWith('session-1', expect.arrayContaining([
+            expect.objectContaining({
+                role: 'assistant',
+                content: expect.stringContaining('The podcast has been created'),
+            }),
+        ]));
+    });
+
     test('routes SSH-looking requests through the orchestrator instead of executing a direct tool shortcut', async () => {
         const toolManager = {
             executeTool: jest.fn(),

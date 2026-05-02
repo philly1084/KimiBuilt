@@ -63,6 +63,11 @@ const {
     unregisterAdminConnection,
     unregisterSessionConnection,
 } = require('../realtime-hub');
+const {
+    buildDirectPodcastAssistantMessage,
+    buildDirectPodcastParams,
+    shouldUseDirectPodcastChat,
+} = require('../podcast/direct-podcast-chat');
 
 // Admin dashboard event emitter
 const EventEmitter = require('events');
@@ -410,6 +415,126 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
 
     try {
         const runtimeToolManager = toolManager || await ensureRuntimeToolManager(ws.app);
+
+        if (shouldUseDirectPodcastChat(message)) {
+            const podcastParams = buildDirectPodcastParams({
+                text: message,
+                artifactIds: effectiveArtifactIds,
+                model,
+                reasoningEffort,
+            });
+            if (podcastParams) {
+                sendWsProgressPayload(ws, session.id, {
+                    phase: 'podcast',
+                    detail: 'Starting the podcast workflow.',
+                    summary: 'Creating podcast audio',
+                });
+
+                const result = await runtimeToolManager.executeTool('podcast', podcastParams, {
+                    sessionId: session.id,
+                    route: '/ws',
+                    transport: 'ws',
+                    memoryService,
+                    ownerId,
+                    clientSurface,
+                    memoryScope,
+                    sessionIsolation,
+                    memoryKeywords,
+                    timezone: requestTimezone,
+                    now: requestNow,
+                    artifactIds: effectiveArtifactIds,
+                    workloadService: ws.app?.locals?.agentWorkloadService || null,
+                    managedAppService: ws.app?.locals?.managedAppService || null,
+                    model,
+                    reasoningEffort,
+                    executionProfile: podcastParams.includeVideo ? 'podcast-video' : 'podcast',
+                });
+                const toolEvents = [{
+                    toolCall: {
+                        function: {
+                            name: 'podcast',
+                            arguments: JSON.stringify(podcastParams),
+                        },
+                    },
+                    result,
+                }];
+                if (result?.success === false) {
+                    const error = new Error(result.error || 'Podcast workflow failed.');
+                    error.code = result.errorCode || result?.diagnostics?.podcast?.code || 'podcast_error';
+                    error.statusCode = Number(result.statusCode || result?.diagnostics?.podcast?.statusCode || 502);
+                    error.podcastDiagnostics = result?.diagnostics?.podcast || {};
+                    throw error;
+                }
+
+                const responseId = `podcast-${Date.now()}`;
+                const assistantText = buildDirectPodcastAssistantMessage(result.data || {});
+                const artifacts = extractArtifactsFromToolEvents(toolEvents);
+                await sessionStore.recordResponse(session.id, responseId);
+                await sessionStore.update(session.id, {
+                    metadata: {
+                        taskType,
+                        clientSurface: clientSurface || taskType,
+                        memoryScope,
+                        lastToolIntent: 'podcast',
+                        lastPodcastTopic: podcastParams.topic,
+                    },
+                });
+                memoryService.rememberResponse(session.id, assistantText, buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                    sourceSurface: clientSurface || taskType,
+                    memoryKeywords,
+                    ...(sessionIsolation ? { sessionIsolation: true } : {}),
+                }));
+                if (artifacts.length > 0) {
+                    await Promise.all(artifacts.map((artifact) => memoryService.rememberArtifactResult(session.id, {
+                        artifact,
+                        summary: `Created the podcast artifact (${artifact.filename}).`,
+                        sourceText: assistantText,
+                        metadata: buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                            sourceSurface: clientSurface || taskType,
+                            memoryKeywords,
+                            sourcePrompt: message,
+                            ...(sessionIsolation ? { sessionIsolation: true } : {}),
+                        }),
+                    })));
+                }
+                await sessionStore.appendMessages(session.id, buildWebChatSessionMessages({
+                    userText: message,
+                    assistantText,
+                    toolEvents,
+                    artifacts,
+                    assistantMetadata: { directPodcast: true, toolEvents },
+                }));
+                await updateSessionProjectMemory(session.id, {
+                    userText: message,
+                    assistantText,
+                    toolEvents,
+                    artifacts,
+                }, ownerId);
+
+                completeRuntimeTask(runtimeTask?.id, {
+                    responseId,
+                    output: assistantText,
+                    model: result.data?.model || model || null,
+                    duration: Date.now() - startedAt,
+                    metadata: {
+                        directPodcast: true,
+                        toolEvents,
+                        artifacts,
+                    },
+                });
+                safeWsSend(ws, { type: 'delta', content: assistantText });
+                safeWsSend(ws, {
+                    type: 'done',
+                    sessionId: session.id,
+                    responseId,
+                    artifacts,
+                    toolEvents,
+                    assistant_metadata: buildFrontendAssistantMetadata({ directPodcast: true, artifacts }),
+                    assistantMetadata: buildFrontendAssistantMetadata({ directPodcast: true, artifacts }),
+                });
+                return;
+            }
+        }
 
         if (effectiveOutputFormat) {
             const artifactRecentMessages = await sessionStore.getRecentMessages(
