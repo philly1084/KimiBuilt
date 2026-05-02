@@ -33,6 +33,30 @@ describe('RemoteRunnerService', () => {
     expect(() => service.authenticateToken('wrong')).toThrow('Invalid remote runner token');
   });
 
+  test('accepts runner bearer auth and preserves deprecated query-token compatibility', () => {
+    const service = new RemoteRunnerService({
+      config: {
+        enabled: true,
+        token: 'secret',
+      },
+    });
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(() => service.authenticateRequest({
+      headers: { authorization: 'Bearer secret' },
+      url: '/api/runners/register',
+    })).not.toThrow();
+    expect(warn).not.toHaveBeenCalled();
+
+    expect(() => service.authenticateRequest({
+      headers: {},
+      url: '/ws/runners?runnerToken=secret',
+    })).not.toThrow();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Query-string runner tokens are deprecated'));
+
+    warn.mockRestore();
+  });
+
   test('registers a websocket runner and dispatches command jobs', async () => {
     const service = new RemoteRunnerService({
       config: {

@@ -7,6 +7,7 @@ const helmet = require('helmet');
 
 const { config, validate } = require('./config');
 const { errorHandler } = require('./middleware/error-handler');
+const { buildCorsOptions, createRateLimit, isToolInvokePath } = require('./middleware/security');
 const { memoryService } = require('./memory/memory-service');
 const { setupWebSocket } = require('./ws/handler');
 const { embedder } = require('./memory/embedder');
@@ -83,8 +84,25 @@ app.use(helmet({
     contentSecurityPolicy: false,
     originAgentCluster: false,
 }));
-app.use(cors());
+app.use(cors(buildCorsOptions()));
 app.use(express.json({ limit: '10mb' }));
+
+const loginRateLimit = createRateLimit({
+    name: 'login',
+    max: config.security.loginRateLimitMax,
+    windowMs: config.security.rateLimitWindowMs,
+});
+const apiRateLimit = createRateLimit({
+    name: 'api',
+    max: config.security.rateLimitMax,
+    windowMs: config.security.rateLimitWindowMs,
+    skip: isToolInvokePath,
+});
+const toolRateLimit = createRateLimit({
+    name: 'tool-invoke',
+    max: config.security.toolRateLimitMax,
+    windowMs: config.security.rateLimitWindowMs,
+});
 
 app.get('/health', async (_req, res) => {
     const checks = {
@@ -162,6 +180,7 @@ app.get('/login', (req, res) => {
     return res.sendFile(path.join(frontendPath, 'auth', 'login.html'));
 });
 
+app.use('/api/auth/login', loginRateLimit);
 app.use('/api/auth', authRouter);
 app.use('/api/integrations/gitlab', gitlabIntegrationsRouter);
 app.use('/api/integrations/gitea', giteaIntegrationsRouter);
@@ -180,6 +199,7 @@ app.post('/api/runners/register', (req, res, next) => {
     }
 });
 app.use(requireAuth);
+app.use('/api', apiRateLimit);
 
 // Serve only the 4 active frontends
 app.use('/web-chat', express.static(path.join(frontendPath, 'web-chat'), buildFrontendStaticOptions()));
@@ -290,6 +310,7 @@ app.use('/api/admin', providerSessionsRouter);
 app.use('/api/admin', remoteAgentTasksRouter);
 app.use('/admin', providerSessionsRouter);
 app.use('/admin', remoteAgentTasksRouter);
+app.use('/api/tools/invoke', toolRateLimit);
 app.use('/api/tools', toolsRouter);
 app.use('/api', workloadsRouter);
 app.use('/api', managedAppsRouter);

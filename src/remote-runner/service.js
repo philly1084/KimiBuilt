@@ -33,7 +33,11 @@ function getRequestToken(req = null) {
 
   try {
     const url = new URL(req.url || '', 'http://localhost');
-    return normalizeText(url.searchParams.get('token') || url.searchParams.get('runnerToken'));
+    const queryToken = normalizeText(url.searchParams.get('token') || url.searchParams.get('runnerToken'));
+    if (queryToken) {
+      console.warn('[RemoteRunner] Query-string runner tokens are deprecated; use Authorization: Bearer instead.');
+    }
+    return queryToken;
   } catch (_error) {
     return '';
   }

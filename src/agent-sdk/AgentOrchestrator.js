@@ -1263,7 +1263,11 @@ class AgentOrchestrator {
   }
 
   buildToolEventsFromTrace(trace = {}) {
-    const steps = Array.isArray(trace?.steps) ? trace.steps : [];
+    const flattenSteps = (stepsToFlatten = []) => stepsToFlatten.flatMap((step) => [
+      step,
+      ...flattenSteps(Array.isArray(step?.substeps) ? step.substeps : []),
+    ]);
+    const steps = flattenSteps(Array.isArray(trace?.steps) ? trace.steps : []);
 
     return steps
       .filter((step) => step?.type === 'tool-call')

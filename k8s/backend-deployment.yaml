@@ -28,6 +28,12 @@ spec:
         - name: backend
           image: ghcr.io/philly1084/kimibuilt:latest
           imagePullPolicy: Always
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           ports:
             - containerPort: 3000
               name: http

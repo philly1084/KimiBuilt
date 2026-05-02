@@ -3445,6 +3445,13 @@ GUIDELINES:
         if (looseCandidate && looseCandidate !== cleaned) {
             candidates.push(looseCandidate);
         }
+        [...candidates].forEach((candidate) => {
+            buildLooseTopLevelJsonCandidates(candidate).forEach((nextCandidate) => {
+                if (nextCandidate && !candidates.includes(nextCandidate)) {
+                    candidates.push(nextCandidate);
+                }
+            });
+        });
 
         for (const candidate of candidates) {
             try {
@@ -3455,6 +3462,50 @@ GUIDELINES:
         }
 
         return null;
+    }
+
+    function findJsonStringEnd(text = '', start = 0) {
+        const source = String(text || '');
+        if (source[start] !== '"') {
+            return -1;
+        }
+
+        let isEscaped = false;
+        for (let index = start + 1; index < source.length; index++) {
+            const char = source[index];
+            if (isEscaped) {
+                isEscaped = false;
+                continue;
+            }
+            if (char === '\\') {
+                isEscaped = true;
+                continue;
+            }
+            if (char === '"') {
+                return index + 1;
+            }
+        }
+
+        return -1;
+    }
+
+    function buildLooseTopLevelJsonCandidates(text = '') {
+        const source = String(text || '').trim();
+        if (!source) {
+            return [];
+        }
+
+        const candidates = [];
+        if (/^"(?:assistant_reply|assistantReply|assistantMessage|reply|message|actions|operations|edits|notes-actions)"\s*:/i.test(source)) {
+            candidates.push(`{${source}}`);
+        }
+
+        const stringEnd = findJsonStringEnd(source, 0);
+        if (stringEnd > 0 && /^\s*,\s*"(?:actions|operations|edits|notes-actions)"\s*:/i.test(source.slice(stringEnd))) {
+            candidates.push(`{"assistant_reply":${source}}`);
+        }
+
+        return candidates;
     }
 
     function unwrapCodeFence(text = '') {

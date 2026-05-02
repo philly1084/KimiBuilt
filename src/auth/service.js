@@ -179,16 +179,18 @@ function getTokenFromRequest(req) {
         return String(apiKey).trim();
     }
 
-    try {
-        const parsedUrl = new URL(String(req.url || ''), 'http://localhost');
-        const queryToken = parsedUrl.searchParams.get('access_token')
-            || parsedUrl.searchParams.get('api_key')
-            || parsedUrl.searchParams.get('token');
-        if (queryToken) {
-            return String(queryToken).trim();
+    if (config.security.allowQueryTokens || getRequestPath(req) === '/ws') {
+        try {
+            const parsedUrl = new URL(String(req.url || ''), 'http://localhost');
+            const queryToken = parsedUrl.searchParams.get('access_token')
+                || parsedUrl.searchParams.get('api_key')
+                || parsedUrl.searchParams.get('token');
+            if (queryToken) {
+                return String(queryToken).trim();
+            }
+        } catch (_error) {
+            // Ignore malformed request URLs and continue as unauthenticated.
         }
-    } catch (_error) {
-        // Ignore malformed request URLs and continue as unauthenticated.
     }
 
     return '';

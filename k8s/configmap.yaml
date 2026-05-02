@@ -5,6 +5,14 @@ metadata:
   namespace: kimibuilt
 data:
   API_BASE_URL: "https://kimibuilt.secdevsolutions.help"
+  # Security hardening: keep auth required in production and only allow browser API calls from the public backend origin.
+  KIMIBUILT_AUTH_REQUIRED: "true"
+  KIMIBUILT_ALLOWED_ORIGINS: "https://kimibuilt.secdevsolutions.help"
+  KIMIBUILT_ALLOW_QUERY_TOKENS: "false"
+  KIMIBUILT_RATE_LIMIT_WINDOW_MS: "60000"
+  KIMIBUILT_RATE_LIMIT_MAX: "120"
+  KIMIBUILT_LOGIN_RATE_LIMIT_MAX: "10"
+  KIMIBUILT_TOOL_RATE_LIMIT_MAX: "30"
   # Chat/tool traffic and frontend image generation stay on the internal OpenAI-compatible gateway.
   OPENAI_BASE_URL: "http://n8n-openai-cli-gateway.n8n-openai-gateway.svc.cluster.local/v1"
   OPENAI_MODEL: "gpt-4o"

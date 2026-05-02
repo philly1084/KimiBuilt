@@ -68,6 +68,14 @@ function parseOptionalStringList(value) {
         .filter(Boolean);
 }
 
+function parseIntegerWithDefault(value, fallback, { min = 0 } = {}) {
+    const parsed = parseInt(value, 10);
+    if (!Number.isFinite(parsed)) {
+        return fallback;
+    }
+    return Math.max(min, parsed);
+}
+
 function resolveAvailableParallelism() {
     try {
         if (typeof os.availableParallelism === 'function') {
@@ -459,10 +467,18 @@ const normalizedPodcastVideoRenderMode = allowedPodcastVideoRenderModes.has(requ
     ? requestedPodcastVideoRenderMode
     : 'waveform-card';
 
+const nodeEnv = process.env.NODE_ENV || 'development';
+const isProduction = nodeEnv === 'production';
+const configuredAllowedOrigins = parseOptionalStringList(
+    process.env.KIMIBUILT_ALLOWED_ORIGINS
+    || process.env.CORS_ALLOWED_ORIGINS
+    || '',
+);
+
 const config = {
     // Server
     port: parseInt(process.env.PORT, 10) || 3000,
-    nodeEnv: process.env.NODE_ENV || 'development',
+    nodeEnv,
 
     // OpenAI-compatible gateway for chat/tool use and frontend image generation
     openai: {
@@ -649,6 +665,39 @@ const config = {
         jwtSecret: process.env.LILLYBUILT_JWT_SECRET || process.env.KIMIBUILT_JWT_SECRET || '',
         cookieName: process.env.LILLYBUILT_AUTH_COOKIE || 'lillybuilt_auth',
         tokenTtlSeconds: parseInt(process.env.LILLYBUILT_AUTH_TTL_SECONDS || process.env.KIMIBUILT_AUTH_TTL_SECONDS, 10) || (12 * 60 * 60),
+    },
+
+    security: {
+        authRequired: parseOptionalBoolean(process.env.KIMIBUILT_AUTH_REQUIRED) ?? isProduction,
+        allowedOrigins: configuredAllowedOrigins.length > 0
+            ? configuredAllowedOrigins
+            : (isProduction ? [] : [
+                'http://localhost:3000',
+                'http://localhost:8080',
+                'http://127.0.0.1:3000',
+                'http://127.0.0.1:8080',
+            ]),
+        allowQueryTokens: parseOptionalBoolean(process.env.KIMIBUILT_ALLOW_QUERY_TOKENS) ?? !isProduction,
+        rateLimitWindowMs: parseIntegerWithDefault(
+            process.env.KIMIBUILT_RATE_LIMIT_WINDOW_MS,
+            60 * 1000,
+            { min: 1000 },
+        ),
+        rateLimitMax: parseIntegerWithDefault(
+            process.env.KIMIBUILT_RATE_LIMIT_MAX,
+            120,
+            { min: 1 },
+        ),
+        loginRateLimitMax: parseIntegerWithDefault(
+            process.env.KIMIBUILT_LOGIN_RATE_LIMIT_MAX,
+            10,
+            { min: 1 },
+        ),
+        toolRateLimitMax: parseIntegerWithDefault(
+            process.env.KIMIBUILT_TOOL_RATE_LIMIT_MAX,
+            30,
+            { min: 1 },
+        ),
     },
 
     search: {
@@ -948,6 +997,10 @@ function validate() {
         config.auth.password,
         config.auth.jwtSecret,
     ].filter(Boolean).length;
+
+    if (config.security.authRequired && authConfigCount < 3) {
+        errors.push('KIMIBUILT auth is required: set username, password, and JWT secret env vars');
+    }
 
     if (errors.length > 0) {
         throw new Error(`Config validation failed:\n  - ${errors.join('\n  - ')}`);

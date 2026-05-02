@@ -157,6 +157,61 @@ describe('AgentOrchestrator', () => {
         ]));
     });
 
+    test('builds tool events from nested execution trace steps', () => {
+        const orchestrator = new AgentOrchestrator({
+            llmClient: {
+                complete: jest.fn(),
+            },
+            embedder: {
+                embed: jest.fn(),
+            },
+        });
+
+        const toolEvents = orchestrator.buildToolEventsFromTrace({
+            steps: [
+                {
+                    id: 'plan-step',
+                    type: 'plan',
+                    substeps: [
+                        {
+                            id: 'nested-tool-step',
+                            type: 'tool-call',
+                            input: {
+                                tool: 'web-fetch',
+                                params: {
+                                    url: 'https://example.com',
+                                },
+                            },
+                            output: {
+                                status: 200,
+                            },
+                            substeps: [],
+                        },
+                    ],
+                },
+            ],
+        });
+
+        expect(toolEvents).toEqual([
+            expect.objectContaining({
+                toolCall: expect.objectContaining({
+                    id: 'nested-tool-step',
+                    function: expect.objectContaining({
+                        name: 'web-fetch',
+                        arguments: JSON.stringify({ url: 'https://example.com' }),
+                    }),
+                }),
+                result: expect.objectContaining({
+                    success: true,
+                    toolId: 'web-fetch',
+                    data: {
+                        status: 200,
+                    },
+                }),
+            }),
+        ]);
+    });
+
     test('ignores conversation agent executor unless it is explicitly enabled in config', async () => {
         const llmClient = {
             createResponse: jest.fn().mockResolvedValue({

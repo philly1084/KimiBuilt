@@ -290,6 +290,56 @@ Approved page plan:
         ]));
     });
 
+    test('repairs notes-actions payloads missing their outer object braces', () => {
+        const agent = loadAgent();
+        const responseText = [
+            '"assistant_reply":"Built the Halifax weekend guide.",',
+            '"actions":[',
+            '  {"op":"update_page","title":"Halifax Weekend Fun - May 2026","icon":"wave"},',
+            '  {"op":"rebuild_page","blocks":[',
+            '    {"type":"heading_1","content":"Halifax Weekend Fun - May 2026","color":"blue_background","textColor":"blue"},',
+            '    {"type":"callout","content":"A weekend and evening planner for Halifax, Nova Scotia this May.","icon":"wave","color":"blue_background","textColor":"blue"},',
+            '    {"type":"database","content":"Best Weekend and Evening Ideas","columns":["Plan Type","Best For"],"rows":[["Waterfront Night","Low-cost evening"],["Arts and Exhibitions","Rainy day"]]}',
+            '  ]}',
+            ']',
+        ].join('\n');
+
+        const parsed = agent._extractNotesActionPlan(responseText);
+
+        expect(parsed.displayText).toBe('Built the Halifax weekend guide.');
+        expect(parsed.actions).toHaveLength(2);
+        expect(parsed.actions[0]).toEqual(expect.objectContaining({
+            op: 'update_page',
+            title: 'Halifax Weekend Fun - May 2026',
+        }));
+        expect(parsed.actions[1]).toEqual(expect.objectContaining({
+            op: 'rebuild_page',
+        }));
+        expect(parsed.actions[1].blocks).toEqual(expect.arrayContaining([
+            expect.objectContaining({ type: 'heading_1', content: 'Halifax Weekend Fun - May 2026' }),
+            expect.objectContaining({ type: 'database', content: 'Best Weekend and Evening Ideas' }),
+        ]));
+    });
+
+    test('repairs notes-actions payloads that start with a bare reply string', () => {
+        const agent = loadAgent();
+        const responseText = [
+            '"Halifax weekend and evening guide using verified Halifax, Nova Scotia event research.",',
+            '"actions":[',
+            '  {"op":"update_page","title":"Halifax Weekend Fun - May 2026"},',
+            '  {"op":"rebuild_page","blocks":[{"type":"heading_1","content":"Halifax Weekend Fun - May 2026"}]}',
+            ']',
+        ].join('\n');
+
+        const parsed = agent._extractNotesActionPlan(responseText);
+
+        expect(parsed.displayText).toBe('Halifax weekend and evening guide using verified Halifax, Nova Scotia event research.');
+        expect(parsed.actions).toHaveLength(2);
+        expect(parsed.actions[1].blocks).toEqual([
+            expect.objectContaining({ type: 'heading_1', content: 'Halifax Weekend Fun - May 2026' }),
+        ]);
+    });
+
     test('does not salvage a one-word inner block fragment from a broken structured payload', () => {
         const agent = loadAgent();
         const responseText = [
