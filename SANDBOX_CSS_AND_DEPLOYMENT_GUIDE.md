@@ -48,7 +48,44 @@ Most styling issues come from one of these:
 
 ---
 
-## 3) “No-surprise” project structure
+## 3) Document-specific sandbox rules
+
+Sandbox HTML is excellent for fast document drafts, visual systems, reports, and dashboard-like PDFs, but it is usually a source/preview layer rather than the final artifact.
+
+Use this workflow:
+
+1. **Brief**
+   - Capture format, audience, purpose, tone, length, required sections, data/assets, and acceptance checks.
+2. **Preview source**
+   - Build static-safe HTML with explicit design tokens, relative assets, semantic headings, figure/table captions, and print CSS.
+3. **Export**
+   - Convert through the real document path for PDF/PPTX/XLSX/Markdown. Use a separate verified conversion path for DOCX. Do not rename HTML to an office format.
+4. **Verify**
+   - Render or open the exported artifact and inspect page breaks, contrast, tables, captions, headers/footers, and image quality.
+5. **Handoff**
+   - Keep the source, final artifact, and QA notes together so another agent can continue cleanly.
+
+For PDF-oriented HTML:
+- Add `@page` margins and print-safe colors.
+- Avoid fixed overlays, nested scroll regions, viewport-only sections, and animation-dependent content.
+- Keep headings with nearby content where practical.
+- Prevent table rows, figures, and callouts from splitting awkwardly.
+
+For DOCX-oriented source:
+- Favor simple semantic structure over elaborate CSS.
+- Use headings, paragraphs, lists, tables, page breaks, figures, captions, and alt text.
+- Use static image assets for charts and diagrams instead of interactive browser-only widgets.
+- Keep reusable section IDs or comments around major blocks so follow-up edits can target exact regions.
+
+KimiBuilt checks and routing:
+- Run `node bin/kimibuilt-ui-check.js <url-or-file-url> --out ui-checks/<name>` for generated HTML previews when a browser is available.
+- Check `/api/sandbox-libraries/catalog.json` before using local sandbox library routes.
+- Treat relative preview/artifact URLs as intentional. Resolve them through the current backend/artifact URL handling instead of hard-coding `localhost`.
+- Current native document outputs are HTML, PDF, PPTX, XLSX, and Markdown. DOCX/Word requests currently need a separate conversion path; sandbox HTML alone is not DOCX.
+
+---
+
+## 4) “No-surprise” project structure
 
 Use a simple structure in prototypes:
 
@@ -73,7 +110,7 @@ Rules:
 
 ---
 
-## 4) Reliable CSS checklist (quick triage)
+## 5) Reliable CSS checklist (quick triage)
 
 When styling is incomplete, check in this order:
 
@@ -90,7 +127,7 @@ When styling is incomplete, check in this order:
 
 ---
 
-## 5) Suggested build-first workflow for “cool things”
+## 6) Suggested build-first workflow for “cool things”
 
 1. Start with local prototype scope:
    - one page/app,
@@ -113,7 +150,7 @@ When styling is incomplete, check in this order:
 
 ---
 
-## 6) Deployment decision matrix (simple)
+## 7) Deployment decision matrix (simple)
 
 - **Static site hosting** (fastest)
   - best for docs, portfolios, landing pages, SPA frontends.
@@ -126,7 +163,7 @@ If your priority is rapid experimentation, choose static or PaaS first.
 
 ---
 
-## 7) Guardrails to prevent “escaping” output
+## 8) Guardrails to prevent “escaping” output
 
 - Keep generated files inside one output root (`dist/`).
 - Never rely on absolute filesystem paths.
@@ -136,7 +173,7 @@ If your priority is rapid experimentation, choose static or PaaS first.
 
 ---
 
-## 8) Minimal pre-deploy validation template
+## 9) Minimal pre-deploy validation template
 
 Run these checks before deploying:
 
@@ -150,10 +187,9 @@ If any check fails: fix build, do not deploy.
 
 ---
 
-## 9) Practical next step for this repo
+## 10) Practical next step for this repo
 
 If you want, the next iteration can add:
 1. A concrete `npm run build` + `npm run preview` flow,
 2. a tiny validation script for CSS/asset completeness,
 3. optional deployment presets (static vs app platform) so you can choose at release time.
-

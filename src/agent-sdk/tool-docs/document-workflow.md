@@ -10,12 +10,27 @@ Core actions:
 - `assemble`: combine source material into one document.
 - `generate-suite`: create a multi-format package such as PDF + HTML + PPTX + XLSX, with optional graph assets and a Vite/static preview bundle.
 
+Current runtime formats:
+
+- Supported generation outputs are `html`, `pdf`, `pptx`, `xlsx`, and `md`.
+- `docx`, `doc`, and `word` requests currently normalize to `html`. Treat DOCX as future work or as an external conversion path that must be named and verified separately.
+- Do not call sandbox HTML, Markdown, or a renamed file a finished DOCX/PDF/PPTX artifact.
+
 Quality defaults:
 
 - Every AI-backed generation request receives the built-in document quality standard: strategy architecture, background art direction, evidence editing, accessibility review, and final polish.
 - Treat design-sensitive documents and sandbox websites as a Symphony-style build loop: plan the surface, generate the artifact, review rendered output, then iterate before final delivery when the review exposes template sameness, broken layout, auth walls, low contrast, missing assets, or thin content.
 - Background creation is automatic. The workflow should define readable canvas, page, panel, dark band, table, chart, caption, and image-overlay surfaces without making the user ask for visual prompt details.
 - Pass `qualityPass:false` only for explicit cost or latency-sensitive calls where the caller accepts lower polish.
+
+Done means verified:
+
+- The artifact exists and the response includes its artifact ID, download URL, preview URL, or saved file path.
+- HTML previews have been opened or checked with `node bin/kimibuilt-ui-check.js <url-or-file-url> --out ui-checks/<name>` when a browser is available.
+- PDF output has been rendered or visually reviewed for page breaks, contrast, table splits, captions, headers/footers, and image quality.
+- PPTX/XLSX outputs have been opened, rendered, or inspected with the available office/spreadsheet tooling before delivery when tooling exists.
+- Static chart and diagram assets are included for DOC/PDF/PPTX-style exports; interactive browser-only charts need SVG/PNG fallbacks.
+- The handoff names the source files, generated artifacts, checks run, failed checks fixed, and remaining assumptions.
 
 Training and Manuals:
 
@@ -27,8 +42,9 @@ Training and Manuals:
 - For website, web app, dashboard, landing-page, and UI mockup requests, build through the richer HTML artifact/frontend path and preserve the generated bundle as the preview entry. Do not wrap a single website mockup in a generic document-suite index unless the user asked for a multi-file document package.
 - Sandbox builds include an `AGENT_SANDBOX_BUILD.md` handoff prompt for the next agent. Keep that prompt capability-oriented: describe the sandbox constraints, available local browser libraries, relative-path rules, accessibility/readability checks, and preview expectations. Do not bake in a fixed visual style, palette, layout trope, or tool-orchestration chain.
 - Treat sandbox build mode as a delivery switch, not permission to invent nested tool workflows. The build agent should use the files and tools already available in the sandbox project and choose design ideas from the user task, audience, and content.
+- Sandbox document builds are previews and source bundles. Export through the real document path for PDF/PPTX/XLSX/Markdown, and record that DOCX is not native unless a separate conversion step exists.
 - For interactive HTML documents, dashboards, graph explorers, and 3D explainers, prefer local sandbox browser library routes from `/api/sandbox-libraries/` before external CDNs. Common choices include Three.js, Chart.js, D3, Mermaid, Cytoscape, Plotly, ECharts, vis-network, GSAP, Matter.js, p5.js, Rough.js, Force Graph, and 3D Force Graph.
-- Ask concise design questions when audience, delivery mode, duration, format mix, research depth, assessment style, or visual direction is unclear.
+- Ask only high-impact design questions when audience, delivery mode, duration, format mix, research depth, assessment style, or visual direction would materially change the output. Otherwise infer conservative defaults and record them.
 - Ground subject-specific training in vector context and verified web research when the user asks for current facts, standards, procedures, or domain-specific instruction.
 
 Podcast and video podcast training:

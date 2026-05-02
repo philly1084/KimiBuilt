@@ -52,16 +52,35 @@ Clients (CLI / Web Chat / Canvas / Notation)
 
 When an agent or program creates HTML, PDF-oriented HTML, DOCX, slide decks, dashboards, reports, or other visual artifacts:
 
+- Decide the delivery format first: editable DOCX, fixed-layout PDF, responsive HTML, Markdown source, PPTX, or a sandbox preview. Do not rename HTML as DOCX/PDF; use the document generator/export path for real office formats.
+- Current KimiBuilt document generation supports HTML, PDF, PPTX, XLSX, and Markdown. DOCX/Word requests currently normalize to HTML unless a separate external/export path is explicitly provided, so do not promise native DOCX as a finished runtime output.
+- Ask for or infer the minimum document context before writing: audience, purpose, format, length, tone, required sections, source material, brand/style constraints, images/data/tables, and delivery deadline. If details are missing, choose conservative professional defaults and state them in the artifact metadata or handoff note.
+- Build from structured content. Use headings, sections, tables, callouts, figures, captions, page breaks, and references as explicit blocks instead of one long prose blob.
 - Treat readability as a release requirement, not polish. Never ship white or near-white text on white, transparent, or pale backgrounds; never ship dark text on dark backgrounds.
 - Define explicit color pairs for each surface: page background, cards, panels, dark bands, image overlays, buttons, links, muted text, tables, callouts, and captions.
 - Target WCAG AA contrast: 4.5:1 for normal body text and 3:1 for large or bold display text. If unsure, make the contrast stronger.
 - For text over images, use a solid or strongly translucent overlay/panel and set both `color` and `background-color`; do not rely on the image staying dark enough.
 - Avoid one-note palettes. Use a small set of named design tokens such as `--text`, `--muted`, `--surface`, `--panel`, `--accent`, `--border`, and verify every token is readable where used.
 - Check responsive layout for clipped labels, text spilling out of buttons/cards, overlapping sections, horizontal overflow, and sticky elements covering content.
-- For print/PDF output, include print-safe styles with dark text on light backgrounds unless a dark printed panel is explicitly defined.
+- For print/PDF output, include print-safe styles with dark text on light backgrounds unless a dark printed panel is explicitly defined. Set page size/margins, avoid viewport-only sizing, prevent orphan headings where practical, and ensure table rows, figures, and callouts do not split awkwardly.
 - For generated HTML previews, run `node bin/kimibuilt-ui-check.js <url-or-file-url> --out ui-checks/<name>` before delivery when a browser is available. Treat `low-contrast-text`, `horizontal-overflow`, `empty-body-text`, broken images, and page errors as blockers to fix.
-- For generated DOCX/PDF/PPTX, render or preview the artifact and do a visual pass before delivery. Confirm titles, captions, tables, and callouts remain readable after export, not just in source HTML.
+- For generated DOCX/PDF/PPTX, render or preview the artifact and do a visual pass before delivery. Confirm title pages, headers/footers, captions, tables, callouts, page breaks, and exported images remain readable after export, not just in source HTML.
+- For data-heavy documents, generate chart/diagram assets separately and embed them as files with alt text/captions. Prefer reusable SVG/PNG artifacts from graph/diagram tooling over screenshots when the output must survive DOCX/PDF export.
+- Preserve source and output together: keep the editable source, generated artifact, and any render/QA report connected in the session or handoff note so another agent can continue without guessing the pipeline.
 - If a user gives a broken example, fix the design tokens and surface-level CSS first, then re-check the artifact instead of only rewriting prose.
+
+---
+
+## Document Agent Workflow
+
+When an agent is asked to create or improve a document:
+
+- Start with a compact document brief: `format`, `audience`, `purpose`, `sections`, `tone`, `length`, `inputs`, `visual assets`, `constraints`, and `acceptance checks`.
+- Prefer KimiBuilt document templates and services for PDF/PPTX/XLSX/Markdown outputs when available. Use sandbox HTML for fast preview and iteration, but convert through a real export/render path before calling the document finished. Treat DOCX as external conversion work unless native support is added.
+- If using sandbox HTML as the source, make it static-safe: one `index.html` plus local `styles.css`/assets or clearly linked static files, relative paths, no build-only classes left uncompiled, and print CSS for PDF-oriented documents.
+- Make document structure machine-readable enough for follow-up agents: stable section IDs, predictable class names, figure/table numbering, and comments only where they explain non-obvious layout or export decisions.
+- Verify in the target medium, not only in the editor. HTML needs browser QA; PDF needs page render review; PPTX/XLSX should be opened or rendered when tooling is available.
+- Handoff must include what was generated, where the source lives, where the final artifact lives, which checks ran, and any remaining assumptions.
 
 ---
 
