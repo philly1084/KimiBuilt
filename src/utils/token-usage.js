@@ -219,12 +219,32 @@ function extractResponseUsageMetadata(response = {}) {
 }
 
 function extractUsageMetadataFromTrace(executionTrace = []) {
-    return mergeUsageMetadata(
-        (Array.isArray(executionTrace) ? executionTrace : [])
-            .filter((entry) => entry?.type === 'model_call')
-            .map((entry) => entry?.details?.usage)
-            .filter(Boolean),
-    );
+    const traceEntries = Array.isArray(executionTrace) ? executionTrace : [];
+    const usageEntries = [];
+
+    for (const entry of traceEntries) {
+        const type = String(entry?.type || '').trim().toLowerCase();
+        if (!['model_call', 'model-call', 'llm-call', 'llm_call'].includes(type)) {
+            continue;
+        }
+
+        usageEntries.push(
+            entry?.details?.usage,
+            entry?.details?.tokenUsage,
+            entry?.metadata?.usage,
+            entry?.metadata?.tokenUsage,
+        );
+
+        const metadataTokens = entry?.metadata?.tokens;
+        if (metadataTokens && typeof metadataTokens === 'object') {
+            usageEntries.push({
+                promptTokens: metadataTokens.input,
+                completionTokens: metadataTokens.output,
+            });
+        }
+    }
+
+    return mergeUsageMetadata(usageEntries.filter(Boolean));
 }
 
 function createZeroUsageMetadata() {
