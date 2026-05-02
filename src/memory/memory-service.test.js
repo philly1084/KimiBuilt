@@ -350,11 +350,75 @@ describe('MemoryService recall profiles', () => {
         }));
     });
 
-    test('rememberLearnedSkill indexes successful programming steps by tool and file keywords', async () => {
+    test('remember chunks oversized assistant output before embedding', async () => {
+        const service = new MemoryService();
+        const originalChunkChars = config.config.memory.storeChunkChars;
+        const originalMaxChunks = config.config.memory.storeMaxChunks;
+        config.config.memory.storeChunkChars = 20;
+        config.config.memory.storeMaxChunks = 2;
+        const storeSpy = jest.spyOn(service.store, 'store').mockResolvedValue('point-1');
+
+        try {
+            const result = await service.remember(
+                'session-1',
+                'Alpha sentence. Beta sentence. Gamma sentence. Delta sentence.',
+                'assistant',
+                { memoryClass: 'conversation' },
+            );
+
+            expect(result).toEqual(['point-1', 'point-1']);
+            expect(storeSpy).toHaveBeenCalledTimes(2);
+            expect(storeSpy.mock.calls[0][1].length).toBeLessThanOrEqual(20);
+            expect(storeSpy.mock.calls[1][1].length).toBeLessThanOrEqual(20);
+            expect(storeSpy.mock.calls[0][2]).toMatchObject({
+                chunkIndex: 0,
+                sourceCharLength: 62,
+                sourceChunkCount: 2,
+                memoryTruncated: true,
+            });
+        } finally {
+            storeSpy.mockRestore();
+            config.config.memory.storeChunkChars = originalChunkChars;
+            config.config.memory.storeMaxChunks = originalMaxChunks;
+        }
+    });
+
+    test('remember skips ongoing programming transcript memory', async () => {
+        const service = new MemoryService();
+        const storeSpy = jest.spyOn(service.store, 'store').mockResolvedValue('point-1');
+
+        const result = await service.remember(
+            'session-1',
+            'Patched src/routes/chat.js and ran npm test for the route suite.',
+            'assistant',
+            { memoryClass: 'conversation' },
+        );
+
+        expect(result).toBeNull();
+        expect(storeSpy).not.toHaveBeenCalled();
+        storeSpy.mockRestore();
+    });
+
+    test('remember keeps explicit user preferences even when they mention code', async () => {
+        const service = new MemoryService();
+        const storeSpy = jest.spyOn(service.store, 'store').mockResolvedValue('point-1');
+
+        await service.remember(
+            'session-1',
+            'I prefer small focused patches in src/routes/chat.js.',
+            'user',
+            { memoryClass: 'user_preference' },
+        );
+
+        expect(storeSpy).toHaveBeenCalledTimes(1);
+        storeSpy.mockRestore();
+    });
+
+    test('rememberLearnedSkill skips ongoing programming steps by default', async () => {
         const service = new MemoryService();
         const rememberSpy = jest.spyOn(service, 'remember').mockResolvedValue('skill-point-1');
 
-        await service.rememberLearnedSkill('session-1', {
+        const result = await service.rememberLearnedSkill('session-1', {
             objective: 'Fix the failing chat route tests in this repo.',
             assistantText: 'Updated src/routes/chat.js and verified npm test passed.',
             toolEvents: [
@@ -392,20 +456,8 @@ describe('MemoryService recall profiles', () => {
             },
         });
 
-        expect(rememberSpy).toHaveBeenCalledWith('session-1', expect.stringContaining('Reusable workflow'), 'skill', expect.objectContaining({
-            memoryType: 'skill',
-            skillKind: 'workflow-summary',
-            toolIds: ['file-read', 'code-sandbox'],
-            memoryKeywords: expect.arrayContaining([
-                'chat-route',
-                'route',
-                'src/routes/chat.js',
-                'chat.js',
-                'chat.test.js',
-                'testing',
-                'debugging',
-            ]),
-        }));
+        expect(result).toBeNull();
+        expect(rememberSpy).not.toHaveBeenCalled();
     });
 
     test('judgment v2 returns typed recall bundles and rationale details', async () => {

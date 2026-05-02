@@ -728,6 +728,14 @@ const config = {
 
     memory: {
         sessionIsolationDefault: process.env.SESSION_ISOLATION_DEFAULT !== 'false',
+        storeChunkChars: Math.max(
+            500,
+            parseInt(process.env.MEMORY_STORE_CHUNK_CHARS, 10) || 1200,
+        ),
+        storeMaxChunks: Math.max(
+            1,
+            parseInt(process.env.MEMORY_STORE_MAX_CHUNKS, 10) || 6,
+        ),
         recentMessageWindow: Math.max(
             1,
             parseInt(process.env.MEMORY_RECENT_MESSAGE_WINDOW, 10) || 40,

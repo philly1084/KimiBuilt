@@ -32,6 +32,14 @@ const USER_GLOBAL_MEMORY_CLASSES = new Set([
     'tool_preference',
     'reusable_skill',
 ]);
+const PROGRAMMING_MEMORY_MARKERS = [
+    /\b(?:src|frontend|backend|routes|components|lib|bin|k8s|tests?|__tests__)\/[A-Za-z0-9._/-]+\b/i,
+    /\b[A-Za-z]:\\[^\s]+/i,
+    /\b(?:npm|pnpm|yarn|jest|vitest|playwright|node|docker|kubectl|git)\s+(?:run\s+)?[A-Za-z0-9:_./-]+/i,
+    /\b(?:stack trace|uncaught|exception|typeerror|referenceerror|syntaxerror|exit code|stderr|stdout)\b/i,
+    /\b(?:implemented|patched|refactored|updated|fixed|debugged|deployed|ran tests?)\b[\s\S]{0,120}\b(?:file|route|module|component|function|test|repo|code|branch|commit)\b/i,
+    /```(?:js|javascript|ts|typescript|jsx|tsx|json|bash|sh|powershell|yaml|yml|html|css|python)?\n/i,
+];
 
 function normalizeMemoryType(value = '') {
     const normalized = String(value || '').trim().toLowerCase();
@@ -289,6 +297,56 @@ function normalizeKeywordOverlap(keywords = []) {
     return normalizeMemoryKeywords(Array.isArray(keywords) ? keywords : []);
 }
 
+function shouldKeepDurableMemory(role = '', text = '', metadata = {}) {
+    const memoryClass = String(metadata?.memoryClass || '').trim().toLowerCase();
+    const memoryType = normalizeMemoryType(metadata?.memoryType || '');
+    if (
+        memoryType === ARTIFACT_MEMORY_TYPE
+        || memoryType === SKILL_MEMORY_TYPE
+        || memoryType === RESEARCH_MEMORY_TYPE
+        || USER_GLOBAL_MEMORY_CLASSES.has(memoryClass)
+        || metadata?.shareAcrossSurfaces === true
+    ) {
+        return true;
+    }
+
+    const normalizedRole = String(role || '').trim().toLowerCase();
+    if (!['user', 'assistant'].includes(normalizedRole)) {
+        return true;
+    }
+
+    const normalizedText = stripNullCharacters(text).trim();
+    if (!normalizedText) {
+        return false;
+    }
+
+    return !PROGRAMMING_MEMORY_MARKERS.some((pattern) => pattern.test(normalizedText));
+}
+
+function selectMemoryChunks(text = '', {
+    maxChunkChars = config.memory.storeChunkChars,
+    maxChunks = config.memory.storeMaxChunks,
+} = {}) {
+    const normalized = stripNullCharacters(text).trim();
+    if (!normalized) {
+        return [];
+    }
+
+    const chunks = chunkText(normalized, maxChunkChars);
+    if (chunks.length <= maxChunks) {
+        return chunks;
+    }
+
+    if (maxChunks === 1) {
+        return [chunks[0]];
+    }
+
+    return [
+        ...chunks.slice(0, maxChunks - 1),
+        chunks[chunks.length - 1],
+    ];
+}
+
 class MemoryService {
     constructor() {
         this.store = vectorStore;
@@ -346,6 +404,9 @@ class MemoryService {
                 : {}),
             ...(scopedMetadata?.summary ? { summary: summarizeLine(scopedMetadata.summary, 280) } : {}),
             ...(scopedMetadata?.chunkIndex != null ? { chunkIndex: Number(scopedMetadata.chunkIndex) } : {}),
+            ...(scopedMetadata?.sourceCharLength != null ? { sourceCharLength: Number(scopedMetadata.sourceCharLength) } : {}),
+            ...(scopedMetadata?.sourceChunkCount != null ? { sourceChunkCount: Number(scopedMetadata.sourceChunkCount) } : {}),
+            ...(scopedMetadata?.memoryTruncated === true ? { memoryTruncated: true } : {}),
         };
     }
 
@@ -355,7 +416,25 @@ class MemoryService {
             return null;
         }
 
-        return this.store.store(sessionId, normalizedMessage, this.normalizeMetadata(role, normalizedMessage, metadata));
+        if (!shouldKeepDurableMemory(role, normalizedMessage, metadata)) {
+            return null;
+        }
+
+        const chunks = selectMemoryChunks(normalizedMessage);
+        if (chunks.length <= 1 && chunks[0] === normalizedMessage) {
+            return this.store.store(sessionId, normalizedMessage, this.normalizeMetadata(role, normalizedMessage, metadata));
+        }
+
+        const wasTruncated = chunks.join('').length < normalizedMessage.length || chunkText(normalizedMessage, config.memory.storeChunkChars).length > chunks.length;
+        const writes = chunks.map((chunk, index) => this.store.store(sessionId, chunk, this.normalizeMetadata(role, chunk, {
+            ...metadata,
+            chunkIndex: index,
+            sourceCharLength: normalizedMessage.length,
+            sourceChunkCount: chunks.length,
+            ...(wasTruncated ? { memoryTruncated: true } : {}),
+        })));
+
+        return Promise.all(writes);
     }
 
     async rememberArtifactResult(sessionId, {
@@ -393,7 +472,10 @@ class MemoryService {
         }
 
         if (normalizedSource) {
-            const chunks = chunkText(normalizedSource);
+            const chunks = selectMemoryChunks(normalizedSource, {
+                maxChunkChars: config.memory.storeChunkChars,
+                maxChunks: config.artifacts.vectorizeMaxChunks,
+            });
             for (let index = 0; index < chunks.length; index += 1) {
                 writes.push(this.remember(sessionId, chunks[index], 'artifact-source', {
                     ...baseMetadata,
@@ -441,6 +523,10 @@ class MemoryService {
             .map((event) => String(event?.toolCall?.function?.name || event?.result?.toolId || '').trim())
             .filter(Boolean)));
         const toolFamily = deriveToolFamilyFromToolEvents(relevantToolEvents);
+        if (toolFamily === 'repo' && metadata?.allowProgrammingMemory !== true) {
+            return null;
+        }
+
         const genericReusableSkill = isGenericReusableSkill({
             objective,
             assistantText,
