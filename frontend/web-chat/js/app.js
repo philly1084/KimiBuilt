@@ -7,7 +7,7 @@
 const AMBIENT_REASONING_ROTATE_MIN_MS = 20000;
 const AMBIENT_REASONING_ROTATE_MAX_MS = 30000;
 const AMBIENT_REASONING_TYPE_TICK_MS = 120;
-const AMBIENT_REASONING_IDLE_THRESHOLD_MS = 20000;
+const REAL_REASONING_DISPLAY_HOLD_MS = 40000;
 const SYNTHETIC_REASONING_TITLE = 'Live reasoning (day dreaming answers)';
 const WEB_CHAT_QUEUE_MAX_SIZE = 3;
 const webChatWorkspaceHelpers = window.KimiBuiltWebChatWorkspace || null;
@@ -6587,13 +6587,7 @@ curl -fsSIL --max-time 20 "https://$host"`;
 
     hasRecentReasoningStream(now = Date.now()) {
         return this.lastReasoningDeltaAt > 0
-            && (now - this.lastReasoningDeltaAt) < AMBIENT_REASONING_IDLE_THRESHOLD_MS;
-    }
-
-    isGeneratedReasoningFallbackPhase(phase = '') {
-        const normalizedPhase = String(phase || '').trim().toLowerCase();
-        return normalizedPhase === 'thinking'
-            || normalizedPhase === 'reasoning';
+            && (now - this.lastReasoningDeltaAt) < REAL_REASONING_DISPLAY_HOLD_MS;
     }
 
     startAmbientReasoningLoop() {
@@ -6639,16 +6633,10 @@ curl -fsSIL --max-time 20 "https://$host"`;
                 || this.liveResponseState.reasoningSummary
                 || '',
             ).trim();
-            const activePhase = String(
-                message.liveState?.phase
-                || this.liveResponseState.phase
-                || 'thinking'
-            ).trim();
-            const allowGeneratedFallback = this.isGeneratedReasoningFallbackPhase(activePhase);
             const hasFreshReasoning = this.hasRecentReasoningStream(now);
             const shouldPreferRealReasoning = Boolean(liveSummary) && (
                 hasFreshReasoning
-                || (!allowGeneratedFallback && String(message.reasoningDisplaySource || '').trim() === 'stream')
+                || String(message.reasoningDisplaySource || '').trim() === 'stream'
             );
             if (shouldPreferRealReasoning) {
                 if (liveSummary && message.reasoningDisplaySource !== 'stream') {

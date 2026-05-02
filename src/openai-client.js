@@ -1042,6 +1042,10 @@ async function postImageGenerationToProvider(params, imageProvider) {
             error.baseURL = baseURL;
             error.endpoint = endpoint;
             error.provider = imageProvider.source;
+            error.providerFamily = providerFamily;
+            error.requestVariant = index;
+            error.requestHadResponseFormat = Object.prototype.hasOwnProperty.call(requestBody, 'response_format');
+            error.model = requestBody.model || params.model || imageProvider.imageModel || '';
             error.requestId = response.headers?.get?.('x-request-id')
                 || response.headers?.get?.('openai-request-id')
                 || response.headers?.get?.('x-openai-request-id')

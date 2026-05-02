@@ -374,6 +374,35 @@ describe('openai-client image generation', () => {
         }
     });
 
+    test('includes request metadata in HTTP image generation errors', async () => {
+        process.env.OPENAI_BASE_URL = 'https://gateway.example/v1';
+        process.env.OPENAI_IMAGE_MODEL = 'gpt-image-2';
+        global.fetch = jest.fn(async () => ({
+            ok: false,
+            status: 500,
+            text: async () => JSON.stringify({ error: { message: 'Provider returned no parseable image data.' } }),
+            headers: { get: () => 'req_123' },
+        }));
+
+        const { generateImage } = require('./openai-client');
+        try {
+            await generateImage({
+                prompt: 'Generate a hero image',
+                model: 'gpt-image-2',
+                response_format: 'b64_json',
+            });
+            throw new Error('Expected generateImage to throw');
+        } catch (error) {
+            expect(error.endpoint).toBe('https://gateway.example/v1/images/generations');
+            expect(error.provider).toBe('gateway');
+            expect(error.providerFamily).toBe('generic');
+            expect(error.requestVariant).toBe(0);
+            expect(error.requestHadResponseFormat).toBe(true);
+            expect(error.model).toBe('gpt-image-2');
+            expect(error.requestId).toBe('req_123');
+        }
+    });
+
     test('can opt in to official media fallback after the router endpoint fails', async () => {
         process.env.OPENAI_BASE_URL = 'https://gateway.example/v1';
         process.env.OPENAI_IMAGE_MODEL = 'gpt-image-2';
