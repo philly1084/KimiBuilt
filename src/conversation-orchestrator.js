@@ -10731,6 +10731,15 @@ class ConversationOrchestrator extends EventEmitter {
             })
             .join('\n');
         const planningPrompt = String(objective || '');
+        const registeredSkillsInstructions = buildRegisteredSkillsInstructions({
+            userText: planningPrompt,
+            metadata: {
+                ...(toolContext?.metadata || {}),
+                ...(session?.metadata || {}),
+                plannedTools: toolPolicy.candidateToolIds,
+            },
+            toolIds: toolPolicy.candidateToolIds,
+        });
         const prompt = [
             'You are planning tool usage for an application-owned agent runtime.',
             'Classify first, then choose the smallest safe tool sequence that follows the classification and verified evidence.',
@@ -10738,6 +10747,13 @@ class ConversationOrchestrator extends EventEmitter {
             'If tools are unnecessary, return {"steps":[]}.',
             `Execution profile: ${executionProfile}`,
             `Task type: ${taskType}`,
+            ...(registeredSkillsInstructions
+                ? [
+                    'Registered skills available for this request:',
+                    registeredSkillsInstructions,
+                    'Use registered skills to understand reusable workflow shape. Still return only concrete tool steps from the candidate tool list.',
+                ]
+                : []),
             ...(toolPolicy?.classification
                 ? [
                     `Request classification: ${JSON.stringify(toolPolicy.classification)}`,

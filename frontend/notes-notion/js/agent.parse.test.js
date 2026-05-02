@@ -340,6 +340,49 @@ Approved page plan:
         ]);
     });
 
+    test('repairs spaced notes-actions with raw newlines inside strings and missing key quotes', () => {
+        const agent = loadAgent();
+        const responseText = [
+            '``` notes -actions',
+            '{',
+            '  " assistant _reply ": "Built the Halifax after-work guide.",',
+            '  " actions ": [',
+            '    { " op ": " update_page ", " title ": " After - Work Guide : 3 Months ", " icon ": "anchor" },',
+            '    { " op ": " re build _page ", " blocks ": [',
+            '      { " type ": " call out ", " text ": "A detailed planner for 3 months." },',
+            '      { " type ": " heading _ 1 ", " text ": "Where to Explore" },',
+            '      { " type ": " toggle ", " text ": "Casual, Pub & Share',
+            '- Style", " children ": [',
+            '        { " type ": " bul leted _list ", text ": "Good Robot Brewing Co. - North End favourite." }',
+            '      ] }',
+            '    ] }',
+            '  ]',
+            '}',
+            '```',
+        ].join('\n');
+
+        const parsed = agent._extractNotesActionPlan(responseText);
+
+        expect(parsed.displayText).toBe('Built the Halifax after-work guide.');
+        expect(parsed.actions).toHaveLength(2);
+        expect(parsed.actions[1]).toEqual(expect.objectContaining({ op: 'rebuild_page' }));
+        const normalized = agent._normalizeStructuredPageActions(parsed.actions, 'Build a Halifax after-work guide.', {
+            blockCount: 0,
+            outline: [],
+            blocks: [],
+        });
+        expect(normalized[1].blocks).toEqual(expect.arrayContaining([
+            expect.objectContaining({ type: 'callout' }),
+            expect.objectContaining({ type: 'heading_1', content: 'Where to Explore' }),
+            expect.objectContaining({
+                type: 'toggle',
+                children: expect.arrayContaining([
+                    expect.objectContaining({ type: 'bulleted_list' }),
+                ]),
+            }),
+        ]));
+    });
+
     test('does not salvage a one-word inner block fragment from a broken structured payload', () => {
         const agent = loadAgent();
         const responseText = [

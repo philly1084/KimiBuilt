@@ -979,7 +979,7 @@ body {
 .block-content-wrapper {
     flex: 1;
     min-width: 0;
-    padding-right: 112px;
+    padding-right: 140px;
 }
 
 .block-actions {

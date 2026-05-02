@@ -181,6 +181,7 @@ const Editor = (function() {
 
         const icons = {
             edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+            type: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M4 12h10"/><path d="M4 17h7"/><path d="m16 15 2 2 3-4"/></svg>',
             up: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m18 15-6-6-6 6"/></svg>',
             down: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>',
             delete: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/></svg>',
@@ -188,6 +189,7 @@ const Editor = (function() {
 
         [
             { action: 'edit', title: 'Edit block', svg: icons.edit },
+            { action: 'turn-into', title: 'Change block type', svg: icons.type },
             { action: 'move-up', title: 'Move block up', svg: icons.up },
             { action: 'move-down', title: 'Move block down', svg: icons.down },
             { action: 'delete', title: 'Delete block', svg: icons.delete, className: 'block-action-danger' },
@@ -206,6 +208,25 @@ const Editor = (function() {
                 case 'edit':
                     focusBlock(block.id);
                     break;
+                case 'turn-into': {
+                    if (!window.SlashMenu) {
+                        break;
+                    }
+                    const blockEl = document.querySelector(`.block[data-block-id="${block.id}"]`);
+                    const rect = blockEl?.getBoundingClientRect?.();
+                    window.SlashMenu.show((rect?.left || event.clientX) + 40, rect?.bottom || event.clientY, block.id);
+                    window.SlashMenu.setCallback((type) => {
+                        const conversionInfo = getBlockConversionInfo(block.id, type);
+                        if (conversionInfo?.requiresConfirmation) {
+                            const confirmed = window.confirm(conversionInfo.message || 'Convert this block and drop unsupported content?');
+                            if (!confirmed) {
+                                return;
+                            }
+                        }
+                        convertBlockType(block.id, type);
+                    });
+                    break;
+                }
                 case 'move-up':
                     moveBlockUp(block.id);
                     break;

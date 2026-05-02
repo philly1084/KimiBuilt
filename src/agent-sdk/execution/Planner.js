@@ -785,6 +785,13 @@ class Planner {
   }
 
   buildConversationPlanningPrompt(task, availableTools = [], quota = null) {
+    const skillContext = String(
+      task?.skillContext
+      || task?.context?.skillContext
+      || task?.context?.metadata?.skillContext
+      || task?.context?.metadata?.registeredSkillsContext
+      || '',
+    ).trim();
     const tools = this.toolRegistry?.list?.()
       ?.filter((tool) => availableTools.includes(tool.id))
       ?.map((tool) => ({
@@ -802,6 +809,11 @@ class Planner {
       '',
       'User request:',
       task.objective || '',
+      '',
+      'Relevant skills:',
+      skillContext || '(none)',
+      '',
+      'Use relevant skills to understand reusable workflow shape and tool chains. Still use only the listed tools in returned tool-call steps.',
       '',
       'Available tools:',
       JSON.stringify(tools, null, 2),

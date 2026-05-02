@@ -940,10 +940,14 @@ const Agent = (function() {
             return '- No root-level blocks detected.';
         }
 
-        const flow = rootBlocks
-            .slice(0, 12)
+        const maxRootBlocks = 80;
+        const visibleRootBlocks = rootBlocks.slice(0, maxRootBlocks);
+        const flow = visibleRootBlocks
             .map((block, index) => `${index + 1}. [${block.id}] ${block.type}: ${truncateText(block.content, 120) || '(empty)'}`)
             .join('\n');
+        const overflowNote = rootBlocks.length > maxRootBlocks
+            ? `Showing first ${maxRootBlocks} root blocks; use BLOCKS IN THIS PAGE for nested/detail targets beyond this list.`
+            : '';
 
         const typeCounts = rootBlocks.reduce((counts, block) => {
             const key = String(block.type || 'unknown');
@@ -957,6 +961,7 @@ const Agent = (function() {
         return [
             `Top-level flow (${rootBlocks.length} blocks):`,
             flow,
+            overflowNote,
             mix ? `Top-level mix: ${mix}` : '',
         ].filter(Boolean).join('\n');
     }
@@ -3021,6 +3026,8 @@ When the user asks you to edit, create, delete, or reorganize content, respond w
 VALID OPERATIONS:
 - update_page: Update page-level metadata like title, icon, cover, properties, or page default model
 - update_block: Change content of an existing block and optionally change its type in place (requires blockId; may include type and content)
+- change_block_type: Convert an existing block to another type while preserving the best available text (requires blockId and type; optional content)
+- set_block_type: Alias for change_block_type
 - replace_text: Replace a specific phrase inside an existing block without rewriting the whole block (requires blockId, findText or oldText, replaceWith or newText; optional replaceAll and caseSensitive)
 - highlight_text: Highlight a specific phrase inside an existing text-like block (requires blockId and text; optional color)
 - replace_block: Replace block with new block(s) (requires blockId, blocks array)
@@ -3036,6 +3043,13 @@ VALID OPERATIONS:
 - prepend_to_page: Add block(s) at start of page (requires blocks array)
 - rebuild_page: Replace the full page body with a new block structure when a clean rebuild is better than incremental edits (requires blocks array)
 - delete_block: Remove a block (requires blockId)
+
+STRUCTURAL EDITING RULES:
+- You can use every visible block in BLOCKS IN THIS PAGE and TOP-LEVEL LAYOUT, not only the final block or final row.
+- When moving existing material, use move_block or move_section with the destination anchor ID; do not recreate the material at the end.
+- When a block is the right content but the wrong kind, use update_block with type or change_block_type/set_block_type. Do not leave JSON or markdown markers inside a code/text block to imply the new type.
+- For full-page builds, return one notes-actions payload only. Do not put the JSON payload in the visible assistant_reply, and do not add a code block containing the request at the bottom of the page.
+- Keep block type names exact: text, heading_1, heading_2, heading_3, bulleted_list, numbered_list, todo, callout, quote, divider, image, ai_image, bookmark, database, toggle, mermaid, code, math.
 
 BLOCK TYPES:
 - text: Plain text paragraph
@@ -3186,6 +3200,8 @@ When the user asks you to edit, create, delete, or reorganize content, respond w
 VALID OPERATIONS:
 - update_page: Update page-level metadata like title, icon, cover, properties, or page default model
 - update_block: Change content of an existing block and optionally change its type in place (requires blockId; may include type and content)
+- change_block_type: Convert an existing block to another type while preserving the best available text (requires blockId and type; optional content)
+- set_block_type: Alias for change_block_type
 - replace_text: Replace a specific phrase inside an existing block without rewriting the whole block (requires blockId, findText or oldText, replaceWith or newText; optional replaceAll and caseSensitive)
 - highlight_text: Highlight a specific phrase inside an existing text-like block (requires blockId and text; optional color)
 - replace_block: Replace block with new block(s) (requires blockId, blocks array)
@@ -3196,6 +3212,13 @@ VALID OPERATIONS:
 - prepend_to_page: Add block(s) at start of page (requires blocks array)
 - rebuild_page: Replace the full page body with a new block structure when a clean rebuild is better than incremental edits (requires blocks array)
 - delete_block: Remove a block (requires blockId)
+
+STRUCTURAL EDITING RULES:
+- You can use every visible block in BLOCKS IN THIS PAGE and TOP-LEVEL LAYOUT, not only the final block or final row.
+- When moving existing material, use move_block or move_section with the destination anchor ID; do not recreate the material at the end.
+- When a block is the right content but the wrong kind, use update_block with type or change_block_type/set_block_type. Do not leave JSON or markdown markers inside a code/text block to imply the new type.
+- For full-page builds, return one notes-actions payload only. Do not put the JSON payload in the visible assistant_reply, and do not add a code block containing the request at the bottom of the page.
+- Keep block type names exact: text, heading_1, heading_2, heading_3, bulleted_list, numbered_list, todo, callout, quote, divider, image, ai_image, bookmark, database, toggle, mermaid, code, math.
 
 BLOCK TYPES:
 - text: Plain text paragraph
@@ -3428,10 +3451,60 @@ GUIDELINES:
             return '';
         }
 
-        return cleaned.replace(/([{,]\s*)"([^"\r\n]+?)"\s*:/g, (_match, prefix, key) => {
+        return cleaned
+            .replace(/([{,]\s*)([A-Za-z_$][A-Za-z0-9_$\s-]{0,48})"\s*:/g, (_match, prefix, key) => {
+                const normalizedKey = normalizeLooseStructuredKeyName(key);
+                return `${prefix}"${normalizedKey}":`;
+            })
+            .replace(/([{,]\s*)"([^"\r\n]+?)"\s*:/g, (_match, prefix, key) => {
             const normalizedKey = normalizeLooseStructuredKeyName(key);
             return `${prefix}"${normalizedKey}":`;
         });
+    }
+
+    function escapeRawNewlinesInJsonStrings(text = '') {
+        const source = String(text || '');
+        let output = '';
+        let inString = false;
+        let isEscaped = false;
+
+        for (let index = 0; index < source.length; index += 1) {
+            const char = source[index];
+
+            if (inString) {
+                if (isEscaped) {
+                    output += char;
+                    isEscaped = false;
+                    continue;
+                }
+                if (char === '\\') {
+                    output += char;
+                    isEscaped = true;
+                    continue;
+                }
+                if (char === '"') {
+                    output += char;
+                    inString = false;
+                    continue;
+                }
+                if (char === '\n' || char === '\r') {
+                    output += ' ';
+                    if (char === '\r' && source[index + 1] === '\n') {
+                        index += 1;
+                    }
+                    continue;
+                }
+                output += char;
+                continue;
+            }
+
+            output += char;
+            if (char === '"') {
+                inString = true;
+            }
+        }
+
+        return output;
     }
 
     function parseStructuredJsonPayload(text = '') {
@@ -3441,9 +3514,17 @@ GUIDELINES:
         }
 
         const candidates = [cleaned];
+        const newlineEscaped = escapeRawNewlinesInJsonStrings(cleaned);
+        if (newlineEscaped && newlineEscaped !== cleaned) {
+            candidates.push(newlineEscaped);
+        }
         const looseCandidate = normalizeLooseStructuredJsonText(cleaned);
         if (looseCandidate && looseCandidate !== cleaned) {
             candidates.push(looseCandidate);
+        }
+        const looseNewlineEscaped = escapeRawNewlinesInJsonStrings(looseCandidate);
+        if (looseNewlineEscaped && !candidates.includes(looseNewlineEscaped)) {
+            candidates.push(looseNewlineEscaped);
         }
         [...candidates].forEach((candidate) => {
             buildLooseTopLevelJsonCandidates(candidate).forEach((nextCandidate) => {
@@ -5946,23 +6027,31 @@ Silently verify the lead cluster, section order, and final polish before returni
             p: 'text',
             h1: 'heading_1',
             heading1: 'heading_1',
+            heading_1: 'heading_1',
             h2: 'heading_2',
             heading2: 'heading_2',
+            heading_2: 'heading_2',
             h3: 'heading_3',
             heading3: 'heading_3',
+            heading_3: 'heading_3',
             bullet: 'bulleted_list',
             bullets: 'bulleted_list',
             bullet_list: 'bulleted_list',
             bulletedlist: 'bulleted_list',
+            bulleted_list: 'bulleted_list',
+            bul_leted_list: 'bulleted_list',
+            bulleted: 'bulleted_list',
             togglelist: 'toggle',
             collapsible: 'toggle',
             numberedlist: 'numbered_list',
             number_list: 'numbered_list',
             numberlist: 'numbered_list',
+            numbered_list: 'numbered_list',
             checklist: 'todo',
             to_do: 'todo',
             todo: 'todo',
             calloutbox: 'callout',
+            call_out: 'callout',
             equation: 'math',
             formula: 'math',
             diagram: 'mermaid',
@@ -5977,7 +6066,8 @@ Silently verify the lead cluster, section order, and final polish before returni
             table: 'database'
         };
 
-        return aliases[normalized] || normalized || 'text';
+        const compact = normalized.replace(/_/g, '');
+        return aliases[normalized] || aliases[compact] || normalized || 'text';
     }
 
     function normalizeActionBlock(blockDefinition, options = {}) {
@@ -6103,12 +6193,35 @@ Silently verify the lead cluster, section order, and final polish before returni
             lowercase: true,
             spacesToUnderscore: true,
         });
+        const opAliases = {
+            rebuildpage: 'rebuild_page',
+            re_build_page: 'rebuild_page',
+            replacepage: 'replace_page',
+            replace_page: 'replace_page',
+            updateblock: 'update_block',
+            update_block: 'update_block',
+            changeblocktype: 'change_block_type',
+            change_block_type: 'change_block_type',
+            setblocktype: 'set_block_type',
+            set_block_type: 'set_block_type',
+            convertblocktype: 'convert_block_type',
+            convert_block_type: 'convert_block_type',
+            moveblock: 'move_block',
+            move_block: 'move_block',
+            movesection: 'move_section',
+            move_section: 'move_section',
+            appendtopage: 'append_to_page',
+            append_to_page: 'append_to_page',
+            prependtopage: 'prepend_to_page',
+            prepend_to_page: 'prepend_to_page',
+        };
+        const canonicalOp = opAliases[op] || opAliases[op.replace(/_/g, '')] || op;
         const normalizedAction = {
             ...rawAction,
-            op
+            op: canonicalOp
         };
 
-        switch (op) {
+        switch (canonicalOp) {
             case 'replace_content': {
                 const blocks = buildBlocksFromLegacyActionContent(rawAction);
                 if (!blocks.length) {
@@ -7168,19 +7281,25 @@ Silently verify the lead cluster, section order, and final polish before returni
                         appliedCount++;
                         break;
                     }
-                    case 'update_block': {
+                    case 'update_block':
+                    case 'change_block_type':
+                    case 'set_block_type':
+                    case 'convert_block_type': {
                         if (!targetBlockId) return;
                         const existing = editor.getBlock?.(targetBlockId);
                         if (!existing) return;
 
                         const nextType = rawAction.type || existing.type;
+                        const nextContent = Object.prototype.hasOwnProperty.call(rawAction, 'content')
+                            ? rawAction.content
+                            : (Object.prototype.hasOwnProperty.call(rawAction, 'text')
+                                ? rawAction.text
+                                : existing.content);
                         const replacement = normalizeActionBlock({
                             ...JSON.parse(JSON.stringify(existing)),
                             id: targetBlockId,
                             type: nextType,
-                            content: Object.prototype.hasOwnProperty.call(rawAction, 'content')
-                                ? rawAction.content
-                                : existing.content,
+                            content: nextContent,
                             children: rawAction.keepChildren === false ? [] : (existing.children || []),
                             color: Object.prototype.hasOwnProperty.call(rawAction, 'color')
                                 ? rawAction.color

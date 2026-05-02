@@ -26,6 +26,22 @@ describe('Planner', () => {
     expect(prompt).toContain('Avoid more than 1 consecutive tool-call steps');
   });
 
+  test('conversation planning prompt includes relevant skill context', () => {
+    const planner = new Planner(null, null);
+
+    const prompt = planner.buildConversationPlanningPrompt(
+      {
+        objective: 'Generate images and deploy the website.',
+        skillContext: '<registered_skills><skill>id=image-website-k3s</skill></registered_skills>',
+      },
+      ['image-generate', 'remote-cli-agent'],
+    );
+
+    expect(prompt).toContain('Relevant skills:');
+    expect(prompt).toContain('image-website-k3s');
+    expect(prompt).toContain('Still use only the listed tools');
+  });
+
   test('normalizes and constrains conversation plans by quota and follow-through checkpoints', () => {
     const planner = new Planner(null, null, {
       planningLimits: {

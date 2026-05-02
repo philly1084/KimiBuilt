@@ -655,11 +655,14 @@ class AgentOrchestrator {
     task.tools = this.getConversationToolIds(task.objective, instructions, {
       executionProfile,
     });
+    task.skillContext = skillContext;
     task.context = {
       ...(task.context || {}),
+      skillContext,
       metadata: {
         ...(task.context?.metadata || {}),
         ...metadata,
+        skillContext,
         model,
         executionProfile,
         instructions: instructions || '',

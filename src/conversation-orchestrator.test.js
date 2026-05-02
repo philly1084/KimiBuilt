@@ -9395,6 +9395,44 @@ describe('ConversationOrchestrator', () => {
         expect(runtimeInstructions).toContain('Rancher UI map');
     });
 
+    test('planner prompt includes matching registered skills before choosing tool steps', async () => {
+        const llmClient = {
+            complete: jest.fn().mockResolvedValue('{"steps":[]}'),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: {
+                getTool: jest.fn((toolId) => ({
+                    id: toolId,
+                    description: toolId,
+                })),
+            },
+        });
+        const toolPolicy = {
+            candidateToolIds: ['image-generate', 'file-write', 'remote-cli-agent'],
+            candidateToolScores: {},
+            toolDescriptions: {
+                'image-generate': 'Generate images',
+                'file-write': 'Save files',
+                'remote-cli-agent': 'Deploy remotely',
+            },
+            allowedToolIds: ['image-generate', 'file-write', 'remote-cli-agent'],
+        };
+
+        await orchestrator.planToolUse({
+            objective: 'Generate images for a website and deploy it to k3s.',
+            toolPolicy,
+            toolContext: {
+                metadata: {},
+            },
+        });
+
+        const plannerPrompt = llmClient.complete.mock.calls[0]?.[0] || '';
+        expect(plannerPrompt).toContain('Registered skills available for this request:');
+        expect(plannerPrompt).toContain('image-website-k3s');
+        expect(plannerPrompt).toContain('Use registered skills to understand reusable workflow shape');
+    });
+
     test('treats image generation, unsplash, and direct image URLs as first-class tool intents', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {

@@ -55,6 +55,8 @@ function buildPlannerPromptSurface() {
     'Return JSON only.',
     'If tools are unnecessary, return {"steps":[]}.',
     'Choose only from the runtime-provided candidate tools.',
+    'Read any registered skills included in the planner prompt as compact reusable workflow guidance that complements tools.',
+    'Use registered skills to choose the workflow shape and chain of effects, but return only concrete tool steps from the candidate tool list.',
     'Use at most 4 steps.',
     'Avoid redundant tool calls.',
     'Reject steps that repeat a no-op command from this run, mismatch the active surface, skip required grounding, or omit required parameters.',
