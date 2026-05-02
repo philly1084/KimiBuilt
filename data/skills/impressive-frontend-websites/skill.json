@@ -1,0 +1,83 @@
+{
+  "id": "impressive-frontend-websites",
+  "name": "Impressive Frontend Websites",
+  "description": "Build, redesign, or polish rich frontend websites and apps through grounded direction, visual assets, real UI states, responsive implementation, screenshot QA, and refinement.",
+  "version": "1.0.0",
+  "enabled": true,
+  "tools": [
+    "web-search",
+    "web-fetch",
+    "design-resource-search",
+    "image-generate",
+    "document-workflow",
+    "code-sandbox",
+    "web-scrape",
+    "file-write",
+    "remote-cli-agent",
+    "k3s-deploy"
+  ],
+  "triggerPatterns": [
+    "impressive frontend",
+    "impressive website",
+    "beautiful website",
+    "polish the frontend",
+    "redesign the site",
+    "build a landing page",
+    "build a website",
+    "build a dashboard",
+    "modernize the UI",
+    "make the UI feel production quality",
+    "website design with generated images",
+    "frontend screenshot QA",
+    "responsive website build",
+    "deploy frontend to k3s"
+  ],
+  "chain": [
+    {
+      "step": "Establish a compact brief from the user request and available context",
+      "tool": null
+    },
+    {
+      "step": "Gather current visual or domain references when useful",
+      "tool": "web-search"
+    },
+    {
+      "step": "Collect design system or domain-specific interface guidance",
+      "tool": "design-resource-search"
+    },
+    {
+      "step": "Create or source relevant bitmap visuals when assets are missing",
+      "tool": "image-generate"
+    },
+    {
+      "step": "Generate a sandbox-ready frontend suite for websites, dashboards, demos, or landing pages",
+      "tool": "document-workflow"
+    },
+    {
+      "step": "Build or repair previewable project files when direct implementation is needed",
+      "tool": "code-sandbox"
+    },
+    {
+      "step": "Capture browser screenshots for desktop, mobile, and important opened UI states",
+      "tool": "web-scrape"
+    },
+    {
+      "step": "Iterate CSS, layout, assets, copy, and states after first visual QA",
+      "tool": "code-sandbox"
+    },
+    {
+      "step": "Use git-backed remote implementation and deployment when the frontend must go live",
+      "tool": "remote-cli-agent"
+    },
+    {
+      "step": "Run k3s rollout or verification when cluster manifests are the deployment lane",
+      "tool": "k3s-deploy"
+    }
+  ],
+  "contextPolicy": {
+    "maxChars": 2600,
+    "exposeBody": true
+  },
+  "createdAt": "2026-05-02T00:00:00.000Z",
+  "updatedAt": "2026-05-02T00:00:00.000Z"
+}
