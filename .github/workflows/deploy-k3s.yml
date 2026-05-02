@@ -65,9 +65,11 @@ jobs:
 
           # Update the image tag in deployment
           sed -i "s|image: .*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${image_tag}|g" k8s/backend-deployment.yaml
+          sed -i "s|image: .*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${image_tag}|g" k8s/kokoro-tts-deployment.yaml
           
           # Verify the change
           grep "image:" k8s/backend-deployment.yaml
+          grep "image:" k8s/kokoro-tts-deployment.yaml
 
       - name: Deploy to k3s
         run: |
@@ -83,6 +85,7 @@ jobs:
           # Apply dependencies
           kubectl apply -f k8s/qdrant-deployment.yaml
           kubectl apply -f k8s/ollama-deployment.yaml
+          kubectl apply -f k8s/kokoro-tts-deployment.yaml
           
           # Apply backend with updated image
           kubectl apply -f k8s/backend-deployment.yaml
