@@ -915,6 +915,10 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(guidance).toContain('research-backed reports, news pages, and current-events documents');
         expect(guidance).toContain('Default `image-generate` to one image');
         expect(guidance).toContain('prompt for one image, not a collage');
+        expect(guidance).toContain('available for website builds, HTML artifacts, PDF/PPTX/document visuals');
+        expect(guidance).toContain('Treat `image-generate` as a slower build step');
+        expect(guidance).toContain('check `success`, `usableCount`, `artifacts`/`artifactIds`, or `markdownImages` before continuing');
+        expect(guidance).toContain('materialize the `image-generate` artifacts first');
     });
 
     test('research guidance tells the model to discover sources itself and fetch before scraping for deep research deliverables', () => {

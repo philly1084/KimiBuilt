@@ -62,6 +62,25 @@ describe('/api/tools routes', () => {
         expect(response.body.data.map((tool) => tool.id)).not.toContain('k3s-deploy');
     });
 
+    test('image-generate tool details expose current path and artifact-check guidance', async () => {
+        const app = buildApp();
+
+        const response = await request(app).get('/api/tools/image-generate');
+
+        expect(response.status).toBe(200);
+        expect(response.body.data.docAvailable).toBe(true);
+        expect(response.body.data.description).toContain('current OpenAI-compatible image path');
+        expect(response.body.data.support.notes).toEqual(expect.arrayContaining([
+            expect.stringContaining('gateway-first OpenAI-compatible image generation path'),
+            expect.stringContaining('verify usableCount/artifacts/markdownImages'),
+        ]));
+        expect(response.body.data.skill.triggerPatterns).toEqual(expect.arrayContaining([
+            'website visual',
+            'html visual',
+            'document visual',
+        ]));
+    });
+
     test('remote-command tool details report runner target availability', async () => {
         const app = buildApp();
 

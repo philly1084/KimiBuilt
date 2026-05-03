@@ -187,6 +187,14 @@ const TOOL_SUPPORT = {
   'api-design': { status: 'stable', notes: ['API contract/design output generator.'] },
   'graph-diagram': { status: 'stable', notes: ['Batch graph/diagram utility with native graph JSON, Mermaid, DOT, SVG, HTML, and persisted SVG image artifacts.', 'When GPT-5.5 or newer is the caller model, prefer direct SVG output for custom document visuals.'] },
   'design-resource-search': { status: 'stable', notes: ['Curated safe design-resource index for backgrounds, fonts, CSS styling, icons, and website/document creation assets.', 'Returns web-fetch-ready fetch plans and approved source domains.'] },
+  'image-generate': {
+    status: 'stable',
+    notes: [
+      'Uses the current gateway-first OpenAI-compatible image generation path and falls back to the official OpenAI media provider when configured.',
+      'Persists generated outputs as reusable image artifacts for chat, website, HTML, document, and presentation builders.',
+      'Image builds can take longer than text/tool calls; callers should wait for completion and verify usableCount/artifacts/markdownImages before embedding results.',
+    ],
+  },
   'ssh-execute': { status: 'requires_setup', notes: ['Requires SSH target credentials or cluster secret configuration.'] },
   'remote-command': { status: 'requires_setup', notes: ['Requires SSH target credentials or cluster secret configuration.', 'Optimized for Ubuntu/Linux host and k3s cluster operations in this project.', 'Includes a Playwright/Chromium UI visual-check catalog entry when the runner image exposes the helper.', 'Runner profile admin is available only for explicitly approved privileged operations.'] },
   'remote-workbench': { status: 'requires_setup', notes: ['Structured remote runner actions for repo inspection, guarded file reads/writes, patch application, build/test, logs, rollout, deployment verification, and UI visual checks.', 'Uses inspect/build/deploy runner profiles instead of sending every operation through the deploy lane.'] },

@@ -7,7 +7,7 @@ Keep context exposure compact:
 
 Workflow:
 1. Clarify only missing destructive or externally visible choices, such as public host, brand-sensitive content, or replacing an existing deployment.
-2. Use `image-generate` for image assets and persist the chosen outputs as artifacts or files.
+2. Use `image-generate` for image assets, allow it enough time to complete, and verify `usableCount`, `artifacts`/`artifactIds`, or `markdownImages` before continuing. If no reusable image is returned, surface the diagnostic and do not wire placeholders into the site.
 3. Use the saved images in the website design, with explicit dimensions, alt text, and responsive layout constraints.
 4. Verify the website visually before deployment when a preview URL or browser runtime is available.
 5. Use `remote-cli-agent` for git-backed remote implementation/deploy loops; use `k3s-deploy` for standard manifest apply or rollout verification.

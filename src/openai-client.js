@@ -3319,7 +3319,8 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
     }
 
     if (automaticTools.some((entry) => entry.id === 'image-generate')) {
-        guidance.push('- Use `image-generate` only when the user explicitly wants new generated artwork or synthetic visuals that direct URLs, prior artifacts, or Unsplash cannot satisfy.');
+        guidance.push('- Use `image-generate` only when the user explicitly wants new generated artwork or synthetic visuals that direct URLs, prior artifacts, or Unsplash cannot satisfy. It is available for website builds, HTML artifacts, PDF/PPTX/document visuals, and custom hero/product/illustration assets.');
+        guidance.push('- Treat `image-generate` as a slower build step: call it before composing the website/document that needs the visual, wait for the tool result, and check `success`, `usableCount`, `artifacts`/`artifactIds`, or `markdownImages` before continuing. If no reusable image artifact is returned, surface the diagnostic summary instead of embedding placeholders or stale links.');
         guidance.push('- Default `image-generate` to one image. When the user asks for image options, website/document design variants, or a research-paper-style visual set, request multiple selectable outputs and keep image batches to 5 or fewer.');
         guidance.push('- For multiple versions of the same image, use `n` with `batchMode: "auto"` so the router can use one OpenAI-compatible image request. For distinct prompt variants, pass `prompts[]` with `batchMode: "parallel"` so the router can run bounded parallel calls.');
         guidance.push('- Use GPT Image defaults with `size: "auto"`, `quality: "auto"`, and `background: "auto"` unless the user or target layout requires a specific format. Write each prompt for one image, not a collage, contact sheet, storyboard, or multi-panel layout unless the user explicitly wants that composition.');
@@ -3336,6 +3337,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
     if (automaticTools.some((entry) => ['image-generate', 'image-search-unsplash', 'image-from-url'].includes(entry.id))) {
         guidance.push('- When verified image URLs are available from tools, embed those directly with markdown image syntax instead of fabricating SVG placeholders, overlays, or HTML mockups.');
         guidance.push('- For HTML and PDF document requests that call for real images, prefer `image-search-unsplash` and `image-from-url` over `image-generate`, save the verified references, and reuse them throughout the document when the user asks for visuals.');
+        guidance.push('- For HTML, website, or document requests that call for generated imagery, materialize the `image-generate` artifacts first and feed the saved image URLs into the artifact/document build rather than asking the document builder to imagine images later.');
         guidance.push('- For research-backed reports, news pages, and current-events documents, gather grounded sources with `web-search` and `web-fetch`, then source real visuals with `image-search-unsplash` or `image-from-url` before composing the document.');
     }
 

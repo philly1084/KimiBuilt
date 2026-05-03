@@ -3625,7 +3625,7 @@ class ToolManager {
         id: 'image-generate',
         name: 'Image Generator',
         category: 'system',
-        description: 'Generate a single image by default, or up to 5 selectable image options using one OpenAI-compatible n request or bounded parallel calls, and return reusable hosted image URLs',
+        description: 'Generate synthetic visuals through the current OpenAI-compatible image path, persist them as reusable image artifacts, and return hosted URLs for chat, website, HTML, and document builders',
         backend: {
           handler: async (params, context = {}) => {
             const prompts = Array.isArray(params.prompts)
@@ -3705,7 +3705,7 @@ class ToolManager {
             };
           },
           sideEffects: ['network'],
-          timeout: 60000,
+          timeout: 180000,
         },
         inputSchema: {
           type: 'object',
@@ -3743,7 +3743,18 @@ class ToolManager {
           },
         },
         skill: {
-          triggerPatterns: ['generate image', 'make an image', 'create image', 'hero image', 'illustration'],
+          triggerPatterns: [
+            'generate image',
+            'make an image',
+            'create image',
+            'hero image',
+            'illustration',
+            'generated artwork',
+            'synthetic visual',
+            'website visual',
+            'html visual',
+            'document visual',
+          ],
           requiresConfirmation: false,
         },
         frontend: {

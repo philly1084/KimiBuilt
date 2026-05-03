@@ -8,7 +8,7 @@ Planner guidance:
 - For website/dashboard/front-end artifacts, prefer `document-workflow generate-suite` with `buildMode:"sandbox"` or `useSandbox:true` when available, then run visual QA.
 - Use `code-sandbox` with `mode:"project"` for direct sandbox/frontend project builds or repairs. Avoid execute mode for website builds.
 - Use `design-resource-search` before design-sensitive websites, dashboards, documents, or page artifacts unless design context is already available.
-- Use `image-generate` for site-specific bitmap artwork, hero/product scenes, textures, thumbnails, or interface-supporting visuals when user-provided assets are missing.
+- Use `image-generate` for site-specific bitmap artwork, hero/product scenes, textures, thumbnails, or interface-supporting visuals when user-provided assets are missing. Treat it as a build step: wait for completion, verify at least one reusable artifact/markdown image URL, then wire the saved asset into the page.
 - Use `web-search`/`web-fetch` for current product, venue, competitor, domain, or reference research when visual language or facts may have changed.
 - Use `web-scrape` with `browser:true` and `captureScreenshot:true` for desktop/mobile visual QA and important opened states. Omit `selectors` unless extracting fields.
 - Use `remote-cli-agent` for git-backed remote frontend implementation, deployment, and verification loops. Use `k3s-deploy` for standard cluster rollout or manifest verification.
@@ -24,6 +24,7 @@ Design standard:
 
 Verification standard:
 - Run the app or preview when needed.
+- If generated images are part of the build, confirm the returned artifact or hosted image URL renders in the page before moving on to broader QA.
 - Capture desktop and mobile screenshots for non-trivial frontend work.
 - Inspect interactive controls before QA: search for select, option, menu, aria-haspopup, aria-expanded, popover, dialog, dropdown, submenu, tooltip, and related component imports.
 - Open dropdowns, menus, popovers, submenus, dialogs, and tooltips where possible and verify readable contrast. For native select popups, verify option foreground/background CSS directly.
