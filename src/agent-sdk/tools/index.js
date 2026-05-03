@@ -3899,7 +3899,7 @@ class ToolManager {
         id: 'podcast',
         name: 'Podcast',
         category: 'system',
-        description: 'Research a topic, script a two-host episode, synthesize both voices with local TTS, stitch the final podcast audio into a saved artifact, and optionally render an MP4 podcast video. Visual podcast requests should use storyboard mode with content-matched infographic scenes; waveform-card is the simple audio visualizer fallback.',
+        description: 'Research a topic, script a user-aligned podcast episode, synthesize the host voices with local TTS, stitch the final podcast audio into a saved artifact, and optionally render an MP4 podcast video. Preserve the full creative brief separately from the topic, including solo-vs-two-host format, required angle, facts, title, and exclusions. Visual podcast requests should use storyboard mode with content-matched infographic scenes; waveform-card is the simple audio visualizer fallback.',
         backend: {
           handler: async (params = {}, context = {}) => {
             const service = resolvePodcastService(context);
@@ -3956,9 +3956,13 @@ class ToolManager {
             topic: { type: 'string' },
             prompt: { type: 'string' },
             subject: { type: 'string' },
+            requestBrief: { type: 'string' },
+            originalPrompt: { type: 'string' },
             title: { type: 'string' },
             filename: { type: 'string' },
             durationMinutes: { type: 'integer', minimum: 3, maximum: 30 },
+            hostCount: { type: 'integer', minimum: 1, maximum: 2 },
+            speakerCount: { type: 'integer', minimum: 1, maximum: 2 },
             timeout: { type: 'integer', minimum: 30000, maximum: 3600000 },
             audience: { type: 'string' },
             tone: { type: 'string' },
@@ -4083,6 +4087,8 @@ class ToolManager {
             'video podcast',
             'podcast video',
             'mp4 podcast',
+            'solo podcast',
+            'one speaker podcast',
             'two host podcast',
             'research and script audio',
             'two agent voices',

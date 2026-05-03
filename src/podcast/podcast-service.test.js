@@ -206,6 +206,68 @@ describe('PodcastService', () => {
     expect(result.processing.packaging).toBe('native-wav');
   });
 
+  test('keeps detailed solo creative briefs in the script prompt', async () => {
+    createResponse.mockResolvedValueOnce({
+      output_text: JSON.stringify({
+        title: 'NASA After Dark: Real Space Facts for a Sci-Fi Night',
+        summary: 'A solo sci-fi night episode grounded in NASA facts.',
+        turns: [
+          { speaker: 'Maya', text: 'Tonight starts with Voyager, a real spacecraft carrying human traces into interstellar space.' },
+          { speaker: 'Maya', text: 'From there, the ISS becomes the nearest version of science fiction we already live with.' },
+          { speaker: 'Maya', text: 'Mars rovers and the Deep Space Network turn distant machines into something almost intimate.' },
+          { speaker: 'Maya', text: 'And Parker Solar Probe, JWST, and Apollo moon dust make the night feel stranger because they are real.' },
+        ],
+      }),
+    });
+    const service = new PodcastService();
+    const executeTool = jest.fn(async (toolId) => {
+      if (toolId === 'web-search') {
+        return {
+          success: true,
+          data: {
+            results: [
+              { title: 'NASA facts', url: 'https://example.com/nasa', snippet: 'NASA missions include Voyager, the ISS, Mars rovers, and JWST.' },
+            ],
+          },
+        };
+      }
+
+      if (toolId === 'web-fetch') {
+        return {
+          success: true,
+          data: {
+            headers: { 'content-type': 'text/html' },
+            body: '<article><p>Voyager, the International Space Station, Mars rovers, the Deep Space Network, Parker Solar Probe, JWST, and Apollo lunar samples are NASA-related facts.</p></article>',
+          },
+        };
+      }
+
+      throw new Error(`Unexpected tool: ${toolId}`);
+    });
+    const requestBrief = 'Title: NASA After Dark: Real Space Facts for a Sci-Fi Night. Format: one host. Angle: cinematic but grounded, using Voyager, the ISS, Mars rovers, the Deep Space Network, Parker Solar Probe, JWST, and Apollo moon dust as launch points for sci-fi imagination.';
+
+    const result = await service.createPodcast({
+      topic: 'NASA facts for a sci-fi night',
+      requestBrief,
+      hostCount: 1,
+      hostAName: 'Maya',
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+      toolManager: { executeTool },
+    });
+
+    const prompt = createResponse.mock.calls[0][0].input;
+    expect(prompt).toContain('Create a scripted solo-host, one-speaker podcast episode');
+    expect(prompt).toContain('User request brief: Title: NASA After Dark');
+    expect(prompt).toContain('Treat the user request brief as binding editorial direction');
+    expect(prompt).toContain('Treat explicitly named facts in the request brief as user-provided source material');
+    expect(prompt).toContain('Do not introduce a co-host');
+    expect(prompt).not.toContain('Host 2:');
+    expect(result.hosts).toHaveLength(1);
+    expect(new Set(result.script.turns.map((turn) => turn.speaker))).toEqual(new Set(['Maya']));
+  });
+
   test('annotates and logs the failing podcast stage', async () => {
     const service = new PodcastService();
     const logSpy = jest.spyOn(console, 'error').mockImplementation(() => {});

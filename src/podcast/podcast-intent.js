@@ -116,6 +116,37 @@ function cleanExtractedPodcastTopic(value = '') {
         .trim();
 }
 
+function extractPodcastRequestBrief(text = '') {
+    return String(text || '')
+        .replace(/\r\n/g, '\n')
+        .replace(/[ \t]{2,}/g, ' ')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+function inferPodcastHostCount(text = '') {
+    const normalized = String(text || '').toLowerCase();
+    if (!normalized.trim()) {
+        return null;
+    }
+
+    if (/\b(?:one|1|single|solo)[- ](?:speaker|host|voice|narrator)\b/.test(normalized)
+        || /\b(?:one|1)\s+speaker\b/.test(normalized)
+        || /\b(?:solo|single-host|single host|monologue|one-person|one person)\b/.test(normalized)
+        || /\bwithout\s+(?:a\s+)?(?:co[- ]?host|second speaker|second host)\b/.test(normalized)) {
+        return 1;
+    }
+
+    if (/\b(?:two|2|dual)[- ](?:speaker|host|voice|narrator)\b/.test(normalized)
+        || /\b(?:two|2)\s+(?:speakers|hosts|voices)\b/.test(normalized)
+        || /\bco[- ]?host\b/.test(normalized)
+        || /\bconversation\b/.test(normalized)) {
+        return 2;
+    }
+
+    return null;
+}
+
 function extractExplicitPodcastTopic(text = '') {
     const normalized = String(text || '').trim();
     if (!normalized) {
@@ -149,4 +180,6 @@ module.exports = {
     hasExplicitPodcastVideoIntent,
     inferPodcastVideoOptions,
     extractExplicitPodcastTopic,
+    extractPodcastRequestBrief,
+    inferPodcastHostCount,
 };

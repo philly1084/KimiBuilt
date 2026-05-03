@@ -1,7 +1,9 @@
 const {
   extractExplicitPodcastTopic,
+  extractPodcastRequestBrief,
   hasExplicitPodcastIntent,
   hasExplicitPodcastVideoIntent,
+  inferPodcastHostCount,
   inferPodcastVideoOptions,
 } = require('./podcast-intent');
 
@@ -43,12 +45,16 @@ function buildDirectPodcastParams({
     .map((artifactId) => String(artifactId || '').trim())
     .filter(Boolean);
   const durationMinutes = extractRequestedPodcastDurationMinutes(text);
+  const requestBrief = extractPodcastRequestBrief(text);
+  const hostCount = inferPodcastHostCount(text);
   const videoOptions = hasExplicitPodcastVideoIntent(text)
     ? inferPodcastVideoOptions(text)
     : {};
 
   return {
     topic,
+    ...(requestBrief ? { requestBrief } : {}),
+    ...(hostCount ? { hostCount } : {}),
     ...(selectedArtifactIds.length > 0 ? { artifactIds: selectedArtifactIds } : {}),
     ...(durationMinutes ? { durationMinutes } : {}),
     ...(model ? { model } : {}),

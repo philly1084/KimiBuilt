@@ -936,10 +936,19 @@ function resolveTurnVoicePlan(turns = [], hosts = [], options = {}) {
   };
 }
 
+function resolvePodcastHostCount(params = {}) {
+  const requested = Number(params.hostCount || params.speakerCount || params.hosts || params.speakers || 0);
+  if (Number.isFinite(requested) && requested >= 1) {
+    return Math.max(1, Math.min(2, Math.round(requested)));
+  }
+  return 2;
+}
+
 function resolveHosts(params = {}, voiceConfig = {}) {
   const availableVoices = Array.isArray(voiceConfig?.voices) ? voiceConfig.voices : [];
   const usedVoiceIds = new Set();
   const hostTemplates = selectDefaultHostTemplates(params);
+  const hostCount = resolvePodcastHostCount(params);
   const explicitARequested = Boolean(
     String(params.hostAVoiceId || '').trim() || params.hostAVoiceIds?.length,
   );
@@ -947,7 +956,7 @@ function resolveHosts(params = {}, voiceConfig = {}) {
     String(params.hostBVoiceId || '').trim() || params.hostBVoiceIds?.length,
   );
 
-  const hosts = hostTemplates.slice(0, 2).map((defaultHost, index) => {
+  const hosts = hostTemplates.slice(0, hostCount).map((defaultHost, index) => {
     const suffix = index === 0 ? 'A' : 'B';
     const providedVoiceId = String(params[`host${suffix}VoiceId`] || '').trim();
     const requestedVoiceIds = normalizeStringList(params[`host${suffix}VoiceIds`]);
@@ -975,7 +984,8 @@ function resolveHosts(params = {}, voiceConfig = {}) {
 
     return {
       name: sanitizePodcastText(params[`host${suffix}Name`] || defaultHost.name) || defaultHost.name,
-      role: sanitizePodcastText(params[`host${suffix}Role`] || defaultHost.role) || defaultHost.role,
+      role: sanitizePodcastText(params[`host${suffix}Role`] || (hostCount === 1 ? 'Solo host' : defaultHost.role))
+        || (hostCount === 1 ? 'Solo host' : defaultHost.role),
       persona: sanitizePodcastText(params[`host${suffix}Persona`] || defaultHost.persona) || defaultHost.persona,
       voiceIds: fullVoicePool,
       voiceId,
@@ -1047,6 +1057,7 @@ function resolvePodcastTtsConcurrency(params = {}) {
 
 function buildResearchPrompt({
   topic,
+  requestBrief,
   audience,
   tone,
   durationMinutes,
@@ -1056,6 +1067,17 @@ function buildResearchPrompt({
 }) {
   const wordBudget = estimateWordBudget(durationMinutes);
   const turnCount = estimateTurnCount(durationMinutes);
+  const hostList = Array.isArray(hosts) ? hosts.filter(Boolean) : [];
+  const isSoloHost = hostList.length === 1;
+  const hostSections = hostList.map((host, index) => [
+    `Host ${index + 1}:`,
+    `- name: ${sanitizePodcastText(host.name)}`,
+    `- role: ${sanitizePodcastText(host.role)}`,
+    `- persona: ${sanitizePodcastText(host.persona)}`,
+  ].join('\n')).join('\n\n');
+  const exampleTurns = hostList.map((host) => (
+    `    { "speaker": "${sanitizePodcastText(host.name)}", "text": "string" }`
+  )).join(',\n');
 
   const sourceText = sources.map((source, index) => [
     `Source ${index + 1}: ${sanitizePodcastText(source.title || 'Untitled source')}`,
@@ -1068,27 +1090,26 @@ function buildResearchPrompt({
   ].filter(Boolean).join('\n')).join('\n\n');
 
   return `
-Create a scripted two-host podcast episode as strict JSON.
+Create a scripted ${isSoloHost ? 'solo-host, one-speaker' : 'two-host'} podcast episode as strict JSON.
 
 Topic: ${sanitizePodcastText(topic)}
+${requestBrief ? `User request brief: ${sanitizePodcastText(requestBrief, { preserveNewlines: true })}` : ''}
 Audience: ${sanitizePodcastText(audience)}
 Tone: ${sanitizePodcastText(tone)}
 Target duration minutes: ${durationMinutes}
 Approximate total word budget: ${wordBudget}
 Target turn count: ${turnCount}
 
-Host 1:
-- name: ${sanitizePodcastText(hosts[0].name)}
-- role: ${sanitizePodcastText(hosts[0].role)}
-- persona: ${sanitizePodcastText(hosts[0].persona)}
+${hostSections}
 
-Host 2:
-- name: ${sanitizePodcastText(hosts[1].name)}
-- role: ${sanitizePodcastText(hosts[1].role)}
-- persona: ${sanitizePodcastText(hosts[1].persona)}
-
+Treat the user request brief as binding editorial direction, not just a search headline.
+Preserve explicit format constraints, speaker count, angle, tone, named facts, required title or framing, and exclusions from the request brief.
+Treat explicitly named facts in the request brief as user-provided source material and cover them as required beats; use fetched sources to verify and enrich them, not to replace them.
+Use the topic mainly as a research query. Do not replace a detailed request with a generic beginner explainer unless the user asked for one.
 Use only the sourced information below. Do not invent facts. If a point is uncertain, phrase it carefully.
-Write like a real podcast: light rapport, clean transitions, informative explanations, occasional reactions, but no filler overload.
+${isSoloHost
+    ? 'Write as a single host speaking directly to the listener. Do not introduce a co-host, second speaker, interview guest, or alternating dialogue.'
+    : 'Write like a real podcast: light rapport, clean transitions, informative explanations, occasional reactions, but no filler overload.'}
 Keep each turn to one paragraph. No stage directions. No markdown. No URLs in spoken text.
 Open with a strong hook and end with a concise wrap-up.
 ${videoFormat ? 'Structure the episode like a YouTube information show: cold open hook, quick setup, evidence beats, why-it-matters sections, and a concrete final takeaway. Keep it conversational, but make each segment feel intentional and paced for viewers.' : ''}
@@ -1101,8 +1122,7 @@ Return exactly this JSON shape:
   "title": "string",
   "summary": "string",
   "turns": [
-    { "speaker": "${hosts[0].name}", "text": "string" },
-    { "speaker": "${hosts[1].name}", "text": "string" }
+${exampleTurns}
   ]
 }
 
@@ -1310,6 +1330,7 @@ class PodcastService {
 
   async generateScript({
     topic,
+    requestBrief,
     audience,
     tone,
     durationMinutes,
@@ -1323,6 +1344,7 @@ class PodcastService {
     const modelCandidates = uniqueOrdered(Array.isArray(models) ? models : [models]);
     const prompt = buildResearchPrompt({
       topic,
+      requestBrief,
       audience,
       tone,
       durationMinutes,
@@ -1631,6 +1653,10 @@ class PodcastService {
     if (!normalizedTopic) {
       throw new Error('podcast requires a topic, prompt, or subject.');
     }
+    const requestBrief = sanitizePodcastText(
+      params.requestBrief || params.originalPrompt || params.prompt || '',
+      { preserveNewlines: true },
+    );
 
     const durationMinutes = clampNumber(params.durationMinutes, 3, 30, DEFAULT_DURATION_MINUTES);
     const audience = sanitizePodcastText(params.audience || 'general') || 'general';
@@ -1673,6 +1699,7 @@ class PodcastService {
 
     const script = await this.runPodcastStage('script-generation', () => this.generateScript({
       topic: normalizedTopic,
+      requestBrief,
       audience,
       tone,
       durationMinutes,
@@ -1794,6 +1821,7 @@ class PodcastService {
         durationMinutes,
         audience,
         tone,
+        requestBrief,
         turnVoices: turnVoicePlan.plans.map((turn) => ({
           speaker: turn.speaker,
           voiceId: turn.voiceId,
@@ -1874,6 +1902,7 @@ class PodcastService {
           durationMinutes,
           audience,
           tone,
+          requestBrief,
           turnVoices: turnVoicePlan.plans.map((turn) => ({
             speaker: turn.speaker,
             voiceId: turn.voiceId,

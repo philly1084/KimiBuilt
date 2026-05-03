@@ -10,6 +10,8 @@ const {
   hasExplicitPodcastIntent,
   hasExplicitPodcastVideoIntent,
   extractExplicitPodcastTopic,
+  extractPodcastRequestBrief,
+  inferPodcastHostCount,
   inferPodcastVideoOptions,
 } = require('../podcast/podcast-intent');
 const { podcastVideoService } = require('../video/podcast-video-service');
@@ -22,6 +24,10 @@ const generateSchema = {
   topic: { required: true, type: 'string' },
   prompt: { required: false, type: 'string' },
   subject: { required: false, type: 'string' },
+  requestBrief: { required: false, type: 'string' },
+  originalPrompt: { required: false, type: 'string' },
+  hostCount: { required: false, type: 'number' },
+  speakerCount: { required: false, type: 'number' },
   sessionId: { required: false, type: 'string' },
   durationMinutes: { required: false, type: 'number' },
   audience: { required: false, type: 'string' },
@@ -186,6 +192,18 @@ function normalizePodcastGenerateRequest(req, _res, next) {
     .map((entry) => String(entry || '').trim())
     .filter(Boolean)
     .join(' ');
+  if (!String(req.body.requestBrief || '').trim()) {
+    const brief = extractPodcastRequestBrief(req.body.prompt || req.body.subject || requestText);
+    if (brief) {
+      req.body.requestBrief = brief;
+    }
+  }
+  if (req.body.hostCount == null && req.body.speakerCount == null) {
+    const inferredHostCount = inferPodcastHostCount(requestText);
+    if (inferredHostCount) {
+      req.body.hostCount = inferredHostCount;
+    }
+  }
   if (hasExplicitPodcastVideoIntent(requestText)) {
     const inferredVideoOptions = inferPodcastVideoOptions(requestText);
     for (const [key, value] of Object.entries(inferredVideoOptions)) {

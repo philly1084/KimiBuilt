@@ -1,10 +1,10 @@
 # Podcast
 
-`podcast` runs a multi-step workflow for a two-host podcast episode:
+`podcast` runs a multi-step workflow for a user-aligned podcast episode:
 
 1. Research the topic with `web-search`
 2. Verify and extract source material with `web-fetch`
-3. Generate a scripted two-host conversation with the configured model
+3. Generate a scripted solo-host or two-host episode with the configured model
 4. Synthesize each host with the configured local TTS provider using separate voices
 5. Optionally mix in intro/outro/music-bed audio with ffmpeg
 6. Optionally export MP3 with ffmpeg
@@ -18,8 +18,10 @@ Required input:
 Useful optional inputs:
 
 - `durationMinutes`
+- `requestBrief` (full user creative/content brief; do not reduce this to a headline)
 - `audience`
 - `tone`
+- `hostCount` / `speakerCount` (`1` for solo/one-speaker, `2` for two-host)
 - `hostAName`, `hostBName`
 - `hostAVoiceId`, `hostBVoiceId`
 - `hostAVoiceIds`, `hostBVoiceIds` (ordered lists to cycle voices)
@@ -47,6 +49,8 @@ Useful optional inputs:
 Notes:
 
 - The tool requires an active session because it persists the final audio artifact.
+- Keep `topic` concise for research, but pass the full original request in `requestBrief` whenever the user gives format, angle, facts, style, title, or exclusions. The script generator treats the request brief as binding editorial direction so it does not collapse detailed requests into generic topic explainers.
+- Honor explicit solo, one-speaker, one-host, or single-narrator requests with `hostCount: 1`. Do not create a co-host unless the user asks for one or leaves the format unspecified.
 - For "video podcast" or "podcast video" requests, pass `includeVideo: true`, `videoRenderMode: "storyboard"`, `videoImageMode: "mixed"`, and `videoGenerateImages: true` unless the user explicitly asks for waveform-only or no generated imagery. Use waveform-card for plain MP4/audio-visualizer requests.
 - Research quality depends on `web-search` availability and source accessibility.
 - Speech stitching is native PCM WAV concatenation, so the selected TTS voices must emit compatible WAV output.
