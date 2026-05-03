@@ -783,16 +783,95 @@ function stripPodcastAudioCues(value = '') {
 }
 
 function normalizeTurn(turn = {}, allowedSpeakers = new Set(), speakerAliases = new Map()) {
-  const speaker = sanitizePodcastText(turn?.speaker || '');
+  const speaker = sanitizePodcastSpeakerLabel(turn?.speaker || '');
   const text = stripPodcastAudioCues(turn?.text || '');
-  const resolvedSpeaker = allowedSpeakers.has(speaker)
-    ? speaker
-    : speakerAliases.get(speaker);
+  const resolvedSpeaker = resolvePodcastSpeaker(speaker, allowedSpeakers, speakerAliases);
   if (!resolvedSpeaker || !text || !allowedSpeakers.has(resolvedSpeaker)) {
     return null;
   }
 
   return { speaker: resolvedSpeaker, text };
+}
+
+function sanitizePodcastSpeakerLabel(value = '') {
+  return sanitizePodcastText(value)
+    .replace(/^\s*(?:speaker|host)\s*[:#-]\s*/i, '')
+    .replace(/\s*\([^)]*\)\s*$/g, '')
+    .replace(/\s*[:：]\s*$/g, '')
+    .trim();
+}
+
+function normalizeSpeakerLookupKey(value = '') {
+  return sanitizePodcastSpeakerLabel(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function resolvePodcastSpeaker(speaker = '', allowedSpeakers = new Set(), speakerAliases = new Map()) {
+  if (!speaker) {
+    return '';
+  }
+  if (allowedSpeakers.has(speaker)) {
+    return speaker;
+  }
+
+  const lookupKey = normalizeSpeakerLookupKey(speaker);
+  for (const allowedSpeaker of allowedSpeakers) {
+    if (normalizeSpeakerLookupKey(allowedSpeaker) === lookupKey) {
+      return allowedSpeaker;
+    }
+  }
+
+  return speakerAliases.get(speaker)
+    || speakerAliases.get(lookupKey)
+    || '';
+}
+
+function splitPodcastTurnText(text = '', targetPieces = 2) {
+  const normalized = stripPodcastAudioCues(text);
+  if (!normalized) {
+    return [];
+  }
+
+  const sentenceParts = normalized
+    .split(/(?<=[.!?])\s+/)
+    .map((part) => sanitizePodcastText(part))
+    .filter(Boolean);
+  if (sentenceParts.length < 2 || targetPieces <= 1) {
+    return [normalized];
+  }
+
+  const pieces = [];
+  const chunkSize = Math.max(1, Math.ceil(sentenceParts.length / Math.max(1, targetPieces)));
+  for (let index = 0; index < sentenceParts.length; index += chunkSize) {
+    pieces.push(sentenceParts.slice(index, index + chunkSize).join(' ').trim());
+  }
+
+  return pieces.filter(Boolean);
+}
+
+function repairShortPodcastScriptTurns(turns = [], hosts = [], minimumTurns = DEFAULT_MINIMUM_VALID_TURNS) {
+  const validTurns = (Array.isArray(turns) ? turns : []).filter((turn) => turn?.speaker && turn?.text);
+  if (validTurns.length === 0) {
+    return [];
+  }
+
+  const hostNames = hosts.map((host) => host.name).filter(Boolean);
+  const representedSpeakers = new Set(validTurns.map((turn) => turn.speaker));
+  if (!hostNames.every((hostName) => representedSpeakers.has(hostName))) {
+    return validTurns;
+  }
+
+  const targetPieces = Math.max(1, Math.ceil(minimumTurns / Math.max(1, validTurns.length)));
+  const repaired = validTurns.flatMap((turn) => (
+    splitPodcastTurnText(turn.text, targetPieces).map((text) => ({
+      speaker: turn.speaker,
+      text,
+    }))
+  ));
+
+  return repaired.length >= validTurns.length ? repaired : validTurns;
 }
 
 function pickPrimaryHostVoice(voiceIds = [], usedVoiceIds = new Set()) {
@@ -1257,7 +1336,22 @@ class PodcastService {
       ['June', hosts[1]?.name],
       ['Host 1', hosts[0]?.name],
       ['Host 2', hosts[1]?.name],
-    ].filter(([, mapped]) => allowedSpeakers.has(mapped)));
+      ['Host One', hosts[0]?.name],
+      ['Host Two', hosts[1]?.name],
+      ['Host A', hosts[0]?.name],
+      ['Host B', hosts[1]?.name],
+      ['Speaker 1', hosts[0]?.name],
+      ['Speaker 2', hosts[1]?.name],
+      ['Speaker A', hosts[0]?.name],
+      ['Speaker B', hosts[1]?.name],
+      ['Lead host', hosts[0]?.name],
+      ['Co-host', hosts[1]?.name],
+      ['Cohost', hosts[1]?.name],
+    ].flatMap(([alias, mapped]) => (
+      allowedSpeakers.has(mapped)
+        ? [[alias, mapped], [normalizeSpeakerLookupKey(alias), mapped]]
+        : []
+    )));
     let lastError = null;
 
     for (const modelCandidate of (modelCandidates.length > 0 ? modelCandidates : [''])) {
@@ -1277,9 +1371,10 @@ class PodcastService {
         });
 
         const parsed = parseLenientJson(getResponseText(response));
-        const turns = (Array.isArray(parsed?.turns) ? parsed.turns : [])
+        let turns = (Array.isArray(parsed?.turns) ? parsed.turns : [])
           .map((turn) => normalizeTurn(turn, allowedSpeakers, speakerAliases))
           .filter(Boolean);
+        turns = repairShortPodcastScriptTurns(turns, hosts, DEFAULT_MINIMUM_VALID_TURNS);
         const representedSpeakers = new Set(turns.map((turn) => turn.speaker));
 
         if (turns.length < DEFAULT_MINIMUM_VALID_TURNS || representedSpeakers.size < allowedSpeakers.size) {

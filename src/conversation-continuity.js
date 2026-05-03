@@ -42,6 +42,17 @@ function isLikelyTranscriptDependentTurn(text = '') {
         return false;
     }
 
+    const retryPrefixRemainder = normalized
+        .replace(/^(?:please\s+)?(?:try again|retry|rerun|re-run|run it again|do it again|again)[\s,.:;!?-]*/i, '')
+        .trim();
+    if (retryPrefixRemainder
+        && retryPrefixRemainder !== normalized
+        && retryPrefixRemainder.split(/\s+/).filter(Boolean).length >= 4
+        && /\b(can you|could you|can we|please|make|create|build|fix|generate|produce|write|research|deploy|update|render|convert|turn)\b/.test(retryPrefixRemainder)
+        && !/^(?:it|that|this|them|those|same|same thing)\b/.test(retryPrefixRemainder)) {
+        return false;
+    }
+
     const shortTurn = normalized.length <= 120;
     const referentialCue = [
         /\b(it|that|this|them|those|same|again|there)\b/,

@@ -306,6 +306,66 @@ describe('PodcastService', () => {
     expect(result.processing.packaging).toBe('native-wav');
   });
 
+  test('repairs sparse host-labeled script output instead of blocking video podcast generation', async () => {
+    createResponse.mockResolvedValueOnce({
+      output_text: JSON.stringify({
+        title: 'Halifax Dating Weekend',
+        summary: 'A short video podcast script about dating in Halifax.',
+        turns: [
+          {
+            speaker: 'Host A',
+            text: 'Dating in Halifax this weekend starts with being realistic about the city scale. People often cross paths through familiar neighborhoods, events, and friend groups. That can make first dates feel more personal, but it also rewards clear plans and a little tact.',
+          },
+          {
+            speaker: 'Host B',
+            text: 'A good plan is simple: pick a public spot, leave room for conversation, and avoid overbuilding the date. Coffee, a waterfront walk, a market stop, or a small live event can work because the focus stays on whether the connection feels easy.',
+          },
+        ],
+      }),
+    });
+
+    const service = new PodcastService();
+    const executeTool = jest.fn(async (toolId) => {
+      if (toolId === 'web-search') {
+        return {
+          success: true,
+          data: {
+            results: [
+              { title: 'Halifax events', url: 'https://example.com/halifax-events', snippet: 'Weekend events and date ideas in Halifax.' },
+            ],
+          },
+        };
+      }
+
+      if (toolId === 'web-fetch') {
+        return {
+          success: true,
+          data: {
+            headers: { 'content-type': 'text/html' },
+            body: '<article><p>Halifax has waterfront walks, cafes, markets, and local events that can work for casual dates.</p></article>',
+          },
+        };
+      }
+
+      throw new Error(`Unexpected tool: ${toolId}`);
+    });
+
+    const result = await service.createPodcast({
+      topic: 'dating in Halifax this weekend',
+      includeVideo: true,
+      hostAName: 'Nora',
+      hostBName: 'Sam',
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+      toolManager: { executeTool },
+    });
+
+    expect(result.script.turns).toHaveLength(4);
+    expect(new Set(result.script.turns.map((turn) => turn.speaker))).toEqual(new Set(['Nora', 'Sam']));
+    expect(ttsService.synthesize).toHaveBeenCalled();
+  });
+
   test('uses the active chat model for podcast script generation when no podcast-specific model is provided', async () => {
     const service = new PodcastService();
     const executeTool = jest.fn(async (toolId) => {
