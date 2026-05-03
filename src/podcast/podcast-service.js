@@ -1491,9 +1491,13 @@ class PodcastService {
     let outputFormat = null;
     const wavBuffers = [];
     for (const synthesis of orderedSyntheses) {
-      const parsedSynthesisBuffer = parseWavBuffer(synthesis.audioBuffer);
+      const parsedSynthesisBuffer = parseWavBuffer(synthesis.audioBuffer, { allowNonPcm: true });
       if (!outputFormat) {
-        outputFormat = parsedSynthesisBuffer;
+        outputFormat = {
+          ...parsedSynthesisBuffer,
+          audioFormat: 1,
+          bitsPerSample: 16,
+        };
       }
 
       const normalizedAudioBuffer = wavFormatsMatch(parsedSynthesisBuffer, outputFormat)

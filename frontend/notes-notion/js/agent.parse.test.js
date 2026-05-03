@@ -691,6 +691,32 @@ Approved page plan:
         jest.useRealTimers();
     });
 
+    test('only reports page rebuild actions when imported blocks are actually applied', () => {
+        jest.useFakeTimers();
+        const editor = {
+            getCurrentPage: jest.fn(() => ({ id: 'page_a', blocks: [] })),
+            importBlocks: jest.fn(() => []),
+            savePage: jest.fn(),
+            focusBlock: jest.fn(),
+        };
+        const agent = loadAgent({ Editor: editor });
+
+        const result = agent._applyNotesActions([
+            {
+                op: 'rebuild_page',
+                blocks: [
+                    { type: 'heading_1', content: 'Draft' },
+                    { type: 'text', content: 'Body' },
+                ],
+            },
+        ]);
+
+        expect(result.appliedCount).toBe(0);
+        expect(editor.savePage).not.toHaveBeenCalled();
+        jest.runOnlyPendingTimers();
+        jest.useRealTimers();
+    });
+
     test('uses multi-pass drafting for research-backed notes pages instead of treating "research" as a non-page task', () => {
         const agent = loadAgent();
 

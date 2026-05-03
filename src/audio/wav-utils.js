@@ -2,7 +2,7 @@ function readString(buffer, start, length) {
   return buffer.toString('ascii', start, start + length);
 }
 
-function parseWavBuffer(buffer) {
+function parseWavBuffer(buffer, options = {}) {
   if (!Buffer.isBuffer(buffer) || buffer.length < 44) {
     throw new Error('Invalid WAV buffer.');
   }
@@ -50,7 +50,7 @@ function parseWavBuffer(buffer) {
     throw new Error('WAV buffer is missing required fmt or data chunks.');
   }
 
-  if (format.audioFormat !== 1) {
+  if (format.audioFormat !== 1 && options.allowNonPcm !== true) {
     throw new Error('Only PCM WAV audio is supported for stitching.');
   }
 
@@ -96,6 +96,38 @@ function readInt16Sample(data, frameIndex, channelIndex, channelCount) {
   return data.readInt16LE(offset);
 }
 
+function clampInt16(value) {
+  return Math.max(-32768, Math.min(32767, Math.round(value)));
+}
+
+function readSampleAsInt16(format, frameIndex, channelIndex) {
+  const offset = ((frameIndex * format.numChannels) + channelIndex) * (format.bitsPerSample / 8);
+
+  if (format.audioFormat === 1) {
+    if (format.bitsPerSample === 16) {
+      return format.data.readInt16LE(offset);
+    }
+    if (format.bitsPerSample === 8) {
+      return clampInt16((format.data.readUInt8(offset) - 128) * 256);
+    }
+    if (format.bitsPerSample === 24) {
+      return clampInt16(format.data.readIntLE(offset, 3) / 256);
+    }
+    if (format.bitsPerSample === 32) {
+      return clampInt16(format.data.readInt32LE(offset) / 65536);
+    }
+  }
+
+  if (format.audioFormat === 3) {
+    const floatValue = format.bitsPerSample === 32
+      ? format.data.readFloatLE(offset)
+      : format.data.readDoubleLE(offset);
+    return clampInt16(Math.max(-1, Math.min(1, floatValue)) * 32767);
+  }
+
+  throw new Error('Unsupported WAV sample format for PCM conversion.');
+}
+
 function resolveInt16SampleForChannel(data, frameIndex, sourceChannels, targetChannels, targetChannelIndex) {
   if (sourceChannels === targetChannels) {
     return readInt16Sample(data, frameIndex, targetChannelIndex, sourceChannels);
@@ -114,25 +146,44 @@ function resolveInt16SampleForChannel(data, frameIndex, sourceChannels, targetCh
   throw new Error('Only mono and stereo PCM WAV normalization is supported.');
 }
 
+function resolveInt16SampleForChannelFromFormat(format, frameIndex, targetChannels, targetChannelIndex) {
+  if (format.numChannels === targetChannels) {
+    return readSampleAsInt16(format, frameIndex, targetChannelIndex);
+  }
+
+  if (format.numChannels === 1 && targetChannels === 2) {
+    return readSampleAsInt16(format, frameIndex, 0);
+  }
+
+  if (format.numChannels === 2 && targetChannels === 1) {
+    const left = readSampleAsInt16(format, frameIndex, 0);
+    const right = readSampleAsInt16(format, frameIndex, 1);
+    return Math.round((left + right) / 2);
+  }
+
+  throw new Error('Only mono and stereo WAV normalization is supported.');
+}
+
 function normalizeWavBufferFormat(buffer, targetFormat = {}) {
-  const source = parseWavBuffer(buffer);
+  const source = parseWavBuffer(buffer, { allowNonPcm: true });
   const target = {
-    audioFormat: Number(targetFormat?.audioFormat || source.audioFormat || 0),
-    sampleRate: Number(targetFormat?.sampleRate || 0),
-    bitsPerSample: Number(targetFormat?.bitsPerSample || 0),
-    numChannels: Number(targetFormat?.numChannels || 0),
+    audioFormat: 1,
+    sampleRate: Number(targetFormat?.sampleRate || source.sampleRate || 0),
+    bitsPerSample: Number(targetFormat?.bitsPerSample || 16),
+    numChannels: Number(targetFormat?.numChannels || source.numChannels || 0),
   };
 
   if (wavFormatsMatch(source, target)) {
     return buffer;
   }
 
-  if (source.audioFormat !== 1 || target.audioFormat !== 1) {
-    throw new Error('Only PCM WAV normalization is supported.');
+  if (![1, 3].includes(source.audioFormat) || target.audioFormat !== 1) {
+    throw new Error('Only PCM or IEEE float WAV normalization is supported.');
   }
 
-  if (source.bitsPerSample !== 16 || target.bitsPerSample !== 16) {
-    throw new Error('Only 16-bit PCM WAV normalization is supported.');
+  if (!([8, 16, 24, 32].includes(source.bitsPerSample) || (source.audioFormat === 3 && source.bitsPerSample === 64))
+    || target.bitsPerSample !== 16) {
+    throw new Error('Only common WAV formats can be normalized to 16-bit PCM.');
   }
 
   if (![1, 2].includes(source.numChannels) || ![1, 2].includes(target.numChannels)) {
@@ -143,7 +194,8 @@ function normalizeWavBufferFormat(buffer, targetFormat = {}) {
     throw new Error('A complete target PCM format is required for WAV normalization.');
   }
 
-  const sourceFrameCount = Math.floor(source.data.length / (2 * source.numChannels));
+  const sourceBytesPerFrame = source.numChannels * (source.bitsPerSample / 8);
+  const sourceFrameCount = Math.floor(source.data.length / sourceBytesPerFrame);
   if (sourceFrameCount <= 0) {
     return writeWavBuffer({
       sampleRate: target.sampleRate,
@@ -163,20 +215,24 @@ function normalizeWavBufferFormat(buffer, targetFormat = {}) {
     const interpolation = Math.max(0, Math.min(1, sourcePosition - leftFrameIndex));
 
     for (let targetChannelIndex = 0; targetChannelIndex < target.numChannels; targetChannelIndex += 1) {
-      const leftSample = resolveInt16SampleForChannel(
-        source.data,
-        leftFrameIndex,
-        source.numChannels,
-        target.numChannels,
-        targetChannelIndex,
-      );
-      const rightSample = resolveInt16SampleForChannel(
-        source.data,
-        rightFrameIndex,
-        source.numChannels,
-        target.numChannels,
-        targetChannelIndex,
-      );
+      const leftSample = source.audioFormat === 1 && source.bitsPerSample === 16
+        ? resolveInt16SampleForChannel(
+          source.data,
+          leftFrameIndex,
+          source.numChannels,
+          target.numChannels,
+          targetChannelIndex,
+        )
+        : resolveInt16SampleForChannelFromFormat(source, leftFrameIndex, target.numChannels, targetChannelIndex);
+      const rightSample = source.audioFormat === 1 && source.bitsPerSample === 16
+        ? resolveInt16SampleForChannel(
+          source.data,
+          rightFrameIndex,
+          source.numChannels,
+          target.numChannels,
+          targetChannelIndex,
+        )
+        : resolveInt16SampleForChannelFromFormat(source, rightFrameIndex, target.numChannels, targetChannelIndex);
       const interpolated = Math.round(leftSample + ((rightSample - leftSample) * interpolation));
       output.writeInt16LE(interpolated, ((targetFrameIndex * target.numChannels) + targetChannelIndex) * 2);
     }

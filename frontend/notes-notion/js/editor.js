@@ -2424,26 +2424,24 @@ const Editor = (function() {
      * Import blocks to current page
      */
     function importBlocks(blocks, options = {}) {
-        if (!currentPage) return;
+        if (!currentPage) return [];
         
         saveToHistory();
+        const normalizedBlocks = blocks.map(b => ({
+            ...b,
+            id: Storage.generateBlockId(),
+            createdAt: Date.now()
+        }));
         
         if (options.replace) {
-            currentPage.blocks = blocks.map(b => ({
-                ...b,
-                id: Storage.generateBlockId(),
-                createdAt: Date.now()
-            }));
+            currentPage.blocks = normalizedBlocks;
         } else {
-            currentPage.blocks.push(...blocks.map(b => ({
-                ...b,
-                id: Storage.generateBlockId(),
-                createdAt: Date.now()
-            })));
+            currentPage.blocks.push(...normalizedBlocks);
         }
         
         refreshEditor();
         autoSave();
+        return normalizedBlocks;
     }
     
     /**

@@ -7228,7 +7228,7 @@ Silently verify the lead cluster, section order, and final polish before returni
         if (typeof window.requestAnimationFrame !== 'function' || typeof document === 'undefined' || !document.body) {
             return false;
         }
-        return actions.some((action) => /^(replace_section|move_section|replace_block|move_block|reorder_block|move|rebuild_page|replace_page|replace_text|highlight_text)$/.test(String(action?.op || '').toLowerCase()));
+        return actions.some((action) => /^(replace_section|move_section|replace_block|move_block|reorder_block|move|replace_text|highlight_text)$/.test(String(action?.op || '').toLowerCase()));
     }
 
     function getActionStageDelay(action = {}, index = 0) {
@@ -7243,6 +7243,7 @@ Silently verify the lead cluster, section order, and final polish before returni
             return { appliedCount: 0, focusBlockId: null };
         }
 
+        const targetPageId = editor.getCurrentPage?.()?.id || null;
         let appliedCount = 0;
         let focusBlockId = null;
         
@@ -7261,6 +7262,7 @@ Silently verify the lead cluster, section order, and final polish before returni
 
         const applySingleAction = (rawAction) => {
             if (!rawAction || typeof rawAction !== 'object') return;
+            if (targetPageId && editor.getCurrentPage?.()?.id !== targetPageId) return;
 
             const op = String(rawAction.op || '').toLowerCase();
             const targetBlockId = rawAction.blockId || rawAction.targetBlockId || null;
@@ -7533,9 +7535,11 @@ Silently verify the lead cluster, section order, and final polish before returni
                             editor.updatePageMetadata?.(pageUpdates);
                         }
 
-                        editor.importBlocks(rebuiltBlocks, { replace: true });
+                        const imported = editor.importBlocks(rebuiltBlocks, { replace: true });
                         focusBlockId = window.Editor?.getCurrentPage?.()?.blocks?.[0]?.id || focusBlockId;
-                        appliedCount++;
+                        if (Array.isArray(imported) ? imported.length > 0 : (!editor.getCurrentPage || window.Editor?.getCurrentPage?.()?.id === targetPageId)) {
+                            appliedCount++;
+                        }
                         break;
                     }
                     case 'delete_block':
@@ -7586,6 +7590,12 @@ Silently verify the lead cluster, section order, and final polish before returni
         if (shouldStageNotesActions(actions)) {
             actions.forEach((rawAction, index) => {
                 window.setTimeout(() => {
+                    if (targetPageId && editor.getCurrentPage?.()?.id !== targetPageId) {
+                        if (index === actions.length - 1) {
+                            finalizeAppliedActions();
+                        }
+                        return;
+                    }
                     applySingleAction(rawAction);
                     if (index === actions.length - 1) {
                         finalizeAppliedActions();
