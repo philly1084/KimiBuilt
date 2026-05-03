@@ -7766,6 +7766,7 @@ curl -fsSIL --max-time 20 "https://$host"`;
             apiClient.setSessionId(sessionId);
             const history = this.buildMessageHistory(sessionId);
             let receivedTerminalChunk = false;
+            let streamSessionId = sessionId;
             
             for await (const chunk of apiClient.streamChat(
                 history,
@@ -7773,6 +7774,8 @@ curl -fsSIL --max-time 20 "https://$host"`;
                 this.currentAbortController.signal,
                 reasoningEffort,
                 {
+                    sessionId,
+                    bindClientSession: false,
                     metadata: {
                         foregroundRequestId: storedAssistantMessage.id,
                         messageId: userMessage.id,
@@ -7784,55 +7787,58 @@ curl -fsSIL --max-time 20 "https://$host"`;
                 },
             )) {
                 if (chunk.type !== 'retry') {
-                    this.markActiveStreamAccepted();
+                    this.withSessionStreamContext(streamSessionId, () => this.markActiveStreamAccepted());
                 }
 
                 if (chunk.sessionId) {
-                    this.syncBackendSession(chunk.sessionId);
+                    this.syncBackendSession(chunk.sessionId, streamSessionId);
+                    streamSessionId = chunk.sessionId;
                 }
 
-                switch (chunk.type) {
-                    case 'stream_open':
-                        console.debug('[ChatApp] Gateway SSE stream opened.');
-                        this.updateConnectionStatus('connected');
-                        break;
-                    case 'status':
-                        this.handleStreamStatus(chunk);
-                        break;
-                    case 'progress':
-                        this.handleProgress(chunk);
-                        break;
-                    case 'text_delta':
-                        this.handleDelta(chunk.content);
-                        break;
-                    case 'reasoning_summary_delta':
-                        this.handleReasoningSummaryDelta(chunk);
-                        break;
-                    case 'tool_event':
-                        this.handleToolEvent(chunk);
-                        break;
-                    case 'done':
-                        receivedTerminalChunk = true;
-                        this.handleDone(chunk);
-                        break;
-                    case 'error':
-                        receivedTerminalChunk = true;
-                        if (chunk.cancelled) {
-                            this.handleCancelled();
-                        } else {
-                            this.handleError(chunk.error, chunk.status);
-                        }
-                        break;
-                    case 'retry':
-                        if (chunk.attempt > 1) {
-                            uiHelpers.showToast(`Retrying... (attempt ${chunk.attempt}/${chunk.maxAttempts})`, 'info');
-                        }
-                        break;
-                    case 'resync_required':
-                        receivedTerminalChunk = true;
-                        this.handleInterruptedStreamResync(chunk);
-                        break;
-                }
+                this.withSessionStreamContext(streamSessionId, () => {
+                    switch (chunk.type) {
+                        case 'stream_open':
+                            console.debug('[ChatApp] Gateway SSE stream opened.');
+                            this.updateConnectionStatus('connected');
+                            break;
+                        case 'status':
+                            this.handleStreamStatus(chunk);
+                            break;
+                        case 'progress':
+                            this.handleProgress(chunk);
+                            break;
+                        case 'text_delta':
+                            this.handleDelta(chunk.content);
+                            break;
+                        case 'reasoning_summary_delta':
+                            this.handleReasoningSummaryDelta(chunk);
+                            break;
+                        case 'tool_event':
+                            this.handleToolEvent(chunk);
+                            break;
+                        case 'done':
+                            receivedTerminalChunk = true;
+                            this.handleDone(chunk);
+                            break;
+                        case 'error':
+                            receivedTerminalChunk = true;
+                            if (chunk.cancelled) {
+                                this.handleCancelled();
+                            } else {
+                                this.handleError(chunk.error, chunk.status);
+                            }
+                            break;
+                        case 'retry':
+                            if (chunk.attempt > 1) {
+                                uiHelpers.showToast(`Retrying... (attempt ${chunk.attempt}/${chunk.maxAttempts})`, 'info');
+                            }
+                            break;
+                        case 'resync_required':
+                            receivedTerminalChunk = true;
+                            this.handleInterruptedStreamResync(chunk);
+                            break;
+                    }
+                });
             }
 
             if (!receivedTerminalChunk && this.isProcessing && this.currentStreamingMessageId === storedAssistantMessage.id) {
