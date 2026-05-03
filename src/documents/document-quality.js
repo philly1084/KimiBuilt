@@ -1,4 +1,4 @@
-const DOCUMENT_QUALITY_STANDARD_VERSION = 'document-quality-2026-04';
+const DOCUMENT_QUALITY_STANDARD_VERSION = 'document-quality-2026-05-context-interaction';
 
 const QUALITY_AGENT_PASSES = [
   {
@@ -76,6 +76,7 @@ function buildDocumentQualityPlan({
 
   return {
     version: DOCUMENT_QUALITY_STANDARD_VERSION,
+    passName: 'lets create context by interaction with the user to avoid slop',
     standard: 'publication-ready',
     documentType: normalizeDocumentTypeLabel(documentType),
     format: normalizedFormat,
@@ -84,6 +85,34 @@ function buildDocumentQualityPlan({
       'Spend reasoning on document architecture, visual composition, evidence boundaries, and final polish before emitting JSON.',
       'Prefer specific, edited content over broad "professional" filler.',
     ],
+    interactionBrief: {
+      stateMachine: [
+        'brief_scan: extract known format, audience, purpose, source material, constraints, and acceptance checks.',
+        'missing_context: decide whether gaps are blockers or safe defaults.',
+        'question_or_default: ask one or two concise questions only for blockers; otherwise continue with assumptions in metadata or handoff notes.',
+        'architecture: choose the document structure, reader jobs, and evidence path before drafting.',
+        'quality_pass: reconcile strategy, design, evidence, accessibility, and final polish into the generated artifact.',
+        'medium_check: verify the target medium requirements before calling the document complete.',
+      ],
+      fields: [
+        'format',
+        'audience',
+        'purpose',
+        'required sections',
+        'source material',
+        'tone',
+        'length',
+        'visual/data assets',
+        'constraints',
+        'acceptance checks',
+      ],
+      rules: [
+        'Infer conservative professional defaults from the request, session context, selected template, and source artifacts before asking the user for more information.',
+        'Ask one or two concise follow-up questions only when missing details would materially change the document or block a credible draft.',
+        'If the user wants speed or the missing detail is not a blocker, continue with explicit assumptions in metadata or handoff notes rather than visible process chatter.',
+        'For document requests, never ship a generic filler draft just because the prompt is short; use the brief to choose structure, evidence needs, and reader jobs.',
+      ],
+    },
     backgroundDirection: {
       label: selectedLayout?.label
         ? `${selectedLayout.label} background system`
@@ -101,6 +130,7 @@ function buildDocumentQualityPlan({
     completionGate: [
       'The artifact must look intentional before it reads clever.',
       'No white-on-white, dark-on-dark, placeholder sections, generic numbered scaffolds, or visible process notes.',
+      'Short or underspecified prompts still need a real document brief, safe assumptions, and request-specific structure.',
       'Every section should justify its presence through a reader job: decide, understand, compare, execute, or remember.',
       'Tables, charts, stats, and callouts need labels and interpretation, not just raw values.',
       'If sources are incomplete, state limits as document content without exposing tool workflow details.',
@@ -115,10 +145,17 @@ function renderDocumentQualityPromptContext(planOrOptions = null) {
 
   const lines = [
     `<quality_standard version="${qualityPlan.version}">`,
+    `Pass: ${qualityPlan.passName}`,
     'Apply this standard automatically. The user should not need to ask for better design prompts, background direction, or a quality review pass.',
     '<model_quality_defaults>',
     ...qualityPlan.modelDefaults.map((entry) => `- ${entry}`),
     '</model_quality_defaults>',
+    '<document_intake>',
+    'State machine:',
+    ...qualityPlan.interactionBrief.stateMachine.map((entry) => `- ${entry}`),
+    `Brief fields: ${qualityPlan.interactionBrief.fields.join(', ')}`,
+    ...qualityPlan.interactionBrief.rules.map((entry) => `- ${entry}`),
+    '</document_intake>',
     '<background_creation>',
     `Direction: ${qualityPlan.backgroundDirection.label}`,
     ...qualityPlan.backgroundDirection.rules.map((entry) => `- ${entry}`),
@@ -146,6 +183,7 @@ function summarizeDocumentQualityPlan(planOrOptions = null) {
 
   return {
     version: qualityPlan.version,
+    passName: qualityPlan.passName,
     standard: qualityPlan.standard,
     format: qualityPlan.format,
     agentPasses: qualityPlan.agentPasses.map((entry) => entry.id),
