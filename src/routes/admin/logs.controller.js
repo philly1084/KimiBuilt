@@ -4,10 +4,25 @@
  */
 
 const { v4: uuidv4 } = require('uuid');
+const path = require('path');
+const { PROJECT_ROOT, resolvePreferredWritableFile } = require('../../runtime-state-paths');
+const {
+  appendJsonlRecordSync,
+  readJsonlRecordsSync,
+  writeJsonlRecordsSync,
+} = require('../../observability/jsonl-persistence');
+
+function getLogsStoragePath() {
+  return resolvePreferredWritableFile(
+    path.join(PROJECT_ROOT, 'data', 'observability', 'logs.jsonl'),
+    ['observability', 'logs.jsonl'],
+  );
+}
 
 class LogsController {
-  constructor() {
-    this.logs = [];
+  constructor(options = {}) {
+    this.storagePath = path.resolve(options.storagePath || getLogsStoragePath());
+    this.logs = readJsonlRecordsSync(this.storagePath);
     this.maxLogs = 10000;
   }
 
@@ -26,6 +41,9 @@ class LogsController {
     // Keep only recent logs
     if (this.logs.length > this.maxLogs) {
       this.logs = this.logs.slice(0, this.maxLogs);
+      writeJsonlRecordsSync(this.storagePath, this.logs);
+    } else {
+      appendJsonlRecordSync(this.storagePath, log);
     }
 
     return log;
@@ -159,6 +177,7 @@ class LogsController {
     try {
       const count = this.logs.length;
       this.logs = [];
+      writeJsonlRecordsSync(this.storagePath, this.logs);
 
       res.json({ 
         success: true, 
@@ -235,3 +254,5 @@ class LogsController {
 }
 
 module.exports = new LogsController();
+module.exports.LogsController = LogsController;
+module.exports.getLogsStoragePath = getLogsStoragePath;

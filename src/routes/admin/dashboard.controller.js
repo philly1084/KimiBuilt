@@ -11,6 +11,7 @@ const { getUnifiedRegistry } = require('../../agent-sdk/registry/UnifiedRegistry
 const { parseLenientJson } = require('../../utils/lenient-json');
 const { normalizeUsageMetadata } = require('../../utils/token-usage');
 const { formatImageDiagnosticsSummary } = require('../../image-generation-diagnostics');
+const { buildSystemHealthReport } = require('../../observability/health-report');
 
 class DashboardController {
   constructor(agentOrchestrator) {
@@ -336,34 +337,10 @@ class DashboardController {
    */
   async getHealth(req, res) {
     try {
-      const capabilities = {
-        deferredWorkloads: Boolean(req.app?.locals?.agentWorkloadService?.isAvailable?.()),
-        managedApps: Boolean(req.app?.locals?.managedAppService?.isAvailable?.()),
-      };
-      const health = {
-        status: 'healthy',
-        services: {
-          sdk: this.orchestrator ? 'connected' : 'disconnected',
-          vectorStore: await this.checkVectorStore(),
-          llmClient: await this.checkLLMClient(),
-          embedder: await this.checkEmbedder()
-        },
-        capabilities,
-        uptime: process.uptime(),
-        memory: process.memoryUsage(),
-        timestamp: new Date().toISOString()
-      };
-
-      // Determine overall status
-      const services = Object.values(health.services);
-      if (services.every(s => s === 'connected' || s === 'available')) {
-        health.status = 'healthy';
-      } else if (services.some(s => s === 'connected' || s === 'available')) {
-        health.status = 'degraded';
-      } else {
-        health.status = 'unhealthy';
-      }
-
+      const health = await buildSystemHealthReport({
+        app: req.app,
+        startupState: req.app?.locals?.startupState || null,
+      });
       res.json({ success: true, data: health });
     } catch (error) {
       console.error('Error getting health:', error);

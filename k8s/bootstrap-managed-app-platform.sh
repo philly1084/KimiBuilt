@@ -310,7 +310,11 @@ fi
 
 echo "Ensuring ${PLATFORM_NAMESPACE} namespace and generated secrets..."
 ensure_namespace
-ensure_bootstrap_secrets
+if [[ -f "$SCRIPT_DIR/ensure-generated-secrets.sh" ]]; then
+  CREATE_KIMIBUILT_SECRETS=0 CREATE_PLATFORM_SECRETS=1 bash "$SCRIPT_DIR/ensure-generated-secrets.sh"
+else
+  ensure_bootstrap_secrets
+fi
 
 echo "Applying non-secret resources from ${MANIFEST_PATH}..."
 apply_manifest_without_secrets

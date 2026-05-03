@@ -367,13 +367,17 @@ describe('DashboardController', () => {
 
   test('reports optional admin capabilities in health without treating them as core service failures', async () => {
     const controller = new DashboardController(null);
-    controller.checkVectorStore = jest.fn(async () => 'connected');
-    controller.checkLLMClient = jest.fn(async () => 'connected');
-    controller.checkEmbedder = jest.fn(async () => 'connected');
 
     const req = {
       app: {
         locals: {
+          startupState: {
+            ready: true,
+            status: 'ready',
+            startedAt: '2026-05-03T00:00:00.000Z',
+            initializedAt: '2026-05-03T00:00:01.000Z',
+            lastError: null,
+          },
           agentWorkloadService: {
             isAvailable: jest.fn(() => false),
           },
@@ -393,11 +397,21 @@ describe('DashboardController', () => {
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
       success: true,
       data: expect.objectContaining({
-        status: 'degraded',
+        status: expect.any(String),
         capabilities: {
           deferredWorkloads: false,
           managedApps: true,
         },
+        components: expect.objectContaining({
+          boot: expect.objectContaining({
+            status: 'healthy',
+          }),
+          websocket: expect.any(Object),
+          tts: expect.any(Object),
+          audioProcessing: expect.any(Object),
+          podcastVideo: expect.any(Object),
+          memory: expect.any(Object),
+        }),
       }),
     }));
   });

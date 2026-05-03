@@ -26,7 +26,7 @@ spec:
         fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: backend
-          image: ghcr.io/philly1084/kimibuilt:latest
+          image: ghcr.io/philly1084/kimibuilt:sha-e5e1669
           imagePullPolicy: Always
           securityContext:
             runAsNonRoot: true

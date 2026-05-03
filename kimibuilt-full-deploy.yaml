@@ -221,7 +221,7 @@ spec:
         kubernetes.io/arch: arm64
       containers:
         - name: qdrant
-          image: qdrant/qdrant:latest
+          image: qdrant/qdrant:v1.13.6
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 6333
@@ -297,7 +297,7 @@ spec:
         kubernetes.io/arch: arm64
       initContainers:
         - name: model-pull
-          image: ollama/ollama:latest
+          image: ollama/ollama:0.5.7
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-c"]
           args:
@@ -312,7 +312,7 @@ spec:
               mountPath: /root/.ollama
       containers:
         - name: ollama
-          image: ollama/ollama:latest
+          image: ollama/ollama:0.5.7
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 11434
@@ -385,7 +385,7 @@ spec:
         - name: ghcr-secret
       containers:
         - name: kokoro-tts
-          image: ghcr.io/philly1084/kimibuilt:latest
+          image: ghcr.io/philly1084/kimibuilt:sha-e5e1669
           imagePullPolicy: Always
           command:
             - node
@@ -466,7 +466,7 @@ spec:
         - name: ghcr-secret
       containers:
         - name: backend
-          image: ghcr.io/philly1084/kimibuilt:latest
+          image: ghcr.io/philly1084/kimibuilt:sha-e5e1669
           imagePullPolicy: Always
           ports:
             - containerPort: 3000

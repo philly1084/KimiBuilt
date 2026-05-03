@@ -63,6 +63,12 @@ const { TemplateStore } = require('./template-store');
 const { podcastService } = require('./podcast/podcast-service');
 const { podcastVideoService } = require('./video/podcast-video-service');
 const { remoteRunnerService } = require('./remote-runner/service');
+const {
+    buildSystemHealthReport,
+    createStartupState,
+    markStartupFailed,
+    markStartupReady,
+} = require('./observability/health-report');
 
 // Document Service
 const { DocumentService } = require('./documents/document-service');
@@ -77,9 +83,9 @@ app.locals.dashboardController = new DashboardController(null);
 setDashboardController(app.locals.dashboardController);
 
 let startupState = {
-    ready: false,
-    startedAt: new Date().toISOString(),
+    ...createStartupState(),
 };
+app.locals.startupState = startupState;
 
 app.use(helmet({
     contentSecurityPolicy: false,
@@ -106,41 +112,11 @@ const toolRateLimit = createRateLimit({
 });
 
 app.get('/health', async (_req, res) => {
-    const checks = {
-        server: 'ok',
-        qdrant: 'unknown',
-        ollama: 'unknown',
-        postgres: 'unknown',
-    };
-
-    try {
-        checks.qdrant = (await vectorStore.healthCheck()) ? 'ok' : 'down';
-    } catch {
-        checks.qdrant = 'down';
-    }
-
-    try {
-        checks.ollama = (await embedder.healthCheck()) ? 'ok' : 'down';
-    } catch {
-        checks.ollama = 'down';
-    }
-
-    if (!sessionStore.isPersistent()) {
-        checks.postgres = 'disabled';
-    } else {
-        try {
-            checks.postgres = (await sessionStore.healthCheck()) ? 'ok' : 'down';
-        } catch {
-            checks.postgres = 'down';
-        }
-    }
-
-    const allOk = Object.values(checks).every((value) => value === 'ok' || value === 'disabled');
-    res.status(allOk ? 200 : 503).json({
-        status: allOk ? 'healthy' : 'degraded',
-        components: checks,
-        timestamp: new Date().toISOString(),
+    const health = await buildSystemHealthReport({
+        app,
+        startupState,
     });
+    res.status(health.httpStatus).json(health);
 });
 
 app.get('/live', (_req, res) => {
@@ -152,8 +128,10 @@ app.get('/live', (_req, res) => {
 
 app.get('/ready', (_req, res) => {
     res.status(startupState.ready ? 200 : 503).json({
-        status: startupState.ready ? 'ready' : 'starting',
+        status: startupState.ready ? 'ready' : (startupState.status === 'degraded' ? 'degraded' : 'starting'),
         startedAt: startupState.startedAt,
+        initializedAt: startupState.initializedAt || null,
+        error: startupState.lastError || null,
         timestamp: new Date().toISOString(),
     });
 });
@@ -360,7 +338,7 @@ server.on('upgrade', (req, socket, head) => {
     });
 });
 
-async function start() {
+async function initializeRuntimeServices(targetApp = app, state = startupState) {
     try {
         console.log('[Boot] Initializing session store...');
         await sessionStore.initialize();
@@ -486,17 +464,36 @@ async function start() {
         console.log(`[Boot] TTS ${ttsConfig.provider || 'unknown'} ${ttsConfig.diagnostics?.status || 'unknown'}: ${ttsConfig.diagnostics?.message || 'No details available.'}`);
         const audioProcessingConfig = audioProcessingService.getPublicConfig();
         console.log(`[Boot] Audio processing ${audioProcessingConfig.provider || 'unknown'} ${audioProcessingConfig.diagnostics?.status || 'unknown'}: ${audioProcessingConfig.diagnostics?.message || 'No details available.'}`);
-        startupState.ready = true;
+        markStartupReady(state);
+        targetApp.locals.startupState = state;
     } catch (err) {
         console.warn('[Boot] Service init failed (will retry on first use):', err.message);
-        startupState.ready = true;
+        markStartupFailed(state, err);
+        targetApp.locals.startupState = state;
     }
-
-    server.listen(config.port, '0.0.0.0', () => {
-        console.log(`Lilly backend listening on http://0.0.0.0:${config.port}`);
-    });
 }
 
-start();
+async function start({ listen = true, initialize = initializeRuntimeServices } = {}) {
+    await initialize(app, startupState);
 
-module.exports = { app, server };
+    if (listen && !server.listening) {
+        server.listen(config.port, '0.0.0.0', () => {
+            console.log(`Lilly backend listening on http://0.0.0.0:${config.port}`);
+        });
+    }
+
+    return { app, server, startupState };
+}
+
+const startupPromise = process.env.NODE_ENV === 'test'
+    ? Promise.resolve({ app, server, startupState })
+    : start();
+
+module.exports = {
+    app,
+    initializeRuntimeServices,
+    server,
+    start,
+    startupPromise,
+    startupState,
+};

@@ -3,92 +3,29 @@
  * Manages execution traces and timelines
  */
 
+const path = require('path');
+const { PROJECT_ROOT, resolvePreferredWritableFile } = require('../../runtime-state-paths');
+const {
+  appendJsonlRecordSync,
+  readJsonlRecordsSync,
+  writeJsonlRecordsSync,
+} = require('../../observability/jsonl-persistence');
+
+function getTracesStoragePath() {
+  return resolvePreferredWritableFile(
+    path.join(PROJECT_ROOT, 'data', 'observability', 'traces.jsonl'),
+    ['observability', 'traces.jsonl'],
+  );
+}
+
 class TracesController {
-  constructor() {
-    this.traces = new Map();
-    this.loadDefaultTraces();
-  }
-
-  loadDefaultTraces() {
-    const defaultTrace = {
-      id: 'trace-1',
-      taskId: 'task-abc-123',
-      sessionId: 'session-xyz',
-      status: 'completed',
-      startTime: new Date(Date.now() - 3600000).toISOString(),
-      endTime: new Date(Date.now() - 3590000).toISOString(),
-      duration: 10000,
-      model: 'gpt-4o',
-      input: 'Create a React component for a todo list',
-      output: 'Here is the React component...',
-      timeline: [
-        {
-          step: 1,
-          type: 'planning',
-          name: 'Task Analysis',
-          startTime: new Date(Date.now() - 3600000).toISOString(),
-          endTime: new Date(Date.now() - 3599800).toISOString(),
-          duration: 200,
-          status: 'completed',
-          details: {
-            detectedIntent: 'code_generation',
-            requiredTools: ['code_writer'],
-            complexity: 'medium'
-          }
-        },
-        {
-          step: 2,
-          type: 'tool_call',
-          name: 'Generate Code',
-          startTime: new Date(Date.now() - 3599800).toISOString(),
-          endTime: new Date(Date.now() - 3595000).toISOString(),
-          duration: 4800,
-          status: 'completed',
-          details: {
-            tool: 'code_writer',
-            input: 'Create React todo component',
-            output: '65 lines of code generated'
-          }
-        },
-        {
-          step: 3,
-          type: 'verification',
-          name: 'Code Review',
-          startTime: new Date(Date.now() - 3595000).toISOString(),
-          endTime: new Date(Date.now() - 3592000).toISOString(),
-          duration: 3000,
-          status: 'completed',
-          details: {
-            checks: ['syntax', 'best_practices', 'security'],
-            issues: 0,
-            warnings: 1
-          }
-        },
-        {
-          step: 4,
-          type: 'completion',
-          name: 'Task Complete',
-          startTime: new Date(Date.now() - 3592000).toISOString(),
-          endTime: new Date(Date.now() - 3590000).toISOString(),
-          duration: 2000,
-          status: 'completed',
-          details: {
-            result: 'success',
-            tokensUsed: 2450
-          }
-        }
-      ],
-      metrics: {
-        totalTokens: 2450,
-        promptTokens: 45,
-        completionTokens: 2405,
-        toolCalls: 1,
-        retries: 0
-      },
-      createdAt: new Date(Date.now() - 3600000).toISOString()
-    };
-
-    this.traces.set(defaultTrace.id, defaultTrace);
+  constructor(options = {}) {
+    this.storagePath = path.resolve(options.storagePath || getTracesStoragePath());
+    this.traces = new Map(
+      readJsonlRecordsSync(this.storagePath)
+        .filter((trace) => trace?.id)
+        .map((trace) => [trace.id, trace]),
+    );
   }
 
   /**
@@ -200,6 +137,7 @@ class TracesController {
       }
 
       this.traces.delete(id);
+      writeJsonlRecordsSync(this.storagePath, Array.from(this.traces.values()));
 
       res.json({ success: true, data: { id, deleted: true } });
     } catch (error) {
@@ -276,7 +214,10 @@ class TracesController {
    */
   addTrace(trace) {
     this.traces.set(trace.id, trace);
+    appendJsonlRecordSync(this.storagePath, trace);
   }
 }
 
 module.exports = new TracesController();
+module.exports.TracesController = TracesController;
+module.exports.getTracesStoragePath = getTracesStoragePath;

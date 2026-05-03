@@ -9,6 +9,27 @@ KimiBuilt now expects the managed-app control plane to be GitLab based:
 
 ## 1. Bootstrap The Platform
 
+Generate the required Kubernetes secrets first. This keeps new installs from
+copying placeholder passwords into Rancher or YAML:
+
+```bash
+./k8s/ensure-generated-secrets.sh
+```
+
+To print decoded values after they are stored in Kubernetes:
+
+```bash
+SHOW_SECRET_VALUES=1 ./k8s/ensure-generated-secrets.sh
+```
+
+To rotate generated values:
+
+```bash
+ROTATE_SECRETS=1 SHOW_SECRET_VALUES=1 ./k8s/ensure-generated-secrets.sh
+```
+
+Then bootstrap the platform resources:
+
 ```bash
 ./k8s/bootstrap-managed-app-platform.sh
 ```

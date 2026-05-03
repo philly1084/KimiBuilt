@@ -32,7 +32,7 @@ spec:
       initContainers:
         # Pull the embedding model before the main container starts
         - name: model-pull
-          image: ollama/ollama:latest
+          image: ollama/ollama:0.5.7
           command: ["/bin/sh", "-c"]
           args:
             - |
@@ -46,7 +46,7 @@ spec:
               mountPath: /root/.ollama
       containers:
         - name: ollama
-          image: ollama/ollama:latest
+          image: ollama/ollama:0.5.7
           ports:
             - containerPort: 11434
               name: http

@@ -235,7 +235,7 @@
       "lastActionAt": "2026-05-03T13:13:21.464Z",
       "lastSuccessAt": "2026-05-03T13:13:21.464Z",
       "lastFailureAt": "2026-05-03T13:13:21.074Z",
-      "lastVerificationAt": "2026-05-03T13:13:21.435Z",
+      "lastVerificationAt": "2026-05-03T14:52:01.840Z",
       "lastStatus": "succeeded",
       "lastError": "",
       "lastCommand": "",
@@ -252,10 +252,10 @@
       "verification": {
         "rollout": true,
         "ingress": true,
-        "tls": false,
-        "https": false,
+        "tls": true,
+        "https": true,
         "lastRolloutAt": "2026-05-03T13:13:21.464Z",
-        "lastVerifiedAt": "2026-05-03T13:13:21.435Z"
+        "lastVerifiedAt": "2026-05-03T14:52:01.840Z"
       }
     },
     "10.0.0.5:22|ame|backend": {
