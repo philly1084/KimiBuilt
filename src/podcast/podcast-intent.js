@@ -80,7 +80,7 @@ function inferPodcastVideoSceneCount(text = '') {
 }
 
 function hasExplicitPodcastStoryboardIntent(text = '') {
-    return /\b(?:generated images?|ai images?|custom images?|illustrations?|visuals?|scene images?|cover art|artwork|storyboards?|slides?|stock photos?|web images?|unsplash)\b/i
+    return /\b(?:generated images?|ai images?|custom images?|illustrations?|visuals?|scene images?|cover art|artwork|storyboards?|slides?|stock photos?|web images?|unsplash|infographics?|designed pages?|content pages?|image output|match(?:es|ing)? (?:the )?content|visual show)\b/i
         .test(String(text || ''));
 }
 
@@ -92,7 +92,9 @@ function inferPodcastVideoOptions(text = '') {
     const imageMode = inferPodcastVideoImageMode(text);
     const generateImages = !/\b(?:no generated images?|no ai images?|do not generate images?|without generated images?)\b/i.test(String(text || ''));
     const sceneCount = inferPodcastVideoSceneCount(text);
-    const useStoryboard = hasExplicitPodcastStoryboardIntent(text);
+    const normalized = String(text || '');
+    const useStoryboard = hasExplicitPodcastStoryboardIntent(text)
+        || /\b(?:video\s+podcasts?|podcasts?\s+videos?)\b/i.test(normalized);
 
     return {
         includeVideo: true,

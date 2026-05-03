@@ -3899,7 +3899,7 @@ class ToolManager {
         id: 'podcast',
         name: 'Podcast',
         category: 'system',
-        description: 'Research a topic, script a two-host episode, synthesize both voices with local TTS, stitch the final podcast audio into a saved artifact, and optionally render an MP4 podcast video. The default MP4 is a reliable waveform card; scene images require storyboard mode.',
+        description: 'Research a topic, script a two-host episode, synthesize both voices with local TTS, stitch the final podcast audio into a saved artifact, and optionally render an MP4 podcast video. Visual podcast requests should use storyboard mode with content-matched infographic scenes; waveform-card is the simple audio visualizer fallback.',
         backend: {
           handler: async (params = {}, context = {}) => {
             const service = resolvePodcastService(context);

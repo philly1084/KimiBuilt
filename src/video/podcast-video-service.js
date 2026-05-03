@@ -334,6 +334,9 @@ function normalizeScene(scene = {}, index = 0) {
   const narration = sanitizeText(scene.narration || scene.text || scene.caption || summary);
   const visualQuery = sanitizeText(scene.visualQuery || scene.query || summary);
   const visualPrompt = sanitizeText(scene.visualPrompt || scene.prompt || visualQuery || summary);
+  const keyFacts = uniqueOrdered(Array.isArray(scene.keyFacts) ? scene.keyFacts : []);
+  const contentReads = uniqueOrdered(Array.isArray(scene.contentReads) ? scene.contentReads : []);
+  const contentWrites = uniqueOrdered(Array.isArray(scene.contentWrites) ? scene.contentWrites : []);
 
   return {
     id: scene.id || `scene-${String(index + 1).padStart(2, '0')}`,
@@ -346,6 +349,10 @@ function normalizeScene(scene = {}, index = 0) {
     caption: sanitizeText(scene.caption || narration || summary).slice(0, 180),
     visualQuery,
     visualPrompt,
+    slideType: sanitizeText(scene.slideType || scene.visualType || scene.layout || ''),
+    keyFacts,
+    contentReads,
+    contentWrites,
     imageUrl: String(scene.imageUrl || scene.image_url || '').trim() || null,
     imageSource: String(scene.imageSource || scene.image_source || '').trim() || null,
     attribution: scene.attribution || null,
@@ -432,6 +439,11 @@ function buildFallbackStoryboard({ title = '', transcript = '', turns = [], dura
 
     const words = narration.split(/\s+/).filter(Boolean);
     const summary = words.slice(0, 14).join(' ');
+    const keyFacts = uniqueOrdered([
+      words.slice(0, 8).join(' '),
+      words.slice(8, 16).join(' '),
+    ]).filter((fact) => fact.length > 8);
+    const slideType = chooseInfographicKind(`${title} ${summary} ${index}`);
     return normalizeScene({
       start,
       end,
@@ -439,9 +451,18 @@ function buildFallbackStoryboard({ title = '', transcript = '', turns = [], dura
       narration,
       caption: words.slice(0, 22).join(' '),
       visualQuery: summary || sanitizeText(title),
+      slideType,
+      keyFacts,
+      contentReads: [
+        `Transcript segment ${index + 1}`,
+      ],
+      contentWrites: [
+        'Show the main idea as a designed infographic, not a generic photo.',
+        'Use one visual structure that matches this segment.',
+      ],
       visualPrompt: [
         'Premium editorial podcast slide, documentary explainer infographic, high production value.',
-        'Use charts, diagrams, icons, evidence cards, or timeline structure when helpful.',
+        `Use a ${slideType} structure with charts, diagrams, icons, evidence cards, or timeline structure when helpful.`,
         'Avoid logos, watermarks, tiny paragraphs, and distorted typography.',
         `Topic: ${sanitizeText(title) || 'Podcast episode'}.`,
         `Moment: ${summary || narration.slice(0, 120)}.`,
@@ -519,12 +540,14 @@ function buildStoryboardPrompt({
     `Visual style: ${sanitizeText(visualStyle) || 'YouTube science/news explainer show, polished editorial pacing, strong hook, evidence beats, viewer takeaway, minimal on-screen text'}`,
     '',
     'Return valid JSON only with this shape:',
-    '{"scenes":[{"start":0,"end":8,"summary":"...","caption":"...","visualQuery":"...","visualPrompt":"..."}]}',
+    '{"scenes":[{"start":0,"end":8,"summary":"...","caption":"...","slideType":"hook-card|timeline|comparison|process-flow|risk-map|evidence-dashboard|myth-vs-fact|takeaway","keyFacts":["..."],"contentReads":["..."],"contentWrites":["..."],"visualQuery":"...","visualPrompt":"..."}]}',
     '',
     'Rules:',
     '- Scene times must cover the whole episode in order without overlaps.',
     '- Treat scenes as show segments: hook, context, evidence, stakes, implications, and takeaway.',
     '- Mix visual formats across the episode: one strong hook image, timeline, comparison, process flow, risk/impact map, evidence dashboard, myth-vs-fact panel, and takeaway card when the transcript supports them.',
+    '- For each scene, read the transcript/source beats into contentReads, then write the slide payload into contentWrites: headline idea, chart/diagram structure, labels, metric tiles, evidence cards, and viewer takeaway.',
+    '- Each visual should feel like a designed long-form sandbox infographic page compressed into a video slide, not a single background picture.',
     '- visualQuery should be short and useful for Unsplash search.',
     '- visualPrompt should be specific enough for image generation and should describe the infographic structure, icons, charts, and visual hierarchy.',
     '- Generated images may include abstract labels or placeholder glyphs, but must avoid small unreadable paragraphs, logos, watermarks, and distorted typography.',
@@ -624,12 +647,32 @@ function buildSceneImagePrompt(scene = {}, options = {}) {
   const summary = sanitizeText(scene.summary || scene.caption || scene.visualQuery || 'Podcast scene');
   const caption = sanitizeText(scene.caption || scene.narration || '').slice(0, 220);
   const requested = sanitizeText(scene.visualPrompt || scene.visualQuery || summary);
-  const kind = chooseInfographicKind(`${summary} ${caption} ${scene.id || ''}`);
+  const explicitKind = sanitizeText(scene.slideType || '').toLowerCase();
+  const kindAliases = {
+    'hook-card': 'metrics',
+    hook: 'metrics',
+    timeline: 'timeline',
+    comparison: 'comparison',
+    'comparison-board': 'comparison',
+    'process-flow': 'flow',
+    flow: 'flow',
+    'risk-map': 'radar',
+    'impact-map': 'radar',
+    radar: 'radar',
+    'evidence-dashboard': 'metrics',
+    dashboard: 'metrics',
+    'myth-vs-fact': 'comparison',
+    takeaway: 'matrix',
+  };
+  const kind = kindAliases[explicitKind] || chooseInfographicKind(`${summary} ${caption} ${scene.id || ''}`);
   const orientation = options.orientation === 'portrait'
     ? 'vertical'
     : options.orientation === 'squarish'
       ? 'square'
       : 'widescreen';
+  const keyFacts = uniqueOrdered(scene.keyFacts || []).slice(0, 4);
+  const contentReads = uniqueOrdered(scene.contentReads || []).slice(0, 3);
+  const contentWrites = uniqueOrdered(scene.contentWrites || []).slice(0, 4);
   const infographicBriefs = {
     timeline: 'a cinematic timeline with four milestone nodes, connecting arcs, subtle date chips, and one emphasized turning point',
     comparison: 'a split-screen comparison board with two evidence columns, icon badges, simple bar indicators, and a clear contrast zone',
@@ -642,11 +685,15 @@ function buildSceneImagePrompt(scene = {}, options = {}) {
   return [
     `Create a premium ${orientation} image slide for a video podcast.`,
     `Use ${infographicBriefs[kind] || infographicBriefs.metrics}.`,
+    'Compose it like a long-form sandbox infographic page translated into one cinematic video frame: clear information architecture, section bands, figure/callout areas, chart space, and a strong content hierarchy.',
     'Style: documentary explainer, high-end editorial infographic, cinematic lighting, crisp vector-like shapes blended with subtle photographic depth, readable composition at YouTube size.',
     'Use strong contrast, restrained color, generous margins, no brand logos, no watermarks, no tiny paragraphs, no malformed text.',
     'If text appears, keep it as large abstract headline glyphs or short placeholder labels only.',
     `Topic moment: ${summary}.`,
     caption ? `Audio-aligned context: ${caption}.` : '',
+    keyFacts.length ? `Facts to visually encode: ${keyFacts.join(' | ')}.` : '',
+    contentReads.length ? `Content reads used: ${contentReads.join(' | ')}.` : '',
+    contentWrites.length ? `Content to write into the slide: ${contentWrites.join(' | ')}.` : '',
     `Original visual direction: ${requested}.`,
   ].filter(Boolean).join(' ');
 }
@@ -849,6 +896,32 @@ function buildWaveformFilterGraph(dimensions = {}) {
     `[1:a]aformat=channel_layouts=mono,showwaves=s=${waveWidth}x${waveHeight}:mode=line:rate=${DEFAULT_FPS}:colors=0x74D99F,format=rgba[wave]`,
     `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1[bg]`,
     `[bg][wave]overlay=x=${waveX}:y=${waveY}:shortest=1,format=yuv420p[v]`,
+  ].join(';');
+}
+
+function buildCornerWaveformOverlayGraph(dimensions = {}, {
+  videoInput = '0:v',
+  audioInput = '1:a',
+  output = 'v',
+} = {}) {
+  const width = Math.max(1, Number(dimensions.width) || DEFAULT_WIDTH);
+  const height = Math.max(1, Number(dimensions.height) || DEFAULT_HEIGHT);
+  const isPortrait = height > width;
+  const margin = Math.max(24, Math.round(Math.min(width, height) * 0.035));
+  const padding = Math.max(10, Math.round(Math.min(width, height) * 0.014));
+  const waveWidth = Math.max(isPortrait ? 250 : 230, Math.round(width * (isPortrait ? 0.34 : 0.22)));
+  const waveHeight = Math.max(52, Math.round(height * (isPortrait ? 0.038 : 0.07)));
+  const panelWidth = waveWidth + (padding * 2);
+  const panelHeight = waveHeight + (padding * 2);
+  const panelX = Math.max(margin, width - panelWidth - margin);
+  const panelY = Math.max(margin, height - panelHeight - margin);
+  const waveX = panelX + padding;
+  const waveY = panelY + padding;
+
+  return [
+    `[${videoInput}]drawbox=x=${panelX}:y=${panelY}:w=${panelWidth}:h=${panelHeight}:color=white@0.72:t=fill,drawbox=x=${panelX}:y=${panelY}:w=${panelWidth}:h=${panelHeight}:color=0x17202A@0.24:t=3[wavebase]`,
+    `[${audioInput}]aformat=channel_layouts=mono,showwaves=s=${waveWidth}x${waveHeight}:mode=line:rate=${DEFAULT_FPS}:colors=0x167A66,format=rgba[cornerwave]`,
+    `[wavebase][cornerwave]overlay=x=${waveX}:y=${waveY}:shortest=1,format=yuv420p[${output}]`,
   ].join(';');
 }
 
@@ -1603,6 +1676,12 @@ class PodcastVideoService {
     if (!validation.usable) {
       await fs.writeFile(finalImagePath, finalImage.buffer);
     }
+    const slideFilter = `[0:v]${buildBackgroundVideoFilter(dimensions, { duration: durationSeconds }, 0, visualEffects)}[slide]`;
+    const overlayFilter = buildCornerWaveformOverlayGraph(dimensions, {
+      videoInput: 'slide',
+      audioInput: '1:a',
+      output: 'v',
+    });
 
     await this.runFfmpeg([
       '-y',
@@ -1610,8 +1689,8 @@ class PodcastVideoService {
       '-framerate', String(DEFAULT_FPS),
       '-i', finalImagePath,
       '-i', audioPath,
-      '-vf', buildBackgroundVideoFilter(dimensions, { duration: durationSeconds }, 0, visualEffects),
-      '-map', '0:v:0',
+      '-filter_complex', `${slideFilter};${overlayFilter}`,
+      '-map', '[v]',
       '-map', '1:a:0',
       '-shortest',
       '-r', String(DEFAULT_FPS),
@@ -1793,6 +1872,7 @@ class PodcastVideoService {
           renderMode: runtime.renderMode,
           audioRepairEnabled: normalizeVideoAudioRepair(enhanceAudio),
           visualEffectsEnabled: normalizeVisualEffects(visualEffects),
+          audioWaveformOverlayEnabled: true,
         };
       }
 
@@ -1846,11 +1926,16 @@ class PodcastVideoService {
         '-safe', '0',
         '-i', concatPath,
         '-i', audioPath,
-        '-map', '0:v:0',
+        '-filter_complex', buildCornerWaveformOverlayGraph(dimensions, {
+          videoInput: '0:v',
+          audioInput: '1:a',
+          output: 'v',
+        }),
+        '-map', '[v]',
         '-map', '1:a:0',
         '-shortest',
         '-r', String(DEFAULT_FPS),
-        '-c:v', 'copy',
+        ...buildCompatibleH264VideoArgs(runtime),
         ...this.buildPodcastVideoAudioArgs({ enhanceAudio }),
         '-movflags', '+faststart',
         outputPath,
@@ -1860,7 +1945,7 @@ class PodcastVideoService {
           totalDurationSeconds,
           {
             fixedMs: 120000,
-            perSecondMs: 1000,
+            perSecondMs: 1400,
             maxTimeoutMs: runtime.maxFfmpegTimeoutMs,
           },
         ),
@@ -1882,6 +1967,7 @@ class PodcastVideoService {
         renderMode: runtime.renderMode,
         audioRepairEnabled: normalizeVideoAudioRepair(enhanceAudio),
         visualEffectsEnabled: applyVisualEffects,
+        audioWaveformOverlayEnabled: true,
       };
     } finally {
       await fs.rm(tempDir, { recursive: true, force: true });
@@ -2056,6 +2142,7 @@ class PodcastVideoService {
         renderMode: rendered.renderMode,
         audioRepairEnabled: rendered.audioRepairEnabled,
         visualEffectsEnabled: rendered.visualEffectsEnabled,
+        audioWaveformOverlayEnabled: rendered.audioWaveformOverlayEnabled === true,
         imageMode,
         generatedImagesEnabled: generateImages,
       },

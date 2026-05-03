@@ -79,14 +79,21 @@ describe('PodcastVideoService', () => {
       id: 'scene-04',
       summary: 'Heat pumps lower winter electricity costs',
       caption: 'The hosts compare installation costs against winter energy savings.',
+      slideType: 'evidence-dashboard',
+      keyFacts: ['Lower operating costs during winter peaks', 'Installation cost is paid back over time'],
+      contentReads: ['Transcript segment on heat pump economics'],
+      contentWrites: ['Show a metric tile for savings and a payback timeline'],
       visualPrompt: 'home energy savings explainer',
     }, {
       orientation: 'landscape',
     });
 
     expect(prompt).toContain('premium widescreen image slide');
+    expect(prompt).toContain('long-form sandbox infographic page');
     expect(prompt).toMatch(/timeline|comparison|process-flow|priority matrix|radial impact map|editorial dashboard/);
     expect(prompt).toContain('Heat pumps lower winter electricity costs');
+    expect(prompt).toContain('Facts to visually encode');
+    expect(prompt).toContain('Content to write into the slide');
     expect(prompt).toContain('no watermarks');
   });
 
@@ -136,9 +143,17 @@ describe('PodcastVideoService', () => {
       stage: 'scene 1/1',
     }));
     expect(ffmpegCalls[1].options).toEqual(expect.objectContaining({
-      timeoutMs: 210000,
+      timeoutMs: 246000,
       stage: 'final mux',
     }));
+    expect(ffmpegCalls[1].args).toEqual(expect.arrayContaining([
+      '-filter_complex',
+      '-map', '[v]',
+      '-c:v', 'libx264',
+    ]));
+    expect(ffmpegCalls[1].args.join(' ')).toContain('showwaves');
+    expect(ffmpegCalls[1].args.join(' ')).not.toContain('-c:v copy');
+    expect(result.audioWaveformOverlayEnabled).toBe(true);
   });
 
   test('defaults to a deterministic waveform-card H.264 AVC render for compatibility', async () => {
@@ -359,14 +374,18 @@ describe('PodcastVideoService', () => {
     expect(ffmpegCalls).toHaveLength(1);
     expect(ffmpegCalls[0].args).toEqual(expect.arrayContaining([
       '-loop', '1',
+      '-filter_complex',
+      '-map', '[v]',
       '-c:v', 'libx264',
       '-tag:v', 'avc1',
       '-c:a', 'aac',
     ]));
+    expect(ffmpegCalls[0].args.join(' ')).toContain('showwaves');
     expect(ffmpegCalls[0].options).toEqual(expect.objectContaining({
       timeoutMs: 180000,
       stage: 'static show-card render',
     }));
+    expect(result.audioWaveformOverlayEnabled).toBe(true);
   });
 
   test('can harvest an image from a web-search result via web-fetch', async () => {

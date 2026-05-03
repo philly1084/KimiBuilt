@@ -1164,6 +1164,13 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(__testUtils.hasExplicitPodcastIntent('Use the podcast workflow to create podcasts about battery storage.')).toBe(true);
         expect(__testUtils.extractExplicitPodcastTopic('Use the podcast workflow to create podcasts about battery storage.')).toBe('battery storage');
         expect(__testUtils.hasExplicitPodcastVideoIntent('Make a video podcast about battery storage.')).toBe(true);
+        expect(__testUtils.inferPodcastVideoOptions('Make a video podcast about battery storage.')).toEqual({
+            includeVideo: true,
+            videoAspectRatio: '16:9',
+            videoRenderMode: 'storyboard',
+            videoImageMode: 'mixed',
+            videoGenerateImages: true,
+        });
         expect(__testUtils.inferPodcastVideoOptions('Make a vertical video podcast about battery storage with generated images.')).toEqual({
             includeVideo: true,
             videoAspectRatio: '9:16',

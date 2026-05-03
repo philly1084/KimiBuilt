@@ -47,7 +47,7 @@ Useful optional inputs:
 Notes:
 
 - The tool requires an active session because it persists the final audio artifact.
-- For "video podcast", "podcast video", or "MP4 podcast" requests, pass `includeVideo: true` and use the default waveform-card render. For visual podcast, scene-image, or cover-art requests, also pass `videoRenderMode: "storyboard"`, keep `videoImageMode: "mixed"` by default, and pass `videoGenerateImages: true` unless the user explicitly asks not to use generated imagery.
+- For "video podcast" or "podcast video" requests, pass `includeVideo: true`, `videoRenderMode: "storyboard"`, `videoImageMode: "mixed"`, and `videoGenerateImages: true` unless the user explicitly asks for waveform-only or no generated imagery. Use waveform-card for plain MP4/audio-visualizer requests.
 - Research quality depends on `web-search` availability and source accessibility.
 - Speech stitching is native PCM WAV concatenation, so the selected TTS voices must emit compatible WAV output.
 - Podcast renders use the curated high-quality Kokoro `af_heart`, `af_bella`, `am_adam`, and `bf_emma` voice pool by default, with legacy Piper aliases mapped during rollout.
@@ -55,10 +55,10 @@ Notes:
 - Each host keeps a stable primary voice unless you set `cycleHostVoices: true` or request a video podcast; when a TTS render fails, the tool falls through to the next voice in that host's pool by default.
 - Source verification still uses bounded parallelism by default. Podcast TTS concurrency is conservative by default; only raise `ttsConcurrency` if you need speed more than render stability.
 - MP3 export and intro/outro/music-bed mixing require ffmpeg audio processing to be configured.
-- MP4 podcast video rendering also requires ffmpeg. The default video render mode is `waveform-card`: a deterministic audio waveform card encoded as H.264/AVC MP4 (`avc1`, yuv420p) with AAC audio for broad PC/browser compatibility. Use `videoRenderMode: "storyboard"` only when the user explicitly wants scene imagery.
+- MP4 podcast video rendering also requires ffmpeg. The `waveform-card` render is a deterministic audio waveform card encoded as H.264/AVC MP4 (`avc1`, yuv420p) with AAC audio for broad PC/browser compatibility. Use it only when the user wants a simple audio visualizer; content-focused video podcasts should use `videoRenderMode: "storyboard"`.
 - Video podcast renders keep speech audio clean by default without repair/mastering filters. Keep MP4 unless the user has a platform-specific reason to request another container.
 - Use `videoRenderMode: "static-card"` only when the user explicitly wants one key visual for the full episode. The storyboard pipeline plans timestamped show segments from the transcript, tries direct/provided images, web-search page image extraction, Unsplash, generated images when allowed, and deterministic fallback infographic frames.
-- For higher-quality visual podcasts, ask for or infer a mix of infographic slide types such as hook card, timeline, comparison board, process flow, risk/impact map, evidence dashboard, myth-vs-fact panel, and takeaway card. Generated slide prompts should favor clear visual hierarchy, icons, charts, metric tiles, and generous margins over plain stock-photo scenes.
+- For higher-quality visual podcasts, ask for or infer a mix of infographic slide types such as hook card, timeline, comparison board, process flow, risk/impact map, evidence dashboard, myth-vs-fact panel, and takeaway card. Generated slide prompts should favor clear visual hierarchy, icons, charts, metric tiles, content reads/writes, and generous margins over plain stock-photo scenes. Storyboard/static-card renders include a small corner waveform overlay so the audio remains visibly alive without dominating the frame.
 - Long video renders use adaptive ffmpeg budgets. Override with `videoFfmpegTimeoutMs`, `videoSegmentTimeoutMs`, or `videoMuxTimeoutMs` only when the host is known to need more time.
 - Only use music beds you are licensed to use. Provide a legal audio file path or upload; do not source copyrighted music without permission.
 - Check `/api/tts/voices` for the exact `hostA` / `hostB` voice IDs supported in your current deployment before passing custom `hostAVoiceIds` and `hostBVoiceIds`.
