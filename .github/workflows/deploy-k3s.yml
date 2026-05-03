@@ -72,15 +72,137 @@ jobs:
           grep "image:" k8s/kokoro-tts-deployment.yaml
 
       - name: Deploy to k3s
+        env:
+          GH_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GH_N8N_API_KEY: ${{ secrets.N8N_API_KEY }}
+          GH_OPENAI_MEDIA_API_KEY: ${{ secrets.OPENAI_MEDIA_API_KEY }}
+          GH_PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+          GH_LILLYBUILT_AUTH_USERNAME: ${{ secrets.LILLYBUILT_AUTH_USERNAME }}
+          GH_LILLYBUILT_AUTH_PASSWORD: ${{ secrets.LILLYBUILT_AUTH_PASSWORD }}
+          GH_LILLYBUILT_JWT_SECRET: ${{ secrets.LILLYBUILT_JWT_SECRET }}
+          GH_KIMIBUILT_REMOTE_RUNNER_TOKEN: ${{ secrets.KIMIBUILT_REMOTE_RUNNER_TOKEN }}
+          GH_POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
         run: |
+          set -euo pipefail
+
+          is_placeholder() {
+            case "${1:-}" in
+              ""|change-me|replace-me|replace-after-gitlab-boot|replace-after-gitea-boot|SET_VIA_KUBECTL_CREATE_SECRET|OPTIONAL_SET_VIA_KUBECTL_CREATE_SECRET)
+                return 0
+                ;;
+              *)
+                return 1
+                ;;
+            esac
+          }
+
+          secret_value() {
+            local key="$1"
+            kubectl get secret kimibuilt-secrets -n "${KUBE_NAMESPACE}" -o "jsonpath={.data.${key}}" 2>/dev/null | base64 -d 2>/dev/null || true
+          }
+
+          choose_secret_value() {
+            local github_value="$1"
+            local key="$2"
+            local fallback="${3:-}"
+            local current_value
+
+            if [ -n "${github_value}" ]; then
+              printf '%s' "${github_value}"
+              return
+            fi
+
+            current_value="$(secret_value "${key}")"
+            if ! is_placeholder "${current_value}"; then
+              printf '%s' "${current_value}"
+              return
+            fi
+
+            printf '%s' "${fallback}"
+          }
+
+          validate_secret_key() {
+            local key="$1"
+            local value
+            value="$(secret_value "${key}")"
+            if is_placeholder "${value}"; then
+              echo "::error::kimibuilt-secrets is missing required key ${key}. Add it as a GitHub Actions secret or patch the live Kubernetes secret."
+              return 1
+            fi
+            echo "${key}=set"
+          }
+
+          require_effective_secret() {
+            local key="$1"
+            local value="$2"
+            if is_placeholder "${value}"; then
+              echo "::error::kimibuilt-secrets is missing required key ${key}. Add it as a GitHub Actions secret or patch the live Kubernetes secret."
+              return 1
+            fi
+          }
+
+          patch_secret_key() {
+            local key="$1"
+            local value="$2"
+            local encoded
+
+            if is_placeholder "${value}"; then
+              return 0
+            fi
+
+            encoded="$(printf '%s' "${value}" | base64 | tr -d '\r\n')"
+            kubectl patch secret kimibuilt-secrets \
+              -n "${KUBE_NAMESPACE}" \
+              --type merge \
+              -p "{\"data\":{\"${key}\":\"${encoded}\"}}" >/dev/null
+            echo "${key}=patched"
+          }
+
           # Apply namespace first
           kubectl apply -f k8s/namespace.yaml
           
           # Apply configmap
           kubectl apply -f k8s/configmap.yaml
           
-          # Apply secret (should already exist with API key)
-          # kubectl apply -f k8s/secret.yaml
+          # Create or patch runtime secrets from GitHub Actions secrets when they
+          # are configured. Existing non-placeholder live values are preserved.
+          effective_openai_key="$(choose_secret_value "${GH_OPENAI_API_KEY:-${GH_N8N_API_KEY:-}}" OPENAI_API_KEY)"
+          effective_n8n_key="$(choose_secret_value "${GH_N8N_API_KEY:-}" N8N_API_KEY)"
+          effective_media_key="$(choose_secret_value "${GH_OPENAI_MEDIA_API_KEY:-}" OPENAI_MEDIA_API_KEY)"
+          effective_perplexity_key="$(choose_secret_value "${GH_PERPLEXITY_API_KEY:-}" PERPLEXITY_API_KEY)"
+          effective_auth_username="$(choose_secret_value "${GH_LILLYBUILT_AUTH_USERNAME:-}" LILLYBUILT_AUTH_USERNAME admin)"
+          effective_auth_password="$(choose_secret_value "${GH_LILLYBUILT_AUTH_PASSWORD:-}" LILLYBUILT_AUTH_PASSWORD)"
+          effective_jwt_secret="$(choose_secret_value "${GH_LILLYBUILT_JWT_SECRET:-}" LILLYBUILT_JWT_SECRET)"
+          effective_runner_token="$(choose_secret_value "${GH_KIMIBUILT_REMOTE_RUNNER_TOKEN:-}" KIMIBUILT_REMOTE_RUNNER_TOKEN)"
+          effective_postgres_password="$(choose_secret_value "${GH_POSTGRES_PASSWORD:-}" POSTGRES_PASSWORD)"
+
+          require_effective_secret OPENAI_API_KEY "${effective_openai_key}"
+          require_effective_secret LILLYBUILT_AUTH_USERNAME "${effective_auth_username}"
+          require_effective_secret LILLYBUILT_AUTH_PASSWORD "${effective_auth_password}"
+          require_effective_secret LILLYBUILT_JWT_SECRET "${effective_jwt_secret}"
+          require_effective_secret POSTGRES_PASSWORD "${effective_postgres_password}"
+
+          if ! kubectl get secret kimibuilt-secrets -n "${KUBE_NAMESPACE}" >/dev/null 2>&1; then
+            kubectl create secret generic kimibuilt-secrets \
+              --namespace "${KUBE_NAMESPACE}" \
+              --from-literal=__bootstrap__=1
+          fi
+
+          patch_secret_key OPENAI_API_KEY "${effective_openai_key}"
+          patch_secret_key N8N_API_KEY "${effective_n8n_key}"
+          patch_secret_key OPENAI_MEDIA_API_KEY "${effective_media_key}"
+          patch_secret_key PERPLEXITY_API_KEY "${effective_perplexity_key}"
+          patch_secret_key LILLYBUILT_AUTH_USERNAME "${effective_auth_username}"
+          patch_secret_key LILLYBUILT_AUTH_PASSWORD "${effective_auth_password}"
+          patch_secret_key LILLYBUILT_JWT_SECRET "${effective_jwt_secret}"
+          patch_secret_key KIMIBUILT_REMOTE_RUNNER_TOKEN "${effective_runner_token}"
+          patch_secret_key POSTGRES_PASSWORD "${effective_postgres_password}"
+
+          validate_secret_key OPENAI_API_KEY
+          validate_secret_key LILLYBUILT_AUTH_USERNAME
+          validate_secret_key LILLYBUILT_AUTH_PASSWORD
+          validate_secret_key LILLYBUILT_JWT_SECRET
+          validate_secret_key POSTGRES_PASSWORD
           
           # Apply dependencies
           kubectl apply -f k8s/qdrant-deployment.yaml
