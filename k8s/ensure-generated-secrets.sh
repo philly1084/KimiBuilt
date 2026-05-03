@@ -29,6 +29,7 @@ Environment variables:
 Optional overrides:
   OPENAI_API_KEY
   N8N_API_KEY
+  REMOTE_CLI_MCP_BEARER_TOKEN
   OPENAI_MEDIA_API_KEY
   PERPLEXITY_API_KEY
   LILLYBUILT_AUTH_USERNAME
@@ -192,13 +193,14 @@ print_secret() {
 
 ensure_kimibuilt_secrets() {
   local auth_username auth_password jwt_secret runner_token postgres_password
-  local openai_api_key n8n_api_key openai_media_api_key perplexity_api_key
+  local openai_api_key n8n_api_key mcp_bearer_token openai_media_api_key perplexity_api_key
   local docker_host ssh_host ssh_port ssh_username ssh_password ssh_key_path
 
   ensure_namespace "$KIMIBUILT_NAMESPACE"
 
-  openai_api_key="$(choose_secret_value OPENAI_API_KEY "$KIMIBUILT_NAMESPACE" kimibuilt-secrets OPENAI_API_KEY)"
   n8n_api_key="$(choose_secret_value N8N_API_KEY "$KIMIBUILT_NAMESPACE" kimibuilt-secrets N8N_API_KEY)"
+  mcp_bearer_token="$(choose_secret_value REMOTE_CLI_MCP_BEARER_TOKEN "$KIMIBUILT_NAMESPACE" kimibuilt-secrets REMOTE_CLI_MCP_BEARER_TOKEN "$n8n_api_key")"
+  openai_api_key="$(choose_secret_value OPENAI_API_KEY "$KIMIBUILT_NAMESPACE" kimibuilt-secrets OPENAI_API_KEY "$n8n_api_key")"
   openai_media_api_key="$(choose_secret_value OPENAI_MEDIA_API_KEY "$KIMIBUILT_NAMESPACE" kimibuilt-secrets OPENAI_MEDIA_API_KEY)"
   perplexity_api_key="$(choose_secret_value PERPLEXITY_API_KEY "$KIMIBUILT_NAMESPACE" kimibuilt-secrets PERPLEXITY_API_KEY)"
   auth_username="$(choose_secret_value LILLYBUILT_AUTH_USERNAME "$KIMIBUILT_NAMESPACE" kimibuilt-secrets LILLYBUILT_AUTH_USERNAME admin)"
@@ -218,6 +220,7 @@ ensure_kimibuilt_secrets() {
     --namespace "$KIMIBUILT_NAMESPACE" \
     --from-literal=OPENAI_API_KEY="$openai_api_key" \
     --from-literal=N8N_API_KEY="$n8n_api_key" \
+    --from-literal=REMOTE_CLI_MCP_BEARER_TOKEN="$mcp_bearer_token" \
     --from-literal=OPENAI_MEDIA_API_KEY="$openai_media_api_key" \
     --from-literal=PERPLEXITY_API_KEY="$perplexity_api_key" \
     --from-literal=LILLYBUILT_AUTH_USERNAME="$auth_username" \
@@ -233,7 +236,8 @@ ensure_kimibuilt_secrets() {
     --from-literal=POSTGRES_PASSWORD="$postgres_password"
 
   print_secret "$KIMIBUILT_NAMESPACE" kimibuilt-secrets \
-    OPENAI_API_KEY N8N_API_KEY OPENAI_MEDIA_API_KEY PERPLEXITY_API_KEY \
+    OPENAI_API_KEY N8N_API_KEY REMOTE_CLI_MCP_BEARER_TOKEN \
+    OPENAI_MEDIA_API_KEY PERPLEXITY_API_KEY \
     LILLYBUILT_AUTH_USERNAME LILLYBUILT_AUTH_PASSWORD LILLYBUILT_JWT_SECRET \
     KIMIBUILT_REMOTE_RUNNER_TOKEN POSTGRES_PASSWORD
 }
