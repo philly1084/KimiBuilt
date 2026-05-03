@@ -2,6 +2,7 @@ const { inferFormat, normalizeFormat } = require('./artifacts/constants');
 
 const INTERNAL_DOWNLOAD_PATH_PATTERN = /\/api\/(?:artifacts|documents)\/[^/?#]+\/download\b/i;
 const INTERNAL_PREVIEW_PATH_PATTERN = /\/api\/artifacts\/[^/?#]+\/preview(?:\b|\/)/i;
+const INTERNAL_SANDBOX_PATH_PATTERN = /\/api\/artifacts\/[^/?#]+\/sandbox(?:\b|\/)/i;
 const INTERNAL_BUNDLE_PATH_PATTERN = /\/api\/artifacts\/[^/?#]+\/bundle\b/i;
 const ARTIFACT_RESULT_KEYS = [
     'artifact',
@@ -20,6 +21,10 @@ function normalizeDownloadUrl(value = '') {
 
 function normalizePreviewUrl(value = '') {
     return normalizeInternalUrl(value, INTERNAL_PREVIEW_PATH_PATTERN);
+}
+
+function normalizeSandboxUrl(value = '') {
+    return normalizeInternalUrl(value, INTERNAL_SANDBOX_PATH_PATTERN);
 }
 
 function normalizeBundleDownloadUrl(value = '') {
@@ -88,6 +93,7 @@ function normalizeArtifactEntry(value = null) {
         ? value.metadata
         : {};
     const previewUrl = normalizePreviewUrl(value.previewUrl || value.preview_url || '');
+    const sandboxUrl = normalizeSandboxUrl(value.sandboxUrl || value.sandbox_url || '');
     const bundleDownloadUrl = normalizeBundleDownloadUrl(
         value.bundleDownloadUrl
         || value.bundle_download_url
@@ -105,6 +111,7 @@ function normalizeArtifactEntry(value = null) {
         downloadUrl,
         metadata,
         ...(previewUrl ? { previewUrl } : {}),
+        ...(sandboxUrl ? { sandboxUrl } : {}),
         ...(bundleDownloadUrl ? { bundleDownloadUrl } : {}),
         ...(value.preview != null ? { preview: value.preview } : {}),
         ...(typeof value.contentPreview === 'string' && value.contentPreview.trim()
@@ -169,6 +176,9 @@ function mergeRuntimeArtifacts(...artifactSets) {
                 || buildFallbackDownloadUrl(artifact.id),
             ...(normalizePreviewUrl(artifact.previewUrl || artifact.preview_url || '')
                 ? { previewUrl: normalizePreviewUrl(artifact.previewUrl || artifact.preview_url || '') }
+                : {}),
+            ...(normalizeSandboxUrl(artifact.sandboxUrl || artifact.sandbox_url || '')
+                ? { sandboxUrl: normalizeSandboxUrl(artifact.sandboxUrl || artifact.sandbox_url || '') }
                 : {}),
             ...(normalizeBundleDownloadUrl(artifact.bundleDownloadUrl || artifact.bundle_download_url || '')
                 ? { bundleDownloadUrl: normalizeBundleDownloadUrl(artifact.bundleDownloadUrl || artifact.bundle_download_url || '') }

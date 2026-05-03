@@ -174,12 +174,13 @@ describe('runtime artifact helpers', () => {
         ]);
     });
 
-    test('preserves preview and bundle download urls for previewable site artifacts', () => {
+    test('preserves preview, sandbox, and bundle download urls for previewable site artifacts', () => {
         const merged = mergeRuntimeArtifacts([{
             id: 'artifact-site-1',
             filename: 'newsroom-preview.zip',
             mimeType: 'application/zip',
             previewUrl: '/api/artifacts/artifact-site-1/preview',
+            sandboxUrl: '/api/artifacts/artifact-site-1/sandbox',
             bundleDownloadUrl: '/api/artifacts/artifact-site-1/bundle',
             metadata: {
                 siteBundle: {
@@ -193,7 +194,41 @@ describe('runtime artifact helpers', () => {
             expect.objectContaining({
                 id: 'artifact-site-1',
                 previewUrl: '/api/artifacts/artifact-site-1/preview',
+                sandboxUrl: '/api/artifacts/artifact-site-1/sandbox',
                 bundleDownloadUrl: '/api/artifacts/artifact-site-1/bundle',
+            }),
+        ]);
+    });
+
+    test('extracts sandbox urls from sandbox tool artifacts', () => {
+        const artifacts = extractArtifactsFromToolEvents([{
+            toolCall: {
+                function: {
+                    name: 'code-sandbox',
+                },
+            },
+            result: {
+                success: true,
+                data: {
+                    artifact: {
+                        id: 'artifact-site-2',
+                        filename: 'site-demo.zip',
+                        mimeType: 'application/zip',
+                        downloadUrl: '/api/artifacts/artifact-site-2/download',
+                        previewUrl: '/api/artifacts/artifact-site-2/preview',
+                        sandboxUrl: '/api/artifacts/artifact-site-2/sandbox',
+                        bundleDownloadUrl: '/api/artifacts/artifact-site-2/bundle',
+                    },
+                },
+            },
+        }]);
+
+        expect(artifacts).toEqual([
+            expect.objectContaining({
+                id: 'artifact-site-2',
+                previewUrl: '/api/artifacts/artifact-site-2/preview',
+                sandboxUrl: '/api/artifacts/artifact-site-2/sandbox',
+                bundleDownloadUrl: '/api/artifacts/artifact-site-2/bundle',
             }),
         ]);
     });

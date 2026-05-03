@@ -256,6 +256,8 @@ describe('/api/sessions route', () => {
                         filename: 'pigeon-love-research.pptx',
                         mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
                         downloadUrl: '/api/documents/doc-77/download',
+                        previewUrl: '/api/artifacts/doc-77/preview',
+                        sandboxUrl: '/api/artifacts/doc-77/sandbox',
                         metadata: { format: 'pptx' },
                     }],
                 },
@@ -280,6 +282,8 @@ describe('/api/sessions route', () => {
                 filename: 'pigeon-love-research.pptx',
                 format: 'pptx',
                 downloadUrl: '/api/documents/doc-77/download',
+                previewUrl: '/api/artifacts/doc-77/preview',
+                sandboxUrl: '/api/artifacts/doc-77/sandbox',
             }),
         ]);
     });
