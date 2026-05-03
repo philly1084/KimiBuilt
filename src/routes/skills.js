@@ -1,7 +1,170 @@
 const express = require('express');
 const { skillStore } = require('../skills/skill-store');
+const { createResponse } = require('../openai-client');
+const { extractResponseText } = require('../artifacts/artifact-service');
+const { parseLenientJson } = require('../utils/lenient-json');
+const { getToolManager } = require('../agent-sdk/tools');
 
 const router = express.Router();
+const MAX_TOOL_CATALOG_ITEMS = 80;
+
+function normalizeString(value = '') {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeStringList(value = []) {
+  const list = Array.isArray(value) ? value : [value];
+  return Array.from(new Set(
+    list
+      .map((entry) => normalizeString(entry))
+      .filter(Boolean),
+  )).slice(0, 40);
+}
+
+function normalizeDraftSkill(value = {}) {
+  const draft = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return {
+    id: normalizeString(draft.id),
+    name: normalizeString(draft.name || draft.title),
+    description: normalizeString(draft.description),
+    body: String(draft.body || draft.instructions || '').trim(),
+    tools: normalizeStringList(draft.tools || draft.toolIds),
+    triggerPatterns: normalizeStringList(draft.triggerPatterns || draft.triggers || draft.keywords),
+    chain: Array.isArray(draft.chain || draft.steps)
+      ? (draft.chain || draft.steps).slice(0, 16)
+      : [],
+    contextPolicy: {
+      maxChars: Math.max(600, Math.min(Number(draft.contextPolicy?.maxChars || 1800), 6000)),
+      exposeBody: draft.contextPolicy?.exposeBody !== false,
+    },
+  };
+}
+
+function normalizeQuestions(value = []) {
+  const list = Array.isArray(value) ? value : [];
+  return list
+    .map((entry) => {
+      if (typeof entry === 'string') {
+        return {
+          id: '',
+          question: normalizeString(entry),
+          inputType: 'text',
+          options: [],
+        };
+      }
+      return {
+        id: normalizeString(entry?.id),
+        question: normalizeString(entry?.question || entry?.prompt || entry?.ask),
+        inputType: normalizeString(entry?.inputType || entry?.type || 'text') || 'text',
+        options: Array.isArray(entry?.options)
+          ? entry.options
+            .map((option) => (typeof option === 'string'
+              ? { label: normalizeString(option), description: '' }
+              : {
+                label: normalizeString(option?.label || option?.title || option?.text),
+                description: normalizeString(option?.description || option?.details),
+              }))
+            .filter((option) => option.label)
+            .slice(0, 5)
+          : [],
+      };
+    })
+    .filter((entry) => entry.question)
+    .slice(0, 6);
+}
+
+async function buildToolCatalogForDraft() {
+  const toolManager = getToolManager();
+  await toolManager.initialize();
+  return toolManager.registry.getFrontendTools()
+    .slice(0, MAX_TOOL_CATALOG_ITEMS)
+    .map((tool) => ({
+      id: tool.id,
+      name: tool.name,
+      category: tool.category,
+      description: tool.description,
+      parameters: Array.isArray(tool.parameters)
+        ? tool.parameters.map((param) => ({
+          name: param.name,
+          required: param.required === true,
+          description: param.description || '',
+        })).slice(0, 8)
+        : [],
+    }));
+}
+
+function buildSkillDraftPrompt({
+  ask = '',
+  answers = [],
+  currentDraft = null,
+  toolCatalog = [],
+} = {}) {
+  return [
+    'You are the KimiBuilt skill creator helper.',
+    'Design one registered agent skill that complements tools without duplicating a tool.',
+    'The skill should preserve low context exposure: compact triggers, explicit tool affinities, concise chain, and only essential instructions.',
+    'Use the provided tool catalog. Do not invent tool ids.',
+    'Ask only the next useful questions needed to design the right skill. Prefer 1 to 3 questions at a time.',
+    'When enough information is available, set readyForApproval true and provide a complete draft for final user approval.',
+    'Return JSON only with this shape:',
+    '{"summary":"short status","readyForApproval":false,"questions":[{"id":"...","question":"...","inputType":"text|choice|multi-choice","options":[{"label":"...","description":"..."}]}],"draft":{"id":"","name":"","description":"","body":"","tools":[],"triggerPatterns":[],"chain":[],"contextPolicy":{"maxChars":1800,"exposeBody":true}},"rationale":"short reason"}',
+    '',
+    'Initial user ask:',
+    ask || '(empty)',
+    '',
+    'Answers collected so far:',
+    JSON.stringify(Array.isArray(answers) ? answers : [], null, 2),
+    '',
+    'Current draft, if any:',
+    JSON.stringify(currentDraft || null, null, 2),
+    '',
+    'Available tools:',
+    JSON.stringify(toolCatalog, null, 2),
+  ].join('\n');
+}
+
+async function draftSkillWithModel(input = {}) {
+  const ask = normalizeString(input.ask || input.initialAsk || input.request);
+  const answers = Array.isArray(input.answers) ? input.answers : [];
+  const currentDraft = input.currentDraft && typeof input.currentDraft === 'object'
+    ? normalizeDraftSkill(input.currentDraft)
+    : null;
+  if (!ask) {
+    throw new Error('Skill wizard needs an initial ask.');
+  }
+
+  const toolCatalog = await buildToolCatalogForDraft();
+  const response = await createResponse({
+    input: buildSkillDraftPrompt({
+      ask,
+      answers,
+      currentDraft,
+      toolCatalog,
+    }),
+    instructions: 'You are a precise JSON-producing workflow designer for KimiBuilt registered skills.',
+    stream: false,
+    reasoningEffort: input.reasoningEffort || 'low',
+    requestTimeoutMs: 60000,
+  });
+  const text = extractResponseText(response).trim();
+  const parsed = parseLenientJson(text);
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('Skill draft model response was not parseable JSON.');
+  }
+
+  const allowedToolIds = new Set(toolCatalog.map((tool) => tool.id));
+  const draft = normalizeDraftSkill(parsed.draft || {});
+  draft.tools = draft.tools.filter((toolId) => allowedToolIds.has(toolId));
+
+  return {
+    summary: normalizeString(parsed.summary || parsed.rationale || 'Skill draft updated.'),
+    readyForApproval: parsed.readyForApproval === true,
+    questions: normalizeQuestions(parsed.questions),
+    draft,
+    rationale: normalizeString(parsed.rationale),
+    toolCatalog,
+  };
+}
 
 function parseBoolean(value, fallback = false) {
   if (value === undefined || value === null || value === '') {
@@ -57,6 +220,18 @@ router.get('/context', (req, res, next) => {
       data: {
         context,
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/draft', async (req, res, next) => {
+  try {
+    const draft = await draftSkillWithModel(req.body || {});
+    res.json({
+      success: true,
+      data: draft,
     });
   } catch (error) {
     next(error);

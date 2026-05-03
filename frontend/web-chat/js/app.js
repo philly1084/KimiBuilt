@@ -394,6 +394,7 @@ class ChatApp {
         this.workspaceContext = WEB_CHAT_APP_WORKSPACE_CONTEXT;
         this.messageQueue = [];
         this.isProcessingQueue = false;
+        this.skillWizardState = null;
         
         // Track retry state
         this.retryAttempt = 0;
@@ -3721,6 +3722,15 @@ class ChatApp {
         
         if (!content) return;
 
+        if (this.skillWizardState && !content.startsWith('/')) {
+            this.messageInput.value = '';
+            this.autoResize?.reset?.();
+            this.updateSendButton();
+            uiHelpers.updateCharCounter(this.messageInput, this.charCounter);
+            await this.handleSkillWizardReply(content);
+            return;
+        }
+
         if (await this.tryHandleToolCommand(content)) {
             this.messageInput.value = '';
             this.autoResize?.reset?.();
@@ -4272,6 +4282,247 @@ class ChatApp {
         }
     }
 
+    async appendLocalChatMessage(role, content, extra = {}) {
+        if (!sessionManager.currentSessionId) {
+            await this.createNewSession();
+        }
+
+        const sessionId = sessionManager.currentSessionId;
+        uiHelpers.hideWelcomeMessage();
+        const message = {
+            role,
+            content,
+            timestamp: new Date().toISOString(),
+            ...extra,
+        };
+        const savedMessage = sessionManager.addMessage(sessionId, message);
+        this.messagesContainer.appendChild(uiHelpers.renderMessage(savedMessage));
+        uiHelpers.reinitializeIcons(this.messagesContainer);
+        uiHelpers.scrollToBottom();
+        this.updateSessionInfo();
+        return savedMessage;
+    }
+
+    isSkillWizardApprovalText(content = '') {
+        return /^(approve|approved|yes|y|create|save|ship it|looks good|go ahead)$/i.test(String(content || '').trim());
+    }
+
+    isSkillWizardCancelText(content = '') {
+        return /^(cancel|stop|exit|quit|never mind|nevermind)$/i.test(String(content || '').trim());
+    }
+
+    formatSkillWizardDraft(draft = {}) {
+        const tools = Array.isArray(draft.tools) ? draft.tools : [];
+        const triggers = Array.isArray(draft.triggerPatterns) ? draft.triggerPatterns : [];
+        const chain = Array.isArray(draft.chain) ? draft.chain : [];
+        const lines = [
+            `Name: **${draft.name || 'Untitled skill'}**`,
+            draft.id ? `ID: \`${draft.id}\`` : '',
+            draft.description ? `Description: ${draft.description}` : '',
+            tools.length ? `Tools: ${tools.map((tool) => `\`${tool}\``).join(', ')}` : 'Tools: none selected yet',
+            triggers.length ? `Triggers: ${triggers.map((trigger) => `\`${trigger}\``).join(', ')}` : '',
+        ].filter(Boolean);
+
+        if (chain.length > 0) {
+            lines.push('');
+            lines.push('Proposed chain:');
+            chain.slice(0, 8).forEach((step, index) => {
+                const label = typeof step === 'string'
+                    ? step
+                    : (step.step || step.instruction || step.description || JSON.stringify(step));
+                const tool = typeof step === 'object' && step?.tool ? ` using \`${step.tool}\`` : '';
+                lines.push(`${index + 1}. ${label}${tool}`);
+            });
+        }
+
+        return lines.join('\n');
+    }
+
+    formatSkillWizardQuestions(questions = []) {
+        if (!Array.isArray(questions) || questions.length === 0) {
+            return '';
+        }
+
+        const lines = ['Questions to tighten the skill:'];
+        questions.forEach((question, index) => {
+            lines.push(`${index + 1}. ${question.question}`);
+            if (Array.isArray(question.options) && question.options.length > 0) {
+                question.options.forEach((option) => {
+                    const description = option.description ? ` - ${option.description}` : '';
+                    lines.push(`   - ${option.label}${description}`);
+                });
+            }
+        });
+        lines.push('');
+        lines.push('Reply with your answers in one message, or say `cancel`.');
+        return lines.join('\n');
+    }
+
+    formatSkillWizardMessage(result = {}, phase = 'questions') {
+        const draft = result.draft || {};
+        const sections = [
+            '## Skill Creator Guide',
+            result.summary || 'I drafted a skill direction from your ask and the available tools.',
+            '',
+            '### Current Draft',
+            this.formatSkillWizardDraft(draft),
+        ];
+
+        if (phase === 'approval') {
+            sections.push('');
+            sections.push('### Final Check');
+            sections.push('Reply `approve` to create this registered skill, or describe adjustments you want.');
+            if (draft.body) {
+                sections.push('');
+                sections.push('```markdown');
+                sections.push(draft.body);
+                sections.push('```');
+            }
+        } else {
+            sections.push('');
+            sections.push('### Next');
+            sections.push(this.formatSkillWizardQuestions(result.questions || []));
+        }
+
+        return sections.filter((entry) => entry !== '').join('\n\n');
+    }
+
+    async refreshSkillWizardDraft(extraAnswer = null) {
+        const state = this.skillWizardState;
+        if (!state) {
+            return null;
+        }
+
+        const answers = [
+            ...(Array.isArray(state.answers) ? state.answers : []),
+            ...(extraAnswer ? [extraAnswer] : []),
+        ];
+        const result = await apiClient.draftSkill({
+            ask: state.ask,
+            answers,
+            currentDraft: state.draft || null,
+        });
+        const questions = Array.isArray(result.questions) ? result.questions : [];
+        const phase = result.readyForApproval === true || questions.length === 0
+            ? 'approval'
+            : 'questions';
+
+        this.skillWizardState = {
+            ...state,
+            answers,
+            draft: result.draft || state.draft || null,
+            questions,
+            phase,
+            lastResult: result,
+        };
+
+        return {
+            result,
+            phase,
+        };
+    }
+
+    async startSkillWizard(initialAsk = '') {
+        const ask = String(initialAsk || '').trim();
+        if (!ask) {
+            await this.appendLocalChatMessage('assistant', [
+                '## Skill Creator Guide',
+                '',
+                'Start with `/skill-wizard <what you want the skill to help with>`.',
+                '',
+                'Example: `/skill-wizard create a repeatable workflow for generating product images, using them in a landing page, and deploying to k3s`',
+            ].join('\n'));
+            return;
+        }
+
+        if (this.isSkillWizardCancelText(ask)) {
+            this.skillWizardState = null;
+            await this.appendLocalChatMessage('assistant', 'Skill creator guide cancelled.');
+            return;
+        }
+
+        this.skillWizardState = {
+            ask,
+            answers: [],
+            draft: null,
+            questions: [],
+            phase: 'starting',
+            lastResult: null,
+        };
+
+        const loadingMessage = await this.appendLocalChatMessage('assistant', '## Skill Creator Guide\n\nLooking at the current tools and sketching the first skill draft...');
+        try {
+            const next = await this.refreshSkillWizardDraft();
+            if (!next) {
+                throw new Error('Skill wizard did not start.');
+            }
+            loadingMessage.content = this.formatSkillWizardMessage(next.result, next.phase);
+            this.upsertSessionMessage(sessionManager.currentSessionId, loadingMessage);
+            this.renderOrReplaceMessage(loadingMessage);
+        } catch (error) {
+            this.skillWizardState = null;
+            loadingMessage.content = `**Skill creator error:** ${error.message}`;
+            this.upsertSessionMessage(sessionManager.currentSessionId, loadingMessage);
+            this.renderOrReplaceMessage(loadingMessage);
+        }
+    }
+
+    async handleSkillWizardReply(content = '') {
+        const answer = String(content || '').trim();
+        if (!this.skillWizardState || !answer) {
+            return false;
+        }
+
+        await this.appendLocalChatMessage('user', answer);
+
+        if (this.isSkillWizardCancelText(answer)) {
+            this.skillWizardState = null;
+            await this.appendLocalChatMessage('assistant', 'Skill creator guide cancelled.');
+            return true;
+        }
+
+        const state = this.skillWizardState;
+        if (state.phase === 'approval' && this.isSkillWizardApprovalText(answer)) {
+            try {
+                const response = await apiClient.createSkill(state.draft || {});
+                const skill = response?.data || {};
+                this.skillWizardState = null;
+                await this.appendLocalChatMessage('assistant', [
+                    '## Skill Created',
+                    '',
+                    `\`${skill.id || 'skill'}\` is registered in \`${response?.meta?.root || 'data/skills'}\`.`,
+                    '',
+                    'It is now available to the conversation planner as compact workflow guidance.',
+                ].join('\n'));
+            } catch (error) {
+                await this.appendLocalChatMessage('assistant', `**Skill save error:** ${error.message}\n\nDescribe an adjustment, or say \`cancel\`.`);
+            }
+            return true;
+        }
+
+        const questionSummary = state.phase === 'approval'
+            ? 'Final adjustment request'
+            : (state.questions || []).map((question, index) => `${index + 1}. ${question.question}`).join('\n');
+        const loadingMessage = await this.appendLocalChatMessage('assistant', '## Skill Creator Guide\n\nUpdating the skill draft from your answer...');
+
+        try {
+            const next = await this.refreshSkillWizardDraft({
+                question: questionSummary || 'Skill creator follow-up',
+                answer,
+                answeredAt: new Date().toISOString(),
+            });
+            loadingMessage.content = this.formatSkillWizardMessage(next.result, next.phase);
+            this.upsertSessionMessage(sessionManager.currentSessionId, loadingMessage);
+            this.renderOrReplaceMessage(loadingMessage);
+        } catch (error) {
+            loadingMessage.content = `**Skill creator error:** ${error.message}\n\nYou can answer again, say \`approve\`, or say \`cancel\`.`;
+            this.upsertSessionMessage(sessionManager.currentSessionId, loadingMessage);
+            this.renderOrReplaceMessage(loadingMessage);
+        }
+
+        return true;
+    }
+
     async tryHandleToolCommand(content) {
         const trimmed = String(content || '').trim();
         const isListCommand = trimmed === '/tools' || trimmed.startsWith('/tools ');
@@ -4281,8 +4532,9 @@ class ChatApp {
         const isSkillReadCommand = trimmed.startsWith('/skill ');
         const isSkillCreateCommand = trimmed.startsWith('/skill-create ');
         const isSkillUpdateCommand = trimmed.startsWith('/skill-update ');
+        const isSkillWizardCommand = trimmed === '/skill-wizard' || trimmed.startsWith('/skill-wizard ');
 
-        if (!isListCommand && !isInvokeCommand && !isHelpCommand && !isSkillListCommand && !isSkillReadCommand && !isSkillCreateCommand && !isSkillUpdateCommand) {
+        if (!isListCommand && !isInvokeCommand && !isHelpCommand && !isSkillListCommand && !isSkillReadCommand && !isSkillCreateCommand && !isSkillUpdateCommand && !isSkillWizardCommand) {
             return false;
         }
 
@@ -4308,6 +4560,9 @@ class ChatApp {
                 const category = trimmed.startsWith('/tools ') ? trimmed.slice('/tools '.length).trim() : null;
                 const toolResponse = await apiClient.getAvailableTools(category || null);
                 assistantContent = this.formatToolsList(toolResponse, category);
+            } else if (isSkillWizardCommand) {
+                await this.startSkillWizard(trimmed.slice('/skill-wizard'.length).trim());
+                return true;
             } else if (isSkillListCommand) {
                 const search = trimmed.startsWith('/skills ') ? trimmed.slice('/skills '.length).trim() : '';
                 const skillResponse = await apiClient.listSkills({ search });

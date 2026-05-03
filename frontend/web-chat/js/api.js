@@ -2232,6 +2232,22 @@ class OpenAIAPIClient extends EventTarget {
         return response.json();
     }
 
+    async draftSkill(payload = {}) {
+        const response = await fetch(`${BASE_URL_WITHOUT_API}/api/skills/draft`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+            const data = await this.parseErrorPayload(response);
+            throw new Error(data?.error?.message || data?.error || data?.message || `Skill draft failed: HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.data || data;
+    }
+
     async getRemoteToolCatalog() {
         const response = await this.getAvailableTools('ssh', {
             executionProfile: 'remote-build',
