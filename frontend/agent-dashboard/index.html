@@ -113,6 +113,15 @@
                             </svg>
                             <span>Traces</span>
                         </li>
+                        <li class="nav-item" data-view="lillyWiki">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M4 19.5A2.5 2.5 0 016.5 17H20"/>
+                                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>
+                                <path d="M8 7h8"/>
+                                <path d="M8 11h6"/>
+                            </svg>
+                            <span>Lilly Wiki</span>
+                        </li>
                         <li class="nav-item" data-view="settings">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="12" cy="12" r="3"/>
@@ -971,6 +980,62 @@
                             </div>
                             <div class="trace-details" id="traceDetails">
                                 <p class="empty-state">Select a trace to view details</p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Lilly Wiki View -->
+                <section class="view" id="lillyWikiView">
+                    <div class="lilly-wiki">
+                        <div class="lilly-hero">
+                            <div class="lilly-hero-copy">
+                                <span class="lilly-kicker">Build wiki</span>
+                                <h2>Lilly Pull Collage</h2>
+                                <p>A visual record of the hundreds of repo pulls that shaped Lilly: early artifact fixes, UI growth, planning upgrades, repair work, podcast stability, deployment proof, and the docs that taught the system how to keep building.</p>
+                            </div>
+                            <div class="lilly-hero-stats" id="lillyWikiStats">
+                                <!-- Populated by JS -->
+                            </div>
+                        </div>
+
+                        <div class="lilly-phase-map" id="lillyPhaseMap">
+                            <!-- Populated by JS -->
+                        </div>
+
+                        <div class="lilly-wiki-grid">
+                            <div class="card lilly-collage-card">
+                                <div class="card-header">
+                                    <h3>Pull Collage</h3>
+                                    <span class="lilly-source-note">Live from local git history</span>
+                                </div>
+                                <div class="card-body">
+                                    <div class="lilly-pr-collage" id="lillyPrCollage">
+                                        <!-- Populated by JS -->
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="card lilly-growth-card">
+                                <div class="card-header">
+                                    <h3>Repair + Growth Threads</h3>
+                                </div>
+                                <div class="card-body">
+                                    <div class="lilly-thread-list" id="lillyGrowthThreads">
+                                        <!-- Populated by JS -->
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card lilly-timeline-card">
+                            <div class="card-header">
+                                <h3>Phase Timeline</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="lilly-timeline" id="lillyTimeline">
+                                    <!-- Populated by JS -->
+                                </div>
                             </div>
                         </div>
                     </div>

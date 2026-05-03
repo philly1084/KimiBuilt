@@ -17,6 +17,7 @@ const podcastAudioController = require('./podcast-audio.controller');
 const storageController = require('./storage.controller');
 const DashboardController = require('./dashboard.controller');
 const { setDashboardController } = require('../../admin/runtime-monitor');
+const { buildLillyHistory } = require('../../admin/lilly-history');
 
 // Dashboard controller is initialized with orchestrator in server.js
 const getDashboardController = (req) => {
@@ -37,6 +38,17 @@ const callController = (controller, method) => (req, res, next) =>
 router.get('/stats', (req, res) => getDashboardController(req).getStats(req, res));
 router.get('/health', (req, res) => getDashboardController(req).getHealth(req, res));
 router.get('/activity', (req, res) => getDashboardController(req).getRecentActivity(req, res));
+router.get('/lilly-history', async (_req, res, next) => {
+  try {
+    const history = await buildLillyHistory({
+      cwd: process.cwd(),
+      maxCount: 900,
+    });
+    res.json({ success: true, data: history });
+  } catch (error) {
+    next(error);
+  }
+});
 
 // Prompts Management
 router.get('/prompts', callController(promptsController, 'getAll'));

@@ -215,6 +215,8 @@ describe('AssetManager', () => {
 
     test('recognizes prompts that should trigger the indexed asset catalog', () => {
         expect(hasAssetReferenceIntent('Use the PDF we worked on earlier and the same image from before.')).toBe(true);
+        expect(hasAssetReferenceIntent('Use context from old files as reference to change this.')).toBe(true);
+        expect(hasAssetReferenceIntent('Review the existing artifact and improve it toward the product goal.')).toBe(true);
         expect(hasAssetReferenceIntent('Build a brand new landing page from scratch.')).toBe(false);
     });
 });

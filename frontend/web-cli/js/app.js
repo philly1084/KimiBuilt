@@ -648,6 +648,21 @@ class CodeCLIApp {
         handler();
     }
 
+    useCommandSuggestion(command = '', options = {}) {
+        const normalized = String(command || '').trim();
+        if (!normalized || !this.commandInput) {
+            return;
+        }
+
+        this.commandInput.value = normalized;
+        this.commandInput.focus();
+        this.hideAutocomplete();
+
+        if (options && options.submit) {
+            this.sendCommand();
+        }
+    }
+
     getVoxelTypingThought() {
         const name = this.voxelPet?.name?.split('-')[0] || 'Vox';
         const thoughts = [
@@ -1570,7 +1585,7 @@ Session Statistics:
         line.className = 'line line-output system';
         line.innerHTML = `<span class="timestamp">${this.getTimestamp()}</span> ${this.escapeHtml(text)}`;
         this.terminalOutput.appendChild(line);
-        this.scrollToBottom();
+        this.terminalOutput.scrollTop = 0;
     }
     
     printError(text) {
@@ -1890,24 +1905,84 @@ Session Statistics:
             this.printSystem(`Session started: ${new Date().toLocaleString()}`);
         }
         this.terminalOutput.appendChild(document.createElement('div')).style.height = '8px';
+        if (this.theme === 'voxel') {
+            const resetWelcomeScroll = () => {
+                this.terminalOutput.scrollTop = 0;
+            };
+            resetWelcomeScroll();
+            requestAnimationFrame(resetWelcomeScroll);
+            window.setTimeout(resetWelcomeScroll, 80);
+        }
     }
 
     printVoxelBoot() {
         const line = document.createElement('div');
         line.className = 'line line-output ai';
+        const currentModel = this.escapeHtml(api.currentModel || 'loading');
+        const sessionLabel = this.escapeHtml(api.sessionId ? api.sessionId.slice(0, 8) : 'pending');
         line.innerHTML = `
             <div class="voxel-response-head">
-                <span>Lilly Voxel Agent</span>
+                <span>KimiBuilt Web CLI</span>
                 <span class="voxel-response-meta">${this.escapeHtml(new Date().toLocaleString())}</span>
             </div>
             <div class="voxel-response-body">
                 <div class="voxel-boot">
-                    <div>
-                        <div class="voxel-boot-title">Lilly Chat Link Ready</div>
-                        <div class="voxel-boot-copy">Mode: chat | Model: ${this.escapeHtml(api.currentModel || 'loading')}</div>
-                        <div class="voxel-boot-copy">Use <code>/tools</code>, <code>/files</code>, or <code>/help</code>.</div>
+                    <div class="voxel-boot-main">
+                        <div class="voxel-boot-kicker">Agent command surface</div>
+                        <div class="voxel-boot-title">Command from the browser, keep the terminal rhythm.</div>
+                        <div class="voxel-boot-copy">Chat, inspect tools, run sandboxes, call remote agents, and keep generated files in the same session.</div>
+                        <div class="voxel-boot-status-grid" aria-label="Current web CLI status">
+                            <div class="voxel-boot-status">
+                                <span>Mode</span>
+                                <strong>chat</strong>
+                            </div>
+                            <div class="voxel-boot-status">
+                                <span>Model</span>
+                                <strong>${currentModel}</strong>
+                            </div>
+                            <div class="voxel-boot-status">
+                                <span>Session</span>
+                                <strong>${sessionLabel}</strong>
+                            </div>
+                        </div>
+                        <div class="voxel-command-grid" aria-label="Suggested commands">
+                            <button type="button" class="voxel-command-chip voxel-command-chip--primary" onclick="app.useVoxelQuickTool('chat')">
+                                <code>Ask</code>
+                                <span>Start with a normal request</span>
+                            </button>
+                            <button type="button" class="voxel-command-chip" onclick="app.useCommandSuggestion('/tools', { submit: true })">
+                                <code>/tools</code>
+                                <span>Inspect available actions</span>
+                            </button>
+                            <button type="button" class="voxel-command-chip" onclick="app.useCommandSuggestion('/skills', { submit: true })">
+                                <code>/skills</code>
+                                <span>Route with reusable skills</span>
+                            </button>
+                            <button type="button" class="voxel-command-chip" onclick="app.useCommandSuggestion('/files', { submit: true })">
+                                <code>/files</code>
+                                <span>Review generated artifacts</span>
+                            </button>
+                            <button type="button" class="voxel-command-chip" onclick="app.useCommandSuggestion('/remote plan', { submit: true })">
+                                <code>/remote plan</code>
+                                <span>See remote deploy lanes</span>
+                            </button>
+                            <button type="button" class="voxel-command-chip" onclick="app.useVoxelQuickTool('build')">
+                                <code>Build</code>
+                                <span>Draft a repo task prompt</span>
+                            </button>
+                        </div>
                     </div>
-                    <div class="voxel-mini-pet" data-voxel-mini-pet></div>
+                    <div class="voxel-boot-side" aria-label="Companion and backend contract">
+                        <div class="voxel-mini-pet" data-voxel-mini-pet></div>
+                        <div class="voxel-boot-contract">
+                            <div class="voxel-boot-kicker">Live contract</div>
+                            <ul>
+                                <li><span>/api/chat</span><strong>SSE</strong></li>
+                                <li><span>/api/tools</span><strong>actions</strong></li>
+                                <li><span>/api/skills</span><strong>routing</strong></li>
+                            </ul>
+                        </div>
+                    </div>
                 </div>
             </div>
         `;

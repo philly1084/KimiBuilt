@@ -5785,6 +5785,45 @@ describe('ConversationOrchestrator', () => {
         expect(prompt).toContain('Do not plan tool calls as if uploads, artifacts, tasks, or tool results mentioned there are present in this request');
     });
 
+    test('planner treats old files as reference context for product improvements', async () => {
+        const llmClient = {
+            createResponse: jest.fn(),
+            complete: jest.fn().mockResolvedValue(JSON.stringify({ steps: [] })),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['asset-search', 'file-read', 'file-write'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+        const objective = 'Use context from old files as reference to change and improve the product brief.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+
+        expect(toolPolicy.candidateToolIds).toEqual(expect.arrayContaining([
+            'asset-search',
+            'file-read',
+            'file-write',
+        ]));
+
+        await orchestrator.planToolUse({
+            objective,
+            executionProfile: 'default',
+            toolPolicy,
+        });
+
+        const prompt = llmClient.complete.mock.calls[0][0];
+        expect(prompt).toContain('When the user wants old files or artifacts used as context/reference for a change');
+        expect(prompt).toContain('Treat non-code artifacts as product source material too');
+    });
+
     test('planner model responses can append to executionTrace without throwing', async () => {
         const executionTrace = [];
         const llmClient = {

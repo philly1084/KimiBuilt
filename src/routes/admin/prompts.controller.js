@@ -72,6 +72,8 @@ function buildPlannerPromptSurface() {
     'Every file-write step must include both params.path and the full file body as params.content.',
     'Use file-write only for local runtime files. For remote hosts or deployed servers, prefer remote-cli-agent for remote software author/build/deploy loops, and use remote-command or k3s-deploy for narrower inspection or standard deploy actions. Do not plan docker-exec for the host unless the user explicitly says Docker is available there.',
     'Do not plan a file-write step that only points at an earlier artifact or previous file when the full content is not already available in the prompt or recent transcript.',
+    'When the user wants old files, existing artifacts, or prior outputs used as context/reference for a change, plan asset-search first, then read the selected editable file or fetched artifact content before writing the improved result.',
+    'For review or product-building requests, treat prior documents, HTML, slide decks, images, and artifacts as product surface material to improve against the user goal, not just as software build byproducts.',
     'Treat "remote CLI", "direct CLI", and "remote command" as aliases for the `remote-command` tool. Do not use the local execution sandbox for those requests.',
     'For most remote software creation, update, and deployment requests where an app, website, service, dashboard, or frontend must be changed and put live, prefer `remote-cli-agent` so the remote coding agent owns authoring, build, deploy, and verification.',
     'For `remote-cli-agent` deployment work, pass `params.adminMode:true` so it may use the configured admin-capable CLI runner lane for real changes, while keeping privileged actions scoped to the user-approved objective.',

@@ -3,10 +3,9 @@
  * Uses OpenAI-compatible endpoints with fetch only (no SDK)
  */
 
-const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
-const API_BASE_URL = LOCAL_HOSTNAMES.has(window.location.hostname)
+const API_BASE_URL = window.location.protocol === 'file:'
     ? 'http://localhost:3000/v1'
-    : `${window.location.protocol}//${window.location.host}/v1`;
+    : `${window.location.origin}/v1`;
 const BASE_URL_WITHOUT_API = API_BASE_URL.replace('/v1', '');
 
 // Default request timeout in milliseconds
@@ -469,13 +468,14 @@ class WebCLIAPI {
         throw lastError;
     }
 
-    async checkHealth() {
+    async checkHealth(options = {}) {
         try {
             const baseUrl = API_BASE_URL.replace('/v1', '');
+            const endpoint = options.fast ? '/live' : '/health';
             const response = await this.fetchWithTimeout(
-                `${baseUrl}/health`, 
+                `${baseUrl}${endpoint}`,
                 { method: 'GET' },
-                5000
+                options.fast ? 5000 : 15000
             );
             
             if (response.ok) {
@@ -1439,7 +1439,7 @@ class WebCLIAPI {
 
     // Alias for checkHealth to match app expectations
     healthCheck() {
-        return this.checkHealth();
+        return this.checkHealth({ fast: true });
     }
 
     clearSession() {

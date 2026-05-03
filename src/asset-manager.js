@@ -306,9 +306,9 @@ function hasAssetReferenceIntent(text = '') {
     }
 
     return [
-        /\b(previous|earlier|prior|last|latest|same|that|those|these|uploaded|attached|generated|saved|working with|worked on)\b[\s\S]{0,50}\b(image|images|photo|photos|picture|pictures|document|documents|doc|docs|pdf|slide deck|deck|pptx|file|files|artifact|artifacts|attachment|attachments)\b/i,
-        /\b(image|images|photo|photos|picture|pictures|document|documents|doc|docs|pdf|slide deck|deck|pptx|file|files|artifact|artifacts|attachment|attachments)\b[\s\S]{0,70}\b(from earlier|from before|from last time|we worked on|we were working with|you generated|you made|you created|uploaded|attached|saved)\b/i,
-        /\b(find|search|locate|list|show|open|use|reuse|reference|pull up|look for)\b[\s\S]{0,40}\b(previous|earlier|uploaded|attached|generated|saved|artifact|image|document|pdf|file|attachment)\b/i,
+        /\b(previous|earlier|prior|old|older|past|existing|last|latest|same|that|those|these|uploaded|attached|generated|saved|working with|worked on)\b[\s\S]{0,50}\b(image|images|photo|photos|picture|pictures|document|documents|doc|docs|pdf|slide deck|deck|pptx|file|files|artifact|artifacts|attachment|attachments)\b/i,
+        /\b(image|images|photo|photos|picture|pictures|document|documents|doc|docs|pdf|slide deck|deck|pptx|file|files|artifact|artifacts|attachment|attachments)\b[\s\S]{0,70}\b(from earlier|from before|from last time|from a prior run|from past work|we worked on|we were working with|you generated|you made|you created|uploaded|attached|saved|old|older|existing)\b/i,
+        /\b(find|search|locate|list|show|open|use|reuse|reference|pull up|look for|review|improve|iterate on|edit|update|build on)\b[\s\S]{0,50}\b(previous|earlier|prior|old|older|past|existing|uploaded|attached|generated|saved|artifact|image|document|pdf|file|attachment)\b/i,
         /\b(asset|assets)\b[\s\S]{0,20}\b(search|index|indexed|catalog|catalogue|manager)\b/i,
     ].some((pattern) => pattern.test(normalized));
 }
@@ -317,9 +317,12 @@ function buildAssetManagerInstructions() {
     return [
         '[Indexed asset manager]',
         'When available in the runtime, use `asset-search` to find uploaded artifacts plus local workspace documents and images.',
-        'Use `asset-search` first when the user refers to a previous, earlier, uploaded, attached, or generated file, image, document, PDF, or artifact.',
+        'Use `asset-search` first when the user refers to a previous, earlier, old, existing, uploaded, attached, saved, or generated file, image, document, PDF, or artifact.',
+        'Also use `asset-search` when the user asks to review, improve, continue, iterate on, or build up prior product work from goals or instructions.',
         'For images, prefer `kind: "image"` so you can quickly recover the right visual and reuse its `inlineUrl` or path.',
         'For documents, prefer `kind: "document"` and set `includeContent: true` when you need the stored text preview before deciding what to read or reuse.',
+        'Treat workspace matches with `absolutePath` or `relativePath` as editable source material: read the selected file, improve it against the user goal, then write the revised full file when editing tools are available.',
+        'Treat stored artifacts without an editable path as product source material too: inspect or fetch the stored content, then create an improved follow-up artifact or workspace file rather than asking the user to resend it.',
     ].join('\n');
 }
 

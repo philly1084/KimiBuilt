@@ -1,0 +1,665 @@
+{
+  "tool": "kimibuilt-ui-check",
+  "url": "file:///C:/Users/phill/KimiBuilt/frontend/agent-dashboard/index.html?view=lillyWiki",
+  "generatedAt": "2026-05-03T20:50:34.963Z",
+  "playwrightModule": "playwright-core",
+  "browserExecutable": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "checks": [
+    {
+      "viewport": {
+        "name": "desktop",
+        "width": 1440,
+        "height": 960
+      },
+      "ok": true,
+      "screenshotPath": "C:\\Users\\phill\\KimiBuilt\\ui-checks\\lilly-wiki\\agent-sdk-admin-dashboard-desktop.png",
+      "metrics": {
+        "title": "Agent SDK Admin Dashboard",
+        "url": "file:///C:/Users/phill/KimiBuilt/frontend/agent-dashboard/index.html?view=lillyWiki",
+        "viewport": {
+          "width": 1440,
+          "height": 960
+        },
+        "scrollWidth": 1440,
+        "scrollHeight": 2690,
+        "horizontalOverflow": false,
+        "overflowingElements": [],
+        "bodyTextLength": 3616,
+        "headings": [
+          "Lilly Wiki",
+          "Request Volume",
+          "Recent Activity",
+          "Model Usage",
+          "System Health",
+          "Prompt Library",
+          "Default Configuration",
+          "Orchestration Phase",
+          "Provider Totals",
+          "Usage Summary",
+          "Per-Model Token Usage",
+          "Workload Definitions",
+          "Run Detail",
+          "Recent Runs",
+          "Tool Catalog",
+          "Tool Detail"
+        ],
+        "interactiveControls": 153,
+        "textContrast": {
+          "checked": 130,
+          "lowContrastCount": 6,
+          "lowContrast": [
+            {
+              "tag": "span",
+              "id": "",
+              "className": "lilly-legend-item lilly-tag-repair",
+              "text": "Repair 308",
+              "contrast": 1.09,
+              "required": 4.5,
+              "color": "#8b949e",
+              "background": "#f85149",
+              "fontSize": 14,
+              "fontWeight": 700,
+              "largeText": false,
+              "top": 1036,
+              "left": 656
+            },
+            {
+              "tag": "span",
+              "id": "",
+              "className": "lilly-legend-item lilly-tag-growth",
+              "text": "Growth 246",
+              "contrast": 1.21,
+              "required": 4.5,
+              "color": "#8b949e",
+              "background": "#3fb950",
+              "fontSize": 14,
+              "fontWeight": 700,
+              "largeText": false,
+              "top": 1036,
+              "left": 747
+            },
+            {
+              "tag": "span",
+              "id": "",
+              "className": "lilly-legend-item lilly-tag-interface",
+              "text": "Interface 214",
+              "contrast": 1.22,
+              "required": 4.5,
+              "color": "#8b949e",
+              "background": "#58a6ff",
+              "fontSize": 14,
+              "fontWeight": 700,
+              "largeText": false,
+              "top": 1036,
+              "left": 844
+            },
+            {
+              "tag": "span",
+              "id": "",
+              "className": "lilly-legend-item lilly-tag-ops",
+              "text": "Ops 150",
+              "contrast": 1.99,
+              "required": 4.5,
+              "color": "#8b949e",
+              "background": "#f2cc60",
+              "fontSize": 14,
+              "fontWeight": 700,
+              "largeText": false,
+              "top": 1036,
+              "left": 951
+            },
+            {
+              "tag": "span",
+              "id": "",
+              "className": "lilly-legend-item lilly-tag-media",
+              "text": "Media + Docs 170",
+              "contrast": 1.09,
+              "required": 4.5,
+              "color": "#8b949e",
+              "background": "#db61a2",
+              "fontSize": 14,
+              "fontWeight": 700,
+              "largeText": false,
+              "top": 1067,
+              "left": 761
+            },
+            {
+              "tag": "span",
+              "id": "",
+              "className": "lilly-legend-item lilly-tag-intelligence",
+              "text": "Intelligence 220",
+              "contrast": 1.09,
+              "required": 4.5,
+              "color": "#8b949e",
+              "background": "#a371f7",
+              "fontSize": 14,
+              "fontWeight": 700,
+              "largeText": false,
+              "top": 1067,
+              "left": 899
+            }
+          ]
+        },
+        "images": {
+          "count": 0,
+          "broken": [],
+          "missingAltCount": 0
+        }
+      },
+      "consoleMessages": [
+        {
+          "type": "error",
+          "text": "Access to fetch at 'file:///C:/api/auth/ws-token' from origin 'null' has been blocked by CORS policy: Cross origin requests are only supported for protocol schemes: chrome, chrome-extension, chrome-untrusted, data, http, https, isolated-app."
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: net::ERR_FAILED"
+        },
+        {
+          "type": "error",
+          "text": "Access to fetch at 'file://api/admin/lilly-history' from origin 'null' has been blocked by CORS policy: Cross origin requests are only supported for protocol schemes: chrome, chrome-extension, chrome-untrusted, data, http, https, isolated-app."
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: net::ERR_FAILED"
+        },
+        {
+          "type": "error",
+          "text": "Access to fetch at 'file://api/admin/stats?range=24h' from origin 'null' has been blocked by CORS policy: Cross origin requests are only supported for protocol schemes: chrome, chrome-extension, chrome-untrusted, data, http, https, isolated-app."
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: net::ERR_FAILED"
+        },
+        {
+          "type": "error",
+          "text": "Access to fetch at 'file://api/admin/lilly-history' from origin 'null' has been blocked by CORS policy: Cross origin requests are only supported for protocol schemes: chrome, chrome-extension, chrome-untrusted, data, http, https, isolated-app."
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: net::ERR_FAILED"
+        },
+        {
+          "type": "error",
+          "text": "Access to fetch at 'file://api/admin/stats?range=24h' from origin 'null' has been blocked by CORS policy: Cross origin requests are only supported for protocol schemes: chrome, chrome-extension, chrome-untrusted, data, http, https, isolated-app."
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: net::ERR_FAILED"
+        },
+        {
+          "type": "error",
+          "text": "WebSocket connection to 'ws://ws/' failed: Error in connection establishment: net::ERR_NAME_NOT_RESOLVED"
+        },
+        {
+          "type": "error",
+          "text": "Access to fetch at 'file://api/admin/lilly-history' from origin 'null' has been blocked by CORS policy: Cross origin requests are only supported for protocol schemes: chrome, chrome-extension, chrome-untrusted, data, http, https, isolated-app."
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: net::ERR_FAILED"
+        },
+        {
+          "type": "error",
+          "text": "Error loading Lilly history: TypeError: Failed to fetch\n    at ApiClient.request (file:///C:/Users/phill/KimiBuilt/frontend/agent-dashboard/js/api-client.js:144:40)\n    at async Dashboard.loadLillyHistory (file:///C:/Users/phill/KimiBuilt/frontend/agent-dashboard/js/dashboard.js:550:30)\n    at async Dashboard.loadViewData (file:///C:/Users/phill/KimiBuilt/frontend/agent-dashboard/js/dashboard.js:534:17)"
+        },
+        {
+          "type": "error",
+          "text": "Access to fetch at 'file://api/admin/stats?range=24h' from origin 'null' has been blocked by CORS policy: Cross origin requests are only supported for protocol schemes: chrome, chrome-extension, chrome-untrusted, data, http, https, isolated-app."
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: net::ERR_FAILED"
+        },
+        {
+          "type": "error",
+          "text": "Error loading stats: TypeError: Failed to fetch\n    at ApiClient.request (file:///C:/Users/phill/KimiBuilt/frontend/agent-dashboard/js/api-client.js:144:40)\n    at async Dashboard.loadStats (file:///C:/Users/phill/KimiBuilt/frontend/agent-dashboard/js/dashboard.js:738:30)\n    at async Dashboard.loadInitialData (file:///C:/Users/phill/KimiBuilt/frontend/agent-dashboard/js/dashboard.js:484:13)\n    at async Dashboard.init (file:///C:/Users/phill/KimiBuilt/frontend/agent-dashboard/js/dashboard.js:70"
+        },
+        {
+          "type": "error",
+          "text": "Access to fetch at 'file://api/admin/models' from origin 'null' has been blocked by CORS policy: Cross origin requests are only supported for protocol schemes: chrome, chrome-extension, chrome-untrusted, data, http, https, isolated-app."
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: net::ERR_FAILED"
+        },
+        {
+          "type": "error",
+          "text": "Access to fetch at 'file://api/admin/models/usage/stats' from origin 'null' has been blocked by CORS policy: Cross origin requests are only supported for protocol schemes: chrome, chrome-extension, chrome-untrusted, data, http, https, isolated-app."
+        }
+      ],
+      "pageErrors": [],
+      "failedRequests": [
+        {
+          "url": "file:///C:/api/auth/ws-token",
+          "failure": "net::ERR_FAILED"
+        },
+        {
+          "url": "file://api/admin/lilly-history",
+          "failure": "net::ERR_FAILED"
+        },
+        {
+          "url": "file://api/admin/stats?range=24h",
+          "failure": "net::ERR_FAILED"
+        },
+        {
+          "url": "file://api/admin/lilly-history",
+          "failure": "net::ERR_FAILED"
+        },
+        {
+          "url": "file://api/admin/stats?range=24h",
+          "failure": "net::ERR_FAILED"
+        },
+        {
+          "url": "file://api/admin/lilly-history",
+          "failure": "net::ERR_FAILED"
+        },
+        {
+          "url": "file://api/admin/stats?range=24h",
+          "failure": "net::ERR_FAILED"
+        },
+        {
+          "url": "file://api/admin/models",
+          "failure": "net::ERR_FAILED"
+        },
+        {
+          "url": "file://api/admin/models/usage/stats",
+          "failure": "net::ERR_FAILED"
+        }
+      ],
+      "issues": [
+        "low-contrast-text",
+        "failed-requests"
+      ]
+    },
+    {
+      "viewport": {
+        "name": "mobile",
+        "width": 390,
+        "height": 844,
+        "isMobile": true
+      },
+      "ok": true,
+      "screenshotPath": "C:\\Users\\phill\\KimiBuilt\\ui-checks\\lilly-wiki\\agent-sdk-admin-dashboard-mobile.png",
+      "metrics": {
+        "title": "Agent SDK Admin Dashboard",
+        "url": "file:///C:/Users/phill/KimiBuilt/frontend/agent-dashboard/index.html?view=lillyWiki",
+        "viewport": {
+          "width": 394,
+          "height": 853
+        },
+        "scrollWidth": 394,
+        "scrollHeight": 5357,
+        "horizontalOverflow": false,
+        "overflowingElements": [
+          {
+            "tag": "aside",
+            "id": "sidebar",
+            "className": "sidebar",
+            "text": "Agent SDK DASHBOARD Overview Prompts Models Tokens Logs 0 Workloads 0 SYSTEM Too",
+            "left": -260,
+            "right": 0,
+            "width": 260
+          },
+          {
+            "tag": "div",
+            "id": "",
+            "className": "sidebar-header",
+            "text": "Agent SDK",
+            "left": -260,
+            "right": -1,
+            "width": 259
+          },
+          {
+            "tag": "div",
+            "id": "",
+            "className": "logo",
+            "text": "Agent SDK",
+            "left": -236,
+            "right": -108,
+            "width": 128
+          },
+          {
+            "tag": "svg",
+            "id": "",
+            "className": "[object SVGAnimatedString]",
+            "text": "",
+            "left": -236,
+            "right": -204,
+            "width": 32
+          },
+          {
+            "tag": "path",
+            "id": "",
+            "className": "[object SVGAnimatedString]",
+            "text": "",
+            "left": -233,
+            "right": -207,
+            "width": 27
+          },
+          {
+            "tag": "span",
+            "id": "",
+            "className": "logo-text",
+            "text": "Agent SDK",
+            "left": -196,
+            "right": -108,
+            "width": 88
+          },
+          {
+            "tag": "button",
+            "id": "sidebarToggle",
+            "className": "sidebar-toggle",
+            "text": "",
+            "left": -57,
+            "right": -25,
+            "width": 32
+          },
+          {
+            "tag": "svg",
+            "id": "",
+            "className": "[object SVGAnimatedString]",
+            "text": "",
+            "left": -51,
+            "right": -31,
+            "width": 20
+          },
+          {
+            "tag": "path",
+            "id": "",
+            "className": "[object SVGAnimatedString]",
+            "text": "",
+            "left": -46,
+            "right": -36,
+            "width": 10
+          },
+          {
+            "tag": "nav",
+            "id": "",
+            "className": "sidebar-nav",
+            "text": "DASHBOARD Overview Prompts Models Tokens Logs 0 Workloads 0 SYSTEM Tools Traces ",
+            "left": -260,
+            "right": -1,
+            "width": 259
+          },
+          {
+            "tag": "div",
+            "id": "",
+            "className": "nav-section",
+            "text": "DASHBOARD Overview Prompts Models Tokens Logs 0 Workloads 0",
+            "left": -260,
+            "right": -1,
+            "width": 259
+          },
+          {
+            "tag": "span",
+            "id": "",
+            "className": "nav-label",
+            "text": "DASHBOARD",
+            "left": -260,
+            "right": -1,
+            "width": 259
+          }
+        ],
+        "bodyTextLength": 3616,
+        "headings": [
+          "Lilly Wiki",
+          "Request Volume",
+          "Recent Activity",
+          "Model Usage",
+          "System Health",
+          "Prompt Library",
+          "Default Configuration",
+          "Orchestration Phase",
+          "Provider Totals",
+          "Usage Summary",
+          "Per-Model Token Usage",
+          "Workload Definitions",
+          "Run Detail",
+          "Recent Runs",
+          "Tool Catalog",
+          "Tool Detail"
+        ],
+        "interactiveControls": 153,
+        "textContrast": {
+          "checked": 130,
+          "lowContrastCount": 6,
+          "lowContrast": [
+            {
+              "tag": "span",
+              "id": "",
+              "className": "lilly-legend-item lilly-tag-repair",
+              "text": "Repair 308",
+              "contrast": 1.09,
+              "required": 4.5,
+              "color": "#8b949e",
+              "background": "#f85149",
+              "fontSize": 14,
+              "fontWeight": 700,
+              "largeText": false,
+              "top": 2836,
+              "left": 41
+            },
+            {
+              "tag": "span",
+              "id": "",
+              "className": "lilly-legend-item lilly-tag-growth",
+              "text": "Growth 246",
+              "contrast": 1.21,
+              "required": 4.5,
+              "color": "#8b949e",
+              "background": "#3fb950",
+              "fontSize": 14,
+              "fontWeight": 700,
+              "largeText": false,
+              "top": 2836,
+              "left": 131
+            },
+            {
+              "tag": "span",
+              "id": "",
+              "className": "lilly-legend-item lilly-tag-interface",
+              "text": "Interface 214",
+              "contrast": 1.22,
+              "required": 4.5,
+              "color": "#8b949e",
+              "background": "#58a6ff",
+              "fontSize": 14,
+              "fontWeight": 700,
+              "largeText": false,
+              "top": 2836,
+              "left": 228
+            },
+            {
+              "tag": "span",
+              "id": "",
+              "className": "lilly-legend-item lilly-tag-ops",
+              "text": "Ops 150",
+              "contrast": 1.99,
+              "required": 4.5,
+              "color": "#8b949e",
+              "background": "#f2cc60",
+              "fontSize": 14,
+              "fontWeight": 700,
+              "largeText": false,
+              "top": 2867,
+              "left": 41
+            },
+            {
+              "tag": "span",
+              "id": "",
+              "className": "lilly-legend-item lilly-tag-media",
+              "text": "Media + Docs 170",
+              "contrast": 1.09,
+              "required": 4.5,
+              "color": "#8b949e",
+              "background": "#db61a2",
+              "fontSize": 14,
+              "fontWeight": 700,
+              "largeText": false,
+              "top": 2867,
+              "left": 114
+            },
+            {
+              "tag": "span",
+              "id": "",
+              "className": "lilly-legend-item lilly-tag-intelligence",
+              "text": "Intelligence 220",
+              "contrast": 1.09,
+              "required": 4.5,
+              "color": "#8b949e",
+              "background": "#a371f7",
+              "fontSize": 14,
+              "fontWeight": 700,
+              "largeText": false,
+              "top": 2898,
+              "left": 41
+            }
+          ]
+        },
+        "images": {
+          "count": 0,
+          "broken": [],
+          "missingAltCount": 0
+        }
+      },
+      "consoleMessages": [
+        {
+          "type": "error",
+          "text": "Access to fetch at 'file:///C:/api/auth/ws-token' from origin 'null' has been blocked by CORS policy: Cross origin requests are only supported for protocol schemes: chrome, chrome-extension, chrome-untrusted, data, http, https, isolated-app."
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: net::ERR_FAILED"
+        },
+        {
+          "type": "error",
+          "text": "Access to fetch at 'file://api/admin/lilly-history' from origin 'null' has been blocked by CORS policy: Cross origin requests are only supported for protocol schemes: chrome, chrome-extension, chrome-untrusted, data, http, https, isolated-app."
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: net::ERR_FAILED"
+        },
+        {
+          "type": "error",
+          "text": "Access to fetch at 'file://api/admin/stats?range=24h' from origin 'null' has been blocked by CORS policy: Cross origin requests are only supported for protocol schemes: chrome, chrome-extension, chrome-untrusted, data, http, https, isolated-app."
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: net::ERR_FAILED"
+        },
+        {
+          "type": "error",
+          "text": "Access to fetch at 'file://api/admin/lilly-history' from origin 'null' has been blocked by CORS policy: Cross origin requests are only supported for protocol schemes: chrome, chrome-extension, chrome-untrusted, data, http, https, isolated-app."
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: net::ERR_FAILED"
+        },
+        {
+          "type": "error",
+          "text": "Access to fetch at 'file://api/admin/stats?range=24h' from origin 'null' has been blocked by CORS policy: Cross origin requests are only supported for protocol schemes: chrome, chrome-extension, chrome-untrusted, data, http, https, isolated-app."
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: net::ERR_FAILED"
+        },
+        {
+          "type": "error",
+          "text": "WebSocket connection to 'ws://ws/' failed: Error in connection establishment: net::ERR_NAME_NOT_RESOLVED"
+        },
+        {
+          "type": "error",
+          "text": "Access to fetch at 'file://api/admin/lilly-history' from origin 'null' has been blocked by CORS policy: Cross origin requests are only supported for protocol schemes: chrome, chrome-extension, chrome-untrusted, data, http, https, isolated-app."
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: net::ERR_FAILED"
+        },
+        {
+          "type": "error",
+          "text": "Error loading Lilly history: TypeError: Failed to fetch\n    at ApiClient.request (file:///C:/Users/phill/KimiBuilt/frontend/agent-dashboard/js/api-client.js:144:40)\n    at async Dashboard.loadLillyHistory (file:///C:/Users/phill/KimiBuilt/frontend/agent-dashboard/js/dashboard.js:550:30)\n    at async Dashboard.loadViewData (file:///C:/Users/phill/KimiBuilt/frontend/agent-dashboard/js/dashboard.js:534:17)"
+        },
+        {
+          "type": "error",
+          "text": "Access to fetch at 'file://api/admin/stats?range=24h' from origin 'null' has been blocked by CORS policy: Cross origin requests are only supported for protocol schemes: chrome, chrome-extension, chrome-untrusted, data, http, https, isolated-app."
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: net::ERR_FAILED"
+        },
+        {
+          "type": "error",
+          "text": "Error loading stats: TypeError: Failed to fetch\n    at ApiClient.request (file:///C:/Users/phill/KimiBuilt/frontend/agent-dashboard/js/api-client.js:144:40)\n    at async Dashboard.loadStats (file:///C:/Users/phill/KimiBuilt/frontend/agent-dashboard/js/dashboard.js:738:30)\n    at async Dashboard.loadInitialData (file:///C:/Users/phill/KimiBuilt/frontend/agent-dashboard/js/dashboard.js:484:13)\n    at async Dashboard.init (file:///C:/Users/phill/KimiBuilt/frontend/agent-dashboard/js/dashboard.js:70"
+        },
+        {
+          "type": "error",
+          "text": "Access to fetch at 'file://api/admin/models' from origin 'null' has been blocked by CORS policy: Cross origin requests are only supported for protocol schemes: chrome, chrome-extension, chrome-untrusted, data, http, https, isolated-app."
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: net::ERR_FAILED"
+        },
+        {
+          "type": "error",
+          "text": "Access to fetch at 'file://api/admin/models/usage/stats' from origin 'null' has been blocked by CORS policy: Cross origin requests are only supported for protocol schemes: chrome, chrome-extension, chrome-untrusted, data, http, https, isolated-app."
+        }
+      ],
+      "pageErrors": [],
+      "failedRequests": [
+        {
+          "url": "file:///C:/api/auth/ws-token",
+          "failure": "net::ERR_FAILED"
+        },
+        {
+          "url": "file://api/admin/lilly-history",
+          "failure": "net::ERR_FAILED"
+        },
+        {
+          "url": "file://api/admin/stats?range=24h",
+          "failure": "net::ERR_FAILED"
+        },
+        {
+          "url": "file://api/admin/lilly-history",
+          "failure": "net::ERR_FAILED"
+        },
+        {
+          "url": "file://api/admin/stats?range=24h",
+          "failure": "net::ERR_FAILED"
+        },
+        {
+          "url": "file://api/admin/lilly-history",
+          "failure": "net::ERR_FAILED"
+        },
+        {
+          "url": "file://api/admin/stats?range=24h",
+          "failure": "net::ERR_FAILED"
+        },
+        {
+          "url": "file://api/admin/models",
+          "failure": "net::ERR_FAILED"
+        },
+        {
+          "url": "file://api/admin/models/usage/stats",
+          "failure": "net::ERR_FAILED"
+        }
+      ],
+      "issues": [
+        "low-contrast-text",
+        "failed-requests"
+      ]
+    }
+  ],
+  "summary": {
+    "ok": false,
+    "checkedViewports": 2,
+    "screenshotPaths": [
+      "C:\\Users\\phill\\KimiBuilt\\ui-checks\\lilly-wiki\\agent-sdk-admin-dashboard-desktop.png",
+      "C:\\Users\\phill\\KimiBuilt\\ui-checks\\lilly-wiki\\agent-sdk-admin-dashboard-mobile.png"
+    ],
+    "issues": [
+      "low-contrast-text",
+      "failed-requests"
+    ]
+  }
+}

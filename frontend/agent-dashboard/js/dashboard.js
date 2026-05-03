@@ -29,6 +29,7 @@ class Dashboard {
             settings: {},
             storage: null,
             tokenAnalysis: null,
+            lillyHistory: null,
             stats: {
                 totalTasks: 0,
                 successRate: 0,
@@ -59,6 +60,11 @@ class Dashboard {
         this.setupCharts();
         this.setupWebSocket();
         this.startPolling();
+
+        const requestedView = new URLSearchParams(window.location.search).get('view');
+        if (requestedView && document.getElementById(`${requestedView}View`)) {
+            this.navigateTo(requestedView);
+        }
         
         // Load initial data
         await this.loadInitialData();
@@ -456,6 +462,7 @@ class Dashboard {
             workloads: 'Workloads',
             skills: 'Tools',
             traces: 'Traces',
+            lillyWiki: 'Lilly Wiki',
             settings: 'Settings'
         };
         
@@ -523,10 +530,203 @@ class Dashboard {
             case 'traces':
                 await this.loadTraces();
                 break;
+            case 'lillyWiki':
+                await this.loadLillyHistory();
+                break;
             case 'settings':
                 await this.loadSettings();
                 break;
         }
+    }
+
+    async loadLillyHistory() {
+        const renderExisting = this.state.lillyHistory;
+        if (renderExisting) {
+            this.renderLillyHistory(renderExisting);
+            return;
+        }
+
+        try {
+            const response = await apiClient.get('/api/admin/lilly-history');
+            const history = this.unwrapApiPayload(response, {});
+            this.state.lillyHistory = history;
+            this.renderLillyHistory(history);
+        } catch (error) {
+            console.error('Error loading Lilly history:', error);
+            const fallback = this.getLillyHistoryFallback();
+            this.state.lillyHistory = fallback;
+            this.renderLillyHistory(fallback);
+            this.showToast('Loaded Lilly wiki from fallback history', 'warning');
+        }
+    }
+
+    renderLillyHistory(history = {}) {
+        const statsContainer = document.getElementById('lillyWikiStats');
+        const phaseContainer = document.getElementById('lillyPhaseMap');
+        const collageContainer = document.getElementById('lillyPrCollage');
+        const threadsContainer = document.getElementById('lillyGrowthThreads');
+        const timelineContainer = document.getElementById('lillyTimeline');
+
+        if (!statsContainer || !phaseContainer || !collageContainer || !threadsContainer || !timelineContainer) {
+            return;
+        }
+
+        const totalPulls = Number(history.totalPulls || 0);
+        const codexSessionCount = Number(history.codexSessions?.count || 0);
+
+        statsContainer.innerHTML = [
+            { label: 'Repo pulls', value: totalPulls.toLocaleString(), detail: `${this.escapeHtml(history.firstDate || 'start')} to ${this.escapeHtml(history.lastDate || 'now')}` },
+            { label: 'Repair pulls', value: Number(history.repairPulls || 0).toLocaleString(), detail: 'fix, harden, restore, stabilize' },
+            { label: 'Growth pulls', value: Number(history.growthPulls || 0).toLocaleString(), detail: 'add, enable, support, expand' },
+            { label: 'Codex logs', value: codexSessionCount ? codexSessionCount.toLocaleString() : 'optional', detail: history.codexSessions?.available ? 'session traces visible' : 'not visible here' },
+        ].map((item) => `
+            <div class="lilly-stat">
+                <span class="lilly-stat-value">${item.value}</span>
+                <span class="lilly-stat-label">${item.label}</span>
+                <span class="lilly-stat-detail">${item.detail}</span>
+            </div>
+        `).join('');
+
+        const maxPhaseCount = Math.max(1, ...(history.phases || []).map((phase) => Number(phase.count || 0)));
+        phaseContainer.innerHTML = (history.phases || []).map((phase) => {
+            const width = Math.max(8, Math.round((Number(phase.count || 0) / maxPhaseCount) * 100));
+            const tagText = (phase.tagCounts || [])
+                .slice(0, 4)
+                .map((tag) => `${this.escapeHtml(tag.label)} ${Number(tag.count || 0).toLocaleString()}`)
+                .join(' | ');
+
+            return `
+                <article class="lilly-phase-card lilly-phase-${this.escapeHtml(phase.id)}">
+                    <div class="lilly-phase-topline">
+                        <span class="lilly-phase-label">${this.escapeHtml(phase.label)}</span>
+                        <span class="lilly-phase-count">${Number(phase.count || 0).toLocaleString()} pulls</span>
+                    </div>
+                    <div class="lilly-phase-range">${this.escapeHtml(phase.from)} to ${phase.to === '2099-12-31' ? 'now' : this.escapeHtml(phase.to)}</div>
+                    <p>${this.escapeHtml(phase.summary || '')}</p>
+                    <div class="lilly-phase-meter"><span style="width: ${width}%"></span></div>
+                    <div class="lilly-phase-tags">${tagText || 'mixed work'}</div>
+                </article>
+            `;
+        }).join('');
+
+        const tiles = Array.isArray(history.tiles) ? history.tiles : [];
+        collageContainer.innerHTML = `
+            <div class="lilly-collage-summary">
+                <div>
+                    <strong>${totalPulls.toLocaleString()}</strong>
+                    <span>dots, one for each repo pull in local history</span>
+                </div>
+                <div class="lilly-legend">
+                    ${(history.categories || []).map((category) => `
+                        <span class="lilly-legend-item lilly-tag-${this.escapeHtml(category.id)}">
+                            ${this.escapeHtml(category.label)} ${Number(category.count || 0).toLocaleString()}
+                        </span>
+                    `).join('')}
+                </div>
+            </div>
+            <div class="lilly-dot-wall" aria-label="Lilly pull collage">
+                ${tiles.map((tile) => `
+                    <span
+                        class="lilly-dot lilly-tag-${this.escapeHtml(tile.primaryTag || 'maintenance')}"
+                        title="#${Number(tile.index || 0).toLocaleString()} ${this.escapeHtml(tile.date || '')}: ${this.escapeHtml(tile.subject || '')}"
+                    ></span>
+                `).join('')}
+            </div>
+            <div class="lilly-recent-pulls">
+                ${(history.recent || []).slice(0, 12).map((commit) => `
+                    <a class="lilly-recent-pull lilly-tag-border-${this.escapeHtml(commit.primaryTag || 'maintenance')}" href="https://github.com/philly1084/KimiBuilt/commit/${this.escapeHtml(commit.hash || '')}" target="_blank" rel="noopener">
+                        <span>${this.escapeHtml(commit.shortHash || '')}</span>
+                        <strong>${this.escapeHtml(commit.subject || '')}</strong>
+                        <em>${this.escapeHtml(commit.date || '')}</em>
+                    </a>
+                `).join('')}
+            </div>
+        `;
+
+        threadsContainer.innerHTML = (history.categories || []).map((category) => {
+            const percent = totalPulls ? Math.round((Number(category.count || 0) / totalPulls) * 100) : 0;
+            return `
+                <div class="lilly-thread">
+                    <div class="lilly-thread-header">
+                        <span class="lilly-thread-name lilly-tag-text-${this.escapeHtml(category.id)}">${this.escapeHtml(category.label)}</span>
+                        <span>${Number(category.count || 0).toLocaleString()} pulls</span>
+                    </div>
+                    <div class="lilly-thread-meter">
+                        <span class="lilly-tag-bg-${this.escapeHtml(category.id)}" style="width: ${Math.max(3, percent)}%"></span>
+                    </div>
+                    <p>${this.escapeHtml(this.describeLillyThread(category.id))}</p>
+                </div>
+            `;
+        }).join('');
+
+        timelineContainer.innerHTML = (history.phases || []).map((phase) => `
+            <article class="lilly-timeline-step">
+                <div class="lilly-timeline-marker"></div>
+                <div>
+                    <div class="lilly-timeline-heading">
+                        <span>${this.escapeHtml(phase.label)}</span>
+                        <span>${Number(phase.count || 0).toLocaleString()} pulls</span>
+                    </div>
+                    <p>${this.escapeHtml(phase.summary || '')}</p>
+                    <div class="lilly-timeline-highlights">
+                        ${(phase.highlights || []).slice(0, 4).map((commit) => `
+                            <span>${this.escapeHtml(commit.subject || '')}</span>
+                        `).join('')}
+                    </div>
+                </div>
+            </article>
+        `).join('');
+    }
+
+    describeLillyThread(categoryId) {
+        const descriptions = {
+            repair: 'The repair lane is the proof of pressure: crash loops, fallbacks, regressions, CORS, PDF, storage, and routing fixes that kept Lilly usable while it grew.',
+            growth: 'The growth lane is where new surfaces appeared: tools, routes, workflows, documents, remote runners, podcast/video paths, skills, and orchestration abilities.',
+            interface: 'The interface lane tracks the visible shape of Lilly across web chat, notes, canvas, CLI, admin, voxel polish, and dashboard diagnostics.',
+            ops: 'The operations lane made Lilly deployable: k3s, Rancher, Docker, GitLab, ingress, secrets, runners, and live-cluster proof loops.',
+            media: 'The media and document lane covers PDFs, generated docs, images, podcasts, audio, video, templates, and the asset flows around them.',
+            intelligence: 'The intelligence lane is the system learning to plan: memory, tools, models, prompts, skills, Symphony, and agent orchestration.',
+        };
+
+        return descriptions[categoryId] || 'Mixed maintenance and build work that does not fit cleanly into one lane.';
+    }
+
+    getLillyHistoryFallback() {
+        return {
+            generatedAt: new Date().toISOString(),
+            source: 'fallback static wiki seed',
+            totalPulls: 774,
+            mergedPullRequests: 11,
+            repairPulls: 308,
+            growthPulls: 246,
+            firstDate: '2026-03-04',
+            lastDate: '2026-05-03',
+            codexSessions: { available: false, count: 0 },
+            categories: [
+                { id: 'repair', label: 'Repair', count: 308 },
+                { id: 'growth', label: 'Growth', count: 246 },
+                { id: 'interface', label: 'Interface', count: 214 },
+                { id: 'ops', label: 'Ops', count: 150 },
+                { id: 'media', label: 'Media + Docs', count: 170 },
+                { id: 'intelligence', label: 'Intelligence', count: 220 },
+            ],
+            phases: [
+                { id: 'ignition', label: 'Ignition', from: '2026-03-04', to: '2026-03-11', count: 74, summary: 'The first backend, frontend, deployment, and document pieces came online.', tagCounts: [], highlights: [] },
+                { id: 'notes-admin', label: 'Notes + Admin Spine', from: '2026-03-12', to: '2026-03-18', count: 112, summary: 'Notes, admin, auth, PDFs, and crash recovery started becoming a working product surface.', tagCounts: [], highlights: [] },
+                { id: 'runtime', label: 'Agent Runtime', from: '2026-03-19', to: '2026-03-25', count: 138, summary: 'Tool calls, memory, artifacts, and remote command routing became core platform behavior.', tagCounts: [], highlights: [] },
+                { id: 'remote-builds', label: 'Remote Builds', from: '2026-03-26', to: '2026-04-18', count: 120, summary: 'Build, deploy, repair, and generated artifact paths expanded across the system.', tagCounts: [], highlights: [] },
+                { id: 'polish-pipeline', label: 'Polish Pipeline', from: '2026-04-19', to: '2026-04-25', count: 126, summary: 'Session polish, document workflows, remote runners, and artifact handling tightened up.', tagCounts: [], highlights: [] },
+                { id: 'media-symphony', label: 'Media + Symphony', from: '2026-04-26', to: '2026-05-01', count: 126, summary: 'Podcast, video, image gateways, Symphony, GitLab, and diagnostics became major branches.', tagCounts: [], highlights: [] },
+                { id: 'live-learning', label: 'Live Learning', from: '2026-05-02', to: 'now', count: 78, summary: 'Kokoro, k3s proof loops, skills, frontend standards, and prompt state machines made Lilly sturdier.', tagCounts: [], highlights: [] },
+            ],
+            tiles: Array.from({ length: 774 }, (_, index) => ({
+                index: index + 1,
+                date: '',
+                subject: 'Lilly build pull',
+                primaryTag: ['repair', 'growth', 'interface', 'ops', 'media', 'intelligence'][index % 6],
+            })),
+            recent: [],
+        };
     }
     
     /**

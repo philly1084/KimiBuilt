@@ -932,9 +932,10 @@ function hasIndexedAssetIntentText(text = '') {
     }
 
     return [
-        /\b(previous|earlier|prior|last|latest|same|that|those|these|uploaded|attached|generated|saved|worked on|working with)\b[\s\S]{0,50}\b(image|images|photo|photos|picture|pictures|document|documents|doc|docs|pdf|deck|slide deck|pptx|file|files|artifact|artifacts|attachment|attachments)\b/i,
-        /\b(image|images|photo|photos|picture|pictures|document|documents|doc|docs|pdf|deck|slide deck|pptx|file|files|artifact|artifacts|attachment|attachments)\b[\s\S]{0,70}\b(from earlier|from before|from last time|we worked on|we were working with|you generated|you made|you created|uploaded|attached|saved)\b/i,
-        /\b(find|search|locate|list|show|open|use|reuse|reference|pull up|look for)\b[\s\S]{0,40}\b(previous|earlier|uploaded|attached|generated|saved|artifact|image|document|pdf|file|attachment)\b/i,
+        /\b(previous|earlier|prior|old|older|past|existing|last|latest|same|that|those|these|uploaded|attached|generated|saved|worked on|working with)\b[\s\S]{0,50}\b(image|images|photo|photos|picture|pictures|document|documents|doc|docs|pdf|deck|slide deck|pptx|file|files|artifact|artifacts|attachment|attachments)\b/i,
+        /\b(image|images|photo|photos|picture|pictures|document|documents|doc|docs|pdf|deck|slide deck|pptx|file|files|artifact|artifacts|attachment|attachments)\b[\s\S]{0,70}\b(from earlier|from before|from last time|from a prior run|from past work|we worked on|we were working with|you generated|you made|you created|uploaded|attached|saved|old|older|existing)\b/i,
+        /\b(find|search|locate|list|show|open|use|reuse|reference|pull up|look for|review|improve|iterate on|edit|update|build on)\b[\s\S]{0,50}\b(previous|earlier|prior|old|older|past|existing|uploaded|attached|generated|saved|artifact|image|document|pdf|file|attachment)\b/i,
+        /\b(context|reference|source material|source files?|old files?|existing files?)\b[\s\S]{0,60}\b(change|edit|update|improve|rewrite|build|revise)\b/i,
         /\b(asset|assets)\b[\s\S]{0,20}\b(search|index|indexed|catalog|catalogue|manager)\b/i,
     ].some((pattern) => pattern.test(normalized));
 }
@@ -1180,7 +1181,7 @@ function classifyRequestIntent({
         preferredExecutionPath = 'plan-first';
         confidence = 0.82;
         pushReason(reasons, 'The user explicitly asked for delegated or parallel agent work.');
-    } else if (hasIndexedAssetIntentText(normalized) || /\b(previous|earlier|latest|generated|artifact|attachment|file)\b/.test(normalized)) {
+    } else if (hasIndexedAssetIntentText(normalized) || /\b(previous|earlier|prior|old|older|existing|latest|generated|artifact|attachment|file)\b/.test(normalized)) {
         taskFamily = 'artifact-followup';
         preferredExecutionPath = 'plan-first';
         confidence = 0.72;
@@ -1412,6 +1413,8 @@ function buildScoredCandidateToolMap({
     }
     if (hasAssetCatalogIntent) {
         adjustCandidateToolScore(scoreMap, 'asset-search', 0.95, 'The request refers to a prior or indexed asset.');
+        adjustCandidateToolScore(scoreMap, 'file-read', /\b(file|files|context|reference|source material|review|improve|edit|update|change|revise)\b/.test(normalizedPrompt) ? 0.65 : 0, 'Prior files may need to be read as reference context before changing or improving them.');
+        adjustCandidateToolScore(scoreMap, 'file-write', /\b(improve|edit|update|change|revise|rewrite|build on|iterate on)\b/.test(normalizedPrompt) ? 0.35 : 0, 'The request may turn old file context into an improved local file.');
     }
     if (hasResearchBucketIntent) {
         adjustCandidateToolScore(scoreMap, 'research-bucket-list', 0.9, 'The request refers to the shared research bucket.');
@@ -9883,6 +9886,14 @@ class ConversationOrchestrator extends EventEmitter {
             }
             if (hasAssetCatalogIntent && allowedToolIds.includes('asset-search')) {
                 candidates.add('asset-search');
+                if (allowedToolIds.includes('file-read')
+                    && /\b(file|files|context|reference|source material|review|improve|edit|update|change|revise)\b/.test(prompt)) {
+                    candidates.add('file-read');
+                }
+                if (allowedToolIds.includes('file-write')
+                    && /\b(improve|edit|update|change|revise|rewrite|build on|iterate on)\b/.test(prompt)) {
+                    candidates.add('file-write');
+                }
             }
             if (hasResearchBucketIntent) {
                 ['research-bucket-list', 'research-bucket-search', 'research-bucket-read'].forEach((toolId) => allowedToolIds.includes(toolId) && candidates.add(toolId));
@@ -9965,6 +9976,14 @@ class ConversationOrchestrator extends EventEmitter {
             }
             if (hasAssetCatalogIntent && allowedToolIds.includes('asset-search')) {
                 candidates.add('asset-search');
+                if (allowedToolIds.includes('file-read')
+                    && /\b(file|files|context|reference|source material|review|improve|edit|update|change|revise)\b/.test(prompt)) {
+                    candidates.add('file-read');
+                }
+                if (allowedToolIds.includes('file-write')
+                    && /\b(improve|edit|update|change|revise|rewrite|build on|iterate on)\b/.test(prompt)) {
+                    candidates.add('file-write');
+                }
             }
             if (hasResearchBucketIntent) {
                 ['research-bucket-list', 'research-bucket-search', 'research-bucket-read'].forEach((toolId) => allowedToolIds.includes(toolId) && candidates.add(toolId));
@@ -9990,7 +10009,7 @@ class ConversationOrchestrator extends EventEmitter {
             if (/\b(find|search|locate|list)\b[\s\S]{0,40}\bfiles?\b/.test(prompt) && allowedToolIds.includes('file-search')) {
                 candidates.add('file-search');
             }
-            if (/\b(write|save|create|update|edit)\b[\s\S]{0,40}\bfile\b/.test(prompt) && allowedToolIds.includes('file-write')) {
+            if (/\b(write|save|create|update|edit|change|improve|revise|rewrite)\b[\s\S]{0,40}\bfile\b/.test(prompt) && allowedToolIds.includes('file-write')) {
                 candidates.add('file-write');
             }
             if (/\b(create|make|mkdir)\b[\s\S]{0,40}\b(folder|directory)\b/.test(prompt) && allowedToolIds.includes('file-mkdir')) {
@@ -10940,11 +10959,13 @@ class ConversationOrchestrator extends EventEmitter {
                     'Do not rely on durable carryover notes or earlier-session artifact lookup in this isolated session.',
                 ]
                 : [
-                    'Use `asset-search` when the user refers to a previous, earlier, uploaded, attached, generated, or saved image, document, PDF, or artifact.',
+                    'Use `asset-search` when the user refers to a previous, earlier, old, existing, uploaded, attached, generated, or saved image, document, PDF, file, or artifact.',
                     'Prefer `asset-search` before asking the user to resend a file that should already exist in prior artifacts or the local workspace.',
                 ]),
             'Use `asset-search.params.kind = "image"` for visuals and `asset-search.params.kind = "document"` for PDFs, docs, HTML, markdown, and similar files.',
             'Set `asset-search.params.includeContent = true` when the stored text preview would help choose the right document.',
+            'When the user wants old files or artifacts used as context/reference for a change, plan `asset-search` first, then read the selected editable file or fetched artifact content before writing the improved result.',
+            'Treat non-code artifacts as product source material too. For review or product-building requests, compare prior files/artifacts against the stated goal or instructions, then improve the product artifact instead of only changing software plumbing.',
             'Use `research-bucket-*` tools when the user mentions a research bucket, reference bucket, source library, saved research, project references, or reusable web-project assets.',
             'For research bucket work, list or search first, then read only the specific files required. Use `research-bucket-write` or `research-bucket-mkdir` only when the user wants bucket contents created or updated.',
             'Use `public-source-*` tools when the user asks about the public source index, public API catalog, dashboard sources, RSS/news feeds, data portals, or reusable public endpoints.',
@@ -11851,9 +11872,11 @@ class ConversationOrchestrator extends EventEmitter {
         }
 
         if (allowedToolIds.includes('asset-search')) {
-            parts.push('Use `asset-search` to find earlier images, documents, uploaded artifacts, and workspace files before asking the user to resend them.');
+            parts.push('Use `asset-search` to find earlier, old, existing, uploaded, generated, and saved images, documents, artifacts, and workspace files before asking the user to resend them.');
             parts.push('Use `asset-search kind:"image"` for prior visuals and `asset-search kind:"document"` for PDFs, docs, HTML, markdown, and similar files.');
             parts.push('Set `asset-search includeContent:true` when you need the stored text preview from a document match, and use `refresh:true` if a very recent local file is missing from the index.');
+            parts.push('When old files are useful context for a requested change, search for them, read the best matching editable file or artifact content, and use that reference to make the requested update.');
+            parts.push('For product-review or product-building requests, treat prior artifacts and documents as part of the product surface. Review them against the user goal and improve the artifact/document itself when editing tools are available, not only the code that produced it.');
         }
         if (allowedToolIds.some((toolId) => String(toolId || '').startsWith('research-bucket-'))) {
             parts.push('Use `research-bucket-*` tools for shared durable bucket references. Treat bucket contents as callable storage, not memory: list/search first, then read only selected files.');
