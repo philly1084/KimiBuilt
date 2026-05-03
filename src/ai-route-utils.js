@@ -461,6 +461,10 @@ function inferRequestedOutputFormat(text = '') {
         return 'html';
     }
 
+    if (hasWebsiteArtifactSubject && hasBuildIntent && !hasPlanningConversationIntent(normalized)) {
+        return 'html';
+    }
+
     if ((hasArtifactIntent || hasBuildIntent) && isWebsiteDesignExampleRequest(normalized)) {
         return 'html';
     }
@@ -579,7 +583,9 @@ function hasImplicitImageArtifactFollowupReference(text = '') {
 
     return /\b(last|generated|previous|prior|same|those|these|this|earlier|above)\b[\s\S]{0,40}\b(images?|photos?|pictures?|illustrations?|renders?)\b/i.test(normalized)
         || /\b(images?|photos?|pictures?|illustrations?|renders?)\b[\s\S]{0,60}\b(from earlier|from before|from above|you made|you generated|we generated|from the last turn)\b/i.test(normalized)
-        || /\b(use|put|place|include|embed|make|turn|convert|compile)\b[\s\S]{0,40}\b(those|these|the generated|the previous|the earlier)\b[\s\S]{0,20}\b(images?|photos?|pictures?)\b/i.test(normalized);
+        || /\b(use|put|place|include|embed|make|turn|convert|compile)\b[\s\S]{0,40}\b(those|these|the generated|the previous|the earlier)\b[\s\S]{0,20}\b(images?|photos?|pictures?)\b/i.test(normalized)
+        || /\b(make|use|set|place|turn)\b[\s\S]{0,30}\b(this|that|it|the generated|the previous|the earlier|same)\b[\s\S]{0,30}\b(static\s+)?(background|hero|backdrop|wallpaper)\b/i.test(normalized)
+        || /\b(this|that|it|the generated|the previous|the earlier|same)\b[\s\S]{0,30}\b(static\s+)?(background|hero|backdrop|wallpaper)\b/i.test(normalized);
 }
 
 function hasImplicitUploadedImageArtifactReference(text = '') {
@@ -619,11 +625,27 @@ function shouldPreGenerateImagesForArtifactRequest({
     outputFormat = null,
 } = {}) {
     const normalizedFormat = normalizeFormat(outputFormat);
+    const normalized = String(text || '').trim().toLowerCase();
     if (!['pdf', 'html'].includes(normalizedFormat)) {
         return false;
     }
 
-    return hasExplicitImageGenerationIntent(text);
+    if (hasExplicitImageGenerationIntent(normalized)) {
+        return true;
+    }
+
+    const referencesPriorImages = /\b(those|these|this|that|it|previous|prior|earlier|above|same)\b[\s\S]{0,40}\b(images?|photos?|pictures?|illustrations?|renders?|visuals?|background|hero|backdrop)\b/i.test(normalized)
+        || /\b(images?|photos?|pictures?|illustrations?|renders?|visuals?)\b[\s\S]{0,60}\b(from earlier|from before|from above|you made|you generated|we generated|from the last turn)\b/i.test(normalized);
+
+    if (normalizedFormat === 'html'
+        && /\b(website|web page|webpage|landing page|homepage|microsite|frontend|site)\b/.test(normalized)
+        && /\b(generate|generated|generative|ai[-\s]?generated|ai image|custom|create|created|make|made)\b[\s\S]{0,40}\b(images?|photos?|pictures?|illustrations?|renders?|visuals?)\b/i.test(normalized)
+        && !referencesPriorImages
+        && !hasImplicitUploadedImageArtifactReference(normalized)) {
+        return true;
+    }
+
+    return false;
 }
 
 function parseRequestedImageCountToken(value = '', fallback = null) {

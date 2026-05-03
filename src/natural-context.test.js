@@ -51,6 +51,8 @@ describe('natural-context', () => {
         expect(contextInstructions).toContain('current selection');
         expect(skillsTree).toContain('Use this compact state machine');
         expect(skillsTree).toContain('route_skill_tool');
+        expect(skillsTree).toContain('Skills progression is not replaced by the state machine');
+        expect(skillsTree).toContain('materialize required assets first');
         expect(skillsTree).toContain('context_by_interaction');
         expect(skillsTree).toContain('Ask at most one or two concise follow-up questions');
         expect(skillsTree).toContain('canvas_exact_edit');

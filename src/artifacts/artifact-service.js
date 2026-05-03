@@ -847,6 +847,7 @@ function buildDocumentImageInstructions() {
         'Prefer remembered direct image URLs and Unsplash image URLs over generated decorative placeholders.',
         `When the user asks for real or image-rich output, reuse as many as ${DEFAULT_DOCUMENT_IMAGE_TARGET} verified image references across the document before falling back to text-only sections.`,
         'For news, research, latest, current-events, and source-backed reports, prefer real sourced photography and fetched online image references over AI-generated illustrations unless the user explicitly asks for generated art.',
+        'If the user explicitly asks for a selected/generated image to be the page, hero, static, wallpaper, or full-screen background, honor that request with a CSS background-image treatment and readable overlay surfaces.',
         'Prefer standard HTML <img src="..."> elements over background-image-only treatments when the image is meaningful content.',
         'For HTML and PDF designs, distribute real images throughout the document instead of clustering them in a single appendix or final page.',
         'Use a strong visual rhythm: opening hero image, repeated section visuals, image cards, and galleries when enough verified image URLs exist.',
@@ -2245,6 +2246,7 @@ class ArtifactService {
             '[Verified image references]',
             'Use these real image URLs when the output benefits from visuals.',
             `These verified references can be reused throughout the document, up to ${DEFAULT_DOCUMENT_IMAGE_TARGET} images when the request supports it.`,
+            'When the user asks for one of these images as a static background, use that image URL directly in CSS background-image and place text on readable overlay surfaces.',
             'Prefer standard HTML <img src="..."> elements that point to these URLs.',
             ...imageReferences.map((entry, index) => {
                 const label = entry.title || `Image ${index + 1}`;

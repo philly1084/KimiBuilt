@@ -300,10 +300,11 @@ describe('ai-route-utils', () => {
     });
 
     test('inferRequestedOutputFormat auto-selects html for explicit html, sandbox preview, or prototype-style website requests', () => {
-        expect(inferRequestedOutputFormat('Build a landing page for a climate startup')).toBeNull();
+        expect(inferRequestedOutputFormat('Build a landing page for a climate startup')).toBe('html');
         expect(inferRequestedOutputFormat('Create a frontend demo microsite for our product launch')).toBe('html');
         expect(inferRequestedOutputFormat('Create an admin dashboard HTML for customer support ops')).toBe('html');
         expect(inferRequestedOutputFormat('Make a website mockup for a fintech launch')).toBe('html');
+        expect(inferRequestedOutputFormat('Make a webpage with NASA facts and a calendar of upcoming skywatching events')).toBe('html');
         expect(inferRequestedOutputFormat('Build a sandbox weather webpage with current conditions cards')).toBe('html');
         expect(inferRequestedOutputFormat('Create a weather web page with a browser preview')).toBe('html');
         expect(inferRequestedOutputFormat('Create website slides for a fintech launch that I can reuse as a Vite template')).toBe('html');
@@ -363,6 +364,11 @@ describe('ai-route-utils', () => {
         expect(shouldPreGenerateImagesForArtifactRequest({
             text: 'Make a hypercar image and put it in a PDF brochure.',
             outputFormat: 'pdf',
+        })).toBe(true);
+
+        expect(shouldPreGenerateImagesForArtifactRequest({
+            text: 'Make a webpage with generated planet images and NASA facts.',
+            outputFormat: 'html',
         })).toBe(true);
 
         expect(shouldPreGenerateImagesForArtifactRequest({
@@ -534,6 +540,13 @@ describe('ai-route-utils', () => {
                 lastGeneratedImageArtifactIds: ['image-1', 'image-2'],
             },
         }, [], 'make a pdf with those images from earlier')).toEqual(['image-1', 'image-2']);
+
+        expect(resolveArtifactContextIds({
+            metadata: {
+                lastGeneratedArtifactId: 'artifact-1',
+                lastGeneratedImageArtifactIds: ['image-world'],
+            },
+        }, [], 'make a webpage and make this the static background with lights going around it')).toEqual(['image-world']);
     });
 
     test('resolveArtifactContextIds does not carry old artifacts into explicit new-image requests', () => {
