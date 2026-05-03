@@ -1,7 +1,11 @@
 const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
-const { PodcastVideoService, buildFallbackStoryboard } = require('./podcast-video-service');
+const {
+  PodcastVideoService,
+  buildFallbackStoryboard,
+  buildSceneImagePrompt,
+} = require('./podcast-video-service');
 
 describe('PodcastVideoService', () => {
   function ppmDataUrl(width, height, pixels) {
@@ -68,6 +72,22 @@ describe('PodcastVideoService', () => {
 
     expect(result.planning.provider).toBe('local');
     expect(result.scenes).toHaveLength(2);
+  });
+
+  test('builds creative infographic prompts for generated scene slides', () => {
+    const prompt = buildSceneImagePrompt({
+      id: 'scene-04',
+      summary: 'Heat pumps lower winter electricity costs',
+      caption: 'The hosts compare installation costs against winter energy savings.',
+      visualPrompt: 'home energy savings explainer',
+    }, {
+      orientation: 'landscape',
+    });
+
+    expect(prompt).toContain('premium widescreen image slide');
+    expect(prompt).toMatch(/timeline|comparison|process-flow|priority matrix|radial impact map|editorial dashboard/);
+    expect(prompt).toContain('Heat pumps lower winter electricity costs');
+    expect(prompt).toContain('no watermarks');
   });
 
   test('uses adaptive ffmpeg timeouts and fast x264 settings when rendering', async () => {
@@ -443,6 +463,8 @@ describe('PodcastVideoService', () => {
     });
 
     expect(generateImageBatch).toHaveBeenCalledTimes(2);
+    expect(generateImageBatch.mock.calls[0][0].prompt).toContain('premium');
+    expect(generateImageBatch.mock.calls[0][0].prompt).toContain('infographic');
     expect(image).toEqual(expect.objectContaining({
       source: 'generated',
       revisedPrompt: 'usable visual',

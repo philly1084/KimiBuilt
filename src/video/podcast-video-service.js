@@ -440,7 +440,9 @@ function buildFallbackStoryboard({ title = '', transcript = '', turns = [], dura
       caption: words.slice(0, 22).join(' '),
       visualQuery: summary || sanitizeText(title),
       visualPrompt: [
-        'Editorial podcast visual, cinematic still frame, realistic image, no text.',
+        'Premium editorial podcast slide, documentary explainer infographic, high production value.',
+        'Use charts, diagrams, icons, evidence cards, or timeline structure when helpful.',
+        'Avoid logos, watermarks, tiny paragraphs, and distorted typography.',
         `Topic: ${sanitizeText(title) || 'Podcast episode'}.`,
         `Moment: ${summary || narration.slice(0, 120)}.`,
       ].join(' '),
@@ -478,8 +480,9 @@ function buildShowCardScene({
     visualPrompt: [
       'Single static key visual for a polished YouTube science news information show.',
       'Modern editorial studio card, presenter desk, monitor wall, clean data graphics, cinematic lighting, high production value.',
+      'Compose it like a premium episode cover: large focal shape, readable hierarchy, metric tiles, abstract chart details, and generous margins.',
       'Use one stable composition suitable for a full podcast episode background.',
-      'No readable text, no logos, no watermarks, no distorted typography.',
+      'No logos, no watermarks, no tiny paragraphs, no distorted typography.',
       `Topic: ${normalizedTitle}.`,
       showBeats ? `Episode beats: ${showBeats}.` : '',
     ].filter(Boolean).join(' '),
@@ -521,8 +524,10 @@ function buildStoryboardPrompt({
     'Rules:',
     '- Scene times must cover the whole episode in order without overlaps.',
     '- Treat scenes as show segments: hook, context, evidence, stakes, implications, and takeaway.',
+    '- Mix visual formats across the episode: one strong hook image, timeline, comparison, process flow, risk/impact map, evidence dashboard, myth-vs-fact panel, and takeaway card when the transcript supports them.',
     '- visualQuery should be short and useful for Unsplash search.',
-    '- visualPrompt should be specific enough for image generation and must request no text in the image.',
+    '- visualPrompt should be specific enough for image generation and should describe the infographic structure, icons, charts, and visual hierarchy.',
+    '- Generated images may include abstract labels or placeholder glyphs, but must avoid small unreadable paragraphs, logos, watermarks, and distorted typography.',
     '- Captions should be concise excerpts aligned to the audio segment.',
     '',
     'Transcript:',
@@ -600,42 +605,171 @@ function extractImageUrlsFromHtml(html = '', baseUrl = '') {
   return urls;
 }
 
+function hashString(value = '') {
+  const text = String(value || 'podcast-video');
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function chooseInfographicKind(seed = '') {
+  const kinds = ['timeline', 'comparison', 'flow', 'matrix', 'radar', 'metrics'];
+  return kinds[hashString(seed) % kinds.length];
+}
+
+function buildSceneImagePrompt(scene = {}, options = {}) {
+  const summary = sanitizeText(scene.summary || scene.caption || scene.visualQuery || 'Podcast scene');
+  const caption = sanitizeText(scene.caption || scene.narration || '').slice(0, 220);
+  const requested = sanitizeText(scene.visualPrompt || scene.visualQuery || summary);
+  const kind = chooseInfographicKind(`${summary} ${caption} ${scene.id || ''}`);
+  const orientation = options.orientation === 'portrait'
+    ? 'vertical'
+    : options.orientation === 'squarish'
+      ? 'square'
+      : 'widescreen';
+  const infographicBriefs = {
+    timeline: 'a cinematic timeline with four milestone nodes, connecting arcs, subtle date chips, and one emphasized turning point',
+    comparison: 'a split-screen comparison board with two evidence columns, icon badges, simple bar indicators, and a clear contrast zone',
+    flow: 'a process-flow infographic with layered cards, arrows, cause-and-effect connectors, and one highlighted decision point',
+    matrix: 'a 2x2 priority matrix with quadrant cards, small icons, plotted dots, and a highlighted opportunity area',
+    radar: 'a radial impact map with concentric rings, spoke labels as abstract glyphs, icon clusters, and a central insight',
+    metrics: 'an editorial dashboard with large number tiles, mini charts, trend lines, and source-card styling',
+  };
+
+  return [
+    `Create a premium ${orientation} image slide for a video podcast.`,
+    `Use ${infographicBriefs[kind] || infographicBriefs.metrics}.`,
+    'Style: documentary explainer, high-end editorial infographic, cinematic lighting, crisp vector-like shapes blended with subtle photographic depth, readable composition at YouTube size.',
+    'Use strong contrast, restrained color, generous margins, no brand logos, no watermarks, no tiny paragraphs, no malformed text.',
+    'If text appears, keep it as large abstract headline glyphs or short placeholder labels only.',
+    `Topic moment: ${summary}.`,
+    caption ? `Audio-aligned context: ${caption}.` : '',
+    `Original visual direction: ${requested}.`,
+  ].filter(Boolean).join(' ');
+}
+
 function buildPlaceholderFrameBuffer(width = DEFAULT_WIDTH, height = DEFAULT_HEIGHT, seed = '') {
-  const hash = Buffer.from(String(seed || 'podcast-video'));
+  const hashed = hashString(seed);
+  const kind = chooseInfographicKind(seed);
   const palettes = [
-    [[42, 78, 104], [128, 172, 148]],
-    [[55, 88, 72], [174, 155, 95]],
-    [[62, 72, 96], [172, 144, 126]],
-    [[82, 72, 58], [166, 138, 86]],
-    [[38, 92, 112], [114, 176, 184]],
+    [[18, 24, 31], [238, 244, 239], [46, 120, 112], [222, 156, 73]],
+    [[22, 27, 34], [245, 240, 229], [71, 96, 181], [211, 92, 92]],
+    [[20, 31, 30], [239, 247, 244], [64, 139, 107], [190, 143, 61]],
+    [[31, 26, 29], [246, 239, 233], [151, 86, 121], [78, 132, 158]],
+    [[19, 28, 38], [239, 244, 248], [37, 119, 151], [218, 174, 83]],
   ];
-  const [startColor, endColor] = palettes[(hash[0] || 0) % palettes.length];
-  const [r1, g1, b1] = startColor;
-  const [r2, g2, b2] = endColor;
+  const [ink, paper, accent, warm] = palettes[hashed % palettes.length];
   const header = Buffer.from(`P6\n${width} ${height}\n255\n`, 'ascii');
   const pixels = Buffer.alloc(width * height * 3);
   const clampByte = (value) => Math.max(0, Math.min(255, Math.round(value)));
+  const mix = (a, b, t) => [
+    a[0] + ((b[0] - a[0]) * t),
+    a[1] + ((b[1] - a[1]) * t),
+    a[2] + ((b[2] - a[2]) * t),
+  ];
+  const inBox = (nx, ny, x1, y1, x2, y2) => nx >= x1 && nx <= x2 && ny >= y1 && ny <= y2;
+  const boxEdge = (nx, ny, x1, y1, x2, y2, stroke = 0.006) => inBox(nx, ny, x1, y1, x2, y2)
+    && (nx < x1 + stroke || nx > x2 - stroke || ny < y1 + stroke || ny > y2 - stroke);
+  const lineDistance = (px, py, ax, ay, bx, by) => {
+    const dx = bx - ax;
+    const dy = by - ay;
+    const lengthSq = (dx * dx) + (dy * dy) || 1;
+    const t = Math.max(0, Math.min(1, (((px - ax) * dx) + ((py - ay) * dy)) / lengthSq));
+    return Math.hypot(px - (ax + (t * dx)), py - (ay + (t * dy)));
+  };
+  const circle = (nx, ny, cx, cy, radius) => Math.hypot(nx - cx, ny - cy) <= radius;
 
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      const t = ((x / Math.max(1, width - 1)) * 0.65) + ((y / Math.max(1, height - 1)) * 0.35);
       const normalizedX = x / Math.max(1, width - 1);
       const normalizedY = y / Math.max(1, height - 1);
-      const grid = ((x + (hash[2] || 0)) % 96 < 3 || (y + (hash[3] || 0)) % 96 < 3) ? 1 : 0;
-      const spotlight = Math.max(0, 1 - Math.hypot(normalizedX - 0.72, normalizedY - 0.28) * 1.75);
-      const accent = Math.max(0, 1 - Math.abs(normalizedY - (0.19 + (normalizedX * 0.1))) / 0.012);
-      const panel = normalizedX > 0.12 && normalizedX < 0.88 && normalizedY > 0.38 && normalizedY < 0.74 ? 1 : 0;
-      const panelEdge = panel && (
-        normalizedX < 0.123
-        || normalizedX > 0.877
-        || normalizedY < 0.383
-        || normalizedY > 0.737
-      ) ? 1 : 0;
-      const vignette = Math.hypot(normalizedX - 0.5, normalizedY - 0.5) * 24;
+      const t = (normalizedX * 0.35) + (normalizedY * 0.65);
+      const base = mix(paper, ink, 0.09 + (t * 0.08));
+      const vignette = Math.hypot(normalizedX - 0.5, normalizedY - 0.5) * 18;
+      const grid = ((x + (hashed & 63)) % Math.max(48, Math.round(width * 0.075)) < 1
+        || (y + ((hashed >> 8) & 63)) % Math.max(48, Math.round(height * 0.105)) < 1) ? 1 : 0;
+      const spotlight = Math.max(0, 1 - Math.hypot(normalizedX - 0.78, normalizedY - 0.18) * 2.3);
       const offset = (y * width + x) * 3;
-      pixels[offset] = clampByte(r1 + (r2 - r1) * t + (grid * 10) + (spotlight * 26) + (accent * 34) - (panel * 12) + (panelEdge * 42) - vignette);
-      pixels[offset + 1] = clampByte(g1 + (g2 - g1) * t + (grid * 10) + (spotlight * 30) + (accent * 44) - (panel * 12) + (panelEdge * 46) - vignette);
-      pixels[offset + 2] = clampByte(b1 + (b2 - b1) * t + (grid * 10) + (spotlight * 34) + (accent * 36) - (panel * 10) + (panelEdge * 40) - vignette);
+      let r = base[0] + (grid * 8) + (spotlight * 20) - vignette;
+      let g = base[1] + (grid * 8) + (spotlight * 18) - vignette;
+      let b = base[2] + (grid * 8) + (spotlight * 14) - vignette;
+
+      const add = (color, alpha = 1) => {
+        r = (r * (1 - alpha)) + (color[0] * alpha);
+        g = (g * (1 - alpha)) + (color[1] * alpha);
+        b = (b * (1 - alpha)) + (color[2] * alpha);
+      };
+
+      if (inBox(normalizedX, normalizedY, 0.07, 0.09, 0.93, 0.88)) {
+        add(mix(paper, ink, 0.045), 0.52);
+      }
+      if (boxEdge(normalizedX, normalizedY, 0.07, 0.09, 0.93, 0.88, 0.004)) {
+        add(mix(accent, paper, 0.25), 0.75);
+      }
+      if (inBox(normalizedX, normalizedY, 0.11, 0.14, 0.32, 0.21)
+        || inBox(normalizedX, normalizedY, 0.11, 0.235, 0.25, 0.262)) {
+        add(ink, 0.5);
+      }
+      if (inBox(normalizedX, normalizedY, 0.77, 0.13, 0.87, 0.18)) {
+        add(warm, 0.58);
+      }
+
+      if (kind === 'timeline') {
+        const yLine = 0.55;
+        if (Math.abs(normalizedY - yLine) < 0.006 && normalizedX > 0.16 && normalizedX < 0.86) add(accent, 0.72);
+        [0.2, 0.38, 0.58, 0.78].forEach((cx, index) => {
+          if (circle(normalizedX, normalizedY, cx, yLine, index === 2 ? 0.045 : 0.034)) add(index === 2 ? warm : accent, 0.8);
+          if (inBox(normalizedX, normalizedY, cx - 0.065, yLine + 0.075, cx + 0.065, yLine + 0.145)) add(mix(paper, ink, 0.11), 0.7);
+        });
+      } else if (kind === 'comparison') {
+        if (inBox(normalizedX, normalizedY, 0.14, 0.32, 0.45, 0.76)) add(mix(accent, paper, 0.77), 0.62);
+        if (inBox(normalizedX, normalizedY, 0.55, 0.32, 0.86, 0.76)) add(mix(warm, paper, 0.77), 0.62);
+        if (Math.abs(normalizedX - 0.5) < 0.006 && normalizedY > 0.28 && normalizedY < 0.8) add(ink, 0.38);
+        [0.42, 0.52, 0.62, 0.72].forEach((barY, index) => {
+          if (inBox(normalizedX, normalizedY, 0.18, barY, 0.28 + (index * 0.035), barY + 0.018)) add(accent, 0.75);
+          if (inBox(normalizedX, normalizedY, 0.59, barY, 0.81 - (index * 0.027), barY + 0.018)) add(warm, 0.75);
+        });
+      } else if (kind === 'flow') {
+        const nodes = [[0.18, 0.45], [0.38, 0.35], [0.6, 0.52], [0.82, 0.41]];
+        nodes.forEach(([cx, cy], index) => {
+          if (inBox(normalizedX, normalizedY, cx - 0.07, cy - 0.055, cx + 0.07, cy + 0.055)) add(index === 2 ? warm : mix(accent, paper, 0.2), 0.72);
+        });
+        for (let index = 0; index < nodes.length - 1; index += 1) {
+          if (lineDistance(normalizedX, normalizedY, nodes[index][0] + 0.07, nodes[index][1], nodes[index + 1][0] - 0.07, nodes[index + 1][1]) < 0.008) add(ink, 0.5);
+        }
+      } else if (kind === 'matrix') {
+        if (Math.abs(normalizedX - 0.5) < 0.005 && normalizedY > 0.3 && normalizedY < 0.8) add(ink, 0.4);
+        if (Math.abs(normalizedY - 0.55) < 0.005 && normalizedX > 0.18 && normalizedX < 0.84) add(ink, 0.4);
+        [[0.3, 0.4], [0.68, 0.41], [0.34, 0.69], [0.72, 0.68]].forEach(([cx, cy], index) => {
+          if (circle(normalizedX, normalizedY, cx, cy, index === 1 ? 0.042 : 0.028)) add(index === 1 ? warm : accent, 0.82);
+        });
+      } else if (kind === 'radar') {
+        [0.11, 0.18, 0.25].forEach((radius) => {
+          if (Math.abs(Math.hypot(normalizedX - 0.5, normalizedY - 0.56) - radius) < 0.004) add(mix(accent, ink, 0.18), 0.55);
+        });
+        for (let index = 0; index < 6; index += 1) {
+          const angle = (Math.PI * 2 * index) / 6;
+          const endX = 0.5 + Math.cos(angle) * 0.28;
+          const endY = 0.56 + Math.sin(angle) * 0.28;
+          if (lineDistance(normalizedX, normalizedY, 0.5, 0.56, endX, endY) < 0.004) add(ink, 0.28);
+          if (circle(normalizedX, normalizedY, endX, endY, 0.026)) add(index % 2 ? warm : accent, 0.72);
+        }
+      } else {
+        [[0.15, 0.35, 0.31, 0.55], [0.36, 0.35, 0.52, 0.55], [0.57, 0.35, 0.73, 0.55], [0.16, 0.64, 0.84, 0.70]].forEach((box, index) => {
+          if (inBox(normalizedX, normalizedY, ...box)) add(index === 1 ? warm : mix(accent, paper, 0.28), 0.68);
+          if (boxEdge(normalizedX, normalizedY, ...box, 0.004)) add(ink, 0.45);
+        });
+        if (lineDistance(normalizedX, normalizedY, 0.2, 0.78, 0.38, 0.72) < 0.006
+          || lineDistance(normalizedX, normalizedY, 0.38, 0.72, 0.56, 0.76) < 0.006
+          || lineDistance(normalizedX, normalizedY, 0.56, 0.76, 0.78, 0.66) < 0.006) add(warm, 0.85);
+      }
+
+      pixels[offset] = clampByte(r);
+      pixels[offset + 1] = clampByte(g);
+      pixels[offset + 2] = clampByte(b);
     }
   }
 
@@ -1296,7 +1430,9 @@ class PodcastVideoService {
         const maxAttempts = Math.max(1, Math.min(3, Number(options.imageRetryAttempts) || 3));
         for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
           const response = await this.generateImageBatch({
-            prompt: scene.visualPrompt || scene.visualQuery || scene.summary,
+            prompt: buildSceneImagePrompt(scene, {
+              orientation,
+            }),
             model: options.imageModel || null,
             size: options.imageSize || (orientation === 'portrait' ? '1024x1536' : '1536x1024'),
             quality: options.imageQuality || 'auto',
@@ -2032,5 +2168,6 @@ module.exports = {
   PodcastVideoService,
   podcastVideoService,
   buildFallbackStoryboard,
+  buildSceneImagePrompt,
   normalizeScene,
 };
