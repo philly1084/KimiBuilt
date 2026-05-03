@@ -56,6 +56,28 @@ const TENS_NUMBER_WORD_FRAGMENT = 'twenty|thirty|forty|fifty|sixty';
 const RELATIVE_DELAY_AMOUNT_FRAGMENT = `(?:\\d+|${SIMPLE_NUMBER_WORD_FRAGMENT}|${TENS_NUMBER_WORD_FRAGMENT}(?:[-\\s](?:${ONES_NUMBER_WORD_FRAGMENT}))?)`;
 const TODAY_SCHEDULE_FRAGMENT = 'today\\b(?![\'’]s)';
 
+function hasImmediateOrNoDeferCue(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+    const nowCueText = normalized.replace(/\bfrom\s+now\b/g, '');
+
+    if (/\b(?:right\s+)?now\b/.test(nowCueText)) {
+        return true;
+    }
+
+    return [
+        /\bimmediately\b/,
+        /\basap\b/,
+        /\bdo\s+not\s+(?:defer|schedule|queue)\b/,
+        /\bdon't\s+(?:defer|schedule|queue)\b/,
+        /\bwithout\s+(?:deferring|scheduling|queueing)\b/,
+        /\bnot\s+(?:deferred|scheduled|queued|later)\b/,
+        /\bno\s+(?:deferred|scheduled|queued)\s+(?:work|agent|call|task|job)s?\b/,
+    ].some((pattern) => pattern.test(normalized));
+}
+
 function getDefaultTimezone() {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 }
@@ -279,7 +301,7 @@ function buildOneTimeRunAt(lowerScenario = '', timeInfo = DEFAULT_TIME_INFO, now
         return buildRunAt(addDaysToZonedDateParts(zonedNow, 1), timeInfo.hour, timeInfo.minute);
     }
 
-    if (/\blater today\b/i.test(lowerScenario) || /\blater\b/i.test(lowerScenario)) {
+    if (/\blater today\b/i.test(lowerScenario)) {
         return runAt <= baseNow ? nextLocalHour : runAt;
     }
 
@@ -500,7 +522,7 @@ function stripBrutalBuilderDirectiveText(text = '') {
 function extractTaskPromptFromScenario(scenario = '') {
     const timeFragment = '(?:\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?|morning|afternoon|evening|night)';
     const relativeDelayFragment = `(?:(?:in|after)\\s+${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)(?:\\s+from\\s+now)?|${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)\\s+from\\s+now)`;
-    const explicitDayFragment = `(?:tomorrow|later today|later|${TODAY_SCHEDULE_FRAGMENT})`;
+    const explicitDayFragment = `(?:tomorrow|later today|${TODAY_SCHEDULE_FRAGMENT})`;
     const leadingPatterns = [
         new RegExp(`^(?:every hour|hourly)(?:\\s+at\\s+${timeFragment})?[\\s,:-]*`, 'i'),
         new RegExp(`^(?:every|each)\\s+weekdays?(?:\\s+at\\s+${timeFragment})?[\\s,:-]*`, 'i'),
@@ -634,7 +656,11 @@ function hasWorkloadIntent(text = '') {
         return true;
     }
 
-    const scheduleIntentFragment = `(?:every|daily|hourly|weekdays?|tomorrow|later today|later|once|at\\s+(?:1[0-2]|0?\\d)(?::[0-5]\\d)?\\s*(?:am|pm)|at\\s+(?:[01]?\\d|2[0-3]):[0-5]\\d|(?:(?:in|after)\\s+${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)(?:\\s+from\\s+now)?|${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)\\s+from\\s+now))`;
+    if (hasImmediateOrNoDeferCue(normalized)) {
+        return false;
+    }
+
+    const scheduleIntentFragment = `(?:every|daily|hourly|weekdays?|tomorrow|later today|once|at\\s+(?:1[0-2]|0?\\d)(?::[0-5]\\d)?\\s*(?:am|pm)|at\\s+(?:[01]?\\d|2[0-3]):[0-5]\\d|(?:(?:in|after)\\s+${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)(?:\\s+from\\s+now)?|${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)\\s+from\\s+now))`;
 
     const hasExplicitWorkloadSetup = [
         /\b(set up|setup|schedule|create|make|add|queue|save)\b[\s\S]{0,24}\b(?:an?\s+|the\s+)?(?:automation|workloads?|follow-?ups?|reminders?|cron(?:\s+jobs?)?|scheduled\s+jobs?|scheduled\s+tasks?|recurring\s+jobs?|recurring\s+tasks?)\b/,
@@ -811,9 +837,13 @@ function parseWorkloadScenario(scenario = '', options = {}) {
 
     let trigger = { type: 'manual' };
 
+    const hasExplicitClockTime = /\b(?:at\s+)?(?:1[0-2]|0?\d)(?::[0-5]\d)?\s*(?:am|pm)\b/i.test(lowerScenario)
+        || /\bat\s+(?:[01]?\d|2[0-3]):[0-5]\d\b/i.test(lowerScenario);
+
     if (!hasRecurringCadence && (
         extractRelativeDelayMs(lowerScenario) != null
-        || new RegExp(`\\b(?:tomorrow|later today|later|once|one[- ]time|${TODAY_SCHEDULE_FRAGMENT})\\b`, 'i').test(lowerScenario)
+        || hasExplicitClockTime
+        || new RegExp(`\\b(?:tomorrow|later today|${TODAY_SCHEDULE_FRAGMENT})\\b`, 'i').test(lowerScenario)
     )) {
         trigger = {
             type: 'once',
@@ -879,6 +909,7 @@ module.exports = {
     extractTaskPromptFromScenario,
     hasSchedulingCue,
     hasWorkloadIntent,
+    hasImmediateOrNoDeferCue,
     inferDefaultRecurringTrigger,
     inferWorkloadPolicy,
     parseWorkloadScenario,

@@ -167,4 +167,86 @@ describe('/api/admin workload routes', () => {
             await fs.rm(stateDir, { recursive: true, force: true });
         }
     });
+
+    test('lists generated storage from the admin dashboard', async () => {
+        const previousDataDir = process.env.KIMIBUILT_DATA_DIR;
+        const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-admin-storage-'));
+        process.env.KIMIBUILT_DATA_DIR = dataDir;
+        const audioDir = path.join(dataDir, 'generated-audio');
+        const audioPath = path.join(audioDir, 'audio-local-test.wav');
+        const metadataPath = path.join(audioDir, 'audio-local-test.json');
+        const app = buildApp({ isAvailable: jest.fn(() => true) });
+
+        try {
+            await fs.mkdir(audioDir, { recursive: true });
+            await fs.writeFile(audioPath, Buffer.from('audio-bytes'));
+            await fs.writeFile(metadataPath, JSON.stringify({
+                id: 'audio-local-test',
+                filename: 'sample.wav',
+                audioPath,
+                sizeBytes: 11,
+                createdAt: '2026-05-01T00:00:00.000Z',
+                updatedAt: '2026-05-01T00:00:00.000Z',
+                metadata: { storage: 'local-fallback' },
+            }));
+
+            const response = await request(app).get('/api/admin/storage');
+
+            expect(response.status).toBe(200);
+            expect(response.body.success).toBe(true);
+            expect(response.body.data.dataDirectory).toBe(dataDir);
+            const audioCategory = response.body.data.categories.find((item) => item.category === 'generatedAudio');
+            expect(audioCategory.count).toBe(1);
+            expect(audioCategory.records[0]).toEqual(expect.objectContaining({
+                id: 'audio-local-test',
+                filename: 'sample.wav',
+                fileCount: 2,
+            }));
+        } finally {
+            if (previousDataDir === undefined) {
+                delete process.env.KIMIBUILT_DATA_DIR;
+            } else {
+                process.env.KIMIBUILT_DATA_DIR = previousDataDir;
+            }
+            await fs.rm(dataDir, { recursive: true, force: true });
+        }
+    });
+
+    test('deletes one generated storage record from the admin dashboard', async () => {
+        const previousDataDir = process.env.KIMIBUILT_DATA_DIR;
+        const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-admin-storage-delete-'));
+        process.env.KIMIBUILT_DATA_DIR = dataDir;
+        const artifactDir = path.join(dataDir, 'generated-artifacts');
+        const contentPath = path.join(artifactDir, 'artifact-local-test.html');
+        const metadataPath = path.join(artifactDir, 'artifact-local-test.json');
+        const app = buildApp({ isAvailable: jest.fn(() => true) });
+
+        try {
+            await fs.mkdir(artifactDir, { recursive: true });
+            await fs.writeFile(contentPath, Buffer.from('<h1>Report</h1>'));
+            await fs.writeFile(metadataPath, JSON.stringify({
+                id: 'artifact-local-test',
+                filename: 'report.html',
+                contentPath,
+                sizeBytes: 15,
+                createdAt: '2026-05-01T00:00:00.000Z',
+                updatedAt: '2026-05-01T00:00:00.000Z',
+            }));
+
+            const response = await request(app).delete('/api/admin/storage/generatedArtifacts/artifact-local-test');
+
+            expect(response.status).toBe(200);
+            expect(response.body.success).toBe(true);
+            expect(response.body.data.deleted).toBe(1);
+            await expect(fs.stat(contentPath)).rejects.toThrow();
+            await expect(fs.stat(metadataPath)).rejects.toThrow();
+        } finally {
+            if (previousDataDir === undefined) {
+                delete process.env.KIMIBUILT_DATA_DIR;
+            } else {
+                process.env.KIMIBUILT_DATA_DIR = previousDataDir;
+            }
+            await fs.rm(dataDir, { recursive: true, force: true });
+        }
+    });
 });

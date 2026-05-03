@@ -983,6 +983,7 @@
                             <div class="settings-nav">
                                 <button class="settings-nav-item active" data-settings="general">General</button>
                                 <button class="settings-nav-item" data-settings="podcastAudio">Podcast Audio</button>
+                                <button class="settings-nav-item" data-settings="storage">Storage</button>
                                 <button class="settings-nav-item" data-settings="features">Features</button>
                                 <button class="settings-nav-item" data-settings="api">API & Integrations</button>
                                 <button class="settings-nav-item" data-settings="notifications">Notifications</button>
@@ -1147,6 +1148,69 @@
                                                     <button type="button" class="btn btn-ghost podcast-audio-remove" data-track="musicBed">Remove</button>
                                                 </div>
                                             </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Storage Settings -->
+                            <div class="settings-section" id="storageSettings">
+                                <h2>Storage</h2>
+                                <div class="storage-summary-grid">
+                                    <div class="stat-card">
+                                        <span class="stat-label">Generated Files</span>
+                                        <span class="stat-value" id="storageTotalCount">0</span>
+                                    </div>
+                                    <div class="stat-card">
+                                        <span class="stat-label">Disk Used</span>
+                                        <span class="stat-value" id="storageTotalBytes">0 B</span>
+                                    </div>
+                                    <div class="stat-card">
+                                        <span class="stat-label">Data Folder</span>
+                                        <span class="stat-value storage-path-value" id="storageDataDirectory">Loading...</span>
+                                    </div>
+                                </div>
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h3>Generated Output Cleanup</h3>
+                                        <button type="button" class="btn btn-secondary" id="refreshStorageBtn">Refresh</button>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="storage-cleanup-controls">
+                                            <label class="form-group">
+                                                <span>Category</span>
+                                                <select id="storageCleanupCategory">
+                                                    <option value="">All generated files</option>
+                                                    <option value="generatedArtifacts">Generated artifacts</option>
+                                                    <option value="generatedAudio">Generated audio</option>
+                                                    <option value="generatedVideo">Generated video</option>
+                                                </select>
+                                            </label>
+                                            <label class="form-group">
+                                                <span>Older Than</span>
+                                                <input type="number" id="storageCleanupDays" min="1" max="3650" value="30">
+                                            </label>
+                                            <button type="button" class="btn btn-secondary" id="previewStorageCleanupBtn">Preview</button>
+                                            <button type="button" class="btn btn-danger" id="runStorageCleanupBtn">Delete Matched</button>
+                                        </div>
+                                        <div class="table-wrapper storage-table-wrapper">
+                                            <table class="logs-table storage-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>File</th>
+                                                        <th>Category</th>
+                                                        <th>Size</th>
+                                                        <th>Updated</th>
+                                                        <th>Storage</th>
+                                                        <th>Actions</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="storageTableBody">
+                                                    <tr>
+                                                        <td colspan="6" class="empty-state">Loading storage inventory...</td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
                                         </div>
                                     </div>
                                 </div>

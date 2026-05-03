@@ -4,6 +4,7 @@ const { isDashboardRequest } = require('../dashboard-template-catalog');
 const { extractStructuredExecution } = require('./execution-extractor');
 const {
     deriveWorkloadTitle,
+    hasImmediateOrNoDeferCue,
     inferWorkloadPolicy,
     parseWorkloadScenario,
     stripBrutalBuilderDirectiveText,
@@ -207,7 +208,7 @@ function isDeferredContextFollowupPrompt(prompt = '') {
     }
 
     return [
-        /^(?:in|after|at|tomorrow|later|once|one[- ]time|daily|hourly|every)\b/,
+        /^(?:in|after|at|tomorrow|later today|once|one[- ]time|daily|hourly|every)\b/,
         /\bfrom now\b/,
         /^(?:do|run|schedule|set up|queue|create|make|get|fetch|check)\s+(?:it|that|this|them|those)\b/,
         /\b(the commands|what you listed|the one you listed|the ones you listed|what i asked|same task|same thing|that one)\b/,
@@ -602,6 +603,11 @@ function buildCanonicalWorkloadPayload(params = {}, options = {}) {
 }
 
 function buildCanonicalWorkloadAction(params = {}, options = {}) {
+    const scenarioSource = extractWorkloadScenarioSource(params);
+    if (hasImmediateOrNoDeferCue(scenarioSource)) {
+        return null;
+    }
+
     const canonical = buildCanonicalWorkloadPayload(params, options);
     if (!canonical || canonical?.payload?.trigger?.type === 'manual') {
         return null;

@@ -71,6 +71,35 @@ describe('workload natural language parsing', () => {
         expect(result.prompt).toBe('run `date` on the server.');
     });
 
+    test('does not round vague later or now-not-later requests into deferred workloads', () => {
+        const options = {
+            timezone: 'UTC',
+            now: new Date('2026-04-01T12:31:00.000Z'),
+        };
+
+        expect(parseWorkloadScenario('Run the command later.', options).trigger)
+            .toEqual({ type: 'manual' });
+        expect(parseWorkloadScenario('Ask an agent to do it now, not later.', options).trigger)
+            .toEqual({ type: 'manual' });
+        expect(hasWorkloadIntent('Run the command later.')).toBe(false);
+        expect(hasWorkloadIntent('Ask an agent to do it now, not later.')).toBe(false);
+    });
+
+    test('still treats explicit clock times as one-time workloads', () => {
+        const result = parseWorkloadScenario(
+            'Run `date` on the server at 8 PM.',
+            {
+                timezone: 'UTC',
+                now: new Date('2026-04-01T12:31:00.000Z'),
+            },
+        );
+
+        expect(result.trigger).toEqual({
+            type: 'once',
+            runAt: '2026-04-01T20:00:00.000Z',
+        });
+    });
+
     test('parses spelled relative delays and treats them as workload intent', () => {
         const result = parseWorkloadScenario(
             'Run `date` on the server in five minutes from now.',

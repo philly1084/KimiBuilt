@@ -124,6 +124,22 @@ describe('workload request builder', () => {
         expect(canonical).toBeNull();
     });
 
+    test('does not turn vague later or explicit now requests into deferred workloads', () => {
+        expect(buildCanonicalWorkloadAction({
+            request: 'Run the command later.',
+        }, {
+            now: '2026-04-02T09:31:00.000Z',
+            timezone: 'UTC',
+        })).toBeNull();
+
+        expect(buildCanonicalWorkloadAction({
+            request: 'Ask an agent to do it now, not later.',
+        }, {
+            now: '2026-04-02T09:31:00.000Z',
+            timezone: 'UTC',
+        })).toBeNull();
+    });
+
     test('does not treat abstract workload discussion as a canonical scheduled workload', () => {
         const canonical = buildCanonicalWorkloadAction({
             request: 'I keep getting cron calls too quickly and every message turns into a workload. I want a planning agent to decide when something should become a job.',

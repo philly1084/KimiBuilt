@@ -503,6 +503,85 @@ describe('ConversationOrchestrator', () => {
         expect(toolPolicy.candidateToolIds).toContain('agent-delegate');
     });
 
+    test('does not offer deferred workloads just because instructions mention scheduling', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    toolId === 'agent-workload'
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Ask an agent to fix this now, not later.',
+            instructions: 'If the user explicitly asks for a cron job, recurring schedule, reminder, or future run, use agent-workload.',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+
+        expect(toolPolicy.candidateToolIds).not.toContain('agent-workload');
+    });
+
+    test('rewrites malformed delegate plans so a child task is not the whole user request', async () => {
+        const objective = 'Use multiple agents to inspect the repo and implement the fix in parallel.';
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn().mockResolvedValue(JSON.stringify({
+                    steps: [{
+                        tool: 'agent-delegate',
+                        reason: 'Delegate the full request.',
+                        params: {
+                            action: 'spawn',
+                            tasks: [{
+                                title: 'Do request',
+                                prompt: objective,
+                            }],
+                        },
+                    }],
+                })),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    toolId === 'agent-delegate'
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+        const plan = await orchestrator.planToolUse({
+            objective,
+            executionProfile: 'default',
+            toolPolicy,
+        });
+
+        expect(plan).toEqual([
+            expect.objectContaining({
+                tool: 'agent-delegate',
+                params: expect.objectContaining({
+                    tasks: [
+                        expect.objectContaining({
+                            prompt: 'Delegate the full request.',
+                        }),
+                    ],
+                }),
+            }),
+        ]);
+        expect(plan[0].params.tasks[0].prompt).not.toBe(objective);
+    });
+
     test('forces multi-workload scheduling through the planner so jobs can be split', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {

@@ -27,6 +27,7 @@ class Dashboard {
             workloadErrorMessage: '',
             editingWorkloadId: null,
             settings: {},
+            storage: null,
             tokenAnalysis: null,
             stats: {
                 totalTasks: 0,
@@ -305,6 +306,16 @@ class Dashboard {
             button.addEventListener('click', () => {
                 this.removePodcastAudioTrack(button.dataset.track);
             });
+        });
+
+        document.getElementById('refreshStorageBtn')?.addEventListener('click', () => {
+            this.loadStorage();
+        });
+        document.getElementById('previewStorageCleanupBtn')?.addEventListener('click', () => {
+            this.cleanupStorage({ dryRun: true });
+        });
+        document.getElementById('runStorageCleanupBtn')?.addEventListener('click', () => {
+            this.cleanupStorage({ dryRun: false });
         });
         
         document.getElementById('apiSettingsForm')?.addEventListener('submit', (e) => {
@@ -798,9 +809,10 @@ class Dashboard {
      */
     async loadSettings() {
         try {
-            const [settingsResponse, podcastAudioResponse] = await Promise.allSettled([
+            const [settingsResponse, podcastAudioResponse, storageResponse] = await Promise.allSettled([
                 apiClient.get('/api/admin/settings'),
                 apiClient.get('/api/admin/podcast-audio'),
+                apiClient.get('/api/admin/storage'),
             ]);
 
             if (settingsResponse.status === 'fulfilled') {
@@ -817,8 +829,23 @@ class Dashboard {
                 this.renderPodcastAudioSettings(this.unwrapApiPayload(podcastAudioResponse.value, null));
             }
 
+            if (storageResponse.status === 'fulfilled') {
+                this.renderStorageSettings(this.unwrapApiPayload(storageResponse.value, null));
+            }
+
         } catch (error) {
             console.error('Error loading settings:', error);
+        }
+    }
+
+    async loadStorage() {
+        try {
+            const response = await apiClient.get('/api/admin/storage');
+            this.renderStorageSettings(this.unwrapApiPayload(response, null));
+            this.showToast('Storage refreshed', 'success');
+        } catch (error) {
+            console.error('Error loading storage:', error);
+            this.showToast('Failed to load storage inventory', 'error');
         }
     }
 
@@ -2500,6 +2527,105 @@ class Dashboard {
             }
         });
     }
+
+    renderStorageSettings(data = null) {
+        if (!data) {
+            return;
+        }
+
+        this.state.storage = data;
+        this.setTextContent('storageTotalCount', Number(data.totalCount || 0).toLocaleString());
+        this.setTextContent('storageTotalBytes', this.formatBytes(data.totalBytes || 0));
+        this.setTextContent('storageDataDirectory', data.dataDirectory || 'Server state folder');
+
+        const tableBody = document.getElementById('storageTableBody');
+        if (!tableBody) {
+            return;
+        }
+
+        const records = (Array.isArray(data.categories) ? data.categories : [])
+            .flatMap((category) => (Array.isArray(category.records) ? category.records : [])
+                .map((record) => ({
+                    ...record,
+                    categoryLabel: category.label || record.category,
+                })))
+            .sort((a, b) => Date.parse(b.updatedAt || '') - Date.parse(a.updatedAt || ''));
+
+        if (records.length === 0) {
+            tableBody.innerHTML = '<tr><td colspan="6" class="empty-state">No generated files found.</td></tr>';
+            return;
+        }
+
+        tableBody.innerHTML = records.slice(0, 150).map((record) => `
+            <tr>
+                <td>
+                    <div class="storage-file-name">${this.escapeHtml(record.filename || record.id)}</div>
+                    <div class="storage-file-meta">${this.escapeHtml(record.sessionId || record.id)}</div>
+                </td>
+                <td>${this.escapeHtml(record.categoryLabel || record.category)}</td>
+                <td>${this.escapeHtml(this.formatBytes(record.diskBytes || record.sizeBytes || 0))}</td>
+                <td>${this.escapeHtml(this.formatDate(record.updatedAt || record.createdAt))}</td>
+                <td>${this.escapeHtml(record.storage || 'local')}</td>
+                <td>
+                    <button
+                        type="button"
+                        class="btn btn-ghost btn-sm storage-delete-file"
+                        data-category="${this.escapeHtml(record.category)}"
+                        data-id="${this.escapeHtml(record.id)}"
+                    >Delete</button>
+                </td>
+            </tr>
+        `).join('');
+
+        tableBody.querySelectorAll('.storage-delete-file').forEach((button) => {
+            button.addEventListener('click', () => {
+                this.deleteStorageRecord(button.dataset.category, button.dataset.id);
+            });
+        });
+    }
+
+    async cleanupStorage({ dryRun = true } = {}) {
+        const category = document.getElementById('storageCleanupCategory')?.value || '';
+        const olderThanDays = Math.max(1, Number(document.getElementById('storageCleanupDays')?.value || 30));
+        if (!dryRun && !confirm(`Delete generated files older than ${olderThanDays} days?`)) {
+            return;
+        }
+
+        try {
+            const response = await apiClient.post('/api/admin/storage/cleanup', {
+                category,
+                olderThanDays,
+                dryRun,
+            });
+            const result = this.unwrapApiPayload(response, {});
+            const bytes = this.formatBytes(result.matchedBytes || 0);
+            if (dryRun) {
+                this.showToast(`Cleanup preview: ${result.matchedCount || 0} files, ${bytes}`, 'info', 6000);
+            } else {
+                this.showToast(`Deleted ${result.deletedCount || 0} files, ${bytes}`, 'success');
+                await this.loadStorage();
+            }
+        } catch (error) {
+            console.error('Error cleaning generated storage:', error);
+            this.showToast('Storage cleanup failed', 'error');
+        }
+    }
+
+    async deleteStorageRecord(category, id) {
+        if (!category || !id || !confirm('Delete this generated file?')) {
+            return;
+        }
+
+        try {
+            const response = await apiClient.delete(`/api/admin/storage/${encodeURIComponent(category)}/${encodeURIComponent(id)}`);
+            const result = this.unwrapApiPayload(response, {});
+            this.showToast(`Deleted ${this.formatBytes(result.deletedBytes || 0)}`, 'success');
+            await this.loadStorage();
+        } catch (error) {
+            console.error('Error deleting generated file:', error);
+            this.showToast('Failed to delete generated file', 'error');
+        }
+    }
     
     async testConnection() {
         try {
@@ -3531,6 +3657,13 @@ class Dashboard {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    setTextContent(id, value) {
+        const element = document.getElementById(id);
+        if (element) {
+            element.textContent = value;
+        }
     }
     
     generateTimeLabels(count) {

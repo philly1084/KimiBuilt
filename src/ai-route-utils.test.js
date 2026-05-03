@@ -87,6 +87,14 @@ describe('ai-route-utils', () => {
             'make me a pdf about daily adhd traits',
             'pdf',
         )).toBe(false);
+        expect(shouldDeferArtifactGenerationToWorkload(
+            'make me a pdf now, not later',
+            'pdf',
+        )).toBe(false);
+        expect(shouldDeferArtifactGenerationToWorkload(
+            'make me a pdf later',
+            'pdf',
+        )).toBe(false);
     });
 
     test('resolveDeferredWorkloadPreflight uses transcript context for fragmented future requests', () => {

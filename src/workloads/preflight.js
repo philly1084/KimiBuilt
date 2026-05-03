@@ -1,6 +1,10 @@
 'use strict';
 
-const { hasWorkloadIntent, parseWorkloadScenario } = require('./natural-language');
+const {
+    hasImmediateOrNoDeferCue,
+    hasWorkloadIntent,
+    parseWorkloadScenario,
+} = require('./natural-language');
 
 function sanitizeText(value = '') {
     return String(value || '').trim();
@@ -55,7 +59,7 @@ function isLikelyDeferredFollowup(text = '') {
     }
 
     return [
-        /^(?:in|after|at|tomorrow|later|once|one[- ]time|daily|hourly|every)\b/,
+        /^(?:in|after|at|tomorrow|later today|once|one[- ]time|daily|hourly|every)\b/,
         /\bfrom now\b/,
         /^(?:do|run|schedule|set up|queue|create|make|get|fetch|check)\s+(?:it|that|this|them|those)\b/,
         /\b(the commands|what you listed|the one you listed|the ones you listed|what i asked|same task|same thing|that one)\b/,
@@ -78,7 +82,7 @@ function hasExplicitDeferredTimingCue(text = '') {
 
     return [
         hasWorkloadIntent(normalized),
-        /^(?:in|after|at|tomorrow|later|once|one[- ]time|daily|hourly|every)\b/.test(normalized),
+        /^(?:in|after|at|tomorrow|later today|once|one[- ]time|daily|hourly|every)\b/.test(normalized),
         /\bfrom now\b/.test(normalized),
         /\b(?:every day|everyday|each day|every weekday|weekdays|every workday|each workday|every hour|hourly|nightly)\b/.test(normalized),
         /\b(?:every|each)\s+(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)s?\b/.test(normalized),
@@ -156,6 +160,15 @@ function resolveDeferredWorkloadPreflight({
 } = {}) {
     const request = sanitizeText(text);
     if (!request) {
+        return {
+            timing: 'now',
+            shouldSchedule: false,
+            request,
+            scenario: null,
+        };
+    }
+
+    if (hasImmediateOrNoDeferCue(request)) {
         return {
             timing: 'now',
             shouldSchedule: false,

@@ -14,6 +14,7 @@ const skillsController = require('./skills.controller');
 const tracesController = require('./traces.controller');
 const settingsController = require('./settings.controller');
 const podcastAudioController = require('./podcast-audio.controller');
+const storageController = require('./storage.controller');
 const DashboardController = require('./dashboard.controller');
 const { setDashboardController } = require('../../admin/runtime-monitor');
 
@@ -89,6 +90,11 @@ router.post('/settings/clear-cache', callController(settingsController, 'clearCa
 router.get('/podcast-audio', callController(podcastAudioController, 'list'));
 router.post('/podcast-audio/:track', callController(podcastAudioController, 'upload'));
 router.delete('/podcast-audio/:track', callController(podcastAudioController, 'remove'));
+
+// Generated file storage
+router.get('/storage', callController(storageController, 'list'));
+router.post('/storage/cleanup', callController(storageController, 'cleanup'));
+router.delete('/storage/:category/:id', callController(storageController, 'remove'));
 
 // SDK Control
 router.post('/sdk/execute', (req, res) => getDashboardController(req).executeTask(req, res));

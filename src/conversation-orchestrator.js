@@ -3322,19 +3322,20 @@ function normalizeAgentDelegatePlanParams(step = {}, { objective = '' } = {}) {
     const rawTasks = Array.isArray(params.tasks)
         ? params.tasks
         : (params.task && typeof params.task === 'object' && !Array.isArray(params.task) ? [params.task] : []);
+    const originalObjective = normalizeInlineText(objective);
     const normalizedTasks = rawTasks
         .map((task, index) => normalizeAgentDelegateTaskPlan(task, index))
-        .filter((task) => task.prompt || task.execution);
+        .filter((task) => task.prompt || task.execution)
+        .filter((task) => !task.prompt || normalizeInlineText(task.prompt).toLowerCase() !== originalObjective.toLowerCase());
 
     if (normalizedTasks.length === 0) {
         const fallbackPrompt = normalizeInlineText(
             params.prompt
             || params.request
-            || objective
             || step?.reason
             || '',
         );
-        if (fallbackPrompt) {
+        if (fallbackPrompt && fallbackPrompt.toLowerCase() !== originalObjective.toLowerCase()) {
             normalizedTasks.push({
                 title: normalizeInlineText(params.title || params.name || 'Delegated task') || 'Delegated task',
                 prompt: fallbackPrompt,
@@ -9651,7 +9652,7 @@ class ConversationOrchestrator extends EventEmitter {
                 || getDefaultWorkloadTimezone(),
             now: toolContext?.now || null,
         });
-        const hasWorkloadSetupIntent = hasWorkloadIntent(`${objective || ''}\n${instructions || ''}`)
+        const hasWorkloadSetupIntent = hasWorkloadIntent(objective || '')
             || inferredWorkload?.trigger?.type === 'cron'
             || inferredWorkload?.trigger?.type === 'once';
         const isDeferredWorkloadRun = metadata?.workloadRun === true || metadata?.clientSurface === 'workload';
@@ -10540,6 +10541,11 @@ class ConversationOrchestrator extends EventEmitter {
             return false;
         }
 
+        if (step.tool === 'agent-delegate'
+            && (!Array.isArray(step?.params?.tasks) || step.params.tasks.length === 0)) {
+            return false;
+        }
+
         if (toolEvents.length > 0) {
             const priorSignatures = new Set((Array.isArray(toolEvents) ? toolEvents : [])
                 .map((event) => extractExecutedStepSignature(event))
@@ -10837,6 +10843,7 @@ class ConversationOrchestrator extends EventEmitter {
             'Reject steps that repeat a no-op command from this run, mismatch the active surface, skip required grounding, or omit required parameters.',
             'Use the harness state to avoid prior failed signatures, respect current blockers, and stay inside the remaining autonomy and replan budget.',
             'If a step is missing required parameters, return a changed plan with those parameters filled instead of executing a malformed call.',
+            'Do not create `agent-workload` steps for immediate requests, "now" requests, vague later language, or because runtime/project instructions mention scheduling. Use `agent-workload` only when the latest user request explicitly asks for future, recurring, reminder, follow-up, cron, or scheduled work.',
             'If the active surface is notes page editing, stay inside notes-safe research tools rather than switching to file, deploy, or document workflows.',
             'If grounding is required, do not jump straight to `document-workflow generate` unless verified web evidence already exists in this run.',
             '',
@@ -10868,6 +10875,7 @@ class ConversationOrchestrator extends EventEmitter {
             'Every `agent-delegate` step must use `params.action` set to `spawn`, `status`, or `list`.',
             'For `agent-delegate spawn`, pass `params.tasks` as an array of 1 to 3 task objects. Each task needs a clear `title` and either a `prompt` or structured `execution` object.',
             'Use `agent-delegate` only when the user explicitly wants sub-agents, delegated workers, or parallel background tasks.',
+            'For `agent-delegate`, spawn immediate helper tasks only. Each task prompt must be a bounded subtask that helps the current foreground work; do not pass the identical full user request as a child task.',
             'Do not plan more than 3 sub-agent tasks in one `agent-delegate` step, and do not use `agent-delegate` from inside a sub-agent task.',
             'When delegated tasks may write files, set distinct `writeTargets` or `lockKey` values so overlapping document edits are rejected.',
             ...(toolPolicy?.workflow?.status === 'active'
