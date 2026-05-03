@@ -127,6 +127,32 @@ describe('workload natural language parsing', () => {
         expect(result.prompt).toBe('Make me a PDF of today\'s news.');
     });
 
+    test('does not treat news for today as a deferred workload', () => {
+        const options = {
+            timezone: 'UTC',
+            now: new Date('2026-05-03T12:00:00.000Z'),
+        };
+
+        const result = parseWorkloadScenario('Make the news for today.', options);
+
+        expect(result.trigger).toEqual({ type: 'manual' });
+        expect(result.prompt).toBe('Make the news for today.');
+        expect(hasWorkloadIntent('Make the news for today.')).toBe(false);
+    });
+
+    test('still treats today as a schedule when attached to an executable task', () => {
+        const result = parseWorkloadScenario('Run `date` on the server today at 8 PM.', {
+            timezone: 'UTC',
+            now: new Date('2026-05-03T12:00:00.000Z'),
+        });
+
+        expect(result.trigger).toEqual({
+            type: 'once',
+            runAt: '2026-05-03T20:00:00.000Z',
+        });
+        expect(result.prompt).toBe('Run `date` on the server.');
+    });
+
     test('strips scheduling wrapper language from deferred workload prompts', () => {
         const result = parseWorkloadScenario(
             'Can you run a cron later every day at 8 PM to remote into the server and get a health report',

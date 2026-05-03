@@ -59,4 +59,47 @@ describe('HarnessState', () => {
       }),
     }));
   });
+
+  test('exports grader-compatible item and sample payload', () => {
+    const harness = new HarnessState({
+      runId: 'run-456',
+      evidence: [{ summary: 'Tool call matched expected route', passed: true }],
+      toolEvents: [{ name: 'remote-command', status: 'completed' }],
+    });
+
+    harness.addBlocker({ summary: 'No writable sandbox for live patch' });
+
+    const payload = harness.toGradingPayload({
+      item: { prompt: 'Route this work to the right tool' },
+      referenceAnswer: 'Use remote-command for one-off kubectl inspection.',
+      outputText: 'Use remote-command for kubectl inspection.',
+      outputTools: [{ name: 'remote-command', arguments: { command: 'kubectl get pods -A' } }],
+    });
+
+    expect(payload).toEqual({
+      item: {
+        prompt: 'Route this work to the right tool',
+        reference_answer: 'Use remote-command for one-off kubectl inspection.',
+      },
+      sample: {
+        output_text: 'Use remote-command for kubectl inspection.',
+        output_tools: [{ name: 'remote-command', arguments: { command: 'kubectl get pods -A' } }],
+        choices: [],
+      },
+      evidence: [expect.objectContaining({
+        summary: 'Tool call matched expected route',
+        passed: true,
+      })],
+      blockers: [expect.objectContaining({
+        summary: 'No writable sandbox for live patch',
+      })],
+      metadata: expect.objectContaining({
+        runId: 'run-456',
+        groupId: 'run-456',
+        evidenceCount: 1,
+        blockerCount: 1,
+        toolEventCount: 1,
+      }),
+    });
+  });
 });

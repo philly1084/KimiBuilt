@@ -83,6 +83,37 @@ class HarnessState {
     };
   }
 
+  toGradingPayload({
+    item = {},
+    outputText = '',
+    outputTools = [],
+    outputJson = null,
+    referenceAnswer = '',
+    choices = [],
+  } = {}) {
+    const normalizedItem = item && typeof item === 'object' && !Array.isArray(item) ? item : {};
+    const sample = {
+      output_text: String(outputText || ''),
+      output_tools: Array.isArray(outputTools) ? outputTools : [],
+      choices: Array.isArray(choices) ? choices : [],
+    };
+
+    if (outputJson && typeof outputJson === 'object' && !Array.isArray(outputJson)) {
+      sample.output_json = outputJson;
+    }
+
+    return {
+      item: {
+        ...normalizedItem,
+        reference_answer: normalizedItem.reference_answer || referenceAnswer || '',
+      },
+      sample,
+      evidence: this.evidence,
+      blockers: this.blockers,
+      metadata: this.toTraceMetadata(),
+    };
+  }
+
   toJSON() {
     return {
       type: this.type,

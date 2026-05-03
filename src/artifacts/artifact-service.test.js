@@ -65,6 +65,7 @@ const { renderArtifact } = require('./artifact-renderer');
 const { createResponse } = require('../openai-client');
 const { searchImages, isConfigured } = require('../unsplash-client');
 const { persistGeneratedArtifactLocally } = require('../generated-file-artifacts');
+const { readFrontendBundleArchive } = require('../frontend-bundles');
 
 describe('ArtifactService', () => {
     beforeEach(() => {
@@ -589,7 +590,7 @@ describe('ArtifactService', () => {
                 generationStrategy: 'single-pass-frontend-demo',
                 siteBundle: expect.objectContaining({
                     entry: 'index.html',
-                    fileCount: 3,
+                    fileCount: 4,
                     htmlPageCount: 2,
                 }),
                 bundle: expect.objectContaining({
@@ -598,6 +599,7 @@ describe('ArtifactService', () => {
                         expect.objectContaining({ path: 'index.html' }),
                         expect.objectContaining({ path: 'world.html' }),
                         expect.objectContaining({ path: 'styles.css' }),
+                        expect.objectContaining({ path: 'README.md' }),
                     ]),
                 }),
             }),
@@ -669,17 +671,50 @@ describe('ArtifactService', () => {
                 generationStrategy: 'single-pass-frontend-demo',
                 siteBundle: expect.objectContaining({
                     entry: 'index.html',
-                    fileCount: 3,
+                    fileCount: 4,
                 }),
                 bundle: expect.objectContaining({
                     files: expect.arrayContaining([
                         expect.objectContaining({ path: 'index.html' }),
                         expect.objectContaining({ path: 'styles.css' }),
                         expect.objectContaining({ path: 'scene.js' }),
+                        expect.objectContaining({ path: 'README.md' }),
                     ]),
                 }),
             }),
         }));
+    });
+
+    test('recovers empty 3D sandbox model output into a playable zip instead of a 22-byte archive', async () => {
+        createResponse.mockResolvedValueOnce({
+            id: 'resp-3d-empty-1',
+            output: [{
+                type: 'message',
+                content: [{
+                    text: '',
+                }],
+            }],
+        });
+
+        await artifactService.generateArtifact({
+            session: { previousResponseId: 'prev-3d-empty', metadata: {} },
+            sessionId: 'session-1',
+            mode: 'chat',
+            prompt: 'Make a 3D webpage sandbox with WebGL particles.',
+            format: 'html',
+            artifactIds: [],
+            existingContent: '',
+            model: 'gpt-5.3',
+        });
+
+        const createArg = artifactStore.create.mock.calls[0][0];
+        const entries = readFrontendBundleArchive(createArg.contentBuffer);
+
+        expect(createArg.extension).toBe('zip');
+        expect(createArg.mimeType).toBe('application/zip');
+        expect(createArg.contentBuffer.length).toBeGreaterThan(22);
+        expect(entries.get('index.html').toString('utf8')).toContain('Frontend Demo');
+        expect(entries.get('README.md').toString('utf8')).toContain('python -m http.server 8000');
     });
 
     test('allows tool orchestration for research-backed frontend artifacts', async () => {

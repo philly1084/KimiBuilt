@@ -56,6 +56,9 @@ const TENS_NUMBER_WORD_FRAGMENT = 'twenty|thirty|forty|fifty|sixty';
 const RELATIVE_DELAY_AMOUNT_FRAGMENT = `(?:\\d+|${SIMPLE_NUMBER_WORD_FRAGMENT}|${TENS_NUMBER_WORD_FRAGMENT}(?:[-\\s](?:${ONES_NUMBER_WORD_FRAGMENT}))?)`;
 const TODAY_SCHEDULE_FRAGMENT = 'today\\b(?![\'’]s)';
 
+const SCHEDULE_TASK_VERB_FRAGMENT = '(?:run|check|review|summarize|follow\\s+up|watch|remind|collect|gather|send|monitor|audit|scan|call|ping)';
+const SCHEDULING_SETUP_VERB_FRAGMENT = '(?:set\\s+up|setup|schedule|queue|save|remind)';
+
 function hasImmediateOrNoDeferCue(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -193,6 +196,34 @@ function extractScenarioTime(input = '') {
     return { ...DEFAULT_TIME_INFO };
 }
 
+function hasTodayScheduleCue(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized || !new RegExp(`\\b${TODAY_SCHEDULE_FRAGMENT}`, 'i').test(normalized)) {
+        return false;
+    }
+
+    if (/\blater today\b/i.test(normalized)) {
+        return true;
+    }
+
+    const timeFragment = '(?:1[0-2]|0?\\d)(?::[0-5]\\d)?\\s*(?:am|pm)|(?:[01]?\\d|2[0-3]):[0-5]\\d';
+    if (/\bfor today\b/i.test(normalized)
+        && !new RegExp(`\\b${SCHEDULING_SETUP_VERB_FRAGMENT}\\b[\\s\\S]{0,48}\\bfor\\s+today\\b`, 'i').test(normalized)
+        && !new RegExp(`\\bat\\s+${timeFragment}\\s+today\\b`, 'i').test(normalized)) {
+        return false;
+    }
+
+    const patterns = [
+        new RegExp(`\\btoday\\s+(?:at\\s+)?${timeFragment}\\b`, 'i'),
+        new RegExp(`\\bat\\s+${timeFragment}\\s+today\\b`, 'i'),
+        new RegExp(`\\b${SCHEDULE_TASK_VERB_FRAGMENT}\\b[\\s\\S]{0,48}\\btoday\\b`, 'i'),
+        new RegExp(`\\btoday\\b[\\s\\S]{0,48}\\b${SCHEDULE_TASK_VERB_FRAGMENT}\\b`, 'i'),
+        new RegExp(`\\b${SCHEDULING_SETUP_VERB_FRAGMENT}\\b[\\s\\S]{0,48}\\btoday\\b`, 'i'),
+    ];
+
+    return patterns.some((pattern) => pattern.test(normalized));
+}
+
 function getZonedDateParts(date = new Date(), timezone = 'UTC') {
     const formatter = new Intl.DateTimeFormat('en-CA', {
         timeZone: normalizeTimezone(timezone || getDefaultTimezone()),
@@ -305,7 +336,7 @@ function buildOneTimeRunAt(lowerScenario = '', timeInfo = DEFAULT_TIME_INFO, now
         return runAt <= baseNow ? nextLocalHour : runAt;
     }
 
-    if (new RegExp(`\\b${TODAY_SCHEDULE_FRAGMENT}`, 'i').test(lowerScenario)) {
+    if (hasTodayScheduleCue(lowerScenario)) {
         if (runAt <= baseNow) {
             runAt = buildRunAt(addDaysToZonedDateParts(zonedNow, 1), timeInfo.hour, timeInfo.minute);
         }
@@ -522,7 +553,9 @@ function stripBrutalBuilderDirectiveText(text = '') {
 function extractTaskPromptFromScenario(scenario = '') {
     const timeFragment = '(?:\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?|morning|afternoon|evening|night)';
     const relativeDelayFragment = `(?:(?:in|after)\\s+${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)(?:\\s+from\\s+now)?|${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)\\s+from\\s+now)`;
-    const explicitDayFragment = `(?:tomorrow|later today|${TODAY_SCHEDULE_FRAGMENT})`;
+    const explicitDayFragment = hasTodayScheduleCue(scenario)
+        ? `(?:tomorrow|later today|${TODAY_SCHEDULE_FRAGMENT})`
+        : '(?:tomorrow|later today)';
     const leadingPatterns = [
         new RegExp(`^(?:every hour|hourly)(?:\\s+at\\s+${timeFragment})?[\\s,:-]*`, 'i'),
         new RegExp(`^(?:every|each)\\s+weekdays?(?:\\s+at\\s+${timeFragment})?[\\s,:-]*`, 'i'),
@@ -618,7 +651,7 @@ function hasSchedulingCue(text = '') {
         return true;
     }
 
-    return [
+    return hasTodayScheduleCue(normalized) || [
         /\bevery hour\b/,
         /\bhourly\b/,
         /\bweekday\b/,
@@ -635,7 +668,6 @@ function hasSchedulingCue(text = '') {
         /\bevery evening\b/,
         /\b(?:every|each)\s+(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)s?\b/,
         /\btomorrow\b/,
-        new RegExp(`\\b${TODAY_SCHEDULE_FRAGMENT}`, 'i'),
         /\blater today\b/,
         buildRelativeDelayPattern(),
         /\bone[- ]time\b/,
@@ -706,7 +738,7 @@ function hasImplicitRecurringJobIntent(text = '') {
 
 function inferDefaultRecurringTrigger(scenario = '', timezone = 'UTC') {
     const normalized = String(scenario || '').trim().toLowerCase();
-    const hasConcreteTimingCue = [
+    const hasConcreteTimingCue = hasTodayScheduleCue(normalized) || [
         /\bevery hour\b/,
         /\bhourly\b/,
         /\bweekday\b/,
@@ -723,7 +755,6 @@ function inferDefaultRecurringTrigger(scenario = '', timezone = 'UTC') {
         /\bevery evening\b/,
         /\b(?:every|each)\s+(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)s?\b/,
         /\btomorrow\b/,
-        new RegExp(`\\b${TODAY_SCHEDULE_FRAGMENT}`, 'i'),
         /\blater today\b/,
         buildRelativeDelayPattern(),
         /\bone[- ]time\b/,
@@ -843,7 +874,8 @@ function parseWorkloadScenario(scenario = '', options = {}) {
     if (!hasRecurringCadence && (
         extractRelativeDelayMs(lowerScenario) != null
         || hasExplicitClockTime
-        || new RegExp(`\\b(?:tomorrow|later today|${TODAY_SCHEDULE_FRAGMENT})\\b`, 'i').test(lowerScenario)
+        || /\b(?:tomorrow|later today)\b/i.test(lowerScenario)
+        || hasTodayScheduleCue(lowerScenario)
     )) {
         trigger = {
             type: 'once',

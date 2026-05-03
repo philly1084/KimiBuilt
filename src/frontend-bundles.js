@@ -1,10 +1,12 @@
 const path = require('path').posix;
 const { createZip, readZipEntries } = require('./utils/zip');
-const { createUniqueFilename, stripHtml } = require('./utils/text');
+const { createUniqueFilename, escapeHtml, stripHtml } = require('./utils/text');
 
 const MAX_FRONTEND_BUNDLE_EXTRACTED_TEXT_CHARS = 20000;
 const STYLE_SAFETY_NET_PATH = 'styles.css';
 const STYLE_SAFETY_NET_MARKER = 'kimibuilt bundle style safety net';
+const BUNDLE_README_PATH = 'README.md';
+const IMAGE_MANIFEST_PATH = 'assets/images.json';
 const STYLE_SAFETY_NET_CSS = `/* ${STYLE_SAFETY_NET_MARKER} */
 :root {
   --kb-bg: #f5f7fb;
@@ -394,6 +396,214 @@ function ensureFrontendBundleStyling(bundle = null) {
     };
 }
 
+function buildEmptyBundleFallbackHtml(title = 'Frontend Demo') {
+    const safeTitle = escapeHtml(title || 'Frontend Demo');
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${safeTitle}</title>
+</head>
+<body>
+<main>
+  <h1>${safeTitle}</h1>
+  <p>This playable entry point was added because the generated sandbox bundle did not include any files. Regenerate the page to replace this recovery page with the requested experience.</p>
+</main>
+</body>
+</html>`;
+}
+
+function buildBundleIndexHtml(title = 'Frontend Bundle', files = []) {
+    const links = files
+        .filter((file) => file?.path && /\.html?$/i.test(file.path))
+        .map((file) => `<li><a href="./${escapeHtml(file.path)}">${escapeHtml(file.path)}</a></li>`)
+        .join('\n');
+    const safeTitle = escapeHtml(title || 'Frontend Bundle');
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${safeTitle}</title>
+</head>
+<body>
+<main>
+  <h1>${safeTitle}</h1>
+  <p>Select a page to play this bundled frontend.</p>
+  <ul>
+${links || '<li>No HTML pages were included.</li>'}
+  </ul>
+</main>
+</body>
+</html>`;
+}
+
+function ensurePlayableFrontendEntry(bundle = null, title = 'Frontend Demo') {
+    const normalized = normalizeFrontendBundle(bundle);
+    const files = normalized.files.map((file) => ({ ...file }));
+    let entry = normalizeBundlePath(normalized.entry || 'index.html') || 'index.html';
+    const entryExists = files.some((file) => file.path === entry);
+    const htmlFile = files.find((file) => /\.html?$/i.test(file.path));
+
+    if (files.length === 0) {
+        files.push({
+            path: 'index.html',
+            language: 'html',
+            purpose: 'Playable recovery entry point.',
+            content: buildEmptyBundleFallbackHtml(title),
+        });
+        entry = 'index.html';
+    } else if (!entryExists && htmlFile) {
+        entry = htmlFile.path;
+    } else if (!htmlFile) {
+        files.unshift({
+            path: 'index.html',
+            language: 'html',
+            purpose: 'Playable bundle index.',
+            content: buildBundleIndexHtml(title, files),
+        });
+        entry = 'index.html';
+    }
+
+    return {
+        ...normalized,
+        entry,
+        files,
+    };
+}
+
+function extractImageReferencesFromHtml(content = '') {
+    const source = String(content || '');
+    const refs = [];
+    const tagPattern = /<(?:img|source|video)\b[^>]*(?:\bsrc|\bposter)=["']([^"']+)["'][^>]*>/ig;
+    let match;
+    while ((match = tagPattern.exec(source)) !== null) {
+        const tag = match[0] || '';
+        const src = String(match[1] || '').trim();
+        if (!src) {
+            continue;
+        }
+        const alt = tag.match(/\balt=["']([^"']*)["']/i)?.[1] || '';
+        refs.push({
+            src,
+            alt,
+            source: 'html',
+        });
+    }
+    return refs;
+}
+
+function extractImageReferencesFromCss(content = '') {
+    const refs = [];
+    const pattern = /url\((['"]?)([^'")]+)\1\)/ig;
+    let match;
+    while ((match = pattern.exec(String(content || ''))) !== null) {
+        const src = String(match[2] || '').trim();
+        if (!src || /^(?:#|data:font|https?:\/\/fonts\.)/i.test(src)) {
+            continue;
+        }
+        refs.push({
+            src,
+            alt: '',
+            source: 'css',
+        });
+    }
+    return refs;
+}
+
+function normalizeImageManifestEntries(files = [], explicitReferences = []) {
+    const unique = new Map();
+    const add = (entry = {}) => {
+        const src = String(entry.src || entry.url || entry.imageUrl || '').trim();
+        if (!src || unique.has(src)) {
+            return;
+        }
+        unique.set(src, {
+            src,
+            alt: String(entry.alt || entry.title || entry.imageAlt || '').trim(),
+            source: String(entry.source || entry.toolId || 'bundle').trim(),
+            ...(entry.artifactId ? { artifactId: String(entry.artifactId).trim() } : {}),
+        });
+    };
+
+    (Array.isArray(explicitReferences) ? explicitReferences : []).forEach(add);
+    files.forEach((file) => {
+        if (/\.html?$/i.test(file.path)) {
+            extractImageReferencesFromHtml(file.content).forEach(add);
+        }
+        if (/\.css$/i.test(file.path)) {
+            extractImageReferencesFromCss(file.content).forEach(add);
+        }
+    });
+
+    return Array.from(unique.values());
+}
+
+function buildFrontendBundleReadme(bundle = null, title = 'Frontend Bundle', imageManifest = []) {
+    const normalized = normalizeFrontendBundle(bundle);
+    const fileList = normalized.files
+        .map((file) => `- ${file.path}${file.purpose ? ` - ${file.purpose}` : ''}`)
+        .join('\n');
+    const imageNote = imageManifest.length > 0
+        ? `\nImages and media referenced by the bundle are listed in \`${IMAGE_MANIFEST_PATH}\`. Keep local asset files with the same relative paths when moving the bundle.\n`
+        : '';
+
+    return [
+        `# ${title || 'Frontend Bundle'}`,
+        '',
+        '## Play',
+        '',
+        `- In KimiBuilt, open the artifact sandbox/preview URL for the quickest playable view.`,
+        `- From the unzipped folder, run a static server and open the entry page:`,
+        '',
+        '```bash',
+        'python -m http.server 8000',
+        '```',
+        '',
+        `Then visit \`http://localhost:8000/${normalized.entry || 'index.html'}\`.`,
+        imageNote,
+        '## Files',
+        '',
+        fileList || '- index.html',
+        '',
+    ].join('\n');
+}
+
+function ensureFrontendBundleSupportFiles(bundle = null, title = 'Frontend Bundle', options = {}) {
+    const normalized = normalizeFrontendBundle(bundle);
+    const files = normalized.files.map((file) => ({ ...file }));
+    const imageManifest = normalizeImageManifestEntries(files, options.imageReferences);
+    const hasReadme = files.some((file) => file.path.toLowerCase() === BUNDLE_README_PATH.toLowerCase());
+    const hasImageManifest = files.some((file) => file.path.toLowerCase() === IMAGE_MANIFEST_PATH.toLowerCase());
+
+    if (imageManifest.length > 0 && !hasImageManifest) {
+        files.push({
+            path: IMAGE_MANIFEST_PATH,
+            language: 'json',
+            purpose: 'Image and media references used by the playable bundle.',
+            content: `${JSON.stringify({ images: imageManifest }, null, 2)}\n`,
+        });
+    }
+
+    if (!hasReadme) {
+        files.push({
+            path: BUNDLE_README_PATH,
+            language: 'markdown',
+            purpose: 'How to play and reuse this frontend bundle.',
+            content: buildFrontendBundleReadme({
+                ...normalized,
+                files,
+            }, title, imageManifest),
+        });
+    }
+
+    return {
+        ...normalized,
+        files,
+    };
+}
+
 function normalizeFrontendHandoff(handoff = null, metadata = {}, content = '') {
     const targetFramework = String(
         handoff?.targetFramework
@@ -536,8 +746,10 @@ function buildFrontendBundleExtractedText(bundle = null) {
     return parts.join('\n\n').slice(0, MAX_FRONTEND_BUNDLE_EXTRACTED_TEXT_CHARS);
 }
 
-function buildFrontendBundleArtifact(bundle = null, title = 'Frontend Bundle') {
-    const normalized = ensureFrontendBundleStyling(bundle);
+function buildFrontendBundleArtifact(bundle = null, title = 'Frontend Bundle', options = {}) {
+    const playable = ensurePlayableFrontendEntry(bundle, title);
+    const styled = ensureFrontendBundleStyling(playable);
+    const normalized = ensureFrontendBundleSupportFiles(styled, title, options);
     const entryFile = normalized.files.find((file) => file.path === normalized.entry)
         || normalized.files.find((file) => /\.html?$/i.test(file.path))
         || normalized.files[0];
@@ -551,6 +763,7 @@ function buildFrontendBundleArtifact(bundle = null, title = 'Frontend Bundle') {
         extractedText: buildFrontendBundleExtractedText(normalized),
         metadata: {
             title,
+            bundle: normalized,
             frameworkTarget: normalized.frameworkTarget,
             previewMode: 'site',
             siteBundle: buildFrontendBundleSummary(normalized),

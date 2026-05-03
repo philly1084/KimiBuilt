@@ -1470,7 +1470,8 @@ function buildFrontendBundleGenerationInstructions({
         'For app or dashboard requests, build working surfaces with controls, tables, panels, and navigation rather than brochure sections.',
         'Create real multi-page navigation with relative URLs only. Never use leading-slash URLs such as `/about` or `/styles.css` because the preview runs from a nested artifact route.',
         'Every HTML page must feel complete and intentionally designed, not like filler placeholders around a shared shell.',
-        'Include shared assets such as CSS, JSON fixtures, and JavaScript modules in `metadata.bundle.files` when they support the site.',
+        'Include shared assets such as CSS, JSON fixtures, JavaScript modules, and image files in `metadata.bundle.files` when they support the site.',
+        'When using generated, uploaded, or reference images with available bytes or data URLs, save them as local `assets/...` bundle files and reference them with relative paths so the ZIP can travel with its images. If an image can only remain remote, include enough `assets/images.json` source/alt metadata for a follow-up agent to fetch or replace it.',
         buildSandboxBrowserLibraryInstructions(),
         'For 3D, WebGL, Three.js, particle, shader, or immersive scene requests, return a bundle with at least `index.html`, `styles.css`, and `scene.js`; initialize a visible renderer, camera, lights, geometry/materials, resize handling, animation loop, and a non-white fallback/error overlay if WebGL or module loading fails.',
         'For Three.js scenes, use the local import map for `three` and `three/addons/`, import from `"three"` in `scene.js`, mount the canvas into a fixed-size viewport element, and avoid unresolved bare imports other than the mapped `three` specifiers.',
@@ -2667,11 +2668,15 @@ class ArtifactService {
                 },
             }
             : null;
-        const hasFrontendBundleArchive = Array.isArray(normalizedFrontendPayload?.metadata?.bundle?.files)
+        const hasFrontendBundleFiles = Array.isArray(normalizedFrontendPayload?.metadata?.bundle?.files)
+            && normalizedFrontendPayload.metadata.bundle.files.length > 0;
+        const hasFrontendBundleArchive = Boolean(normalizedFrontendPayload)
             && (
+                complexFrontendBundleRequest
+                || (hasFrontendBundleFiles && (
                 normalizedFrontendPayload.metadata.bundle.files.length > 1
                 || String(normalizedFrontendPayload.metadata?.frameworkTarget || '').trim().toLowerCase() === 'vite'
-                || complexFrontendBundleRequest
+                ))
             );
         const renderSource = normalizedFrontendPayload
             ? normalizedFrontendPayload.content
@@ -2684,7 +2689,7 @@ class ArtifactService {
             ? buildFrontendBundleArtifact({
                 ...normalizedFrontendPayload.metadata.bundle,
                 frameworkTarget: normalizedFrontendPayload.metadata.frameworkTarget,
-            }, title)
+            }, title, { imageReferences })
             : normalizedFormat === 'xlsx'
             ? await renderArtifact({
                 format: normalizedFormat,
@@ -2730,13 +2735,13 @@ class ArtifactService {
             extractedText: rendered.extractedText,
             previewHtml: rendered.previewHtml,
             metadata: {
-                ...rendered.metadata,
                 format: normalizedFormat,
                 sourcePrompt: prompt,
                 artifactIds,
+                ...(normalizedFrontendPayload?.metadata || {}),
+                ...rendered.metadata,
                 ...creativeMetadata,
                 ...dashboardMetadata,
-                ...(normalizedFrontendPayload?.metadata || {}),
                 ...(generated.metadata || {}),
                 ...artifactExperienceMetadata,
             },

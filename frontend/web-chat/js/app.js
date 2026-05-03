@@ -340,6 +340,7 @@ class ChatApp {
         this.workloadsEmpty = document.getElementById('workloads-empty');
         this.workloadsList = document.getElementById('workloads-list');
         this.refreshWorkloadsBtn = document.getElementById('refresh-workloads-btn');
+        this.closeWorkloadsPanelBtn = document.getElementById('close-workloads-panel-btn');
         this.newWorkloadBtn = document.getElementById('new-workload-btn');
         this.workloadModal = document.getElementById('workload-modal');
         this.workloadModalTitle = document.getElementById('workload-modal-title');
@@ -574,6 +575,9 @@ class ChatApp {
         });
         this.refreshWorkloadsBtn?.addEventListener('click', () => {
             this.loadSessionWorkloads(sessionManager.currentSessionId, { force: true });
+        });
+        this.closeWorkloadsPanelBtn?.addEventListener('click', () => {
+            this.closeWorkloadsPanel();
         });
         this.newWorkloadBtn?.addEventListener('click', () => {
             this.openWorkloadModal();
@@ -1428,6 +1432,12 @@ class ChatApp {
                 }
             });
         }
+    }
+
+    closeWorkloadsPanel() {
+        this.workloadsOpen = false;
+        this.syncWorkloadsPanelState();
+        this.workloadsBtn?.focus?.();
     }
 
     syncWorkloadsPanelState() {

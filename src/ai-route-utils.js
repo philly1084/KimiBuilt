@@ -148,6 +148,16 @@ function buildArtifactCompletionMessage(outputFormat, artifact) {
     }[normalizedFormat] || normalizedFormat.toUpperCase();
 
     const filename = artifact?.filename ? ` (${artifact.filename})` : '';
+    if (isSiteBundle) {
+        const preview = artifact?.sandboxUrl || artifact?.previewUrl || '';
+        const bundle = artifact?.bundleDownloadUrl || artifact?.downloadUrl || '';
+        return [
+            `Created the ${formatLabel} artifact${filename}.`,
+            preview ? `Play it: ${preview}` : '',
+            bundle ? `Download ZIP: ${bundle}` : '',
+        ].filter(Boolean).join('\n');
+    }
+
     return `Created the ${formatLabel} artifact${filename}.`;
 }
 

@@ -1883,6 +1883,15 @@ class UIHelpers {
             .trim();
     }
 
+    hasPlainSurveyChoiceIntent(lines = [], question = '') {
+        const focus = [
+            ...lines.slice(-3),
+            question,
+        ].join(' ');
+
+        return /\b(choose|select|pick|prefer|decision|direction|option|path|approach|which|what should|where should|how should|should i|do you want|would you like)\b/i.test(focus);
+    }
+
     isSurveyWrapperLine(value = '') {
         const normalized = this.cleanPlainSurveyText(value).toLowerCase();
         if (!normalized) {
@@ -1924,6 +1933,10 @@ class UIHelpers {
         }
 
         const rawLines = source.split('\n');
+        if (source.length > 2000 || rawLines.length > 30) {
+            return null;
+        }
+
         let bestRun = [];
         let currentRun = [];
 
@@ -1964,8 +1977,11 @@ class UIHelpers {
             return null;
         }
 
-        const looksLikeChoicePrompt = /\?$/.test(question)
-            || /\b(choose|select|pick|prefer|decision|direction|option|path|approach|should i|which|what should i do)\b/i.test(promptContext);
+        const looksLikeChoicePrompt = this.hasPlainSurveyChoiceIntent(meaningfulPreLines, question)
+            || (
+                /\?$/.test(question)
+                && /\b(choose|select|pick|prefer|which|what should|where should|how should|should i|do you want|would you like)\b/i.test(promptContext)
+            );
         if (!looksLikeChoicePrompt) {
             return null;
         }

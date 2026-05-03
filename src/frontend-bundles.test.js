@@ -5,6 +5,49 @@ const {
 } = require('./frontend-bundles');
 
 describe('frontend bundle styling safety net', () => {
+    test('never emits a 22-byte empty zip for playable frontend bundles', () => {
+        const artifact = buildFrontendBundleArtifact({ files: [] }, 'Recovered Scene');
+        const entries = readFrontendBundleArchive(artifact.buffer);
+        const indexHtml = entries.get('index.html').toString('utf8');
+        const readme = entries.get('README.md').toString('utf8');
+
+        expect(artifact.buffer.length).toBeGreaterThan(22);
+        expect(indexHtml).toContain('Recovered Scene');
+        expect(readme).toContain('python -m http.server 8000');
+    });
+
+    test('adds play instructions and image manifest files to site bundles', () => {
+        const artifact = buildFrontendBundleArtifact({
+            entry: 'index.html',
+            files: [
+                {
+                    path: 'index.html',
+                    language: 'html',
+                    content: '<!DOCTYPE html><html><head><title>Gallery</title></head><body><img src="./assets/hero.jpg" alt="Hero"></body></html>',
+                },
+            ],
+        }, 'Gallery', {
+            imageReferences: [{
+                url: './assets/hero.jpg',
+                title: 'Hero',
+                source: 'generated',
+            }],
+        });
+
+        const entries = readFrontendBundleArchive(artifact.buffer);
+        const readme = entries.get('README.md').toString('utf8');
+        const manifest = JSON.parse(entries.get('assets/images.json').toString('utf8'));
+
+        expect(readme).toContain('Play');
+        expect(readme).toContain('http://localhost:8000/index.html');
+        expect(manifest.images).toEqual([
+            expect.objectContaining({
+                src: './assets/hero.jpg',
+                alt: 'Hero',
+            }),
+        ]);
+    });
+
     test('adds a stylesheet file and links unstyled html pages', () => {
         const artifact = buildFrontendBundleArtifact({
             entry: 'index.html',

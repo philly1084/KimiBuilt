@@ -7377,6 +7377,10 @@ code[class*="language-"] {
     gap: 0.5rem;
 }
 
+.workloads-panel__actions .btn-primary {
+    white-space: nowrap;
+}
+
 .workloads-empty {
     padding: 0.5rem 0;
 }
@@ -8274,6 +8278,30 @@ code[class*="language-"] {
     body.layout-minimal #workloads-panel {
         padding-left: 0.75rem;
         padding-right: 0.75rem;
+    }
+
+    .workloads-panel__header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 0.75rem;
+    }
+
+    .workloads-panel__actions {
+        display: grid;
+        grid-template-columns: 2.5rem 2.5rem minmax(0, 1fr);
+        align-items: stretch;
+        width: 100%;
+    }
+
+    .workloads-panel__actions .btn-icon {
+        min-width: 2.5rem;
+        min-height: 2.5rem;
+    }
+
+    .workloads-panel__actions .btn-primary {
+        min-height: 2.5rem;
+        width: 100%;
+        justify-content: center;
     }
 
     #input-area {

@@ -86,6 +86,52 @@ Variations | Variation | What changes | |-----------|--------------| | Spicy | A
         expect(html).toContain('Review the deployment target.');
     });
 
+    test('does not infer a survey card from long news briefs with watchlists', () => {
+        const helper = Object.create(loadUIHelpersPrototype());
+        const content = `Here is the in-depth news brief for Sunday, May 3.
+
+Big Story: Strait of Hormuz Is the Center of the Day
+
+Why it matters: the Strait of Hormuz is a global oil and gas chokepoint. Any reopening, even partial, could ease pressure on energy markets. But if the operation is not coordinated with Iran, it could also become a military flashpoint.
+
+Markets: Oil Falls, Stock Futures Rise
+
+Markets reacted positively to the possibility that shipping through Hormuz could resume. The key question for the next 24-48 hours: does Iran tolerate, negotiate around, or challenge the U.S.-backed movement of ships?
+
+The Readout
+
+The strongest watchlist for tonight and Monday:
+
+- Whether U.S.-guided ships actually move through Hormuz.
+- Whether Iran publicly responds or interferes.
+- Oil price movement after Asian and European markets open.
+- Pentagon or White House clarification on whether this is a naval escort operation.
+- Any sign neutral shipping companies accept or decline U.S. help.`;
+
+        expect(helper.extractSurveyDefinitionFromContent(content, 'news-message')).toBeNull();
+        expect(helper.buildSurveyRenderPlan(content, { id: 'news-message' })).toEqual({
+            markdown: content,
+            surveys: [],
+        });
+    });
+
+    test('still infers a compact plain-text choice prompt', () => {
+        const helper = Object.create(loadUIHelpersPrototype());
+        const survey = helper.extractSurveyDefinitionFromContent(`Which direction should we take?
+
+1. Dashboard UI
+2. Cluster deployment`, 'choice-message');
+
+        expect(survey).toEqual(expect.objectContaining({
+            id: 'choice-message',
+            question: 'Which direction should we take?',
+            options: [
+                expect.objectContaining({ label: 'Dashboard UI' }),
+                expect.objectContaining({ label: 'Cluster deployment' }),
+            ],
+        }));
+    });
+
     test('renders progress as one live reasoning block with completed task styling', () => {
         const helper = Object.create(loadUIHelpersPrototype());
         const html = helper.buildAssistantRenderPlan({
