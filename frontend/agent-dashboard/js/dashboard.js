@@ -2552,30 +2552,48 @@ class Dashboard {
             .sort((a, b) => Date.parse(b.updatedAt || '') - Date.parse(a.updatedAt || ''));
 
         if (records.length === 0) {
-            tableBody.innerHTML = '<tr><td colspan="6" class="empty-state">No generated files found.</td></tr>';
+            tableBody.innerHTML = '<tr><td colspan="6" class="empty-state">No managed artifacts found.</td></tr>';
             return;
         }
 
-        tableBody.innerHTML = records.slice(0, 150).map((record) => `
-            <tr>
-                <td>
-                    <div class="storage-file-name">${this.escapeHtml(record.filename || record.id)}</div>
-                    <div class="storage-file-meta">${this.escapeHtml(record.sessionId || record.id)}</div>
-                </td>
-                <td>${this.escapeHtml(record.categoryLabel || record.category)}</td>
-                <td>${this.escapeHtml(this.formatBytes(record.diskBytes || record.sizeBytes || 0))}</td>
-                <td>${this.escapeHtml(this.formatDate(record.updatedAt || record.createdAt))}</td>
-                <td>${this.escapeHtml(record.storage || 'local')}</td>
-                <td>
-                    <button
-                        type="button"
-                        class="btn btn-ghost btn-sm storage-delete-file"
-                        data-category="${this.escapeHtml(record.category)}"
-                        data-id="${this.escapeHtml(record.id)}"
-                    >Delete</button>
-                </td>
-            </tr>
-        `).join('');
+        tableBody.innerHTML = records.slice(0, 150).map((record) => {
+            const downloadLink = record.downloadUrl
+                ? `<a class="btn btn-ghost btn-sm storage-file-link" href="${this.escapeHtml(record.downloadUrl)}" target="_blank" rel="noopener">Download</a>`
+                : '';
+            const previewLink = record.previewUrl
+                ? `<a class="btn btn-ghost btn-sm storage-file-link" href="${this.escapeHtml(record.previewUrl)}" target="_blank" rel="noopener">Preview</a>`
+                : '';
+            const metaParts = [
+                record.sessionId,
+                record.ownerId ? `owner ${record.ownerId}` : '',
+                record.mimeType || record.format || '',
+            ].filter(Boolean);
+
+            return `
+                <tr>
+                    <td>
+                        <div class="storage-file-name">${this.escapeHtml(record.filename || record.id)}</div>
+                        <div class="storage-file-meta">${this.escapeHtml(metaParts.join(' | ') || record.id)}</div>
+                    </td>
+                    <td>${this.escapeHtml(record.categoryLabel || record.category)}</td>
+                    <td>${this.escapeHtml(this.formatBytes(record.diskBytes || record.sizeBytes || 0))}</td>
+                    <td>${this.escapeHtml(this.formatDate(record.updatedAt || record.createdAt))}</td>
+                    <td>${this.escapeHtml(record.storage || 'local')}</td>
+                    <td>
+                        <div class="storage-row-actions">
+                            ${previewLink}
+                            ${downloadLink}
+                            <button
+                                type="button"
+                                class="btn btn-ghost btn-sm storage-delete-file"
+                                data-category="${this.escapeHtml(record.category)}"
+                                data-id="${this.escapeHtml(record.id)}"
+                            >Delete</button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
 
         tableBody.querySelectorAll('.storage-delete-file').forEach((button) => {
             button.addEventListener('click', () => {
@@ -2587,7 +2605,7 @@ class Dashboard {
     async cleanupStorage({ dryRun = true } = {}) {
         const category = document.getElementById('storageCleanupCategory')?.value || '';
         const olderThanDays = Math.max(1, Number(document.getElementById('storageCleanupDays')?.value || 30));
-        if (!dryRun && !confirm(`Delete generated files older than ${olderThanDays} days?`)) {
+        if (!dryRun && !confirm(`Delete managed artifacts older than ${olderThanDays} days?`)) {
             return;
         }
 
@@ -2600,19 +2618,19 @@ class Dashboard {
             const result = this.unwrapApiPayload(response, {});
             const bytes = this.formatBytes(result.matchedBytes || 0);
             if (dryRun) {
-                this.showToast(`Cleanup preview: ${result.matchedCount || 0} files, ${bytes}`, 'info', 6000);
+                this.showToast(`Cleanup preview: ${result.matchedCount || 0} items, ${bytes}`, 'info', 6000);
             } else {
-                this.showToast(`Deleted ${result.deletedCount || 0} files, ${bytes}`, 'success');
+                this.showToast(`Deleted ${result.deletedCount || 0} items, ${bytes}`, 'success');
                 await this.loadStorage();
             }
         } catch (error) {
-            console.error('Error cleaning generated storage:', error);
+            console.error('Error cleaning managed storage:', error);
             this.showToast('Storage cleanup failed', 'error');
         }
     }
 
     async deleteStorageRecord(category, id) {
-        if (!category || !id || !confirm('Delete this generated file?')) {
+        if (!category || !id || !confirm('Delete this managed artifact?')) {
             return;
         }
 
@@ -2622,8 +2640,8 @@ class Dashboard {
             this.showToast(`Deleted ${this.formatBytes(result.deletedBytes || 0)}`, 'success');
             await this.loadStorage();
         } catch (error) {
-            console.error('Error deleting generated file:', error);
-            this.showToast('Failed to delete generated file', 'error');
+            console.error('Error deleting managed artifact:', error);
+            this.showToast('Failed to delete managed artifact', 'error');
         }
     }
     

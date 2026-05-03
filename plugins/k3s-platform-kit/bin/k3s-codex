@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="${CODEX_K3S_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+MAP="${CODEX_K3S_CONTEXT_MAP:-$ROOT/.codex/k3s-contexts.json}"
+have(){ command -v "$1" >/dev/null 2>&1; }
+need(){ have "$1" || { echo "missing: $1" >&2; exit 2; }; }
+ctx(){ kubectl config current-context 2>/dev/null || echo unknown; }
+classify(){ python3 - "$MAP" "$(ctx)" <<'PY'
+import json,sys
+path,ctx=sys.argv[1],sys.argv[2]
+default={"class":"unknown","allow_apply":False}
+try: d=json.load(open(path)).get("contexts",{}).get(ctx,{})
+except Exception: d={}
+print(json.dumps({**default,**d}))
+PY
+}
+json_get(){ python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get(sys.argv[1], sys.argv[2] if len(sys.argv)>2 else ""))' "$@"; }
+context(){ need kubectl; need python3; j="$(classify)"; echo "context: $(ctx)"; printf '%s' "$j" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("class:",d.get("class","unknown")); print("allow_apply:",str(d.get("allow_apply",False)).lower())'; echo "context_map: $MAP"; }
+build(){ p="$1"; if [[ -f "$p/kustomization.yaml" ]]; then if have kustomize; then kustomize build "$p"; else kubectl kustomize "$p"; fi; else cat "$p"/*.yaml "$p"/*.yml 2>/dev/null || cat "$p"; fi; }
+case "${1:-help}" in
+check-tools) for t in kubectl python3 kustomize helm flux trivy grype syft conftest; do have "$t" && echo "ok: $t" || echo "missing/optional: $t"; done; [[ -f "$MAP" ]] && echo "ok: $MAP" || echo "missing: $MAP";;
+context) context;;
+inventory) context || true; kubectl get nodes -o wide || true; kubectl get ns || true; kubectl get deploy,sts,ds,svc,ingress -A 2>/dev/null || true;;
+preflight) shift; p=""; ns=""; while [[ $# -gt 0 ]]; do case "$1" in --path) p="$2"; shift 2;; --namespace) ns="$2"; shift 2;; *) echo "bad arg $1"; exit 2;; esac; done; [[ -n "$p" ]] || { echo --path required; exit 2; }; tmp=$(mktemp); build "$p" > "$tmp"; context || true; echo "client dry-run"; if [[ -n "$ns" ]]; then kubectl apply --dry-run=client -n "$ns" -f "$tmp"; else kubectl apply --dry-run=client -f "$tmp"; fi; echo "server dry-run"; if [[ -n "$ns" ]]; then kubectl apply --dry-run=server -n "$ns" -f "$tmp" || true; else kubectl apply --dry-run=server -f "$tmp" || true; fi; rm -f "$tmp";;
+render-sandbox) shift; name=""; host=""; image="nginx:1.27-alpine"; out=""; while [[ $# -gt 0 ]]; do case "$1" in --name) name="$2"; shift 2;; --host) host="$2"; shift 2;; --image) image="$2"; shift 2;; --out) out="$2"; shift 2;; *) echo bad arg; exit 2;; esac; done; [[ -n "$name" && -n "$host" ]] || { echo "--name and --host required"; exit 2; }; out="${out:-$ROOT/generated/sandboxes/$name}"; mkdir -p "$out"; cp "$ROOT/plugins/k3s-platform-kit/templates/sandbox/"*.yaml "$out/"; sed -i "s#__NAMESPACE__#$name#g;s#__HOST__#$host#g;s#__IMAGE__#$image#g" "$out"/*.yaml; printf 'resources:\n  - namespace.yaml\n  - quota.yaml\n  - networkpolicy.yaml\n  - deployment.yaml\n  - service.yaml\n  - ingress.yaml\n' > "$out/kustomization.yaml"; echo "$out";;
+deploy-harness) shift; p=""; ns=""; while [[ $# -gt 0 ]]; do case "$1" in --path) p="$2"; shift 2;; --namespace) ns="$2"; shift 2;; *) echo bad arg; exit 2;; esac; done; [[ -n "$p" && -n "$ns" ]] || { echo "--path and --namespace required"; exit 2; }; j="$(classify)"; cls="$(printf '%s' "$j" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("class"))')"; allow="$(printf '%s' "$j" | python3 -c 'import json,sys; print(str(json.load(sys.stdin).get("allow_apply",False)).lower())')"; [[ "$cls" != prod && "$cls" != unknown && "$allow" == true ]] || { echo "blocked context class=$cls allow=$allow"; exit 3; }; "$0" preflight --path "$p" --namespace "$ns"; [[ "${SAFE_APPLY:-0}" == 1 ]] || { echo "dry-run only: set SAFE_APPLY=1"; exit 0; }; kubectl get ns "$ns" >/dev/null 2>&1 || kubectl create ns "$ns"; kubectl label ns "$ns" codex.openai.com/sandbox=true --overwrite; kubectl apply -n "$ns" -f "$p"; kubectl rollout status -n "$ns" deploy --timeout=120s || true;;
+promote-prod) shift; p=""; while [[ $# -gt 0 ]]; do case "$1" in --path) p="$2"; shift 2;; *) shift;; esac; done; echo "production promotion plan for ${p:-<missing>}"; context || true; echo "policy: direct production apply blocked; prepare PR/GitOps patch"; echo "direct-write guards: ALLOW_PROD_WRITE=yes HUMAN_APPROVED=yes CHANGE_TICKET=<id>";;
+cleanup-sandboxes) echo "DELETE=${DELETE:-0}"; kubectl get ns -l codex.openai.com/sandbox=true --show-labels || true; [[ "${DELETE:-0}" == 1 ]] && kubectl delete ns -l codex.openai.com/sandbox=true || echo "dry-run only: set DELETE=1";;
+*) echo "k3s-codex commands: check-tools, context, inventory, preflight, render-sandbox, deploy-harness, promote-prod, cleanup-sandboxes";;
+esac

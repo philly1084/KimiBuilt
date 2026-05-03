@@ -1,0 +1,47 @@
+{
+    "name":  "observability-kit",
+    "version":  "1.0.0",
+    "description":  "Incident triage, event timelines, logs, SLO drift, and operational reports.",
+    "author":  {
+                   "name":  "Phill Local",
+                   "email":  "philly1084@gmail.com",
+                   "url":  "https://demoserver2.buzz"
+               },
+    "homepage":  "https://demoserver2.buzz",
+    "repository":  "https://demoserver2.buzz",
+    "license":  "MIT",
+    "keywords":  [
+                     "observability",
+                     "incidents",
+                     "logs",
+                     "events",
+                     "slo",
+                     "reports"
+                 ],
+    "skills":  "./skills/",
+    "interface":  {
+                      "displayName":  "Observability Kit",
+                      "shortDescription":  "Operational evidence gathering for incidents and drift.",
+                      "longDescription":  "Helps collect read-only cluster signals, build event timelines, summarize logs safely, compare SLO drift, and produce incident reports grounded in deterministic evidence.",
+                      "developerName":  "Phill Local",
+                      "category":  "Developer Tools",
+                      "capabilities":  [
+                                           "Workflow Guidance",
+                                           "Infrastructure",
+                                           "Operations",
+                                           "Testing"
+                                       ],
+                      "websiteURL":  "https://demoserver2.buzz",
+                      "privacyPolicyURL":  "https://demoserver2.buzz/privacy",
+                      "termsOfServiceURL":  "https://demoserver2.buzz/terms",
+                      "defaultPrompt":  [
+                                            "Create an incident timeline from Kubernetes events.",
+                                            "Summarize these workload logs without exposing secrets.",
+                                            "Build an incident report from cluster evidence."
+                                        ],
+                      "brandColor":  "#2563EB",
+                      "screenshots":  [
+
+                                      ]
+                  }
+}

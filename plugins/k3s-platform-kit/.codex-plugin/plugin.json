@@ -1,0 +1,47 @@
+{
+    "name":  "k3s-platform-kit",
+    "version":  "1.0.0",
+    "description":  "Safe k3s cluster workflows for harness deploys, HTTPS sandboxes, and production promotion.",
+    "author":  {
+                   "name":  "Phill Local",
+                   "email":  "philly1084@gmail.com",
+                   "url":  "https://demoserver2.buzz"
+               },
+    "homepage":  "https://demoserver2.buzz",
+    "repository":  "https://demoserver2.buzz",
+    "license":  "MIT",
+    "keywords":  [
+                     "k3s",
+                     "kubernetes",
+                     "deployments",
+                     "sandbox",
+                     "gitops",
+                     "preflight"
+                 ],
+    "skills":  "./skills/",
+    "interface":  {
+                      "displayName":  "K3s Platform Kit",
+                      "shortDescription":  "Safe k3s workflow guidance for harness, sandbox, and release work.",
+                      "longDescription":  "Guides k3s cluster mapping, app manifest scaffolding, sandbox HTTPS deploys, release preflight, production promotion, incident triage, and guarded automation loops.",
+                      "developerName":  "Phill Local",
+                      "category":  "Developer Tools",
+                      "capabilities":  [
+                                           "Workflow Guidance",
+                                           "Infrastructure",
+                                           "Operations",
+                                           "Testing"
+                                       ],
+                      "websiteURL":  "https://demoserver2.buzz",
+                      "privacyPolicyURL":  "https://demoserver2.buzz/privacy",
+                      "termsOfServiceURL":  "https://demoserver2.buzz/terms",
+                      "defaultPrompt":  [
+                                            "Map this k3s cluster and identify safe next actions.",
+                                            "Scaffold k3s manifests with probes, resources, and ingress.",
+                                            "Prepare a guarded sandbox deploy and verification plan."
+                                        ],
+                      "brandColor":  "#0F766E",
+                      "screenshots":  [
+
+                                      ]
+                  }
+}

@@ -2715,6 +2715,16 @@ select.form-control,
     overflow-wrap: anywhere;
 }
 
+.storage-row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+}
+
+.storage-file-link {
+    text-decoration: none;
+}
+
 @media (max-width: 900px) {
     .storage-cleanup-controls {
         grid-template-columns: 1fr;

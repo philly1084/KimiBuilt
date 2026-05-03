@@ -91,7 +91,7 @@ router.get('/podcast-audio', callController(podcastAudioController, 'list'));
 router.post('/podcast-audio/:track', callController(podcastAudioController, 'upload'));
 router.delete('/podcast-audio/:track', callController(podcastAudioController, 'remove'));
 
-// Generated file storage
+// Managed artifact storage
 router.get('/storage', callController(storageController, 'list'));
 router.post('/storage/cleanup', callController(storageController, 'cleanup'));
 router.delete('/storage/:category/:id', callController(storageController, 'remove'));

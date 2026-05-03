@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+have(){ command -v "$1" >/dev/null 2>&1; }
+case "${1:-help}" in
+check-tools) for t in python3 kubectl trivy grype syft conftest; do have "$t" && echo "ok: $t" || echo "missing/optional: $t"; done;;
+secret-scan) shift; path="${1:-.}"; python3 - "$path" <<'PY'
+from pathlib import Path
+import re,sys
+root=Path(sys.argv[1]); pats=[('private_key',r'-----BEGIN [A-Z0-9 ]{0,40}PRIVATE KEY-----'),('aws_key',r'AKIA[0-9A-Z]{16}'),('github_token',r'gh[pousr]_[A-Za-z0-9_]{20,}'),('openai_key',r'sk-[A-Za-z0-9_-]{20,}'),('generic_secret',r'(?i)(password|secret|token|api[_-]?key)\s*[:=]\s*["\']?[^"\'\s]{12,}')]
+skip={'.git','node_modules','.venv','venv','dist','build','.terraform','.next','target'}; findings=[]
+files=[root] if root.is_file() else [p for p in root.rglob('*') if p.is_file() and not any(part in skip for part in p.parts) and p.stat().st_size<2000000]
+for p in files:
+    t=p.read_text(errors='ignore')
+    for i,line in enumerate(t.splitlines(),1):
+        for name,pat in pats:
+            if re.search(pat,line): findings.append((p,i,name)); break
+print(f'secret_scan_path: {root}')
+if findings:
+    print('decision: block'); print(f'findings: {len(findings)}')
+    [print(f'{p}:{i}: {n}: ***MASKED***') for p,i,n in findings[:200]]
+    sys.exit(1)
+print('decision: pass'); print('findings: 0')
+PY
+;;
+manifest-scan) shift; path="${1:-.}"; python3 - "$path" <<'PY'
+from pathlib import Path
+import re,sys
+root=Path(sys.argv[1]); files=[root] if root.is_file() else list(root.rglob('*.yaml'))+list(root.rglob('*.yml'))
+block=[]; warn=[]
+for p in files:
+    s=p.read_text(errors='ignore')
+    if re.search(r'image:\s*\S+:latest\b',s): block.append((p,'image uses latest tag'))
+    if re.search(r'privileged:\s*true',s): block.append((p,'privileged container'))
+    if re.search(r'hostNetwork:\s*true',s): block.append((p,'hostNetwork enabled'))
+    if 'kind: Deployment' in s:
+        if 'resources:' not in s: warn.append((p,'missing resources'))
+        if 'readinessProbe:' not in s: warn.append((p,'missing readinessProbe'))
+        if 'livenessProbe:' not in s: warn.append((p,'missing livenessProbe'))
+    if 'kind: Ingress' in s and 'tls:' not in s: warn.append((p,'ingress missing tls'))
+print(f'manifest_scan_path: {root}')
+[print(f'BLOCKER {p}: {m}') for p,m in block]; [print(f'WARNING {p}: {m}') for p,m in warn]
+print('decision:', 'block' if block else ('warn' if warn else 'pass'))
+sys.exit(1 if block else 0)
+PY
+;;
+image-scan) shift; image="${1:-}"; if have trivy; then trivy image --severity HIGH,CRITICAL --ignore-unfixed "$image"; elif have grype; then grype "$image"; else echo "no scanner installed: trivy/grype optional"; fi;;
+sbom) shift; image="${1:-}"; out="reports/security/sbom-$(echo "$image" | tr '/:@' '---').json"; mkdir -p "$(dirname "$out")"; have syft && syft "$image" -o json > "$out" && echo "$out" || echo "syft not installed";;
+release-gate) shift; path="${1:-.}"; status=0; echo "== secret scan =="; "$0" secret-scan . || status=1; echo "== manifest scan =="; "$0" manifest-scan "$path" || status=1; echo "decision: $([[ $status -eq 0 ]] && echo pass_or_warn || echo block)"; exit "$status";;
+*) echo "secure-codex commands: check-tools, secret-scan, manifest-scan, image-scan, sbom, release-gate";;
+esac

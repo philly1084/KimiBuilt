@@ -1,0 +1,46 @@
+{
+    "name":  "product-intelligence-kit",
+    "version":  "1.0.0",
+    "description":  "Feedback ingestion, backlog synthesis, experiment briefs, and release narratives.",
+    "author":  {
+                   "name":  "Phill Local",
+                   "email":  "philly1084@gmail.com",
+                   "url":  "https://demoserver2.buzz"
+               },
+    "homepage":  "https://demoserver2.buzz",
+    "repository":  "https://demoserver2.buzz",
+    "license":  "MIT",
+    "keywords":  [
+                     "product",
+                     "feedback",
+                     "backlog",
+                     "experiments",
+                     "release-notes"
+                 ],
+    "skills":  "./skills/",
+    "interface":  {
+                      "displayName":  "Product Intelligence Kit",
+                      "shortDescription":  "Product workflow placeholder for feedback and release narratives.",
+                      "longDescription":  "A local plugin placeholder for product intelligence workflows. The uploaded source only included a manifest, so skills still need to be added before this plugin can guide active work.",
+                      "developerName":  "Phill Local",
+                      "category":  "Developer Tools",
+                      "capabilities":  [
+                                           "Workflow Guidance",
+                                           "Infrastructure",
+                                           "Operations",
+                                           "Testing"
+                                       ],
+                      "websiteURL":  "https://demoserver2.buzz",
+                      "privacyPolicyURL":  "https://demoserver2.buzz/privacy",
+                      "termsOfServiceURL":  "https://demoserver2.buzz/terms",
+                      "defaultPrompt":  [
+                                            "Turn feedback into backlog themes.",
+                                            "Draft an experiment brief from this product idea.",
+                                            "Create a release narrative from shipped changes."
+                                        ],
+                      "brandColor":  "#7C3AED",
+                      "screenshots":  [
+
+                                      ]
+                  }
+}

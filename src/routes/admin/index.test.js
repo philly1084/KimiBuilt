@@ -25,6 +25,8 @@ jest.mock('../../admin/runtime-monitor', () => ({
 const DashboardController = require('./dashboard.controller');
 const { setDashboardController } = require('../../admin/runtime-monitor');
 const settingsController = require('./settings.controller');
+const { artifactService } = require('../../artifacts/artifact-service');
+const { artifactStore } = require('../../artifacts/artifact-store');
 const adminRouter = require('./index');
 
 describe('/api/admin workload routes', () => {
@@ -212,6 +214,61 @@ describe('/api/admin workload routes', () => {
         }
     });
 
+    test('lists stored document artifacts from the admin dashboard', async () => {
+        const isEnabledSpy = jest.spyOn(artifactService, 'isEnabled').mockReturnValue(true);
+        const listSpy = jest.spyOn(artifactStore, 'listAllWithSessions').mockResolvedValue([
+            {
+                id: 'artifact-db-report',
+                sessionId: 'session-1',
+                ownerId: 'owner-1',
+                filename: 'report.pdf',
+                extension: 'pdf',
+                mimeType: 'application/pdf',
+                sizeBytes: 2048,
+                sourceMode: 'document',
+                metadata: { generatedBy: 'document-generator' },
+                createdAt: '2026-05-01T00:00:00.000Z',
+                updatedAt: '2026-05-02T00:00:00.000Z',
+            },
+            {
+                id: 'artifact-db-image',
+                sessionId: 'session-1',
+                ownerId: 'owner-1',
+                filename: 'image.png',
+                extension: 'png',
+                mimeType: 'image/png',
+                sizeBytes: 1024,
+                sourceMode: 'image',
+                metadata: {},
+                createdAt: '2026-05-01T00:00:00.000Z',
+                updatedAt: '2026-05-02T00:00:00.000Z',
+            },
+        ]);
+        const app = buildApp({ isAvailable: jest.fn(() => true) });
+
+        try {
+            const response = await request(app).get('/api/admin/storage');
+
+            expect(response.status).toBe(200);
+            expect(response.body.success).toBe(true);
+            const storedCategory = response.body.data.categories.find((item) => item.category === 'storedArtifacts');
+            expect(storedCategory).toEqual(expect.objectContaining({
+                count: 1,
+                label: 'Stored documents',
+            }));
+            expect(storedCategory.records[0]).toEqual(expect.objectContaining({
+                id: 'artifact-db-report',
+                filename: 'report.pdf',
+                storage: 'postgres',
+                downloadUrl: '/api/artifacts/artifact-db-report/download',
+                fileCount: 1,
+            }));
+        } finally {
+            listSpy.mockRestore();
+            isEnabledSpy.mockRestore();
+        }
+    });
+
     test('deletes one generated storage record from the admin dashboard', async () => {
         const previousDataDir = process.env.KIMIBUILT_DATA_DIR;
         const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-admin-storage-delete-'));
@@ -247,6 +304,40 @@ describe('/api/admin workload routes', () => {
                 process.env.KIMIBUILT_DATA_DIR = previousDataDir;
             }
             await fs.rm(dataDir, { recursive: true, force: true });
+        }
+    });
+
+    test('deletes one stored document artifact through the admin dashboard', async () => {
+        const isEnabledSpy = jest.spyOn(artifactService, 'isEnabled').mockReturnValue(true);
+        const listSpy = jest.spyOn(artifactStore, 'listAllWithSessions').mockResolvedValue([
+            {
+                id: 'artifact-db-delete',
+                sessionId: 'session-1',
+                ownerId: 'owner-1',
+                filename: 'report.html',
+                extension: 'html',
+                mimeType: 'text/html',
+                sizeBytes: 4096,
+                sourceMode: 'document',
+                metadata: { generatedBy: 'document-generator' },
+                createdAt: '2026-05-01T00:00:00.000Z',
+                updatedAt: '2026-05-02T00:00:00.000Z',
+            },
+        ]);
+        const deleteSpy = jest.spyOn(artifactService, 'deleteArtifact').mockResolvedValue(true);
+        const app = buildApp({ isAvailable: jest.fn(() => true) });
+
+        try {
+            const response = await request(app).delete('/api/admin/storage/storedArtifacts/artifact-db-delete');
+
+            expect(response.status).toBe(200);
+            expect(response.body.success).toBe(true);
+            expect(response.body.data.deleted).toBe(1);
+            expect(deleteSpy).toHaveBeenCalledWith('artifact-db-delete');
+        } finally {
+            deleteSpy.mockRestore();
+            listSpy.mockRestore();
+            isEnabledSpy.mockRestore();
         }
     });
 });

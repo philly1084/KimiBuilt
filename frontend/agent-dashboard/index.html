@@ -1158,7 +1158,7 @@
                                 <h2>Storage</h2>
                                 <div class="storage-summary-grid">
                                     <div class="stat-card">
-                                        <span class="stat-label">Generated Files</span>
+                                        <span class="stat-label">Managed Items</span>
                                         <span class="stat-value" id="storageTotalCount">0</span>
                                     </div>
                                     <div class="stat-card">
@@ -1172,7 +1172,7 @@
                                 </div>
                                 <div class="card">
                                     <div class="card-header">
-                                        <h3>Generated Output Cleanup</h3>
+                                        <h3>Artifact Cleanup</h3>
                                         <button type="button" class="btn btn-secondary" id="refreshStorageBtn">Refresh</button>
                                     </div>
                                     <div class="card-body">
@@ -1180,7 +1180,8 @@
                                             <label class="form-group">
                                                 <span>Category</span>
                                                 <select id="storageCleanupCategory">
-                                                    <option value="">All generated files</option>
+                                                    <option value="">All managed items</option>
+                                                    <option value="storedArtifacts">Stored documents</option>
                                                     <option value="generatedArtifacts">Generated artifacts</option>
                                                     <option value="generatedAudio">Generated audio</option>
                                                     <option value="generatedVideo">Generated video</option>

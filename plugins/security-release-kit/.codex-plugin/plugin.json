@@ -1,0 +1,47 @@
+{
+    "name":  "security-release-kit",
+    "version":  "1.0.0",
+    "description":  "Secret scanning, manifest policy checks, image/SBOM hooks, and release risk gates.",
+    "author":  {
+                   "name":  "Phill Local",
+                   "email":  "philly1084@gmail.com",
+                   "url":  "https://demoserver2.buzz"
+               },
+    "homepage":  "https://demoserver2.buzz",
+    "repository":  "https://demoserver2.buzz",
+    "license":  "MIT",
+    "keywords":  [
+                     "security",
+                     "release",
+                     "secrets",
+                     "sbom",
+                     "rego",
+                     "kubernetes"
+                 ],
+    "skills":  "./skills/",
+    "interface":  {
+                      "displayName":  "Security Release Kit",
+                      "shortDescription":  "Release security checks for secrets, manifests, and images.",
+                      "longDescription":  "Guides secret sweeps, Kubernetes manifest policy checks, optional image and SBOM scans, release risk gates, and concise supply-chain briefs before production changes.",
+                      "developerName":  "Phill Local",
+                      "category":  "Developer Tools",
+                      "capabilities":  [
+                                           "Workflow Guidance",
+                                           "Infrastructure",
+                                           "Operations",
+                                           "Testing"
+                                       ],
+                      "websiteURL":  "https://demoserver2.buzz",
+                      "privacyPolicyURL":  "https://demoserver2.buzz/privacy",
+                      "termsOfServiceURL":  "https://demoserver2.buzz/terms",
+                      "defaultPrompt":  [
+                                            "Run a release risk gate for these manifests.",
+                                            "Check these Kubernetes manifests for risky defaults.",
+                                            "Create a supply-chain brief for this release."
+                                        ],
+                      "brandColor":  "#B91C1C",
+                      "screenshots":  [
+
+                                      ]
+                  }
+}

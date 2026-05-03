@@ -1,8 +1,14 @@
 const fs = require('fs/promises');
 const path = require('path');
 const { getStateDirectory } = require('../../runtime-state-paths');
+const { artifactService } = require('../../artifacts/artifact-service');
+const { artifactStore } = require('../../artifacts/artifact-store');
 
 const CATEGORIES = {
+  storedArtifacts: {
+    label: 'Stored documents',
+    storage: 'postgres',
+  },
   generatedArtifacts: {
     label: 'Generated artifacts',
     directory: 'generated-artifacts',
@@ -91,6 +97,10 @@ async function findContentPath(directory, id, entries) {
 
 async function scanCategory(category) {
   const definition = CATEGORIES[category];
+  if (definition.storage === 'postgres') {
+    return scanStoredArtifactsCategory(category, definition);
+  }
+
   const directory = path.join(getDataDirectory(), definition.directory);
   const entries = await readDirectoryEntries(directory);
   const records = [];
@@ -139,6 +149,7 @@ async function scanCategory(category) {
       metadataBytes: metadataStats.bytes,
       files: [contentPath, metadataPath].filter(Boolean),
       storage: record.metadata?.storage || 'local',
+      downloadUrl: `/api/artifacts/${encodeURIComponent(id)}/download`,
     });
   }
 
@@ -168,6 +179,7 @@ async function scanCategory(category) {
       metadataBytes: 0,
       files: [orphanPath],
       storage: 'orphan',
+      downloadUrl: null,
     });
   }
 
@@ -184,6 +196,101 @@ async function scanCategory(category) {
   };
 }
 
+function isDocumentLikeArtifact(artifact = {}) {
+  const format = String(artifact.format || artifact.extension || '').toLowerCase();
+  const mimeType = String(artifact.mimeType || '').toLowerCase();
+  const sourceMode = String(artifact.sourceMode || '').toLowerCase();
+  const generatedBy = String(artifact.metadata?.generatedBy || '').toLowerCase();
+
+  return [
+    'html',
+    'pdf',
+    'pptx',
+    'xlsx',
+    'md',
+    'markdown',
+    'docx',
+    'txt',
+    'csv',
+    'json',
+    'svg',
+    'mermaid',
+  ].includes(format)
+    || mimeType.includes('pdf')
+    || mimeType.includes('text/')
+    || mimeType.includes('presentation')
+    || mimeType.includes('spreadsheet')
+    || sourceMode.includes('document')
+    || generatedBy.includes('document');
+}
+
+async function scanStoredArtifactsCategory(category, definition) {
+  if (!artifactService.isEnabled()) {
+    return {
+      category,
+      label: definition.label,
+      directory: 'Postgres artifacts table',
+      count: 0,
+      totalBytes: 0,
+      records: [],
+    };
+  }
+
+  let rows = [];
+  try {
+    rows = await artifactStore.listAllWithSessions();
+  } catch (error) {
+    console.warn('[AdminStorage] Failed to list stored artifacts:', error.message);
+    return {
+      category,
+      label: definition.label,
+      directory: 'Postgres artifacts table',
+      count: 0,
+      totalBytes: 0,
+      error: error.message,
+      records: [],
+    };
+  }
+  const records = rows
+    .filter((artifact) => isDocumentLikeArtifact(artifact))
+    .map((artifact) => {
+      const serialized = artifactService.serializeArtifact(artifact) || {};
+      const id = String(artifact.id || '').trim();
+      const format = String(artifact.extension || serialized.format || '').trim();
+      return {
+        id,
+        category,
+        label: definition.label,
+        filename: String(artifact.filename || id).trim(),
+        sessionId: String(artifact.sessionId || '').trim() || null,
+        ownerId: artifact.ownerId || null,
+        mimeType: String(artifact.mimeType || '').trim() || null,
+        format,
+        createdAt: normalizeDate(artifact.createdAt, null),
+        updatedAt: normalizeDate(artifact.updatedAt, artifact.createdAt),
+        sizeBytes: safeNumber(artifact.sizeBytes, 0),
+        diskBytes: safeNumber(artifact.sizeBytes, 0),
+        contentBytes: safeNumber(artifact.sizeBytes, 0),
+        metadataBytes: 0,
+        fileCount: 1,
+        files: [],
+        storage: 'postgres',
+        downloadUrl: serialized.downloadUrl || `/api/artifacts/${encodeURIComponent(id)}/download`,
+        previewUrl: serialized.previewUrl || serialized.sandboxUrl || null,
+      };
+    });
+
+  records.sort((a, b) => Date.parse(b.updatedAt || '') - Date.parse(a.updatedAt || ''));
+  return {
+    category,
+    label: definition.label,
+    directory: 'Postgres artifacts table',
+    count: records.length,
+    totalBytes: records.reduce((sum, record) => sum + record.diskBytes, 0),
+    records,
+  };
+}
+
 function serializeCategory(result, { includeRecords = true, limit = 100 } = {}) {
   return {
     category: result.category,
@@ -191,10 +298,11 @@ function serializeCategory(result, { includeRecords = true, limit = 100 } = {}) 
     directory: result.directory,
     count: result.count,
     totalBytes: result.totalBytes,
+    error: result.error,
     records: includeRecords
-      ? result.records.slice(0, limit).map(({ files, ...record }) => ({
+      ? result.records.slice(0, limit).map(({ files = [], ...record }) => ({
         ...record,
-        fileCount: files.length,
+        fileCount: record.fileCount || files.length,
       }))
       : undefined,
   };
@@ -232,8 +340,15 @@ async function remove(req, res, next) {
       return res.status(404).json({ success: false, error: 'Stored file not found.' });
     }
 
-    for (const filePath of record.files) {
-      await fs.rm(filePath, { force: true });
+    if (category === 'storedArtifacts') {
+      const deleted = await artifactService.deleteArtifact(id);
+      if (!deleted) {
+        return res.status(404).json({ success: false, error: 'Stored artifact not found.' });
+      }
+    } else {
+      for (const filePath of record.files) {
+        await fs.rm(filePath, { force: true });
+      }
     }
 
     res.json({
@@ -271,7 +386,9 @@ async function cleanup(req, res, next) {
       });
 
       for (const record of expired) {
-        if (!dryRun) {
+        if (!dryRun && currentCategory === 'storedArtifacts') {
+          await artifactService.deleteArtifact(record.id);
+        } else if (!dryRun) {
           for (const filePath of record.files) {
             await fs.rm(filePath, { force: true });
           }

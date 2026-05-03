@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+have(){ command -v "$1" >/dev/null 2>&1; }
+need(){ have "$1" || { echo "missing: $1" >&2; exit 2; }; }
+mask(){ sed -E 's/(Authorization: Bearer )[A-Za-z0-9._~+\/-]+/\1***MASKED***/g; s/(password|token|secret|api[_-]?key)(=|:)[^ ,;]+/\1\2***MASKED***/gi'; }
+case "${1:-help}" in
+check-tools) for t in kubectl curl python3; do have "$t" && echo "ok: $t" || echo "missing/optional: $t"; done;;
+snapshot) shift; ns=""; while [[ $# -gt 0 ]]; do [[ "$1" == --namespace ]] && ns="$2" && shift 2 || shift; done; [[ -n "$ns" ]] || { echo --namespace required; exit 2; }; need kubectl; kubectl get ns "$ns" --show-labels || true; kubectl get deploy,sts,ds,rs,pods,svc,endpoints,ingress -n "$ns" -o wide || true; kubectl get events -n "$ns" --sort-by=.lastTimestamp | tail -n 80 | mask || true;;
+events) shift; ns=""; while [[ $# -gt 0 ]]; do [[ "$1" == --namespace ]] && ns="$2" && shift 2 || shift; done; kubectl get events -n "$ns" --sort-by=.lastTimestamp | mask || true;;
+logs) shift; ns=""; selector=""; pod=""; tail=200; while [[ $# -gt 0 ]]; do case "$1" in --namespace) ns="$2"; shift 2;; --selector) selector="$2"; shift 2;; --pod) pod="$2"; shift 2;; --tail) tail="$2"; shift 2;; *) shift;; esac; done; if [[ -n "$pod" ]]; then kubectl logs -n "$ns" "$pod" --all-containers --tail="$tail" | mask || true; else kubectl logs -n "$ns" -l "$selector" --all-containers --tail="$tail" | mask || true; fi;;
+prom-query) shift; q=""; while [[ $# -gt 0 ]]; do [[ "$1" == --query ]] && q="$2" && shift 2 || shift; done; [[ -n "${PROMETHEUS_URL:-}" ]] || { echo PROMETHEUS_URL not set; exit 2; }; curl -fsS --get --data-urlencode "query=$q" "$PROMETHEUS_URL/api/v1/query" | mask;;
+incident-report) shift; ns=""; out=""; while [[ $# -gt 0 ]]; do case "$1" in --namespace) ns="$2"; shift 2;; --out) out="$2"; shift 2;; *) shift;; esac; done; mkdir -p "$(dirname "$out")"; { echo "# Incident Report: $ns"; date -u; echo; k3s-codex context || true; echo; "$0" snapshot --namespace "$ns" || true; } | mask > "$out"; echo "$out";;
+*) echo "observe-codex commands: check-tools, snapshot, events, logs, prom-query, incident-report";;
+esac
