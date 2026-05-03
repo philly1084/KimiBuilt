@@ -134,6 +134,18 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
+  name: gitlab-runner-config
+  namespace: agent-platform
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
   name: buildkit-cache
   namespace: agent-platform
 spec:
@@ -381,7 +393,8 @@ spec:
               mountPath: /builds
       volumes:
         - name: runner-config
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: gitlab-runner-config
         - name: runner-builds
           emptyDir: {}
 ---
