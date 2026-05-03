@@ -189,9 +189,46 @@ function buildRunnerRuntimeDetails(runner = null) {
   };
 }
 
+function buildK3sFeedbackReadiness(runner = null) {
+  const runnerDetails = buildRunnerRuntimeDetails(runner);
+  const availableCliTools = new Set((runnerDetails?.availableCliTools || []).map((tool) => tool.toLowerCase()));
+  const hasKubectl = availableCliTools.has('kubectl');
+  const hasBuildctl = availableCliTools.has('buildctl');
+  const hasGit = availableCliTools.has('git');
+  const buildkitReady = Boolean(runnerDetails?.buildkitHostConfigured && hasBuildctl);
+  const kubernetesReady = Boolean(runnerDetails?.kubernetesConfigured && hasKubectl);
+  const imagePushReady = Boolean(buildkitReady && runnerDetails?.imagePrefix);
+  const deployReady = Boolean(runnerDetails && kubernetesReady);
+  const buildToK3sReady = Boolean(runnerDetails && buildkitReady && kubernetesReady && hasGit && imagePushReady);
+  const blockers = [
+    !runnerDetails ? 'No online deploy-capable remote runner is registered.' : '',
+    runnerDetails && !hasGit ? 'Runner did not report git.' : '',
+    runnerDetails && !hasBuildctl ? 'Runner did not report buildctl.' : '',
+    runnerDetails && !runnerDetails?.buildkitHostConfigured ? 'Runner did not report BUILDKIT_HOST.' : '',
+    runnerDetails && !hasKubectl ? 'Runner did not report kubectl.' : '',
+    runnerDetails && !runnerDetails?.kubernetesConfigured ? 'Runner did not report Kubernetes configuration.' : '',
+    runnerDetails && !runnerDetails?.imagePrefix ? 'Runner did not report DIRECT_CLI_IMAGE_PREFIX.' : '',
+  ].filter(Boolean);
+
+  return {
+    runnerReady: Boolean(runnerDetails),
+    deployReady,
+    buildkitReady,
+    kubernetesReady,
+    imagePushReady,
+    buildToK3sReady,
+    requiredCliTools: ['git', 'buildctl', 'kubectl'],
+    availableCliTools: runnerDetails?.availableCliTools || [],
+    imagePrefix: runnerDetails?.imagePrefix || '',
+    blockers,
+  };
+}
+
 function buildToolRuntime(toolId, options = {}) {
   if (toolId === 'remote-cli-agent') {
     const publicConfig = remoteCliAgentsSdkRunner.getPublicConfig();
+    const runner = remoteRunnerService.getHealthyRunner('', { requiredProfile: 'deploy' });
+    const runnerDetails = buildRunnerRuntimeDetails(runner);
     return {
       configured: publicConfig.configured,
       provider: 'openai-agents-sdk-streamable-http-mcp',
@@ -204,6 +241,13 @@ function buildToolRuntime(toolId, options = {}) {
       maxTurns: publicConfig.maxTurns,
       adminModeSupported: true,
       serverSideOnly: true,
+      runnerAvailable: Boolean(runner),
+      runner: runnerDetails,
+      defaultWorkspace: runnerDetails?.defaultWorkspace || '',
+      shell: runnerDetails?.shell || '',
+      cliTools: runnerDetails?.cliTools || [],
+      availableCliTools: runnerDetails?.availableCliTools || [],
+      k3sFeedback: buildK3sFeedbackReadiness(runner),
     };
   }
 
@@ -299,6 +343,7 @@ function buildToolRuntime(toolId, options = {}) {
       cliTools: runnerDetails?.cliTools || [],
       availableCliTools: runnerDetails?.availableCliTools || [],
       transportPreference: runner ? 'runner-first' : 'ssh',
+      k3sFeedback: buildK3sFeedbackReadiness(runner),
       commandCatalog: REMOTE_CLI_COMMAND_CATALOG.filter((entry) => [
         'k8s-manifest-summary',
         'kubectl-inspect',

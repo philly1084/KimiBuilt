@@ -58,6 +58,39 @@ function formatRunnerCliToolsNote(cliTools = []) {
     ].filter(Boolean).join(' ');
 }
 
+function buildK3sRunnerFeedback(runner = null) {
+    const runnerCliTools = getRunnerCliTools(runner);
+    const availableCliTools = runnerCliTools
+        .filter((tool) => tool.available)
+        .map((tool) => tool.name);
+    const availableNames = new Set(availableCliTools.map((name) => name.toLowerCase()));
+    const buildkitReady = Boolean(runner?.metadata?.buildkitHostConfigured && availableNames.has('buildctl'));
+    const kubernetesReady = Boolean(runner?.metadata?.kubernetesConfigured && availableNames.has('kubectl'));
+    const imagePushReady = Boolean(buildkitReady && runner?.metadata?.imagePrefix);
+    const buildToK3sReady = Boolean(runner && buildkitReady && kubernetesReady && imagePushReady && availableNames.has('git'));
+
+    return {
+        runnerReady: Boolean(runner),
+        deployReady: Boolean(runner && kubernetesReady),
+        buildkitReady,
+        kubernetesReady,
+        imagePushReady,
+        buildToK3sReady,
+        requiredCliTools: ['git', 'buildctl', 'kubectl'],
+        availableCliTools,
+        imagePrefix: runner?.metadata?.imagePrefix || '',
+        blockers: [
+            !runner ? 'No online deploy-capable remote runner is registered.' : '',
+            runner && !availableNames.has('git') ? 'Runner did not report git.' : '',
+            runner && !availableNames.has('buildctl') ? 'Runner did not report buildctl.' : '',
+            runner && !runner?.metadata?.buildkitHostConfigured ? 'Runner did not report BUILDKIT_HOST.' : '',
+            runner && !availableNames.has('kubectl') ? 'Runner did not report kubectl.' : '',
+            runner && !runner?.metadata?.kubernetesConfigured ? 'Runner did not report Kubernetes configuration.' : '',
+            runner && !runner?.metadata?.imagePrefix ? 'Runner did not report DIRECT_CLI_IMAGE_PREFIX.' : '',
+        ].filter(Boolean),
+    };
+}
+
 function probeCommand(command, args = [], options = {}) {
     const timeout = options.timeout || 5000;
 
@@ -271,11 +304,15 @@ async function getRuntimeSupport(toolId) {
         const runnerWorkspace = runner?.metadata?.defaultCwd || runner?.metadata?.workspace || '';
         const runnerCliTools = getRunnerCliTools(runner);
         const runnerCliToolsNote = formatRunnerCliToolsNote(runnerCliTools);
+        const k3sFeedback = buildK3sRunnerFeedback(runner);
         return {
             status: (runner || snapshot.ssh.ready) ? 'stable' : 'requires_setup',
             notes: runner
                 ? [
                     `Remote runner ${runner.runnerId} is online for deploy operations${runnerWorkspace ? ` with workspace ${runnerWorkspace}` : ''}.`,
+                    k3sFeedback.buildToK3sReady
+                        ? 'K3s feedback check reports buildctl, kubectl, BuildKit, Kubernetes config, and image prefix are ready.'
+                        : `K3s feedback blockers: ${k3sFeedback.blockers.join(' ')}`,
                     runnerCliToolsNote,
                     ...snapshot.ssh.notes,
                 ].filter(Boolean)
@@ -290,6 +327,7 @@ async function getRuntimeSupport(toolId) {
                 runnerCapabilities: runner?.capabilities || [],
                 runnerCliTools,
                 runnerAvailableCliTools: runnerCliTools.filter((tool) => tool.available).map((tool) => tool.name),
+                k3sFeedback,
             },
         };
     }
@@ -297,12 +335,22 @@ async function getRuntimeSupport(toolId) {
     if (toolId === 'remote-cli-agent') {
         const publicConfig = remoteCliAgentsSdkRunner.getPublicConfig();
         const ready = publicConfig.enabled !== false && publicConfig.configured;
+        const runner = remoteRunnerService.getHealthyRunner('', { requiredProfile: 'deploy' });
+        const runnerWorkspace = runner?.metadata?.defaultCwd || runner?.metadata?.workspace || '';
+        const runnerCliTools = getRunnerCliTools(runner);
+        const k3sFeedback = buildK3sRunnerFeedback(runner);
         return {
             status: ready ? 'stable' : 'requires_setup',
             notes: ready
                 ? [
                     `Remote CLI MCP server ${publicConfig.name} is configured at ${publicConfig.url}.`,
                     `Default target is ${publicConfig.defaultTargetId}${publicConfig.defaultCwd ? ` with cwd ${publicConfig.defaultCwd}` : ''}.`,
+                    runner
+                        ? `Deploy-capable remote runner ${runner.runnerId} is online${runnerWorkspace ? ` with workspace ${runnerWorkspace}` : ''}.`
+                        : 'No deploy-capable remote runner is online; remote-cli-agent can still use MCP targets, but direct k3s build feedback is unavailable.',
+                    k3sFeedback.buildToK3sReady
+                        ? 'K3s feedback check reports buildctl, kubectl, BuildKit, Kubernetes config, and image prefix are ready.'
+                        : `K3s feedback blockers: ${k3sFeedback.blockers.join(' ')}`,
                     gitProviderConfig?.baseURL ? `Configured Git provider is ${gitProviderConfig.provider || 'gitlab'} at ${gitProviderConfig.baseURL}.` : 'No configured GitLab base URL is visible to the runtime; remote builds should fall back to local git/direct runner and report the missing source-control automation.',
                     'Use adminMode for scoped remote software deployment loops that need real changes through the admin-capable CLI runner lane.',
                 ]
@@ -313,6 +361,14 @@ async function getRuntimeSupport(toolId) {
             runtime: {
                 ready,
                 ...publicConfig,
+                runnerReady: Boolean(runner),
+                runnerId: runner?.runnerId || '',
+                runnerWorkspace,
+                runnerShell: runner?.metadata?.shell || '',
+                runnerCapabilities: runner?.capabilities || [],
+                runnerCliTools,
+                runnerAvailableCliTools: runnerCliTools.filter((tool) => tool.available).map((tool) => tool.name),
+                k3sFeedback,
             },
         };
     }

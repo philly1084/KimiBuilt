@@ -164,6 +164,83 @@ describe('/api/tools routes', () => {
         ]));
     });
 
+    test('remote-build catalog surfaces deploy runner feedback for remote-cli-agent and k3s-deploy', async () => {
+        const app = buildApp();
+        remoteRunnerService.registerRunner({
+            runnerId: 'k3s-builder',
+            capabilities: ['inspect', 'build', 'deploy', 'admin'],
+            metadata: {
+                defaultCwd: '/workspace',
+                shell: '/bin/bash',
+                buildkitHostConfigured: true,
+                kubernetesConfigured: true,
+                imagePrefix: 'registry.gitlab.demoserver2.buzz/agent-apps',
+                cliTools: [
+                    { name: 'git', available: true, path: '/usr/bin/git' },
+                    { name: 'buildctl', available: true, path: '/usr/bin/buildctl' },
+                    { name: 'kubectl', available: true, path: '/usr/bin/kubectl' },
+                ],
+            },
+        }, { readyState: 1, send: jest.fn() });
+
+        const response = await request(app).get('/api/tools/available?executionProfile=remote-build');
+
+        expect(response.status).toBe(200);
+        const remoteAgent = response.body.data.find((tool) => tool.id === 'remote-cli-agent');
+        const k3sDeploy = response.body.data.find((tool) => tool.id === 'k3s-deploy');
+
+        expect(remoteAgent).toBeDefined();
+        expect(k3sDeploy).toBeDefined();
+        expect(remoteAgent.runtime.runnerAvailable).toBe(true);
+        expect(remoteAgent.runtime.k3sFeedback).toEqual(expect.objectContaining({
+            runnerReady: true,
+            buildkitReady: true,
+            kubernetesReady: true,
+            imagePushReady: true,
+            buildToK3sReady: true,
+            imagePrefix: 'registry.gitlab.demoserver2.buzz/agent-apps',
+        }));
+        expect(remoteAgent.runtime.k3sFeedback.availableCliTools).toEqual(expect.arrayContaining([
+            'git',
+            'buildctl',
+            'kubectl',
+        ]));
+        expect(k3sDeploy.runtime.k3sFeedback.buildToK3sReady).toBe(true);
+    });
+
+    test('k3s feedback reports missing build and deploy prerequisites', async () => {
+        const app = buildApp();
+        remoteRunnerService.registerRunner({
+            runnerId: 'inspect-only',
+            capabilities: ['inspect', 'deploy'],
+            metadata: {
+                defaultCwd: '/workspace',
+                shell: '/bin/bash',
+                cliTools: [
+                    { name: 'git', available: true, path: '/usr/bin/git' },
+                    { name: 'kubectl', available: false, path: '' },
+                ],
+            },
+        }, { readyState: 1, send: jest.fn() });
+
+        const response = await request(app).get('/api/tools/k3s-deploy');
+
+        expect(response.status).toBe(200);
+        expect(response.body.data.runtime.k3sFeedback).toEqual(expect.objectContaining({
+            runnerReady: true,
+            buildkitReady: false,
+            kubernetesReady: false,
+            buildToK3sReady: false,
+        }));
+        expect(response.body.data.runtime.k3sFeedback.blockers).toEqual(expect.arrayContaining([
+            'Runner did not report buildctl.',
+            'Runner did not report BUILDKIT_HOST.',
+            'Runner did not report kubectl.',
+            'Runner did not report Kubernetes configuration.',
+            'Runner did not report DIRECT_CLI_IMAGE_PREFIX.',
+        ]));
+    });
+
     test('managed-app details and invocation are disabled', async () => {
         const app = buildApp();
 

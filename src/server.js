@@ -327,8 +327,8 @@ app.use((_req, res) => {
 app.use(errorHandler);
 
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws' });
-const runnerWss = new WebSocketServer({ server, path: '/ws/runners' });
+const wss = new WebSocketServer({ noServer: true });
+const runnerWss = new WebSocketServer({ noServer: true });
 setupWebSocket(wss, app);
 runnerWss.on('connection', (ws, req) => {
     try {
@@ -336,6 +336,28 @@ runnerWss.on('connection', (ws, req) => {
     } catch (error) {
         ws.close(4401, error.message);
     }
+});
+server.on('upgrade', (req, socket, head) => {
+    let pathname = '';
+    try {
+        pathname = new URL(req.url || '/', 'http://localhost').pathname;
+    } catch (_error) {
+        socket.destroy();
+        return;
+    }
+
+    const targetWss = pathname === '/ws/runners'
+        ? runnerWss
+        : (pathname === '/ws' ? wss : null);
+
+    if (!targetWss) {
+        socket.destroy();
+        return;
+    }
+
+    targetWss.handleUpgrade(req, socket, head, (ws) => {
+        targetWss.emit('connection', ws, req);
+    });
 });
 
 async function start() {
