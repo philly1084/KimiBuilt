@@ -21,6 +21,7 @@ const {
     extractSshSessionMetadataFromToolEvents,
     inferOutputFormatFromSession,
     resolveArtifactContextIds,
+    buildUserInputWithImageArtifacts,
     resolveReasoningEffort,
 } = require('../ai-route-utils');
 const {
@@ -625,6 +626,11 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 : {}),
         };
         const effectiveArtifactIds = resolveArtifactContextIds(session, artifactIds, message);
+        const effectiveAgentInput = await buildUserInputWithImageArtifacts({
+            sessionId,
+            text: effectiveMessage,
+            artifactIds: effectiveArtifactIds,
+        });
         runtimeTask = startRuntimeTask({
             sessionId,
             input: message,
@@ -1013,7 +1019,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             };
 
             const execution = await executeConversationRuntime(req.app, {
-                input: effectiveMessage,
+                input: effectiveAgentInput,
                 session: effectiveSession,
                 sessionId,
                 memoryInput: message,
@@ -1224,7 +1230,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
 
         const runtimeToolManager = await ensureRuntimeToolManager(req.app);
         const execution = await executeConversationRuntime(req.app, {
-            input: effectiveMessage,
+            input: effectiveAgentInput,
             session: effectiveSession,
             sessionId,
             memoryInput: message,

@@ -358,6 +358,26 @@ router.post('/upload', async (req, res, next) => {
             tags,
             file,
         });
+        if (artifact?.id) {
+            const priorUploadedIds = Array.isArray(session?.metadata?.lastUploadedArtifactIds)
+                ? session.metadata.lastUploadedArtifactIds
+                : [];
+            const priorUploadedImageIds = Array.isArray(session?.metadata?.lastUploadedImageArtifactIds)
+                ? session.metadata.lastUploadedImageArtifactIds
+                : [];
+            const uploadedIds = [artifact.id, ...priorUploadedIds.filter((id) => id !== artifact.id)].slice(0, 8);
+            const imageLike = String(artifact.mimeType || '').toLowerCase().startsWith('image/')
+                || ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(String(artifact.format || '').toLowerCase());
+            const uploadedImageIds = imageLike
+                ? [artifact.id, ...priorUploadedImageIds.filter((id) => id !== artifact.id)].slice(0, 4)
+                : priorUploadedImageIds.slice(0, 4);
+            await sessionStore.update(sessionId, {
+                metadata: {
+                    lastUploadedArtifactIds: uploadedIds,
+                    lastUploadedImageArtifactIds: uploadedImageIds,
+                },
+            });
+        }
 
         res.status(201).json(artifact);
     } catch (err) {

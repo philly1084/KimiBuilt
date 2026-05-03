@@ -28,6 +28,16 @@ To rotate generated values:
 ROTATE_SECRETS=1 SHOW_SECRET_VALUES=1 ./k8s/ensure-generated-secrets.sh
 ```
 
+If you are working from the Rancher UI and the shell is not connected to the
+cluster, use **Import YAML** with:
+
+```text
+k8s/rancher-secret-bootstrap-job.yaml
+```
+
+That creates a one-time in-cluster Job that generates the same secrets and
+prints only `SET` / `MISSING_OR_PLACEHOLDER` status in the Job logs.
+
 Then bootstrap the platform resources:
 
 ```bash

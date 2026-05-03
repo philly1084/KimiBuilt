@@ -22,6 +22,12 @@ const IMAGE_COUNT_WORDS = new Map([
     ['several', 3],
     ['multiple', 2],
 ]);
+const OPENAI_VISION_INPUT_MIME_TYPES = new Set([
+    'image/png',
+    'image/jpeg',
+    'image/gif',
+    'image/webp',
+]);
 
 function normalizeReasoningEffort(value = '') {
     const normalized = String(value || '').trim().toLowerCase();
@@ -574,6 +580,18 @@ function hasImplicitImageArtifactFollowupReference(text = '') {
     return /\b(last|generated|previous|prior|same|those|these|this|earlier|above)\b[\s\S]{0,40}\b(images?|photos?|pictures?|illustrations?|renders?)\b/i.test(normalized)
         || /\b(images?|photos?|pictures?|illustrations?|renders?)\b[\s\S]{0,60}\b(from earlier|from before|from above|you made|you generated|we generated|from the last turn)\b/i.test(normalized)
         || /\b(use|put|place|include|embed|make|turn|convert|compile)\b[\s\S]{0,40}\b(those|these|the generated|the previous|the earlier)\b[\s\S]{0,20}\b(images?|photos?|pictures?)\b/i.test(normalized);
+}
+
+function hasImplicitUploadedImageArtifactReference(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(uploaded|attached|selected|provided|sent)\b[\s\S]{0,50}\b(images?|photos?|pictures?|screenshots?)\b/i.test(normalized)
+        || /\b(images?|photos?|pictures?|screenshots?)\b[\s\S]{0,50}\b(uploaded|attached|selected|provided|sent)\b/i.test(normalized)
+        || /\b(this|that|the|my)\b[\s\S]{0,20}\b(images?|photos?|pictures?|screenshots?)\b/i.test(normalized)
+        || /\b(describe|analy[sz]e|inspect|read|look at|what'?s in|what is in)\b[\s\S]{0,30}\b(this|that|it|the upload|the attachment)\b/i.test(normalized);
 }
 
 function hasExplicitImageGenerationIntent(text = '') {
@@ -1211,10 +1229,161 @@ function resolveArtifactContextIds(session = null, artifactIds = [], text = '') 
         return lastGeneratedImageArtifactIds;
     }
 
+    const lastUploadedImageArtifactIds = Array.isArray(session?.metadata?.lastUploadedImageArtifactIds)
+        ? session.metadata.lastUploadedImageArtifactIds.filter((entry) => typeof entry === 'string' && entry.trim())
+        : [];
+    if (lastUploadedImageArtifactIds.length > 0 && hasImplicitUploadedImageArtifactReference(text)) {
+        return lastUploadedImageArtifactIds;
+    }
+
     const lastGeneratedArtifactId = session?.metadata?.lastGeneratedArtifactId;
     return lastGeneratedArtifactId && hasImplicitArtifactFollowupReference(text)
         ? [lastGeneratedArtifactId]
         : [];
+}
+
+function isVisionInputArtifact(artifact = null) {
+    const mimeType = String(artifact?.mimeType || '').trim().toLowerCase().split(';')[0];
+    const extension = String(artifact?.extension || artifact?.format || '').trim().toLowerCase();
+
+    return OPENAI_VISION_INPUT_MIME_TYPES.has(mimeType)
+        || ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(extension);
+}
+
+function normalizeVisionInputMimeType(artifact = null) {
+    const mimeType = String(artifact?.mimeType || '').trim().toLowerCase().split(';')[0];
+    if (OPENAI_VISION_INPUT_MIME_TYPES.has(mimeType)) {
+        return mimeType;
+    }
+
+    const extension = String(artifact?.extension || artifact?.format || '').trim().toLowerCase();
+    if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg';
+    if (extension === 'png') return 'image/png';
+    if (extension === 'gif') return 'image/gif';
+    if (extension === 'webp') return 'image/webp';
+    return '';
+}
+
+function normalizeUserInputContentParts(content = null, text = '') {
+    const normalizedText = String(text || '');
+    if (!Array.isArray(content)) {
+        return [{ type: 'input_text', text: normalizedText }];
+    }
+
+    const parts = [];
+    let insertedText = false;
+
+    content.forEach((part) => {
+        if (typeof part === 'string') {
+            if (!insertedText) {
+                parts.push({ type: 'input_text', text: normalizedText });
+                insertedText = true;
+            }
+            return;
+        }
+
+        if (!part || typeof part !== 'object') {
+            return;
+        }
+
+        if (['text', 'input_text', 'output_text'].includes(String(part.type || ''))) {
+            if (!insertedText) {
+                parts.push({ type: 'input_text', text: normalizedText });
+                insertedText = true;
+            }
+            return;
+        }
+
+        if (part.type === 'input_image') {
+            parts.push({
+                type: 'input_image',
+                ...(part.file_id ? { file_id: part.file_id } : {}),
+                ...(part.image_url ? { image_url: part.image_url } : {}),
+                detail: part.detail || 'auto',
+            });
+            return;
+        }
+
+        if (part.type === 'image_url' || part.image_url || part.imageUrl || part.url) {
+            const imageUrl = typeof part.image_url === 'object'
+                ? part.image_url.url
+                : (part.image_url || part.imageUrl || part.url);
+            if (imageUrl) {
+                parts.push({
+                    type: 'input_image',
+                    image_url: imageUrl,
+                    detail: part.detail || 'auto',
+                });
+            }
+        }
+    });
+
+    if (!insertedText) {
+        parts.unshift({ type: 'input_text', text: normalizedText });
+    }
+
+    return parts;
+}
+
+async function buildUserInputWithImageArtifacts({
+    sessionId = '',
+    text = '',
+    content = null,
+    artifactIds = [],
+    detail = 'auto',
+} = {}) {
+    const normalizedText = String(text || '');
+    const baseParts = Array.isArray(content)
+        ? normalizeUserInputContentParts(content, normalizedText)
+        : null;
+    const ids = Array.from(new Set(
+        (Array.isArray(artifactIds) ? artifactIds : [])
+            .map((artifactId) => String(artifactId || '').trim())
+            .filter(Boolean),
+    )).slice(0, 4);
+
+    if (!sessionId || ids.length === 0) {
+        return baseParts && baseParts.some((part) => part.type === 'input_image')
+            ? baseParts
+            : normalizedText;
+    }
+
+    const imageParts = [];
+    for (const artifactId of ids) {
+        let artifact = null;
+        try {
+            artifact = await artifactService.getArtifact(artifactId, { includeContent: true });
+        } catch (error) {
+            console.warn(`[Artifacts] Failed to load image artifact ${artifactId} for vision input: ${error.message}`);
+            continue;
+        }
+
+        if (!artifact || artifact.sessionId !== sessionId || !artifact.contentBuffer || !isVisionInputArtifact(artifact)) {
+            continue;
+        }
+
+        const mimeType = normalizeVisionInputMimeType(artifact);
+        if (!mimeType) {
+            continue;
+        }
+
+        imageParts.push({
+            type: 'input_image',
+            image_url: `data:${mimeType};base64,${artifact.contentBuffer.toString('base64')}`,
+            detail,
+        });
+    }
+
+    if (imageParts.length === 0) {
+        return baseParts && baseParts.some((part) => part.type === 'input_image')
+            ? baseParts
+            : normalizedText;
+    }
+
+    return [
+        ...(baseParts || [{ type: 'input_text', text: normalizedText }]),
+        ...imageParts,
+    ];
 }
 
 async function maybePrepareImagesForArtifactPrompt({
@@ -1399,6 +1568,7 @@ module.exports = {
     extractSshSessionMetadataFromToolEvents,
     inferOutputFormatFromSession,
     resolveArtifactContextIds,
+    buildUserInputWithImageArtifacts,
     maybePrepareImagesForArtifactPrompt,
 };
 

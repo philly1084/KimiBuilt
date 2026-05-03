@@ -53,10 +53,20 @@ function isLikelyTranscriptDependentTurn(text = '') {
         return false;
     }
 
+    const hasCurrentTurnAnchor = [
+        /\b(?:uploaded|attached|sent|included|provided)\b[\s\S]{0,80}\b(?:image|file|document|screenshot|photo|picture|pdf|attachment)\b/,
+        /^(?:please\s+)?(?:can you|could you|would you|help me|i need you to)?\s*(?:write|create|build|generate|produce|research|fix|update|deploy|render|convert)\b(?!\s+(?:it|that|this|them|those|same|same thing)\b)[\s\S]{8,}/,
+    ].some((pattern) => pattern.test(normalized));
+    if (hasCurrentTurnAnchor && !/^\s*(?:yes|yeah|yep|ok|okay|sure|again|continue|same)\b/.test(normalized)) {
+        return false;
+    }
+
     const shortTurn = normalized.length <= 120;
     const referentialCue = [
-        /\b(it|that|this|them|those|same|again|there)\b/,
+        /^(?:it|that|this|them|those)\b/,
+        /^(?:what about|how about|and|also)\b[\s\S]*\b(?:it|that|this|them|those|same)\b/,
         /\b(the commands|what you listed|the one you listed|the ones you listed|what i asked|same task|same thing|that one)\b/,
+        /^(?:did you|can you|could you|would you|please)?\s*(?:see|use|reuse|fix|update|change|make|do|run|check|open|get|fetch|show|try|retry|continue)\s+(?:it|that|this|them|those|same|same thing)\b/,
         /^(?:do|run|schedule|set up|queue|create|make|get|fetch|check)\s+(?:it|that|this|them|those)\b/,
         /^(?:in|after|at|tomorrow|later|once|one[- ]time|daily|hourly|every)\b/,
         /^(?:yes|yeah|yep|ok|okay|sure)\b/,
@@ -65,7 +75,7 @@ function isLikelyTranscriptDependentTurn(text = '') {
     const openEndedCue = /\b(?:in|at|for|to|on|from|with|about|into|around|using|and|then)\s*$/.test(normalized);
     const weakStandaloneCue = shortTurn
         && (
-            /^(?:continue|retry|again|later|tomorrow|same)\b/.test(normalized)
+            /^(?:continue|retry|try again|again|later|tomorrow|same)\b/.test(normalized)
             || /^(?:do|run|make|schedule|set up|queue|create|get|fetch|check|use)\s*$/.test(normalized)
         );
 

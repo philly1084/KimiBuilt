@@ -22,6 +22,7 @@ const {
     extractSshSessionMetadataFromToolEvents,
     inferOutputFormatFromSession,
     resolveArtifactContextIds,
+    buildUserInputWithImageArtifacts,
     resolveReasoningEffort,
 } = require('../ai-route-utils');
 const {
@@ -989,20 +990,6 @@ router.post('/chat/completions', async (req, res, next) => {
             });
             requestAbortSignal = registeredForegroundRequest?.signal || null;
         }
-        const effectiveMessages = messages.map((message) => (
-            message.role === 'user' && message === lastUserMessage
-                ? { role: message.role, content: effectiveInput }
-                : { role: message.role, content: message.content }
-        ));
-        const effectiveExecutionProfile = inferExecutionProfile({
-            ...req.body,
-            taskType,
-            input: effectiveMessages,
-            memoryInput: lastUserText,
-            session,
-        });
-        const chatControlState = getSessionControlState(session);
-        console.log(`[OpenAICompat] chat/completions routing sessionId=${sessionId} profile=${effectiveExecutionProfile} stickyRemote=${Boolean(chatControlState?.lastToolIntent || chatControlState?.lastSshTarget?.host || chatControlState?.lastRemoteObjective)} lastRemoteObjective=${JSON.stringify(chatControlState?.lastRemoteObjective || '')}`);
         const outputFormatProvided = Boolean(output_format);
         let effectiveOutputFormat = output_format
             || inferRequestedOutputFormat(artifactIntentText)
@@ -1074,6 +1061,26 @@ router.post('/chat/completions', async (req, res, next) => {
                 : {}),
         };
         const effectiveArtifactIds = resolveArtifactContextIds(session, artifact_ids, lastUserText);
+        const effectiveLastUserContent = await buildUserInputWithImageArtifacts({
+            sessionId,
+            text: effectiveInput,
+            content: lastUserMessage?.content,
+            artifactIds: effectiveArtifactIds,
+        });
+        const effectiveMessages = messages.map((message) => (
+            message.role === 'user' && message === lastUserMessage
+                ? { role: message.role, content: effectiveLastUserContent }
+                : { role: message.role, content: message.content }
+        ));
+        const effectiveExecutionProfile = inferExecutionProfile({
+            ...req.body,
+            taskType,
+            input: effectiveMessages,
+            memoryInput: lastUserText,
+            session,
+        });
+        const chatControlState = getSessionControlState(session);
+        console.log(`[OpenAICompat] chat/completions routing sessionId=${sessionId} profile=${effectiveExecutionProfile} stickyRemote=${Boolean(chatControlState?.lastToolIntent || chatControlState?.lastSshTarget?.host || chatControlState?.lastRemoteObjective)} lastRemoteObjective=${JSON.stringify(chatControlState?.lastRemoteObjective || '')}`);
         const artifactPrompt = buildArtifactPromptFromTranscript(messages, lastUserText);
         runtimeTask = startRuntimeTask({
             sessionId,
@@ -1272,11 +1279,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 foregroundTurn: pendingForegroundTurn,
             });
             const execution = await executeConversationRuntime(req.app, {
-                input: messages.map((message) => (
-                    message.role === 'user' && message === lastUserMessage
-                        ? { role: message.role, content: effectiveInput }
-                        : { role: message.role, content: message.content }
-                )),
+                input: effectiveMessages,
                 session,
                 sessionId,
                 memoryInput: lastUserText,
@@ -2087,13 +2090,19 @@ router.post('/responses', async (req, res, next) => {
             [buildContinuityInstructions(), instructions || '', artifactInstructions].filter(Boolean).join('\n\n'),
             effectiveArtifactIds,
         );
+        const lastUserIndex = normalizedInputMessages.map((entry) => entry.role).lastIndexOf('user');
+        const effectiveUserContent = await buildUserInputWithImageArtifacts({
+            sessionId,
+            text: effectiveUserInput,
+            content: lastUserIndex >= 0 ? normalizedInputMessages[lastUserIndex]?.content : null,
+            artifactIds: effectiveArtifactIds,
+        });
         const runtimeInput = typeof input === 'string'
-            ? effectiveUserInput
+            ? effectiveUserContent
             : normalizedInputMessages.map((message, index) => {
-                const isLastUser = message.role === 'user'
-                    && index === normalizedInputMessages.map((entry) => entry.role).lastIndexOf('user');
+                const isLastUser = message.role === 'user' && index === lastUserIndex;
                 return isLastUser
-                    ? { ...message, content: effectiveUserInput }
+                    ? { ...message, content: effectiveUserContent }
                     : message;
             });
         const effectiveExecutionProfile = inferExecutionProfile({

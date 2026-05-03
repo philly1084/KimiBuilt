@@ -74,6 +74,12 @@ describe('/api/tools routes', () => {
             expect.stringContaining('gateway-first OpenAI-compatible image generation path'),
             expect.stringContaining('verify usableCount/artifacts/markdownImages'),
         ]));
+        expect(response.body.data.runtime.requestTimeoutMs).toBeGreaterThanOrEqual(900000);
+        expect(response.body.data.runtime.callerContract).toEqual(expect.arrayContaining([
+            expect.stringContaining('websites, HTML, documents, PDFs, or presentations'),
+            expect.stringContaining('several minutes'),
+            expect.stringContaining('usableCount, artifacts/artifactIds, or markdownImages'),
+        ]));
         expect(response.body.data.skill.triggerPatterns).toEqual(expect.arrayContaining([
             'website visual',
             'html visual',

@@ -1,4 +1,10 @@
 const SUPPORTED_UPLOAD_FORMATS = new Set([
+    'png',
+    'jpg',
+    'jpeg',
+    'gif',
+    'webp',
+    'svg',
     'xlsx',
     'csv',
     'doc',
@@ -27,14 +33,20 @@ const FORMAT_MIME_TYPES = {
     csv: 'text/csv',
     doc: 'application/msword',
     docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    gif: 'image/gif',
     html: 'text/html',
+    jpeg: 'image/jpeg',
+    jpg: 'image/jpeg',
     m: 'text/plain',
     mermaid: 'text/vnd.mermaid',
     mmd: 'text/vnd.mermaid',
     pdf: 'application/pdf',
+    png: 'image/png',
     pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
     pq: 'text/plain',
     'power-query': 'text/plain',
+    svg: 'image/svg+xml',
+    webp: 'image/webp',
     xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     xml: 'application/xml',
 };
@@ -43,14 +55,20 @@ const FORMAT_EXTENSIONS = {
     csv: '.csv',
     doc: '.doc',
     docx: '.docx',
+    gif: '.gif',
     html: '.html',
+    jpeg: '.jpg',
+    jpg: '.jpg',
     m: '.m',
     mermaid: '.mmd',
     mmd: '.mmd',
     pdf: '.pdf',
+    png: '.png',
     pptx: '.pptx',
     pq: '.pq',
     'power-query': '.pq',
+    svg: '.svg',
+    webp: '.webp',
     xlsx: '.xlsx',
     xml: '.xml',
 };
@@ -76,6 +94,11 @@ function inferFormat(filename = '', mimeType = '') {
         return extension;
     }
 
+    if (lowerMime.includes('png')) return 'png';
+    if (lowerMime.includes('jpeg') || lowerMime.includes('jpg')) return 'jpg';
+    if (lowerMime.includes('gif')) return 'gif';
+    if (lowerMime.includes('webp')) return 'webp';
+    if (lowerMime.includes('svg')) return 'svg';
     if (lowerMime.includes('spreadsheetml')) return 'xlsx';
     if (lowerMime.includes('wordprocessingml')) return 'docx';
     if (lowerMime.includes('presentationml')) return 'pptx';

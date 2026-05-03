@@ -587,6 +587,22 @@ function createToolManager() {
                 };
             }
 
+            if (id === 'image-generate') {
+                return {
+                    success: true,
+                    toolId: id,
+                    data: {
+                        count: 1,
+                        artifacts: [
+                            {
+                                id: 'artifact-image-1',
+                                filename: 'generated-image.png',
+                            },
+                        ],
+                    },
+                };
+            }
+
             if (id === 'deep-research-presentation') {
                 return {
                     success: true,
@@ -2336,6 +2352,56 @@ describe('openai-client automatic tool orchestration helpers', () => {
         );
     });
 
+    test('runs standalone image generation directly without final model synthesis', async () => {
+        const toolManager = createToolManager();
+        const prompt = 'Make an image of a glass office atrium at sunrise.';
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            prompt,
+        );
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            prompt,
+        );
+        const requiredToolId = __testUtils.inferRequiredAutomaticToolId(
+            prompt,
+            automaticTools.map((tool) => tool.id),
+        );
+
+        const response = await __testUtils.runDirectRequiredToolAction({
+            toolManager,
+            requiredToolId,
+            selectedTools,
+            prompt,
+            toolContext: {},
+            model: 'gpt-5.5',
+        });
+
+        expect(requiredToolId).toBe('image-generate');
+        expect(response.output[0].content[0].text).toContain('Generated 1 image');
+        expect(toolManager.executeTool).toHaveBeenCalledWith(
+            'image-generate',
+            expect.objectContaining({
+                prompt,
+            }),
+            expect.any(Object),
+        );
+    });
+
+    test('does not direct-return image generation when the prompt needs a website build', async () => {
+        const toolManager = createToolManager();
+        const prompt = 'Build a website with a generated hero image for a solar startup.';
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            prompt,
+        );
+
+        expect(__testUtils.inferRequiredAutomaticToolId(
+            prompt,
+            automaticTools.map((tool) => tool.id),
+        )).not.toBe('image-generate');
+    });
+
     test('runs required remote-cli-agent deployment requests directly without final model synthesis', async () => {
         const toolManager = createToolManager();
         const prompt = 'Build and deploy a dashboard app on the remote k3s server at app.demoserver2.buzz.';
@@ -2730,7 +2796,8 @@ describe('openai-client automatic tool orchestration helpers', () => {
             content: 'You are a helpful AI assistant.',
         });
         expect(messages[1].role).toBe('system');
-        expect(messages[1].content).toContain('Supplemental recalled memory');
+        expect(messages[1].content).toContain('Historical recalled memory - not current transcript');
+        expect(messages[1].content).toContain('not messages or uploads from the active turn');
         expect(messages[2]).toEqual({
             role: 'user',
             content: 'Work in C:\\repo\\scripts and list the files.',
@@ -2743,6 +2810,27 @@ describe('openai-client automatic tool orchestration helpers', () => {
             role: 'user',
             content: 'Use the same directory as before.',
         });
+    });
+
+    test('normalizes multimodal content for Responses and Chat Completions APIs', () => {
+        const content = [
+            { type: 'input_text', text: 'Describe this image.' },
+            { type: 'input_image', image_url: 'data:image/png;base64,aW1hZ2U=', detail: 'auto' },
+        ];
+
+        expect(__testUtils.buildResponsesInput([{ role: 'user', content }])).toEqual([{
+            type: 'message',
+            role: 'user',
+            content,
+        }]);
+        expect(__testUtils.normalizeChatMessageContent(content)).toEqual([
+            { type: 'text', text: 'Describe this image.' },
+            {
+                type: 'image_url',
+                image_url: { url: 'data:image/png;base64,aW1hZ2U=' },
+                detail: 'auto',
+            },
+        ]);
     });
 
     test('adds a recent transcript anchor ahead of recalled memory for referential follow-ups', () => {
@@ -2758,7 +2846,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
             content: '[Recent transcript anchor]\nuser: Research Halifax vacation pricing for a presentation.',
         });
         expect(messages[2].role).toBe('system');
-        expect(messages[2].content).toContain('If it conflicts with the recent transcript or the user\'s current request, ignore it');
+        expect(messages[2].content).toContain('Do not treat artifacts, uploads, tool results, plans, or requests mentioned here as current');
     });
 
     test('runs a direct required workload action for explicit scheduling prompts', async () => {

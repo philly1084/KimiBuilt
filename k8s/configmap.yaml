@@ -16,6 +16,9 @@ data:
   # Chat/tool traffic and frontend image generation stay on the internal OpenAI-compatible gateway.
   OPENAI_BASE_URL: "http://n8n-openai-cli-gateway.n8n-openai-gateway.svc.cluster.local/v1"
   OPENAI_MODEL: "kimi-for-coding"
+  # Image-backed workflows can legitimately spend several minutes in the gateway before the final chat step.
+  OPENAI_REQUEST_TIMEOUT_MS: "900000"
+  OPENAI_TOOL_REQUEST_TIMEOUT_MS: "900000"
   OPENAI_IMAGE_MODEL: "gpt-image-2"
   # Server-side Agents SDK MCP connection for remote CLI coding agents.
   REMOTE_CLI_MCP_URL: "http://n8n-openai-cli-gateway.n8n-openai-gateway.svc.cluster.local/mcp"

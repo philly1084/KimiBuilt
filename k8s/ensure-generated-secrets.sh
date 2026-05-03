@@ -7,6 +7,7 @@ ROTATE_SECRETS="${ROTATE_SECRETS:-0}"
 SHOW_SECRET_VALUES="${SHOW_SECRET_VALUES:-0}"
 CREATE_KIMIBUILT_SECRETS="${CREATE_KIMIBUILT_SECRETS:-1}"
 CREATE_PLATFORM_SECRETS="${CREATE_PLATFORM_SECRETS:-1}"
+KUBECTL="${KUBECTL:-}"
 
 usage() {
   cat <<'EOF'
@@ -23,6 +24,7 @@ Environment variables:
   PLATFORM_NAMESPACE         Default: agent-platform
   ROTATE_SECRETS             Set to 1 to rotate generated secret values.
   SHOW_SECRET_VALUES         Set to 1 to print decoded values after applying.
+  KUBECTL                    Override kubectl command, e.g. "sudo k3s kubectl".
 
 Optional overrides:
   OPENAI_API_KEY
@@ -59,6 +61,12 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 fi
 
 kubectl_cmd() {
+  if [[ -n "$KUBECTL" ]]; then
+    # Intentionally allow a command with arguments, such as: sudo k3s kubectl.
+    # shellcheck disable=SC2086
+    $KUBECTL "$@"
+    return
+  fi
   if command -v kubectl >/dev/null 2>&1; then
     kubectl "$@"
     return
@@ -69,6 +77,14 @@ kubectl_cmd() {
   fi
   echo "kubectl or k3s is required" >&2
   exit 1
+}
+
+require_cluster_access() {
+  if ! kubectl_cmd get namespace default >/dev/null 2>&1; then
+    echo "ERROR: kubectl is not connected to the target k3s cluster." >&2
+    echo "Set KUBECONFIG correctly or run with KUBECTL=\"sudo k3s kubectl\" on the server." >&2
+    exit 1
+  fi
 }
 
 is_enabled() {
@@ -272,10 +288,12 @@ ensure_platform_secrets() {
 }
 
 if is_enabled "$CREATE_KIMIBUILT_SECRETS"; then
+  require_cluster_access
   ensure_kimibuilt_secrets
 fi
 
 if is_enabled "$CREATE_PLATFORM_SECRETS"; then
+  require_cluster_access
   ensure_platform_secrets
 fi
 

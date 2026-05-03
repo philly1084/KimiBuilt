@@ -400,6 +400,12 @@ function buildToolRuntime(toolId, options = {}) {
       configured: Boolean(hasGatewayImageProvider || hasOfficialMediaProvider),
       provider: hasGatewayImageProvider ? 'gateway' : (hasOfficialMediaProvider ? 'official-openai' : 'unconfigured'),
       model: config.openai.imageModel || config.media.imageModel || '',
+      requestTimeoutMs: config.openai.toolRequestTimeoutMs || config.openai.requestTimeoutMs || null,
+      callerContract: [
+        'Call before composing websites, HTML, documents, PDFs, or presentations that need generated visuals.',
+        'Wait for the tool result; image generation can take several minutes.',
+        'Continue only after usableCount, artifacts/artifactIds, or markdownImages confirms a reusable image.',
+      ],
     };
   }
 

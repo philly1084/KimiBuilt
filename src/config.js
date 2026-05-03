@@ -487,6 +487,16 @@ const config = {
         apiMode: process.env.OPENAI_API_MODE || 'auto',
         model: process.env.OPENAI_MODEL || 'gpt-5.5',
         reasoningEffort: process.env.OPENAI_REASONING_EFFORT || '',
+        requestTimeoutMs: Math.max(
+            1000,
+            parseInt(process.env.OPENAI_REQUEST_TIMEOUT_MS, 10) || 900000,
+        ),
+        toolRequestTimeoutMs: Math.max(
+            1000,
+            parseInt(process.env.OPENAI_TOOL_REQUEST_TIMEOUT_MS, 10)
+                || parseInt(process.env.OPENAI_REQUEST_TIMEOUT_MS, 10)
+                || 900000,
+        ),
         imageModel: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2',
         imageAllowOfficialFallback: process.env.OPENAI_IMAGE_ALLOW_OFFICIAL_FALLBACK === 'true',
         imageBatchConcurrency: Math.min(Math.max(parseOptionalInteger(process.env.OPENAI_IMAGE_BATCH_CONCURRENCY) || 4, 1), 5),

@@ -47,6 +47,15 @@ spec:
       containers:
         - name: ollama
           image: ollama/ollama:0.5.7
+          env:
+            - name: OLLAMA_KEEP_ALIVE
+              value: "30m"
+            - name: OLLAMA_MAX_LOADED_MODELS
+              value: "1"
+            - name: OLLAMA_NUM_PARALLEL
+              value: "4"
+            - name: OLLAMA_MAX_QUEUE
+              value: "256"
           ports:
             - containerPort: 11434
               name: http
@@ -67,11 +76,11 @@ spec:
             periodSeconds: 30
           resources:
             requests:
-              memory: "512Mi"
-              cpu: "250m"
+              memory: "3Gi"
+              cpu: "2000m"
             limits:
-              memory: "2Gi"
-              cpu: "1000m"
+              memory: "8Gi"
+              cpu: "6000m"
       volumes:
         - name: ollama-storage
           persistentVolumeClaim:

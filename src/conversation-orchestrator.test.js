@@ -5751,6 +5751,40 @@ describe('ConversationOrchestrator', () => {
         );
     });
 
+    test('planner labels recalled context as historical instead of active transcript', async () => {
+        const llmClient = {
+            createResponse: jest.fn(),
+            complete: jest.fn().mockResolvedValue(JSON.stringify({ steps: [] })),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    toolId === 'asset-search'
+                        ? { id: toolId, description: 'Search indexed assets' }
+                        : null
+                )),
+            },
+        });
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'I just uploaded an image. did you see it?',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+
+        await orchestrator.planToolUse({
+            objective: 'I just uploaded an image. did you see it?',
+            executionProfile: 'default',
+            contextMessages: ['Older memory says the user had a puddle image.'],
+            toolPolicy,
+        });
+
+        expect(llmClient.complete).toHaveBeenCalled();
+        const prompt = llmClient.complete.mock.calls[0][0];
+        expect(prompt).toContain('historical retrieved memory, not the active transcript');
+        expect(prompt).toContain('Do not plan tool calls as if uploads, artifacts, tasks, or tool results mentioned there are present in this request');
+    });
+
     test('planner model responses can append to executionTrace without throwing', async () => {
         const executionTrace = [];
         const llmClient = {

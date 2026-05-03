@@ -34,6 +34,8 @@ data:
   KIMIBUILT_ALLOWED_ORIGINS: "https://kimibuilt.secdevsolutions.help,https://kimibuilt.demoserver2.buzz,https://168.119.176.121,http://168.119.176.121"
   OPENAI_BASE_URL: "http://n8n-openai-cli-gateway.n8n-openai-gateway.svc.cluster.local/v1"
   OPENAI_MODEL: "gpt-4o"
+  OPENAI_REQUEST_TIMEOUT_MS: "900000"
+  OPENAI_TOOL_REQUEST_TIMEOUT_MS: "900000"
   OPENAI_IMAGE_MODEL: "gpt-image-2"
   TTS_PROVIDER: "kokoro"
   TTS_FALLBACK_PROVIDER: "piper"
@@ -210,6 +212,23 @@ spec:
         - name: postgres
           image: postgres:16
           imagePullPolicy: Always
+          args:
+            - -c
+            - shared_buffers=1536MB
+            - -c
+            - effective_cache_size=12GB
+            - -c
+            - maintenance_work_mem=512MB
+            - -c
+            - work_mem=16MB
+            - -c
+            - max_connections=100
+            - -c
+            - checkpoint_completion_target=0.9
+            - -c
+            - wal_buffers=16MB
+            - -c
+            - random_page_cost=1.1
           ports:
             - containerPort: 5432
               name: postgres
@@ -250,11 +269,11 @@ spec:
             periodSeconds: 20
           resources:
             requests:
-              memory: "256Mi"
-              cpu: "100m"
+              memory: "2Gi"
+              cpu: "1000m"
             limits:
-              memory: "1Gi"
-              cpu: "500m"
+              memory: "6Gi"
+              cpu: "3000m"
       volumes:
         - name: postgres-storage
           persistentVolumeClaim:
@@ -303,6 +322,13 @@ spec:
         - name: qdrant
           image: qdrant/qdrant:v1.13.6
           imagePullPolicy: Always
+          env:
+            - name: QDRANT__STORAGE__PERFORMANCE__MAX_SEARCH_THREADS
+              value: "4"
+            - name: QDRANT__STORAGE__PERFORMANCE__MAX_OPTIMIZATION_THREADS
+              value: "2"
+            - name: QDRANT__SERVICE__MAX_WORKERS
+              value: "4"
           ports:
             - containerPort: 6333
               name: http
@@ -325,11 +351,11 @@ spec:
             periodSeconds: 30
           resources:
             requests:
-              memory: "256Mi"
-              cpu: "100m"
+              memory: "2Gi"
+              cpu: "1000m"
             limits:
-              memory: "1Gi"
-              cpu: "500m"
+              memory: "5Gi"
+              cpu: "4000m"
       volumes:
         - name: qdrant-storage
           persistentVolumeClaim:
@@ -396,6 +422,15 @@ spec:
         - name: ollama
           image: ollama/ollama:0.5.7
           imagePullPolicy: Always
+          env:
+            - name: OLLAMA_KEEP_ALIVE
+              value: "30m"
+            - name: OLLAMA_MAX_LOADED_MODELS
+              value: "1"
+            - name: OLLAMA_NUM_PARALLEL
+              value: "4"
+            - name: OLLAMA_MAX_QUEUE
+              value: "256"
           ports:
             - containerPort: 11434
               name: http
@@ -416,11 +451,11 @@ spec:
             periodSeconds: 30
           resources:
             requests:
-              memory: "512Mi"
-              cpu: "250m"
+              memory: "3Gi"
+              cpu: "2000m"
             limits:
-              memory: "2Gi"
-              cpu: "1000m"
+              memory: "8Gi"
+              cpu: "6000m"
       volumes:
         - name: ollama-storage
           persistentVolumeClaim:
@@ -486,6 +521,10 @@ spec:
               value: "3001"
             - name: KOKORO_TTS_BASE_URL
               value: ""
+            - name: NODE_OPTIONS
+              value: "--max-old-space-size=2048"
+            - name: UV_THREADPOOL_SIZE
+              value: "8"
           readinessProbe:
             httpGet:
               path: /ready
@@ -504,11 +543,11 @@ spec:
             failureThreshold: 10
           resources:
             requests:
-              memory: "768Mi"
-              cpu: "500m"
+              memory: "1536Mi"
+              cpu: "1000m"
             limits:
-              memory: "2Gi"
-              cpu: "2000m"
+              memory: "4Gi"
+              cpu: "3000m"
 
 ---
 apiVersion: v1
@@ -566,6 +605,15 @@ spec:
                 name: kimibuilt-config
             - secretRef:
                 name: kimibuilt-secrets
+          env:
+            - name: NODE_OPTIONS
+              value: "--max-old-space-size=4096"
+            - name: UV_THREADPOOL_SIZE
+              value: "16"
+            - name: OPENAI_IMAGE_BATCH_CONCURRENCY
+              value: "5"
+            - name: PODCAST_TTS_CONCURRENCY
+              value: "2"
           volumeMounts:
             - name: backend-state
               mountPath: /home/kimibuilt/.kimibuilt
@@ -587,11 +635,11 @@ spec:
             failureThreshold: 10
           resources:
             requests:
-              memory: "512Mi"
-              cpu: "250m"
-            limits:
               memory: "2Gi"
-              cpu: "2000m"
+              cpu: "1000m"
+            limits:
+              memory: "6Gi"
+              cpu: "4000m"
       volumes:
         - name: backend-state
           persistentVolumeClaim:
@@ -664,11 +712,11 @@ spec:
             periodSeconds: 30
           resources:
             requests:
-              memory: "64Mi"
-              cpu: "50m"
+              memory: "128Mi"
+              cpu: "100m"
             limits:
-              memory: "256Mi"
-              cpu: "250m"
+              memory: "512Mi"
+              cpu: "500m"
       volumes:
         - name: nginx-config
           configMap:

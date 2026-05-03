@@ -32,6 +32,13 @@ spec:
       containers:
         - name: qdrant
           image: qdrant/qdrant:v1.13.6
+          env:
+            - name: QDRANT__STORAGE__PERFORMANCE__MAX_SEARCH_THREADS
+              value: "4"
+            - name: QDRANT__STORAGE__PERFORMANCE__MAX_OPTIMIZATION_THREADS
+              value: "2"
+            - name: QDRANT__SERVICE__MAX_WORKERS
+              value: "4"
           ports:
             - containerPort: 6333
               name: http
@@ -54,11 +61,11 @@ spec:
             periodSeconds: 30
           resources:
             requests:
-              memory: "256Mi"
-              cpu: "100m"
+              memory: "2Gi"
+              cpu: "1000m"
             limits:
-              memory: "1Gi"
-              cpu: "500m"
+              memory: "5Gi"
+              cpu: "4000m"
       volumes:
         - name: qdrant-storage
           persistentVolumeClaim:

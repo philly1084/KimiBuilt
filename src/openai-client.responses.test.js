@@ -35,6 +35,7 @@ describe('openai-client response threading', () => {
 
     afterEach(() => {
         delete process.env.OPENAI_API_MODE;
+        delete process.env.OPENAI_REQUEST_TIMEOUT_MS;
     });
 
     test('forwards previous_response_id when the prior prompt fingerprint matches', async () => {
@@ -54,6 +55,27 @@ describe('openai-client response threading', () => {
         const [[requestParams]] = client.responses.create.mock.calls;
         expect(requestParams).toEqual(expect.objectContaining({
             previous_response_id: 'resp_prev_123',
+        }));
+    });
+
+    test('applies the configured OpenAI request timeout by default', async () => {
+        process.env.OPENAI_REQUEST_TIMEOUT_MS = '901234';
+        jest.resetModules();
+        jest.doMock('./routes/admin/settings.controller', () => ({
+            getSettings: jest.fn(() => ({})),
+        }));
+        const OpenAI = require('openai');
+        const { createResponse } = require('./openai-client');
+
+        await createResponse({
+            input: 'Use the default timeout.',
+            stream: false,
+        });
+
+        const client = OpenAI.mock.results[0].value;
+        const [, requestOptions] = client.responses.create.mock.calls[0];
+        expect(requestOptions).toEqual(expect.objectContaining({
+            timeout: 901234,
         }));
     });
 

@@ -1336,6 +1336,92 @@ function normalizeMessageContent(content) {
     return '';
 }
 
+function normalizeResponsesMessageContent(content) {
+    if (!Array.isArray(content)) {
+        return content;
+    }
+
+    return content
+        .map((part) => {
+            if (typeof part === 'string') {
+                return { type: 'input_text', text: part };
+            }
+            if (!part || typeof part !== 'object') {
+                return null;
+            }
+
+            const type = String(part.type || '').trim();
+            if (type === 'input_text' || type === 'text' || type === 'output_text') {
+                return {
+                    type: 'input_text',
+                    text: part.text || part.content || part.value || '',
+                };
+            }
+            if (type === 'input_image') {
+                return {
+                    type: 'input_image',
+                    ...(part.file_id ? { file_id: part.file_id } : {}),
+                    ...(part.image_url ? { image_url: typeof part.image_url === 'object' ? part.image_url.url : part.image_url } : {}),
+                    detail: part.detail || 'auto',
+                };
+            }
+            if (type === 'image_url' || part.image_url || part.imageUrl || part.url) {
+                const imageUrl = typeof part.image_url === 'object'
+                    ? part.image_url.url
+                    : (part.image_url || part.imageUrl || part.url);
+                return imageUrl
+                    ? {
+                        type: 'input_image',
+                        image_url: imageUrl,
+                        detail: part.detail || 'auto',
+                    }
+                    : null;
+            }
+
+            return null;
+        })
+        .filter((part) => part && (part.type !== 'input_text' || String(part.text || '').trim()));
+}
+
+function normalizeChatMessageContent(content) {
+    if (!Array.isArray(content)) {
+        return content;
+    }
+
+    return content
+        .map((part) => {
+            if (typeof part === 'string') {
+                return { type: 'text', text: part };
+            }
+            if (!part || typeof part !== 'object') {
+                return null;
+            }
+
+            const type = String(part.type || '').trim();
+            if (type === 'text' || type === 'input_text' || type === 'output_text') {
+                return {
+                    type: 'text',
+                    text: part.text || part.content || part.value || '',
+                };
+            }
+            if (type === 'image_url' || type === 'input_image' || part.image_url || part.imageUrl || part.url) {
+                const imageUrl = typeof part.image_url === 'object'
+                    ? part.image_url.url
+                    : (part.image_url || part.imageUrl || part.url);
+                return imageUrl
+                    ? {
+                        type: 'image_url',
+                        image_url: { url: imageUrl },
+                        ...(part.detail ? { detail: part.detail } : {}),
+                    }
+                    : null;
+            }
+
+            return null;
+        })
+        .filter((part) => part && (part.type !== 'text' || String(part.text || '').trim()));
+}
+
 function collectInputSystemMessages(input = null) {
     const inputMessages = Array.isArray(input) ? input : null;
     if (!inputMessages) {
@@ -1436,7 +1522,7 @@ function buildMessages({
     if (contextMessages.length > 0) {
         messages.push({
             role: 'system',
-            content: `[Supplemental recalled memory]\nUse this only as supporting context when it helps resolve references or recover older details.\nIf it conflicts with the recent transcript or the user's current request, ignore it and follow the recent transcript/current request.\n${contextMessages.join('\n---\n')}`,
+            content: `[Historical recalled memory - not current transcript]\nThese snippets are older retrieved context, not messages or uploads from the active turn.\nUse them only as supporting context when they help resolve an explicit follow-up or recover older details.\nDo not treat artifacts, uploads, tool results, plans, or requests mentioned here as current unless the current user request or recent transcript clearly asks to reuse them.\nIf this conflicts with the recent transcript or the user's current request, ignore it and follow the recent transcript/current request.\n${contextMessages.join('\n---\n')}`,
         });
     }
 
@@ -3218,6 +3304,11 @@ function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = [], o
         return 'podcast';
     }
 
+    if (availableToolIds.has('image-generate')
+        && hasStandaloneImageGenerationRequest(prompt)) {
+        return 'image-generate';
+    }
+
     if (hasExplicitWebResearchIntent(prompt)) {
         return 'web-search';
     }
@@ -3231,6 +3322,15 @@ function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = [], o
     }
 
     return null;
+}
+
+function hasStandaloneImageGenerationRequest(prompt = '') {
+    const normalized = String(prompt || '').toLowerCase();
+    if (!hasExplicitImageGenerationIntent(prompt)) {
+        return false;
+    }
+
+    return !/\b(website|web site|webpage|web page|landing page|homepage|home page|site|html|pdf|docx|word document|document|report|brief|deck|slide deck|presentation|pptx|app|dashboard|article|brochure|artifact|file|sandbox|page)\b/.test(normalized);
 }
 
 function buildForcedToolChoice(toolId, api = 'responses') {
@@ -4422,7 +4522,7 @@ async function runDirectRequiredToolAction({
     toolContext = {},
     model = null,
 }) {
-    if (!['ssh-execute', 'remote-command', 'remote-cli-agent', 'web-scrape', 'agent-workload', 'podcast'].includes(requiredToolId)) {
+    if (!['ssh-execute', 'remote-command', 'remote-cli-agent', 'web-scrape', 'agent-workload', 'podcast', 'image-generate'].includes(requiredToolId)) {
         return null;
     }
 
@@ -4474,7 +4574,7 @@ async function runDirectRequiredToolAction({
     const actions = buildDeterministicPreflightActions(selectedTools, prompt)
         .filter((action) => action.toolId === requiredToolId);
 
-    if (!actions.length && requiredToolId !== 'remote-cli-agent') {
+    if (!actions.length && !['remote-cli-agent', 'image-generate'].includes(requiredToolId)) {
         return null;
     }
 
@@ -4483,6 +4583,8 @@ async function runDirectRequiredToolAction({
             task: prompt,
             adminMode: hasRemoteSoftwareDeploymentIntent(prompt),
         }
+        : requiredToolId === 'image-generate'
+            ? (actions[0]?.params || { prompt })
         : actions[0].params;
     const toolCall = {
         id: 'direct_required_tool_1',
@@ -4509,7 +4611,7 @@ function buildResponsesInput(messages = []) {
     return messages.map((message) => ({
         type: 'message',
         role: message.role,
-        content: message.content,
+        content: normalizeResponsesMessageContent(message.content),
     }));
 }
 
@@ -4880,7 +4982,14 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
     reasoningEffort = null,
     toolContext = {},
 }) {
-    const requestOptions = toolContext?.signal ? { signal: toolContext.signal } : undefined;
+    const requestOptions = {};
+    const effectiveToolRequestTimeoutMs = Number(config.openai.toolRequestTimeoutMs || config.openai.requestTimeoutMs);
+    if (Number.isFinite(effectiveToolRequestTimeoutMs) && effectiveToolRequestTimeoutMs > 0) {
+        requestOptions.timeout = effectiveToolRequestTimeoutMs;
+    }
+    if (toolContext?.signal) {
+        requestOptions.signal = toolContext.signal;
+    }
     if (selectedTools.length === 0) {
         return null;
     }
@@ -5546,8 +5655,11 @@ async function createResponse({
         },
     };
     const requestOptions = {};
-    if (Number.isFinite(Number(requestTimeoutMs)) && Number(requestTimeoutMs) > 0) {
-        requestOptions.timeout = Number(requestTimeoutMs);
+    const effectiveRequestTimeoutMs = Number.isFinite(Number(requestTimeoutMs)) && Number(requestTimeoutMs) > 0
+        ? Number(requestTimeoutMs)
+        : Number(config.openai.requestTimeoutMs);
+    if (Number.isFinite(effectiveRequestTimeoutMs) && effectiveRequestTimeoutMs > 0) {
+        requestOptions.timeout = effectiveRequestTimeoutMs;
     }
     if (Number.isFinite(Number(requestMaxRetries)) && Number(requestMaxRetries) >= 0) {
         requestOptions.maxRetries = Number(requestMaxRetries);
@@ -5668,7 +5780,10 @@ async function createResponse({
 
         const chatParams = {
             model: params.model,
-            messages,
+            messages: messages.map((message) => ({
+                ...message,
+                content: normalizeChatMessageContent(message.content),
+            })),
             stream,
         };
         if (normalizedReasoningEffort && shouldSendReasoningEffort({
@@ -6224,6 +6339,8 @@ module.exports = {
         normalizeOpenAIApiMode,
         extractResponseUsageMetadata,
         normalizeMessageContent,
+        normalizeResponsesMessageContent,
+        normalizeChatMessageContent,
         normalizeChatCompletionsStream,
         normalizeModelResponse,
         normalizeStreamResponse,

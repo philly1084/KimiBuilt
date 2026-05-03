@@ -10822,6 +10822,7 @@ class ConversationOrchestrator extends EventEmitter {
             toolPolicy.remoteCliInventorySummary || '(no remote runner CLI inventory reported)',
             '',
             'Supplemental recalled context:',
+            'The recalled context below is historical retrieved memory, not the active transcript. Do not plan tool calls as if uploads, artifacts, tasks, or tool results mentioned there are present in this request unless the current user request or recent transcript explicitly asks to reuse them.',
             Array.isArray(contextMessages) && contextMessages.length > 0 ? contextMessages.join('\n') : '(none)',
             '',
             'Recent transcript:',

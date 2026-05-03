@@ -3,6 +3,7 @@ jest.mock('./artifacts/artifact-service', () => ({
         buildPromptContext: jest.fn(),
         canStoreArtifacts: jest.fn(() => true),
         generateArtifact: jest.fn(),
+        getArtifact: jest.fn(),
     },
 }));
 
@@ -41,6 +42,7 @@ const {
     resolveReasoningEffort,
     resolveSshRequestContext,
     resolveArtifactContextIds,
+    buildUserInputWithImageArtifacts,
     shouldPreGenerateImagesForArtifactRequest,
     shouldDeferArtifactGenerationToWorkload,
     shouldSuppressNotesSurfaceArtifact,
@@ -541,6 +543,37 @@ describe('ai-route-utils', () => {
                 lastGeneratedImageArtifactIds: ['image-1', 'image-2'],
             },
         }, [], 'Generate more hypercar images and then make a document with it.')).toEqual([]);
+    });
+
+    test('resolveArtifactContextIds uses recently uploaded images for explicit image follow-ups', () => {
+        expect(resolveArtifactContextIds({
+            metadata: {
+                lastUploadedImageArtifactIds: ['upload-image-1'],
+            },
+        }, [], 'what is in this image?')).toEqual(['upload-image-1']);
+    });
+
+    test('buildUserInputWithImageArtifacts sends uploaded images as OpenAI vision parts', async () => {
+        artifactService.getArtifact.mockResolvedValue({
+            id: 'upload-image-1',
+            sessionId: 'session-1',
+            extension: 'png',
+            mimeType: 'image/png',
+            contentBuffer: Buffer.from('image-bytes'),
+        });
+
+        await expect(buildUserInputWithImageArtifacts({
+            sessionId: 'session-1',
+            text: 'Describe this image.',
+            artifactIds: ['upload-image-1'],
+        })).resolves.toEqual([
+            { type: 'input_text', text: 'Describe this image.' },
+            {
+                type: 'input_image',
+                image_url: `data:image/png;base64,${Buffer.from('image-bytes').toString('base64')}`,
+                detail: 'auto',
+            },
+        ]);
     });
 
     test('resolveArtifactContextIds does not attach the last generated artifact on unrelated turns', () => {

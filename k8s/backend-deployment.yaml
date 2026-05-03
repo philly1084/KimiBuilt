@@ -42,6 +42,15 @@ spec:
                 name: kimibuilt-config
             - secretRef:
                 name: kimibuilt-secrets
+          env:
+            - name: NODE_OPTIONS
+              value: "--max-old-space-size=4096"
+            - name: UV_THREADPOOL_SIZE
+              value: "16"
+            - name: OPENAI_IMAGE_BATCH_CONCURRENCY
+              value: "5"
+            - name: PODCAST_TTS_CONCURRENCY
+              value: "2"
           volumeMounts:
             - name: backend-state
               mountPath: /home/kimibuilt/.kimibuilt
@@ -63,11 +72,11 @@ spec:
             failureThreshold: 10
           resources:
             requests:
-              memory: "512Mi"
-              cpu: "250m"
-            limits:
               memory: "2Gi"
-              cpu: "2000m"
+              cpu: "1000m"
+            limits:
+              memory: "6Gi"
+              cpu: "4000m"
       volumes:
         - name: backend-state
           persistentVolumeClaim:

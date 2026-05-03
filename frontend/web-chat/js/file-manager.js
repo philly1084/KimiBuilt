@@ -927,6 +927,21 @@ class FileManager {
     }
   }
 
+  getSelectedFiles(options = {}) {
+    const category = String(options.category || '').trim();
+    return this.files.filter((file) => (
+      file?.selected
+      && (!category || file.category === category)
+      && String(file.id || '').trim()
+    ));
+  }
+
+  getSelectedArtifactIds(options = {}) {
+    return this.getSelectedFiles(options)
+      .map((file) => String(file.id || '').trim())
+      .filter(Boolean);
+  }
+
   /**
    * Set filter type
    */
