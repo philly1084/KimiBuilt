@@ -617,6 +617,8 @@ function webChatSelectPreferredModel(models = [], preferredModel = '') {
 class UIHelpers {
     constructor() {
         this.storageAvailable = this.checkStorageAvailability();
+        this.htmlPreviewPageLoadedAt = Date.now();
+        this.htmlPreviewAutostartWindowMs = 90000;
         this.messageContainer = document.getElementById('messages-container');
         this.sessionsList = document.getElementById('sessions-list');
         this.searchResults = [];
@@ -1179,9 +1181,19 @@ class UIHelpers {
                         <div class="html-preview-wrapper">
                             <div class="html-preview-toolbar">
                                 <span class="html-preview-label">Live preview</span>
+                                <div class="html-preview-controls">
+                                    <button type="button" class="html-preview-control" data-html-preview-action="start" onclick="uiHelpers.startInlineHtmlPreview(this)" aria-label="Start HTML preview">
+                                        <i data-lucide="play" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                                        <span>Start</span>
+                                    </button>
+                                    <button type="button" class="html-preview-control" data-html-preview-action="stop" onclick="uiHelpers.stopInlineHtmlPreview(this)" aria-label="Stop HTML preview" disabled>
+                                        <i data-lucide="square" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                                        <span>Stop</span>
+                                    </button>
+                                </div>
                             </div>
                             <div class="html-preview-surface">
-                                <div class="html-preview-placeholder">Rendering preview...</div>
+                                <div class="html-preview-placeholder">Preview stopped. Start it when you want to run this HTML.</div>
                             </div>
                         </div>
                     </div>
@@ -3786,6 +3798,9 @@ class UIHelpers {
         messageEl.className = `message ${isUser ? 'user' : 'assistant'}`;
         messageEl.id = messageId;
         messageEl.dataset.messageId = messageId;
+        if (message.timestamp) {
+            messageEl.dataset.messageTimestamp = String(message.timestamp);
+        }
         
         // Add ARIA attributes for accessibility
         messageEl.setAttribute('role', 'article');
@@ -6700,24 +6715,119 @@ class UIHelpers {
         await this.persistGeneratedFile(blob, filename, 'text/html');
     }
 
+    getHtmlPreviewSurface(element) {
+        return element?.closest?.('.html-preview-wrapper')?.querySelector?.('.html-preview-surface')
+            || element?.closest?.('.html-preview-surface')
+            || null;
+    }
+
+    getHtmlPreviewControls(surface) {
+        const wrapper = surface?.closest?.('.html-preview-wrapper');
+        return {
+            start: wrapper?.querySelector?.('[data-html-preview-action="start"]') || null,
+            stop: wrapper?.querySelector?.('[data-html-preview-action="stop"]') || null,
+        };
+    }
+
+    shouldAutostartHtmlPreview(surface) {
+        const messageEl = surface?.closest?.('.message.assistant');
+        if (!messageEl) {
+            return false;
+        }
+
+        const timestamp = Date.parse(messageEl.dataset.messageTimestamp || '');
+        if (!Number.isFinite(timestamp)) {
+            return false;
+        }
+
+        return timestamp >= this.htmlPreviewPageLoadedAt - this.htmlPreviewAutostartWindowMs;
+    }
+
+    setHtmlPreviewState(surface, active, label = '') {
+        if (!surface) {
+            return;
+        }
+
+        const controls = this.getHtmlPreviewControls(surface);
+        surface.dataset.htmlPreviewActive = active ? 'true' : 'false';
+        if (controls.start) {
+            controls.start.disabled = active;
+        }
+        if (controls.stop) {
+            controls.stop.disabled = !active;
+        }
+        if (label) {
+            const wrapper = surface.closest('.html-preview-wrapper');
+            const status = wrapper?.querySelector?.('.html-preview-label');
+            if (status) {
+                status.textContent = label;
+            }
+        }
+    }
+
+    startInlineHtmlPreview(element) {
+        const surface = this.getHtmlPreviewSurface(element);
+        const source = this.getInlineHtmlSourceFromElement(surface);
+        if (!surface || !source) {
+            this.showToast('No HTML preview source found', 'error');
+            return;
+        }
+
+        const sourceSignature = this.getInlineHtmlSourceSignature(source);
+        const existingIframe = surface.querySelector('iframe');
+        if (existingIframe && surface.dataset.htmlRenderedSource === sourceSignature) {
+            this.setHtmlPreviewState(surface, true, 'Live preview');
+            return;
+        }
+
+        const iframe = document.createElement('iframe');
+        iframe.loading = 'lazy';
+        iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals');
+        iframe.referrerPolicy = 'no-referrer';
+        iframe.srcdoc = source;
+
+        surface.innerHTML = '';
+        surface.appendChild(iframe);
+        surface.dataset.htmlRenderedSource = sourceSignature;
+        this.setHtmlPreviewState(surface, true, 'Live preview');
+    }
+
+    stopInlineHtmlPreview(element) {
+        const surface = this.getHtmlPreviewSurface(element);
+        if (!surface) {
+            return;
+        }
+
+        surface.innerHTML = '<div class="html-preview-placeholder">Preview stopped. Start it when you want to run this HTML.</div>';
+        delete surface.dataset.htmlRenderedSource;
+        this.setHtmlPreviewState(surface, false, 'Preview stopped');
+    }
+
     renderHtmlPreviews(container = document) {
         const targets = Array.from(container.querySelectorAll('.html-preview-surface'));
         targets.forEach((target) => {
             const source = this.getInlineHtmlSourceFromElement(target);
             const sourceSignature = this.getInlineHtmlSourceSignature(source);
-            if (!source || target.dataset.htmlRenderedSource === sourceSignature) {
+            if (!source) {
                 return;
             }
 
-            const iframe = document.createElement('iframe');
-            iframe.loading = 'lazy';
-            iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals');
-            iframe.referrerPolicy = 'no-referrer';
-            iframe.srcdoc = source;
+            if (target.dataset.htmlPreviewActive === 'true') {
+                if (target.dataset.htmlRenderedSource !== sourceSignature) {
+                    this.startInlineHtmlPreview(target);
+                }
+                return;
+            }
 
-            target.innerHTML = '';
-            target.appendChild(iframe);
-            target.dataset.htmlRenderedSource = sourceSignature;
+            if (this.shouldAutostartHtmlPreview(target)) {
+                this.startInlineHtmlPreview(target);
+                return;
+            }
+
+            if (!target.querySelector('.html-preview-placeholder')) {
+                target.innerHTML = '<div class="html-preview-placeholder">Preview stopped. Start it when you want to run this HTML.</div>';
+            }
+            this.setHtmlPreviewState(target, false, 'Preview stopped');
         });
     }
 

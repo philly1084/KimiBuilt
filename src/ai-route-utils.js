@@ -387,7 +387,7 @@ function isWebsiteDesignExampleRequest(text = '') {
         return false;
     }
 
-    const hasWebsiteImplementationCue = /\b(web page|webpage|website|site|frontend|ui|vite|react|nextjs|microsite|landing page)\b/.test(normalized);
+    const hasWebsiteImplementationCue = /\b(web page|webpage|website|site|frontend|ui|vite|react|nextjs|microsite|landing page|browser game|web game|playable game|game prototype|interactive sandbox|vite preview|vite sandbox|multi step frontend|multi-step frontend)\b/.test(normalized);
     const hasDesignPrototypeCue = /\b(template|prototype|mockup|example|demo|starter|boilerplate|layout|wireframe|design system|component)\b/.test(normalized);
     const hasPresentationOrDocumentCue = /\b(slides|slide deck|deck|presentation|storyboard|report|brief|document|doc)\b/.test(normalized);
     const hasSlideDeckCue = /\b(powerpoint|pptx?|slide deck|slides?|presentation|deck)\b/.test(normalized);
@@ -406,7 +406,7 @@ function inferRequestedOutputFormat(text = '') {
     const hasArtifactIntent = hasExplicitArtifactGenerationIntent(normalized);
     const hasBuildIntent = /\b(create|make|generate|build|built|produce|render|prepare|draft)\b/.test(normalized);
     const hasWebsiteArtifactSubject = (
-        /\b(website|web page|webpage|html page|page|landing page|homepage|microsite|marketing site|frontend demo|front-end demo|site mockup|site prototype)\b/.test(normalized)
+        /\b(website|web page|webpage|html page|page|landing page|homepage|microsite|marketing site|frontend demo|front-end demo|site mockup|site prototype|browser game|web game|playable game|game prototype|interactive sandbox|vite preview|vite sandbox|multi step frontend|multi-step frontend)\b/.test(normalized)
         || isDashboardRequest(normalized)
     );
     const hasSandboxPreviewCue = /\b(sandbox|preview|browser preview|live preview|full screen preview|fullscreen preview)\b/.test(normalized);
@@ -414,7 +414,7 @@ function inferRequestedOutputFormat(text = '') {
     const hasExplicitHtmlCue = /\bhtml\b/.test(normalized);
     const hasExplicitPptxCue = /\b(powerpoint|pptx?|\.(pptx|ppt)\b)\b/.test(normalized);
     const hasSlideDeckSubject = /\b(slide deck|slides?|presentation|deck)\b/.test(normalized);
-    const hasInteractiveCue = /\b(interactive|clickable|animated|browser-native|web-native)\b/.test(normalized);
+    const hasInteractiveCue = /\b(interactive|clickable|animated|browser-native|web-native|playable|gameplay)\b/.test(normalized);
     const hasFrontendTemplateCue = /\b(vite|react|nextjs|frontend template|front-end template)\b/.test(normalized);
     const hasLongFormDocumentSubject = /\b(research paper|research report|research brief|whitepaper|white paper|case study|dossier|long[-\s]?form|large[-\s]?form|article|paper)\b/.test(normalized);
     const hasDocumentArtifactCue = /\b(document|doc|report|brief|paper|whitepaper|white paper|article|dossier|guide)\b/.test(normalized);

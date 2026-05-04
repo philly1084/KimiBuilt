@@ -97,8 +97,17 @@ function resolveWorkspaceFile(workspaceId = '', requestedPath = '') {
   };
 }
 
-function buildSandboxShell(workspaceId = '') {
-  const previewSrc = `/api/sandbox-workspaces/${encodeURIComponent(workspaceId)}/preview/`;
+function buildWorkspacePreviewPath(workspaceId = '', previewAccessToken = '', relativePath = '') {
+  const normalizedPath = String(relativePath || '').trim().replace(/^\/+/, '');
+  const token = String(previewAccessToken || '').trim();
+  const base = token
+    ? `/api/sandbox-workspaces/${encodeURIComponent(workspaceId)}/preview-access/${encodeURIComponent(token)}/`
+    : `/api/sandbox-workspaces/${encodeURIComponent(workspaceId)}/preview/`;
+  return normalizedPath ? `${base}${normalizedPath}` : base;
+}
+
+function buildSandboxShell(workspaceId = '', previewAccessToken = '') {
+  const previewSrc = buildWorkspacePreviewPath(workspaceId, previewAccessToken);
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -129,22 +138,70 @@ function buildPreviewBasePath(workspaceId = '') {
   return `/api/sandbox-workspaces/${encodeURIComponent(workspaceId)}/preview`;
 }
 
-function preparePreviewBuffer(workspaceId = '', relativePath = '', buffer = Buffer.alloc(0)) {
+function appendAccessTokenToUrl(rawUrl = '', previewAccessToken = '') {
+  const token = String(previewAccessToken || '').trim();
+  const source = String(rawUrl || '').trim();
+  if (!token || !source || !source.startsWith('/api/artifacts/')) {
+    return rawUrl;
+  }
+
+  try {
+    const parsed = new URL(source, 'http://localhost');
+    if (!/\/api\/artifacts\/[^/]+\/download$/i.test(parsed.pathname)) {
+      return rawUrl;
+    }
+    if (!parsed.searchParams.has('access_token')) {
+      parsed.searchParams.set('access_token', token);
+    }
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch (_error) {
+    const separator = source.includes('?') ? '&' : '?';
+    return `${source}${separator}access_token=${encodeURIComponent(token)}`;
+  }
+}
+
+function appendAccessTokenToInternalArtifactUrls(content = '', previewAccessToken = '') {
+  const token = String(previewAccessToken || '').trim();
+  if (!token) {
+    return String(content || '');
+  }
+
+  return String(content || '')
+    .replace(/(\b(?:href|src|action|poster)=["'])(\/api\/artifacts\/[^"']+)(["'])/gi, (_match, prefix, url, suffix) => (
+      `${prefix}${appendAccessTokenToUrl(url, token)}${suffix}`
+    ))
+    .replace(/url\((['"]?)(\/api\/artifacts\/[^'")]+)\1\)/gi, (_match, quote, url) => (
+      `url(${quote}${appendAccessTokenToUrl(url, token)}${quote})`
+    ));
+}
+
+function preparePreviewBuffer(workspaceId = '', relativePath = '', buffer = Buffer.alloc(0), previewAccessToken = '') {
   if (!/\.(?:html?|css|svg|js|mjs)$/i.test(relativePath)) {
     return buffer;
   }
 
-  const previewBasePath = buildPreviewBasePath(workspaceId);
+  const previewBasePath = previewAccessToken
+    ? buildWorkspacePreviewPath(workspaceId, previewAccessToken).replace(/\/$/, '')
+    : buildPreviewBasePath(workspaceId);
   let content = rewriteRootRelativeFrontendPaths(buffer.toString('utf8'), previewBasePath);
 
   if (/\.html?$/i.test(relativePath)) {
     content = injectBundleBaseHref(content, `${previewBasePath}/`);
   }
 
+  content = appendAccessTokenToInternalArtifactUrls(content, previewAccessToken);
   return Buffer.from(content, 'utf8');
 }
 
 router.get('/:workspaceId/sandbox', async (req, res, next) => {
+  return serveSandboxShell(req, res, next);
+});
+
+router.get('/:workspaceId/sandbox-access/:previewAccessToken', async (req, res, next) => {
+  return serveSandboxShell(req, res, next, req.params.previewAccessToken);
+});
+
+async function serveSandboxShell(req, res, next, previewAccessToken = '') {
   try {
     const workspaceId = normalizeWorkspaceId(req.params.workspaceId);
     if (!workspaceId) {
@@ -154,16 +211,16 @@ router.get('/:workspaceId/sandbox', async (req, res, next) => {
     const workspacePath = path.resolve(SANDBOX_ROOT, workspaceId);
     await fs.access(workspacePath);
     applyShellHeaders(res);
-    res.send(buildSandboxShell(workspaceId));
+    res.send(buildSandboxShell(workspaceId, previewAccessToken));
   } catch (error) {
     if (error.code === 'ENOENT') {
       return res.status(404).json({ error: { message: 'Sandbox workspace not found' } });
     }
     next(error);
   }
-});
+}
 
-async function servePreviewFile(req, res, next) {
+async function servePreviewFile(req, res, next, previewAccessToken = '') {
   try {
     const resolved = resolveWorkspaceFile(req.params.workspaceId, req.params[0] || '');
     if (!resolved) {
@@ -171,7 +228,7 @@ async function servePreviewFile(req, res, next) {
     }
 
     const rawBuffer = await fs.readFile(resolved.filePath);
-    const buffer = preparePreviewBuffer(req.params.workspaceId, resolved.relativePath, rawBuffer);
+    const buffer = preparePreviewBuffer(req.params.workspaceId, resolved.relativePath, rawBuffer, previewAccessToken);
     applyPreviewHeaders(res, resolveFrontendBundleContentType(resolved.relativePath));
     res.send(buffer);
   } catch (error) {
@@ -183,6 +240,8 @@ async function servePreviewFile(req, res, next) {
 }
 
 router.get('/:workspaceId/preview', servePreviewFile);
+router.get('/:workspaceId/preview-access/:previewAccessToken', (req, res, next) => servePreviewFile(req, res, next, req.params.previewAccessToken));
+router.get('/:workspaceId/preview-access/:previewAccessToken/*', (req, res, next) => servePreviewFile(req, res, next, req.params.previewAccessToken));
 router.get('/:workspaceId/preview/*', servePreviewFile);
 
 module.exports = router;

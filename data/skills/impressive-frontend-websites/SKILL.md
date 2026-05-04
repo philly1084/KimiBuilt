@@ -5,8 +5,9 @@ Planner guidance:
 - Prefer the repo's existing frontend framework and styling patterns.
 - Build the actual usable experience first. Do not substitute a marketing placeholder unless the user explicitly asks for a landing page.
 - Use real controls and states where the workflow implies them: navigation, buttons, tabs, filters, forms, empty/loading/error/disabled states, menus, dialogs, popovers, tooltips, and responsive navigation.
+- For games or multi-step interactive apps, include a real state machine or game loop, visible HUD/status, pause/restart/reset, keyboard plus pointer/touch input when relevant, and an in-page fallback if canvas/WebGL/module loading fails.
 - For website/dashboard/front-end artifacts, prefer `document-workflow generate-suite` with `buildMode:"sandbox"` or `useSandbox:true` when available, then run visual QA.
-- Use `code-sandbox` with `mode:"project"` for direct sandbox/frontend project builds or repairs. Avoid execute mode for website builds.
+- Use `code-sandbox` with `mode:"project"` for direct sandbox/frontend project builds or repairs. Use `language:"vite"` for multi-file apps, browser games, simulations, and richer interactive previews. Avoid execute mode for website builds.
 - Use `design-resource-search` before design-sensitive websites, dashboards, documents, or page artifacts unless design context is already available.
 - Use `image-generate` for site-specific bitmap artwork, hero/product scenes, textures, thumbnails, or interface-supporting visuals when user-provided assets are missing. Treat it as a build step: wait for completion, verify at least one reusable artifact/markdown image URL, then wire the saved asset into the page.
 - Use `web-search`/`web-fetch` for current product, venue, competitor, domain, or reference research when visual language or facts may have changed.
@@ -26,6 +27,7 @@ Verification standard:
 - Run the app or preview when needed.
 - If generated images are part of the build, confirm the returned artifact or hosted image URL renders in the page before moving on to broader QA.
 - Capture desktop and mobile screenshots for non-trivial frontend work.
+- For game/canvas/WebGL work, verify the preview is nonblank, actively renders pixels, and primary controls plus restart/reset work before finalizing.
 - Inspect interactive controls before QA: search for select, option, menu, aria-haspopup, aria-expanded, popover, dialog, dropdown, submenu, tooltip, and related component imports.
 - Open dropdowns, menus, popovers, submenus, dialogs, and tooltips where possible and verify readable contrast. For native select popups, verify option foreground/background CSS directly.
 - Look for broken assets, console errors, blank canvases, overflow, overlaps, cramped controls, unreadable popup text, and states that only work at one viewport.

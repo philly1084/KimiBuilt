@@ -71,6 +71,32 @@ describe('SandboxTool runtime configuration', () => {
     ]));
   });
 
+  test('adds Vite handoff files for Vite project previews', () => {
+    const tool = new SandboxTool();
+
+    const files = tool.normalizeProjectFiles({
+      language: 'vite',
+      files: [{
+        path: 'index.html',
+        content: '<!DOCTYPE html><html><head><title>Game</title></head><body><canvas id="game"></canvas><script type="module" src="./src/main.js"></script></body></html>',
+      }, {
+        path: 'src/main.js',
+        content: 'document.body.dataset.ready = "true";',
+      }],
+    });
+
+    expect(files).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: 'package.json',
+        content: expect.stringContaining('"dev": "vite --host 0.0.0.0"'),
+      }),
+      expect.objectContaining({
+        path: 'vite.config.js',
+        content: expect.stringContaining('defineConfig'),
+      }),
+    ]));
+  });
+
   test('drops unsafe dependency strings before building install commands', () => {
     const tool = new SandboxTool();
 

@@ -188,6 +188,58 @@ describe('auth service OpenCode gateway access', () => {
         expect(isAuthorizedFrontendApiRequest(req)).toBe(false);
     });
 
+    test('allows signed preview path tokens inside sandboxed artifact iframes', () => {
+        config.security.allowQueryTokens = false;
+        const auth = createAuthToken('phill');
+        const req = {
+            path: `/api/artifacts/artifact-1/preview-access/${auth.token}/styles.css`,
+            url: `/api/artifacts/artifact-1/preview-access/${auth.token}/styles.css`,
+            method: 'GET',
+            headers: {},
+            secure: false,
+        };
+        const res = {
+            status: jest.fn().mockReturnThis(),
+            json: jest.fn(),
+            redirect: jest.fn(),
+        };
+        const next = jest.fn();
+
+        requireAuth(req, res, next);
+
+        expect(next).toHaveBeenCalledTimes(1);
+        expect(req.user).toMatchObject({
+            username: 'phill',
+            role: 'admin',
+        });
+    });
+
+    test('allows signed query tokens for inline artifact images only', () => {
+        config.security.allowQueryTokens = false;
+        const auth = createAuthToken('phill');
+        const req = {
+            path: '/api/artifacts/image-1/download',
+            url: `/api/artifacts/image-1/download?inline=1&access_token=${encodeURIComponent(auth.token)}`,
+            method: 'GET',
+            headers: {},
+            secure: false,
+        };
+        const res = {
+            status: jest.fn().mockReturnThis(),
+            json: jest.fn(),
+            redirect: jest.fn(),
+        };
+        const next = jest.fn();
+
+        requireAuth(req, res, next);
+
+        expect(next).toHaveBeenCalledTimes(1);
+        expect(req.user).toMatchObject({
+            username: 'phill',
+            role: 'admin',
+        });
+    });
+
     test('falls back to the gateway token when no dedicated frontend API key is configured', () => {
         delete process.env.KIMIBUILT_FRONTEND_API_KEY;
 

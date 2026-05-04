@@ -1339,7 +1339,7 @@ function isFrontendDemoArtifactRequest(prompt = '') {
         return true;
     }
 
-    return /\b(website|web page|webpage|landing page|homepage|microsite|marketing site|product page|campaign page|frontend demo|front-end demo|site prototype|site mockup)\b/.test(normalized)
+    return /\b(website|web page|webpage|landing page|homepage|microsite|marketing site|product page|campaign page|frontend demo|front-end demo|site prototype|site mockup|browser game|web game|playable game|game prototype|interactive sandbox|vite preview|vite sandbox|multi step frontend|multi-step frontend)\b/.test(normalized)
         || /\b(3d|three\.?js|webgl|web gpu|webgpu|immersive scene|interactive scene|scene sandbox|sandboxed scene|shader|particles?|orbit controls?)\b/.test(normalized)
         || isDashboardRequest(normalized)
         || (
@@ -1476,6 +1476,7 @@ function buildFrontendBundleGenerationInstructions({
         'For 3D, WebGL, Three.js, particle, shader, or immersive scene requests, return a bundle with at least `index.html`, `styles.css`, and `scene.js`; initialize a visible renderer, camera, lights, geometry/materials, resize handling, animation loop, and a non-white fallback/error overlay if WebGL or module loading fails.',
         'For Three.js scenes, use the local import map for `three` and `three/addons/`, import from `"three"` in `scene.js`, mount the canvas into a fixed-size viewport element, and avoid unresolved bare imports other than the mapped `three` specifiers.',
         'If you choose `frameworkTarget: "vite"`, keep the preview dependency-free and browser-runnable with native ES modules so it still works without install or build steps. You may include `package.json` and `vite.config.js` as handoff files, but do not depend on npm packages for the sandbox preview.',
+        'For browser game, playable simulation, or multi-step app requests, build a real state machine or game loop with input handling, update/render phases, score/progress, pause/restart, win/lose or completion state, responsive sizing, and an in-page fallback/error overlay for failed canvas/WebGL/module loading.',
         'Use realistic example data by default, and when a live source is known, wire it behind a small fetch layer or a clearly swappable data adapter.',
         'Favor real interactions such as filters, tab switches, drill-down panels, carousels, sticky nav, or chart toggles over static decoration.',
         'Use stable ids or data-component attributes on major sections to support later repo extraction.',
@@ -2022,6 +2023,7 @@ class ArtifactService {
                 'Aim for a strong visual thesis, deliberate layout hierarchy, and a premium request-matched feel.',
                 'Use semantic sections, responsive CSS, and purposeful but restrained interaction.',
                 'Keep the result portable so it can be moved into a real frontend repository later.',
+                'For browser game, playable simulation, or multi-step app requests, build a real state machine or game loop with input handling, update/render phases, score/progress, pause/restart, win/lose or completion state, responsive sizing, and an in-page fallback/error overlay for failed canvas/WebGL/module loading.',
                 'Use realistic example data by default, and when a live source is known, wire it behind a small fetch layer or a clearly swappable data adapter.',
                 'Favor real interactions such as filters, tab switches, drill-down panels, carousels, sticky nav, or chart toggles over static decoration.',
                 buildSandboxBrowserLibraryInstructions(),

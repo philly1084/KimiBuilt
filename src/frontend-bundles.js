@@ -879,7 +879,7 @@ function sanitizeFrontendArtifactMetadata(metadata = {}, content = '') {
     return next;
 }
 
-function resolveArtifactFrontendBundleFile(artifact = {}, requestedPath = '') {
+function resolveArtifactFrontendBundleFile(artifact = {}, requestedPath = '', options = {}) {
     let entries;
     try {
         entries = readFrontendBundleArchive(artifact?.contentBuffer || Buffer.alloc(0));
@@ -905,14 +905,13 @@ function resolveArtifactFrontendBundleFile(artifact = {}, requestedPath = '') {
     if (/\.html?$/i.test(resolvedPath)) {
         const html = contentBuffer.toString('utf8');
         const directory = path.dirname(resolvedPath);
-        const baseHref = buildFrontendBundlePreviewUrl(
-            artifact.id,
-            directory && directory !== '.'
-                ? `${directory.replace(/\/+$/g, '')}/`
-                : '',
-        );
+        const previewBasePath = String(options.previewBasePath || '').trim() || buildFrontendBundlePreviewUrl(artifact.id);
+        const normalizedPreviewBase = previewBasePath.endsWith('/') ? previewBasePath : `${previewBasePath}/`;
+        const baseHref = directory && directory !== '.'
+            ? `${normalizedPreviewBase}${directory.replace(/\/+$/g, '')}/`
+            : normalizedPreviewBase;
         contentBuffer = Buffer.from(injectBundleBaseHref(
-            rewriteRootRelativeFrontendPaths(html, buildFrontendBundlePreviewUrl(artifact.id)),
+            rewriteRootRelativeFrontendPaths(html, normalizedPreviewBase),
             baseHref,
         ), 'utf8');
     }

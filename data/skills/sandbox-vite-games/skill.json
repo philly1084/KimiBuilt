@@ -1,0 +1,63 @@
+{
+  "id": "sandbox-vite-games",
+  "name": "Sandbox Vite Games",
+  "description": "Build playable sandbox web apps, Vite-style previews, browser games, simulations, and multi-step interactive frontends through project-mode files, preview lifecycle controls, game-loop state, assets, browser QA, and iteration.",
+  "version": "1.0.0",
+  "enabled": true,
+  "tools": [
+    "design-resource-search",
+    "image-generate",
+    "document-workflow",
+    "code-sandbox",
+    "web-scrape",
+    "web-fetch"
+  ],
+  "triggerPatterns": [
+    "sandbox game",
+    "browser game",
+    "web game",
+    "playable game",
+    "vite preview",
+    "vite sandbox",
+    "interactive sandbox",
+    "multi-step frontend",
+    "multi step frontend",
+    "game prototype",
+    "canvas game",
+    "three.js game",
+    "matter.js game",
+    "p5.js game"
+  ],
+  "chain": [
+    {
+      "step": "Classify the request as a playable app/game/simulation or a multi-step Vite-style frontend",
+      "tool": null
+    },
+    {
+      "step": "Gather design or gameplay references only when genre, controls, or visual language are under-specified",
+      "tool": "design-resource-search"
+    },
+    {
+      "step": "Create or source needed bitmap/SVG assets when the game or app needs subject-specific visuals",
+      "tool": "image-generate"
+    },
+    {
+      "step": "Build a previewable project bundle with index.html plus CSS, JS modules, fixtures, and assets",
+      "tool": "code-sandbox"
+    },
+    {
+      "step": "Run desktop and mobile browser QA, checking nonblank canvas/rendering, controls, restart, responsive layout, and console errors",
+      "tool": "web-scrape"
+    },
+    {
+      "step": "Refine gameplay feel, state transitions, layout, performance, and readable UI after the first preview",
+      "tool": "code-sandbox"
+    }
+  ],
+  "contextPolicy": {
+    "maxChars": 2600,
+    "exposeBody": true
+  },
+  "createdAt": "2026-05-03T00:00:00.000Z",
+  "updatedAt": "2026-05-03T00:00:00.000Z"
+}

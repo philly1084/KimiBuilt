@@ -97,6 +97,30 @@ function getRequestPath(req = {}) {
     }
 }
 
+function extractPreviewRouteToken(routePath = '') {
+    const normalizedPath = String(routePath || '').trim();
+    const match = normalizedPath.match(/^\/api\/(?:artifacts|sandbox-workspaces)\/[^/]+\/(?:sandbox-access|preview-access)\/([^/?#]+)/);
+    return match ? decodeURIComponent(match[1]) : '';
+}
+
+function isPreviewQueryTokenRoute(req = {}) {
+    const routePath = getRequestPath(req);
+    if (/^\/api\/(?:artifacts|sandbox-workspaces)\/[^/]+\/(?:sandbox|preview)(?:\/|$)/.test(routePath)) {
+        return true;
+    }
+
+    if (!/^\/api\/artifacts\/[^/]+\/download$/.test(routePath)) {
+        return false;
+    }
+
+    try {
+        const parsedUrl = new URL(String(req.url || routePath), 'http://localhost');
+        return ['1', 'true', 'yes'].includes(String(parsedUrl.searchParams.get('inline') || '').toLowerCase());
+    } catch (_error) {
+        return false;
+    }
+}
+
 function serializeCookie(name, value, options = {}) {
     const parts = [`${name}=${encodeURIComponent(value)}`];
 
@@ -179,7 +203,12 @@ function getTokenFromRequest(req) {
         return String(apiKey).trim();
     }
 
-    if (config.security.allowQueryTokens || getRequestPath(req) === '/ws') {
+    const pathToken = extractPreviewRouteToken(getRequestPath(req));
+    if (pathToken) {
+        return pathToken;
+    }
+
+    if (config.security.allowQueryTokens || getRequestPath(req) === '/ws' || isPreviewQueryTokenRoute(req)) {
         try {
             const parsedUrl = new URL(String(req.url || ''), 'http://localhost');
             const queryToken = parsedUrl.searchParams.get('access_token')

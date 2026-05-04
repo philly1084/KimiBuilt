@@ -290,12 +290,63 @@ class SandboxTool extends ToolBase {
       return normalizedFiles;
     }
 
-    return ensureFrontendBundleStyling({
+    const styledBundle = ensureFrontendBundleStyling({
       entry: normalizeBundlePath(entry || '') || 'index.html',
       frameworkTarget: normalizedLanguage === 'html' ? 'static' : normalizedLanguage,
       routing: 'multipage',
       files: normalizedFiles,
-    }).files;
+    });
+
+    return this.ensureProjectSupportFiles(styledBundle, normalizedLanguage).files;
+  }
+
+  ensureProjectSupportFiles(bundle = null, language = '') {
+    const normalizedLanguage = String(language || '').trim().toLowerCase();
+    const normalizedBundle = {
+      ...bundle,
+      files: (Array.isArray(bundle?.files) ? bundle.files : []).map((file) => ({ ...file })),
+    };
+
+    if (!['vite', 'react'].includes(normalizedLanguage)) {
+      return normalizedBundle;
+    }
+
+    const hasFile = (filePath) => normalizedBundle.files.some((file) => (
+      String(file.path || '').trim().toLowerCase() === filePath
+    ));
+
+    if (!hasFile('package.json')) {
+      const dependencies = normalizedLanguage === 'react'
+        ? { '@vitejs/plugin-react': 'latest', vite: 'latest', react: 'latest', 'react-dom': 'latest' }
+        : { vite: 'latest' };
+      normalizedBundle.files.push({
+        path: 'package.json',
+        language: 'json',
+        purpose: 'Vite handoff scripts for running the sandbox bundle in a real project.',
+        content: `${JSON.stringify({
+          scripts: {
+            dev: 'vite --host 0.0.0.0',
+            build: 'vite build',
+            preview: 'vite preview --host 0.0.0.0',
+          },
+          dependencies,
+          devDependencies: {},
+        }, null, 2)}\n`,
+      });
+    }
+
+    if (!hasFile('vite.config.js')) {
+      normalizedBundle.files.push({
+        path: 'vite.config.js',
+        language: 'javascript',
+        purpose: 'Minimal Vite config for repo handoff.',
+        content: normalizedLanguage === 'react'
+          ? "import { defineConfig } from 'vite';\nimport react from '@vitejs/plugin-react';\n\nexport default defineConfig({ plugins: [react()] });\n"
+          : "import { defineConfig } from 'vite';\n\nexport default defineConfig({});\n",
+      });
+    }
+
+    return normalizedBundle;
   }
 
   async writeProjectFiles(workspacePath, files, tracker) {
@@ -325,7 +376,7 @@ class SandboxTool extends ToolBase {
     return written;
   }
 
-  async persistProjectArtifact({ projectName, entry, files, context }) {
+  async persistProjectArtifact({ projectName, entry, files, language, context }) {
     const sessionId = String(context?.sessionId || '').trim();
     if (!sessionId) {
       return {
@@ -337,7 +388,7 @@ class SandboxTool extends ToolBase {
     try {
       const bundleArtifact = buildFrontendBundleArtifact({
         entry: normalizeBundlePath(entry || '') || 'index.html',
-        frameworkTarget: 'vite',
+        frameworkTarget: String(language || '').trim().toLowerCase() === 'html' ? 'static' : (String(language || '').trim().toLowerCase() || 'vite'),
         routing: 'spa',
         files
       }, projectName || 'Sandbox Project');
@@ -391,6 +442,7 @@ class SandboxTool extends ToolBase {
       projectName: safeProjectName,
       entry,
       files: normalizedFiles,
+      language,
       context
     });
 

@@ -200,6 +200,27 @@ describe('/api/artifacts route', () => {
         expect(response.text).toContain('src="/api/artifacts/artifact-site-1/preview"');
     });
 
+    test('serves tokenized sandbox shells for isolated web-chat previews', async () => {
+        artifactService.getArtifact.mockResolvedValue({
+            id: 'artifact-site-1',
+            sessionId: 'session-1',
+            filename: 'interactive.html',
+            extension: 'html',
+            previewHtml: '<!DOCTYPE html><html><body><script>window.ready=true</script></body></html>',
+            metadata: {},
+        });
+        sessionStore.getOwned.mockResolvedValue({
+            id: 'session-1',
+            metadata: { ownerId: 'phill' },
+        });
+
+        const response = await request(buildApp()).get('/api/artifacts/artifact-site-1/sandbox-access/preview-token');
+
+        expect(response.status).toBe(200);
+        expect(response.text).toContain('src="/api/artifacts/artifact-site-1/preview-access/preview-token"');
+        expect(response.text).toContain('sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads"');
+    });
+
     test('serves bundled html artifact previews from the server', async () => {
         artifactService.getArtifact.mockResolvedValue({
             id: 'artifact-site-1',
@@ -408,6 +429,52 @@ describe('/api/artifacts route', () => {
         expect(cssResponse.status).toBe(200);
         expect(cssResponse.text).toContain('url(/api/artifacts/artifact-1/preview/images/paper.png)');
         expect(cssResponse.headers['cross-origin-resource-policy']).toBe('cross-origin');
+    });
+
+    test('serves tokenized bundled html previews with tokenized assets and inline artifact images', async () => {
+        artifactService.getArtifact.mockResolvedValue({
+            id: 'artifact-1',
+            sessionId: 'session-1',
+            filename: 'newsroom.html',
+            extension: 'html',
+            mimeType: 'text/html',
+            contentBuffer: Buffer.from('<!DOCTYPE html><html><body>fallback</body></html>'),
+            metadata: {
+                type: 'frontend',
+                title: 'Newsroom',
+                bundle: {
+                    entry: 'index.html',
+                    files: [
+                        {
+                            path: 'index.html',
+                            language: 'html',
+                            purpose: 'Front page',
+                            content: '<!DOCTYPE html><html><head><link rel="stylesheet" href="/styles/site.css"></head><body><img src="/api/artifacts/image-1/download?inline=1" alt="Generated"><main><h1>Front Page</h1></main></body></html>',
+                        },
+                        {
+                            path: 'styles/site.css',
+                            language: 'css',
+                            purpose: 'Shared styles',
+                            content: 'body { background-image: url(/images/paper.png); }',
+                        },
+                    ],
+                },
+            },
+        });
+        sessionStore.getOwned.mockResolvedValue({
+            id: 'session-1',
+            metadata: { ownerId: 'phill' },
+        });
+
+        const previewResponse = await request(buildApp()).get('/api/artifacts/artifact-1/preview-access/preview-token');
+        expect(previewResponse.status).toBe(200);
+        expect(previewResponse.text).toContain('<base href="/api/artifacts/artifact-1/preview-access/preview-token/">');
+        expect(previewResponse.text).toContain('href="/api/artifacts/artifact-1/preview-access/preview-token/styles/site.css"');
+        expect(previewResponse.text).toContain('src="/api/artifacts/image-1/download?inline=1&access_token=preview-token"');
+
+        const cssResponse = await request(buildApp()).get('/api/artifacts/artifact-1/preview-access/preview-token/styles/site.css');
+        expect(cssResponse.status).toBe(200);
+        expect(cssResponse.text).toContain('url(/api/artifacts/artifact-1/preview-access/preview-token/images/paper.png)');
     });
 
     test('downloads a generated site bundle as zip', async () => {

@@ -6470,6 +6470,37 @@ body.layout-minimal #input-meta-row {
     color: #cbd5f5;
 }
 
+.html-preview-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.html-preview-control {
+    min-height: 30px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.55rem;
+    border: 1px solid rgba(148, 163, 184, 0.34);
+    border-radius: 8px;
+    background: rgba(15, 23, 42, 0.58);
+    color: #e2e8f0;
+    font-size: 0.75rem;
+    font-weight: 650;
+    cursor: pointer;
+}
+
+.html-preview-control:hover:not(:disabled) {
+    border-color: rgba(125, 211, 252, 0.72);
+    color: #ffffff;
+}
+
+.html-preview-control:disabled {
+    cursor: default;
+    opacity: 0.48;
+}
+
 .html-preview-surface {
     padding: 1rem;
 }

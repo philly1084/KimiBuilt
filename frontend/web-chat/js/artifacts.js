@@ -35,6 +35,7 @@
         outputFormat: '',
         lastDone: null,
     };
+    let previewAccessTokenCache = null;
 
     function getCurrentSessionId() {
         return String(window.sessionManager?.currentSessionId || window.apiClient?.getSessionId?.() || '').trim();
@@ -49,6 +50,78 @@
 
         const relativePath = normalized.startsWith('/') ? normalized : `/${normalized}`;
         return absolute ? `${API_BASE}${relativePath}` : relativePath;
+    }
+
+    async function getPreviewAccessToken() {
+        const now = Date.now();
+        if (
+            previewAccessTokenCache?.token
+            && Number(previewAccessTokenCache.expiresAt || 0) * 1000 > now + 30000
+        ) {
+            return previewAccessTokenCache.token;
+        }
+
+        const response = await fetch(resolveApiUrl('/api/auth/ws-token', { absolute: true }), {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+            credentials: 'same-origin',
+            cache: 'no-store',
+        });
+        if (!response.ok) {
+            throw new Error(`Preview authentication failed (${response.status})`);
+        }
+
+        const data = await response.json().catch(() => ({}));
+        const token = String(data?.token || '').trim();
+        if (!token) {
+            return '';
+        }
+
+        previewAccessTokenCache = {
+            token,
+            expiresAt: Number(data?.expiresAt || 0),
+        };
+        return token;
+    }
+
+    function applyPreviewAccessToken(urlPath = '', token = '') {
+        const accessToken = String(token || '').trim();
+        if (!accessToken) {
+            return resolveApiUrl(urlPath, { absolute: true });
+        }
+
+        try {
+            const parsed = new URL(resolveApiUrl(urlPath, { absolute: true }), window.location.href);
+            if (/\/api\/artifacts\/[^/]+\/sandbox(?:\/)?$/i.test(parsed.pathname)) {
+                parsed.pathname = parsed.pathname.replace(/\/sandbox\/?$/i, `/sandbox-access/${encodeURIComponent(accessToken)}`);
+                return parsed.toString();
+            }
+            if (/\/api\/artifacts\/[^/]+\/preview(?:\/)?$/i.test(parsed.pathname)) {
+                parsed.pathname = parsed.pathname.replace(/\/preview\/?$/i, `/preview-access/${encodeURIComponent(accessToken)}/`);
+                return parsed.toString();
+            }
+            if (/\/api\/sandbox-workspaces\/[^/]+\/sandbox(?:\/)?$/i.test(parsed.pathname)) {
+                parsed.pathname = parsed.pathname.replace(/\/sandbox\/?$/i, `/sandbox-access/${encodeURIComponent(accessToken)}`);
+                return parsed.toString();
+            }
+            if (/\/api\/sandbox-workspaces\/[^/]+\/preview(?:\/)?$/i.test(parsed.pathname)) {
+                parsed.pathname = parsed.pathname.replace(/\/preview\/?$/i, `/preview-access/${encodeURIComponent(accessToken)}/`);
+                return parsed.toString();
+            }
+            if (parsed.pathname.startsWith('/api/artifacts/') && !parsed.searchParams.has('access_token')) {
+                parsed.searchParams.set('access_token', accessToken);
+            }
+            return parsed.toString();
+        } catch (_error) {
+            const absoluteUrl = resolveApiUrl(urlPath, { absolute: true });
+            const separator = absoluteUrl.includes('?') ? '&' : '?';
+            return `${absoluteUrl}${separator}access_token=${encodeURIComponent(accessToken)}`;
+        }
+    }
+
+    async function resolveAuthenticatedPreviewUrl(urlPath = '') {
+        const token = await getPreviewAccessToken();
+        return applyPreviewAccessToken(urlPath, token);
     }
 
     function isCurrentSessionId(sessionId = '') {
@@ -237,6 +310,48 @@
                 border-radius: 12px;
                 overflow: hidden;
                 background: rgba(15, 23, 42, 0.06);
+            }
+
+            .artifact-generated-card .artifact-html-preview-toolbar {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 8px;
+                padding: 8px 10px;
+                border-bottom: 1px solid rgba(245, 158, 11, 0.18);
+                color: var(--text-secondary);
+                font-size: 12px;
+                font-weight: 650;
+            }
+
+            .artifact-generated-card .artifact-html-preview-actions {
+                display: inline-flex;
+                gap: 6px;
+            }
+
+            .artifact-generated-card .artifact-html-preview-actions button {
+                min-height: 28px;
+                padding: 4px 9px;
+                border: 1px solid var(--border);
+                border-radius: 7px;
+                background: var(--bg-secondary);
+                color: var(--text-primary);
+                font-size: 12px;
+                cursor: pointer;
+            }
+
+            .artifact-generated-card .artifact-html-preview-actions button:disabled {
+                cursor: default;
+                opacity: 0.5;
+            }
+
+            .artifact-generated-card .artifact-html-preview-stage {
+                min-height: 180px;
+                display: grid;
+                place-items: center;
+                padding: 10px;
+                color: var(--text-secondary);
+                font-size: 13px;
             }
 
             .artifact-generated-card .artifact-html-preview iframe {
@@ -870,14 +985,17 @@
             : '';
         const htmlPreview = inlineHtmlPreview
             ? `
-                <div class="artifact-html-preview">
-                    <iframe
-                        src="${escapeHtmlAttr(htmlPreviewUrl)}"
-                        title="${escapeHtmlAttr(artifact.filename || 'Artifact preview')}"
-                        loading="lazy"
-                        referrerpolicy="no-referrer"
-                        sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads"
-                    ></iframe>
+                <div class="artifact-html-preview" data-preview-url="${escapeHtmlAttr(htmlPreviewUrl)}" data-preview-title="${escapeHtmlAttr(artifact.filename || 'Artifact preview')}">
+                    <div class="artifact-html-preview-toolbar">
+                        <span>HTML preview</span>
+                        <div class="artifact-html-preview-actions">
+                            <button type="button" data-action="start-preview" onclick="artifactManager.startInlineArtifactPreview(this)">Start</button>
+                            <button type="button" data-action="stop-preview" onclick="artifactManager.stopInlineArtifactPreview(this)" disabled>Stop</button>
+                        </div>
+                    </div>
+                    <div class="artifact-html-preview-stage">
+                        Preview stopped. Start it when you want to run this artifact.
+                    </div>
                 </div>
             `
             : '';
@@ -1448,16 +1566,74 @@
         return modal;
     }
 
-    function openSitePreviewModal(artifact, previewUrl) {
+    async function openSitePreviewModal(artifact, previewUrl) {
         const modal = ensureSitePreviewModal();
         const iframe = modal.querySelector('iframe');
         const title = modal.querySelector('.site-preview-title');
-        const absolutePreviewUrl = resolveApiUrl(previewUrl, { absolute: true });
+        const absolutePreviewUrl = await resolveAuthenticatedPreviewUrl(previewUrl);
         title.textContent = artifact?.filename || 'Website preview';
         iframe.dataset.previewSrc = absolutePreviewUrl;
         iframe.src = absolutePreviewUrl;
         modal.hidden = false;
         document.body.classList.add('site-preview-open');
+    }
+
+    function getInlineArtifactPreviewElements(button) {
+        const wrapper = button?.closest?.('.artifact-html-preview');
+        return {
+            wrapper,
+            stage: wrapper?.querySelector?.('.artifact-html-preview-stage') || null,
+            start: wrapper?.querySelector?.('[data-action="start-preview"]') || null,
+            stop: wrapper?.querySelector?.('[data-action="stop-preview"]') || null,
+        };
+    }
+
+    async function startInlineArtifactPreview(button) {
+        const { wrapper, stage, start, stop } = getInlineArtifactPreviewElements(button);
+        if (!wrapper || !stage || !wrapper?.dataset?.previewUrl) {
+            if (window.uiHelpers?.showToast) {
+                uiHelpers.showToast('Preview is not available for this artifact.', 'warning');
+            }
+            return;
+        }
+
+        if (start) start.disabled = true;
+        stage.textContent = 'Starting preview...';
+
+        let previewUrl = '';
+        try {
+            previewUrl = await resolveAuthenticatedPreviewUrl(wrapper.dataset.previewUrl);
+        } catch (error) {
+            stage.textContent = 'Preview authentication failed. Sign in again and retry.';
+            if (window.uiHelpers?.showToast) {
+                uiHelpers.showToast(error.message || 'Preview authentication failed', 'error');
+            }
+            if (start) start.disabled = false;
+            return;
+        }
+
+        const iframe = document.createElement('iframe');
+        iframe.src = previewUrl;
+        iframe.title = wrapper.dataset.previewTitle || 'Artifact preview';
+        iframe.loading = 'lazy';
+        iframe.referrerPolicy = 'no-referrer';
+        iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals allow-popups allow-downloads');
+        stage.innerHTML = '';
+        stage.appendChild(iframe);
+        wrapper.dataset.previewActive = 'true';
+        if (stop) stop.disabled = false;
+    }
+
+    function stopInlineArtifactPreview(button) {
+        const { wrapper, stage, start, stop } = getInlineArtifactPreviewElements(button);
+        if (!wrapper || !stage) {
+            return;
+        }
+
+        stage.innerHTML = 'Preview stopped. Start it when you want to run this artifact.';
+        wrapper.dataset.previewActive = 'false';
+        if (start) start.disabled = false;
+        if (stop) stop.disabled = true;
     }
     
     // Create global artifact manager for external access
@@ -1500,7 +1676,7 @@
             }
         },
 
-        openArtifactPreview: (id) => {
+        openArtifactPreview: async (id) => {
             const artifact = state.artifacts.find((entry) => entry.id === id) || state.lastDone?.artifacts?.find((entry) => entry.id === id);
             const previewUrl = getArtifactPreviewUrl(artifact, { sandbox: true });
             if (!previewUrl) {
@@ -1510,8 +1686,17 @@
                 return;
             }
 
-            openSitePreviewModal(artifact, previewUrl);
+            try {
+                await openSitePreviewModal(artifact, previewUrl);
+            } catch (error) {
+                if (window.uiHelpers?.showToast) {
+                    uiHelpers.showToast(error.message || 'Preview authentication failed', 'error');
+                }
+            }
         },
+
+        startInlineArtifactPreview,
+        stopInlineArtifactPreview,
 
         exportSiteToManagedApp: async (id) => {
             const artifact = state.artifacts.find((entry) => entry.id === id) || state.lastDone?.artifacts?.find((entry) => entry.id === id);

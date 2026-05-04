@@ -310,6 +310,8 @@ describe('ai-route-utils', () => {
         expect(inferRequestedOutputFormat('This was supposed to be a sandbox built HTML page')).toBe('html');
         expect(inferRequestedOutputFormat('Create website slides for a fintech launch that I can reuse as a Vite template')).toBe('html');
         expect(inferRequestedOutputFormat('Build an executive brief template as a frontend example for our web design system')).toBe('html');
+        expect(inferRequestedOutputFormat('Build a playable browser game with a Vite preview')).toBe('html');
+        expect(inferRequestedOutputFormat('Make a multi-step frontend sandbox for an onboarding flow')).toBe('html');
     });
 
     test('inferRequestedOutputFormat defaults slide deck requests to pptx unless html or interactive is explicit', () => {

@@ -11,7 +11,7 @@ const ROLE_IDS = Object.freeze({
 
 const IMPRESSIVE_FRONTEND_QUALITY_BAR = Object.freeze({
   name: 'impressive-frontend-websites',
-  appliesTo: ['website', 'dashboard', 'app-workspace', 'landing-page', 'frontend-demo', 'html-prototype', 'ui-mockup'],
+  appliesTo: ['website', 'dashboard', 'app-workspace', 'landing-page', 'frontend-demo', 'html-prototype', 'ui-mockup', 'browser-game', 'interactive-sandbox', 'vite-preview'],
   requiredPractices: [
     'infer a compact brief when the user gives sparse context',
     'make the first viewport specific to the product, place, workflow, offer, or audience',
@@ -48,7 +48,7 @@ function hasWebsiteBuildIntent(text = '') {
   }
 
   const buildVerb = /\b(create|make|generate|build|draft|design|prototype|ship|assemble|produce|turn)\b/.test(normalized);
-  const webTarget = /\b(website|web site|site|webpage|web page|landing page|microsite|product page|dashboard|frontend|front end|web app|html page|html document)\b/.test(normalized);
+  const webTarget = /\b(website|web site|site|webpage|web page|landing page|microsite|product page|dashboard|frontend|front end|web app|html page|html document|browser game|web game|game prototype|playable game|interactive sandbox|vite preview|vite sandbox|multi step frontend|multi-step frontend)\b/.test(normalized);
   return buildVerb && webTarget;
 }
 

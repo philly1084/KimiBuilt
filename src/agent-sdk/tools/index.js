@@ -1072,7 +1072,7 @@ function isPreviewableFrontendWorkflowRequest(prompt = '') {
     return false;
   }
 
-  return /\b(website|web page|webpage|landing page|homepage|microsite|marketing site|product page|campaign page|frontend|front-end|web app|app mockup|site prototype|site mockup|website mockup|ui mockup|interactive prototype|soundtrack system)\b/.test(normalized)
+  return /\b(website|web page|webpage|landing page|homepage|microsite|marketing site|product page|campaign page|frontend|front-end|web app|app mockup|site prototype|site mockup|website mockup|ui mockup|interactive prototype|soundtrack system|browser game|web game|playable game|game prototype|interactive sandbox|vite preview|vite sandbox|multi step frontend|multi-step frontend)\b/.test(normalized)
     || /\b(3d|three\.?js|webgl|web gpu|webgpu|immersive scene|interactive scene|scene sandbox|shader|particles?|orbit controls?)\b/.test(normalized)
     || isDashboardRequest(normalized);
 }
@@ -1086,12 +1086,13 @@ function buildSandboxAgentHandoffPrompt(title = 'Document Suite') {
     'You are in sandbox build mode. Work inside this project bundle and keep every runtime dependency static-safe for the sandbox preview.',
     '',
     'Build rules:',
-    '- Apply the Impressive Frontend Websites standard for site, dashboard, app, landing-page, and frontend mockup work: make the first viewport specific to the product or workflow, not a generic placeholder.',
+    '- Apply the Impressive Frontend Websites standard for site, dashboard, app, landing-page, frontend mockup, browser game, and interactive sandbox work: make the first viewport specific to the product or workflow, not a generic placeholder.',
     '- Establish a compact brief from the task; infer audience, primary actions, content hierarchy, brand mood, and target devices when the user did not spell them out.',
     '- Build the actual usable experience with real controls, states, navigation, data regions, empty/loading/error/disabled treatments, and purposeful interactions where the workflow implies them.',
+    '- For games, playable simulations, or multi-step Vite apps, create separate project files and include a real game loop or workflow state machine, input handling, score/progress, pause/restart/reset, responsive sizing, and a visible fallback if canvas/WebGL/module loading fails.',
     '- Use visual assets that reveal the product, place, workflow, audience, or state. Avoid vague decorative gradients, blobs, blurred stock-like backgrounds, and screenshot-only mockups.',
     '- Use relative links for local files such as ./styles.css and ./app.js.',
-    '- Keep the preview browser-runnable without npm install or a separate build step.',
+    '- Keep the preview browser-runnable without npm install or a separate build step. Include Vite handoff files when useful, but do not depend on unresolved bare imports for the saved preview.',
     '- Use explicit readable color tokens for page, panels, text, muted text, borders, links, controls, tables, captions, and overlays.',
     '- Avoid one-note palettes, oversized rounded cards, nested cards, clipped text, horizontal overflow, and controls whose opened dropdown/menu/popover states are unreadable.',
     '- Preserve the requested task, audience, and content hierarchy; choose the visual direction from the task instead of applying a fixed house style.',

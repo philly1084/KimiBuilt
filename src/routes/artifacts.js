@@ -114,7 +114,21 @@ function escapeHtmlAttribute(value = '') {
 }
 
 function buildSandboxPreviewShell(artifactId = '') {
-    const previewSrc = `/api/artifacts/${encodeURIComponent(String(artifactId || '').trim())}/preview`;
+    return buildTokenizedSandboxPreviewShell(artifactId);
+}
+
+function buildArtifactPreviewPath(artifactId = '', previewAccessToken = '', relativePath = '') {
+    const encodedId = encodeURIComponent(String(artifactId || '').trim());
+    const normalizedPath = String(relativePath || '').trim().replace(/^\/+/, '');
+    const token = String(previewAccessToken || '').trim();
+    const base = token
+        ? `/api/artifacts/${encodedId}/preview-access/${encodeURIComponent(token)}/`
+        : `/api/artifacts/${encodedId}/preview/`;
+    return normalizedPath ? `${base}${normalizedPath}` : base;
+}
+
+function buildTokenizedSandboxPreviewShell(artifactId = '', previewAccessToken = '') {
+    const previewSrc = buildArtifactPreviewPath(artifactId, previewAccessToken).replace(/\/$/, '');
     return `<!DOCTYPE html>
 <html>
 <head>
@@ -139,6 +153,43 @@ iframe { width: 100%; height: 100vh; border: 0; background: #fff; display: block
 </main>
 </body>
 </html>`;
+}
+
+function appendAccessTokenToUrl(rawUrl = '', previewAccessToken = '') {
+    const token = String(previewAccessToken || '').trim();
+    const source = String(rawUrl || '').trim();
+    if (!token || !source || !source.startsWith('/api/artifacts/')) {
+        return rawUrl;
+    }
+
+    try {
+        const parsed = new URL(source, 'http://localhost');
+        if (!/\/api\/artifacts\/[^/]+\/download$/i.test(parsed.pathname)) {
+            return rawUrl;
+        }
+        if (!parsed.searchParams.has('access_token')) {
+            parsed.searchParams.set('access_token', token);
+        }
+        return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    } catch (_error) {
+        const separator = source.includes('?') ? '&' : '?';
+        return `${source}${separator}access_token=${encodeURIComponent(token)}`;
+    }
+}
+
+function appendAccessTokenToInternalArtifactUrls(content = '', previewAccessToken = '') {
+    const token = String(previewAccessToken || '').trim();
+    if (!token) {
+        return String(content || '');
+    }
+
+    return String(content || '')
+        .replace(/(\b(?:href|src|action|poster)=["'])(\/api\/artifacts\/[^"']+)(["'])/gi, (_match, prefix, url, suffix) => (
+            `${prefix}${appendAccessTokenToUrl(url, token)}${suffix}`
+        ))
+        .replace(/url\((['"]?)(\/api\/artifacts\/[^'")]+)\1\)/gi, (_match, quote, url) => (
+            `url(${quote}${appendAccessTokenToUrl(url, token)}${quote})`
+        ));
 }
 
 function getRequestOwnerId(req) {
@@ -194,37 +245,44 @@ const generationSchema = {
     memoryKeywords: { required: false, type: 'array' },
 };
 
-function buildPreviewContentBuffer(artifactId, file) {
+function buildPreviewContentBuffer(artifactId, file, previewAccessToken = '') {
     const filePath = String(file?.path || '').trim();
     const source = String(file?.content || '');
     if (!source) {
         return Buffer.alloc(0);
     }
 
-    const previewRoot = buildFrontendBundlePreviewUrl(artifactId);
+    const previewRoot = buildArtifactPreviewPath(artifactId, previewAccessToken);
     if (/\.html?$/i.test(filePath)) {
         const directory = path.dirname(filePath);
-        const baseHref = buildFrontendBundlePreviewUrl(
+        const baseHref = buildArtifactPreviewPath(
             artifactId,
+            previewAccessToken,
             directory && directory !== '.' ? `${directory.replace(/\/+$/g, '')}/` : '',
         );
         return Buffer.from(
-            injectBundleBaseHref(
+            appendAccessTokenToInternalArtifactUrls(injectBundleBaseHref(
                 rewriteRootRelativeFrontendPaths(source, previewRoot),
                 baseHref,
-            ),
+            ), previewAccessToken),
             'utf8',
         );
     }
 
     if (/\.(?:css|svg|js|mjs)$/i.test(filePath)) {
-        return Buffer.from(rewriteRootRelativeFrontendPaths(source, previewRoot), 'utf8');
+        return Buffer.from(
+            appendAccessTokenToInternalArtifactUrls(
+                rewriteRootRelativeFrontendPaths(source, previewRoot),
+                previewAccessToken,
+            ),
+            'utf8',
+        );
     }
 
     return Buffer.from(source, 'utf8');
 }
 
-function resolveMetadataBundlePreviewFile(artifact, requestedPath = '') {
+function resolveMetadataBundlePreviewFile(artifact, requestedPath = '', previewAccessToken = '') {
     if (!hasExplicitFrontendBundle(artifact?.metadata || {})) {
         return null;
     }
@@ -237,7 +295,7 @@ function resolveMetadataBundlePreviewFile(artifact, requestedPath = '') {
     return {
         path: file.path,
         contentType: resolveFrontendBundleContentType(file.path),
-        contentBuffer: buildPreviewContentBuffer(artifact.id, file),
+        contentBuffer: buildPreviewContentBuffer(artifact.id, file, previewAccessToken),
     };
 }
 
@@ -481,6 +539,14 @@ router.get('/:id', async (req, res, next) => {
 });
 
 router.get('/:id/sandbox', async (req, res, next) => {
+    return serveArtifactSandbox(req, res, next);
+});
+
+router.get('/:id/sandbox-access/:previewAccessToken', async (req, res, next) => {
+    return serveArtifactSandbox(req, res, next, req.params.previewAccessToken);
+});
+
+async function serveArtifactSandbox(req, res, next, previewAccessToken = '') {
     try {
         const artifact = await getOwnedArtifact(req, req.params.id);
         if (!artifact) {
@@ -488,11 +554,11 @@ router.get('/:id/sandbox', async (req, res, next) => {
         }
 
         applySandboxShellHeaders(res);
-        res.send(buildSandboxPreviewShell(req.params.id));
+        res.send(buildTokenizedSandboxPreviewShell(req.params.id, previewAccessToken));
     } catch (err) {
         next(err);
     }
-});
+}
 
 router.get('/:id/download', async (req, res, next) => {
     try {
@@ -517,62 +583,57 @@ router.get('/:id/download', async (req, res, next) => {
 });
 
 router.get('/:id/preview', async (req, res, next) => {
+    return serveArtifactPreview(req, res, next, '', '');
+});
+
+router.get('/:id/preview-access/:previewAccessToken', async (req, res, next) => {
+    return serveArtifactPreview(req, res, next, '', req.params.previewAccessToken);
+});
+
+router.get('/:id/preview-access/:previewAccessToken/*', async (req, res, next) => {
+    return serveArtifactPreview(req, res, next, String(req.params[0] || '').trim(), req.params.previewAccessToken);
+});
+
+async function serveArtifactPreview(req, res, next, requestedPath = '', previewAccessToken = '') {
     try {
         const artifact = await getOwnedArtifact(req, req.params.id, { includeContent: true });
         if (!artifact) {
             return res.status(404).json({ error: { message: 'Artifact not found' } });
         }
 
-        const zipPreview = resolveArtifactFrontendBundleFile(artifact, '');
+        const zipPreview = resolveArtifactFrontendBundleFile(artifact, requestedPath, {
+            previewBasePath: buildArtifactPreviewPath(req.params.id, previewAccessToken),
+        });
         if (zipPreview) {
             res.setHeader('Content-Type', zipPreview.contentType);
             applyPreviewResponseHeaders(res);
-            res.send(zipPreview.contentBuffer);
+            const buffer = /\.(?:html?|css|svg|js|mjs)$/i.test(zipPreview.path)
+                ? Buffer.from(appendAccessTokenToInternalArtifactUrls(zipPreview.contentBuffer.toString('utf8'), previewAccessToken), 'utf8')
+                : zipPreview.contentBuffer;
+            res.send(buffer);
             return;
         }
 
-        const previewFile = resolveMetadataBundlePreviewFile(artifact);
+        const previewFile = resolveMetadataBundlePreviewFile(artifact, requestedPath, previewAccessToken);
 
         const previewBuffer = previewFile?.contentBuffer
             || (typeof artifact.previewHtml === 'string' && artifact.previewHtml
                 ? Buffer.from(artifact.previewHtml, 'utf8')
                 : artifact.contentBuffer);
 
-        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.setHeader('Content-Type', previewFile?.contentType || 'text/html; charset=utf-8');
         applyPreviewResponseHeaders(res);
-        res.send(previewBuffer);
+        const outputBuffer = /\.(?:html?|css|svg|js|mjs)$/i.test(previewFile?.path || 'index.html')
+            ? Buffer.from(appendAccessTokenToInternalArtifactUrls(previewBuffer.toString('utf8'), previewAccessToken), 'utf8')
+            : previewBuffer;
+        res.send(outputBuffer);
     } catch (err) {
         next(err);
     }
-});
+}
 
 router.get('/:id/preview/*', async (req, res, next) => {
-    try {
-        const artifact = await getOwnedArtifact(req, req.params.id, { includeContent: true });
-        if (!artifact) {
-            return res.status(404).json({ error: { message: 'Artifact not found' } });
-        }
-
-        const zipPreview = resolveArtifactFrontendBundleFile(artifact, String(req.params[0] || '').trim());
-        if (zipPreview) {
-            res.setHeader('Content-Type', zipPreview.contentType);
-            applyPreviewResponseHeaders(res);
-            res.send(zipPreview.contentBuffer);
-            return;
-        }
-
-        const requestedPath = String(req.params[0] || '').trim();
-        const previewFile = resolveMetadataBundlePreviewFile(artifact, requestedPath);
-        if (!previewFile) {
-            return res.status(404).json({ error: { message: 'Preview file not found' } });
-        }
-
-        res.setHeader('Content-Type', previewFile.contentType);
-        applyPreviewResponseHeaders(res);
-        res.send(previewFile.contentBuffer);
-    } catch (err) {
-        next(err);
-    }
+    return serveArtifactPreview(req, res, next, String(req.params[0] || '').trim(), '');
 });
 
 router.get('/:id/bundle', async (req, res, next) => {
