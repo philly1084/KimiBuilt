@@ -1728,6 +1728,34 @@ const Editor = (function() {
             updateWorkspacePanel();
         }
     }
+
+    function updateBlockFields(blockId, updates = {}) {
+        if (!currentPage || !blockId || !updates || typeof updates !== 'object') return null;
+
+        const location = findBlockLocation(blockId);
+        if (!location) return null;
+
+        saveToHistory();
+
+        const mergedBlock = normalizeBlocks([{
+            ...location.block,
+            ...updates,
+            id: blockId,
+            children: Object.prototype.hasOwnProperty.call(updates, 'children')
+                ? updates.children
+                : (location.block.children || []),
+            formatting: Object.prototype.hasOwnProperty.call(updates, 'formatting')
+                ? updates.formatting
+                : (location.block.formatting || {}),
+        }])[0];
+
+        location.siblings.splice(location.index, 1, mergedBlock);
+
+        refreshEditor();
+        autoSave();
+
+        return mergedBlock;
+    }
     
     /**
      * Indent a block (make child of previous)
@@ -2549,6 +2577,7 @@ const Editor = (function() {
         showInlineToolbar,
         hideInlineToolbar,
         updateBlockContent,
+        updateBlockFields,
         replaceBlockWithBlocks,
         insertBlocksAfter,
         insertBlocksBefore,

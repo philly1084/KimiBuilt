@@ -3799,10 +3799,10 @@ class UIHelpers {
             message.content :
             this.resolveAssistantVisibleContent(message);
 
-        const inlineArtifacts = !isUser && message.type !== 'artifact-gallery' && Array.isArray(message.artifacts)
+        const inlineArtifacts = message.type !== 'artifact-gallery' && Array.isArray(message.artifacts)
             ? message.artifacts.filter((artifact) => artifact?.id && artifact?.downloadUrl)
             : [];
-        const inlineArtifactMarkup = !isUser && inlineArtifacts.length > 0
+        const inlineArtifactMarkup = inlineArtifacts.length > 0
             ? `
                 <div class="message-generated-artifacts">
                     <div class="message-selection-panel">
@@ -3810,7 +3810,7 @@ class UIHelpers {
                             <div class="icon" aria-hidden="true">
                                 <i data-lucide="files" class="w-3.5 h-3.5"></i>
                             </div>
-                            <span class="text">Files ready</span>
+                            <span class="text">${isUser ? 'Files attached' : 'Files ready'}</span>
                             <span class="meta">${inlineArtifacts.length} item${inlineArtifacts.length === 1 ? '' : 's'}</span>
                         </div>
                         ${window.artifactManager?.buildGalleryMarkup?.(inlineArtifacts) || ''}

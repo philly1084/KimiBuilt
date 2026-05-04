@@ -644,6 +644,162 @@ Approved page plan:
         jest.useRealTimers();
     });
 
+    test('parses natural section-slice aliases for multi-round notes edits', () => {
+        const agent = loadAgent();
+        const responseText = [
+            '```notes-actions',
+            '{',
+            '  "assistant_reply": "Done",',
+            '  "actions": [',
+            '    { "op": "insert between sections", "after heading block id": "heading_a", "before heading block id": "heading_b", "blocks": [{ "type": "heading_2", "content": "New Middle Section" }] },',
+            '    { "op": "insert here", "block id": "block_c", "position": "before", "blocks": [{ "type": "text", "content": "Inserted at the local cursor." }] },',
+            '    { "op": "delete here", "heading block id": "heading_old", "scope": "section" }',
+            '  ]',
+            '}',
+            '```',
+        ].join('\n');
+
+        const parsed = agent._extractNotesActionPlan(responseText);
+
+        expect(parsed.actions).toEqual([
+            expect.objectContaining({
+                op: 'insert_between_sections',
+                afterHeadingBlockId: 'heading_a',
+                beforeHeadingBlockId: 'heading_b',
+            }),
+            expect.objectContaining({
+                op: 'insert_here',
+                blockId: 'block_c',
+                position: 'before',
+            }),
+            expect.objectContaining({
+                op: 'delete_here',
+                headingBlockId: 'heading_old',
+                scope: 'section',
+            }),
+        ]);
+    });
+
+    test('applies section-slice aliases without rebuilding the page', () => {
+        jest.useFakeTimers();
+        const editor = {
+            insertBlocksAfterSection: jest.fn(() => [{ id: 'middle_heading' }]),
+            insertBlocksBefore: jest.fn(() => [{ id: 'local_insert' }]),
+            deleteSectionFromHeading: jest.fn(() => true),
+            importBlocks: jest.fn(() => [{ id: 'should_not_use' }]),
+            savePage: jest.fn(),
+            focusBlock: jest.fn(),
+        };
+        const agent = loadAgent({ Editor: editor });
+
+        const result = agent._applyNotesActions([
+            {
+                op: 'insert_between_sections',
+                afterHeadingBlockId: 'heading_a',
+                beforeHeadingBlockId: 'heading_b',
+                blocks: [{ type: 'heading_2', content: 'New Middle Section' }],
+            },
+            {
+                op: 'insert_here',
+                blockId: 'block_c',
+                position: 'before',
+                blocks: [{ type: 'text', content: 'Inserted at the local cursor.' }],
+            },
+            {
+                op: 'delete_here',
+                headingBlockId: 'heading_old',
+                scope: 'section',
+            },
+        ]);
+
+        expect(result.appliedCount).toBe(3);
+        expect(editor.insertBlocksAfterSection).toHaveBeenCalledWith('heading_a', expect.arrayContaining([
+            expect.objectContaining({ type: 'heading_2', content: 'New Middle Section' }),
+        ]));
+        expect(editor.insertBlocksBefore).toHaveBeenCalledWith('block_c', expect.arrayContaining([
+            expect.objectContaining({ type: 'text', content: 'Inserted at the local cursor.' }),
+        ]));
+        expect(editor.deleteSectionFromHeading).toHaveBeenCalledWith('heading_old');
+        expect(editor.importBlocks).not.toHaveBeenCalled();
+        jest.runOnlyPendingTimers();
+        jest.useRealTimers();
+    });
+
+    test('keeps block identity when changing a block type in place', () => {
+        jest.useFakeTimers();
+        const blocks = {
+            block_a: {
+                id: 'block_a',
+                type: 'text',
+                content: 'Keep this wording but make it a callout.',
+                children: [],
+                formatting: {},
+            },
+        };
+        const editor = {
+            getBlock: jest.fn((blockId) => blocks[blockId]),
+            updateBlockFields: jest.fn((blockId, updates) => {
+                blocks[blockId] = { ...blocks[blockId], ...updates, id: blockId };
+                return blocks[blockId];
+            }),
+            replaceBlockWithBlocks: jest.fn(() => [{ id: 'fresh_id' }]),
+            savePage: jest.fn(),
+            focusBlock: jest.fn(),
+        };
+        const agent = loadAgent({ Editor: editor });
+
+        const result = agent._applyNotesActions([
+            {
+                op: 'change_block_type',
+                blockId: 'block_a',
+                type: 'callout',
+            },
+        ]);
+
+        expect(result.appliedCount).toBe(1);
+        expect(editor.updateBlockFields).toHaveBeenCalledWith('block_a', expect.objectContaining({
+            id: 'block_a',
+            type: 'callout',
+            content: expect.objectContaining({
+                text: 'Keep this wording but make it a callout.',
+            }),
+        }));
+        expect(editor.replaceBlockWithBlocks).not.toHaveBeenCalled();
+        expect(blocks.block_a.id).toBe('block_a');
+        expect(blocks.block_a.type).toBe('callout');
+        jest.runOnlyPendingTimers();
+        jest.useRealTimers();
+    });
+
+    test('does not rebuild an existing page for second-round additional content fallback', () => {
+        const editor = {
+            getCurrentPage: jest.fn(() => ({
+                id: 'page_existing',
+                title: 'Launch Notes',
+                blocks: [
+                    { id: 'h1', type: 'heading_1', content: 'Launch Notes' },
+                    { id: 'intro', type: 'text', content: 'Existing intro stays.' },
+                    { id: 'h2', type: 'heading_2', content: 'Timeline' },
+                    { id: 'timeline', type: 'text', content: 'Existing timeline stays.' },
+                ],
+            })),
+        };
+        const agent = loadAgent({ Editor: editor });
+
+        const actions = agent._buildFallbackNotesActionsFromText(
+            'Add additional risks and mitigation content to the page.',
+            '# Risks\n\n## Mitigations\n- Add rollout owner\n- Add fallback window\n- Add monitoring check',
+            {
+                blockCount: 4,
+                outline: [{ id: 'h1', content: 'Launch Notes' }, { id: 'h2', content: 'Timeline' }],
+            }
+        );
+
+        expect(actions).toHaveLength(1);
+        expect(actions[0].op).toBe('append_to_page');
+        expect(actions[0].op).not.toBe('rebuild_page');
+    });
+
     test('applies exact text replacement and highlight actions without rebuilding a whole page', () => {
         jest.useFakeTimers();
         const blocks = {

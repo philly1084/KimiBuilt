@@ -359,6 +359,8 @@ function buildRemoteCliInstructions({
     'If it returns status "running", call remote_code_status with the returned jobId.',
     'If continuing prior work, reuse the returned sessionId.',
     sessionId ? `Current prior remote CLI sessionId: ${sessionId}` : '',
+    'When the task includes an "Original task" and a "Current user follow-up", preserve the original task as the governing objective. Treat the follow-up as steering or continuation, not as a replacement status request.',
+    'Do not let progress callbacks, foreground plan labels, or status-card text become the task. Finish the requested work and only stop for USER_INPUT_REQUIRED when a real user decision is needed.',
     'Do not try to pass raw shell commands; only use the exposed tool schema.',
     'Finish with marker lines for continuity when known: REMOTE_CLI_SESSION_ID=<remote_code_run sessionId>, WORKSPACE=<path>, GIT_REPO=<origin or local repo>, GIT_COMMIT=<sha>, DEPLOYMENT=<namespace/name>, PUBLIC_HOST=<host>.',
     extraInstructions,

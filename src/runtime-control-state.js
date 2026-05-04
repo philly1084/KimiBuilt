@@ -112,6 +112,7 @@ function getSessionControlState(session = null) {
         ...(session?.metadata?.lastToolIntent ? { lastToolIntent: session.metadata.lastToolIntent } : {}),
         ...(session?.metadata?.lastSshTarget ? { lastSshTarget: session.metadata.lastSshTarget } : {}),
         ...(session?.metadata?.remoteWorkingState ? { remoteWorkingState: session.metadata.remoteWorkingState } : {}),
+        ...(session?.metadata?.remoteCliAgent ? { remoteCliAgent: session.metadata.remoteCliAgent } : {}),
         ...(typeof session?.metadata?.remoteBuildAutonomyApproved === 'boolean'
             ? { autonomyApproved: session.metadata.remoteBuildAutonomyApproved }
             : {}),
@@ -141,6 +142,10 @@ function buildLegacyControlMetadata(controlState = {}) {
 
     if (normalized.remoteCli) {
         legacyMetadata.remoteCli = normalized.remoteCli;
+    }
+
+    if (normalized.remoteCliAgent) {
+        legacyMetadata.remoteCliAgent = normalized.remoteCliAgent;
     }
 
     if (Object.keys(normalized).length > 0) {

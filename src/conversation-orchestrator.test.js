@@ -1000,6 +1000,81 @@ describe('ConversationOrchestrator', () => {
         }));
     });
 
+    test('persists remote-cli-agent continuity state from orchestrated tool events', async () => {
+        const sessionStore = {
+            getOwned: jest.fn().mockResolvedValue({ id: 'session-remote-cli-state', metadata: {} }),
+            get: jest.fn().mockResolvedValue({ id: 'session-remote-cli-state', metadata: {} }),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            updateControlState: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            rememberResponse: jest.fn(),
+            rememberLearnedSkill: jest.fn(async () => undefined),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn(() => null),
+            },
+            sessionStore,
+            memoryService,
+        });
+
+        await orchestrator.completeConversationRun({
+            sessionId: 'session-remote-cli-state',
+            userText: 'Build the Calan app with remote-cli-agent.',
+            objective: 'Build the Calan app with remote-cli-agent.',
+            assistantText: 'Remote CLI finished.',
+            output: 'Remote CLI finished.',
+            finalResponse: buildResponse('Remote CLI finished.', 'resp-remote-cli-state'),
+            executionProfile: 'remote-build',
+            toolEvents: [{
+                toolCall: {
+                    function: {
+                        name: 'remote-cli-agent',
+                        arguments: JSON.stringify({
+                            task: 'Build the Calan app with remote-cli-agent.',
+                            cwd: '/srv/apps/calan-calendar',
+                        }),
+                    },
+                },
+                result: {
+                    success: true,
+                    toolId: 'remote-cli-agent',
+                    data: {
+                        finalOutput: 'Built and deployed Calan.',
+                        sessionId: 'remote-code-session-2',
+                        mcpSessionId: 'mcp-session-2',
+                        cwd: '/srv/apps/calan-calendar',
+                        gitCommit: 'abc1234',
+                        publicHost: 'calan.demoserver2.buzz',
+                    },
+                },
+            }],
+        });
+
+        expect(sessionStore.updateControlState).toHaveBeenCalledWith(
+            'session-remote-cli-state',
+            expect.objectContaining({
+                lastToolIntent: 'remote-cli-agent',
+                remoteCliAgent: expect.objectContaining({
+                    lastTask: 'Build the Calan app with remote-cli-agent.',
+                    sessionId: 'remote-code-session-2',
+                    mcpSessionId: 'mcp-session-2',
+                    cwd: '/srv/apps/calan-calendar',
+                    gitCommit: 'abc1234',
+                    publicHost: 'calan.demoserver2.buzz',
+                }),
+            }),
+        );
+    });
+
     test('triggers session compaction after persistence with merged workflow and project memory state', async () => {
         const sessionStore = {
             getOwned: jest.fn().mockResolvedValue({
@@ -3024,6 +3099,150 @@ describe('ConversationOrchestrator', () => {
         );
         expect(llmClient.createResponse).toHaveBeenCalledTimes(2);
         expect(result.output).toBe('The remote Sophia site inspection ran and returned the current index.html, so the next step is to apply the requested content changes.');
+    });
+
+    test('recovers leaked Harmony remote-command tool calls by executing them', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const leakedPayload = [
+            'Let me inspect the current Calan deployment.',
+            '<tool_call>remote-command <arg_key>command</arg_key><arg_value>kubectl get ingress -n web calan-calendar -o wide</arg_value></tool_call>',
+        ].join('\n');
+        const llmClient = {
+            createResponse: jest.fn()
+                .mockResolvedValueOnce(buildResponse(leakedPayload, 'resp_invalid_harmony_remote_payload'))
+                .mockResolvedValueOnce(buildResponse(
+                    'The Calan ingress inspection ran and confirmed the route points at the calendar service.',
+                    'resp_repaired_harmony_remote_payload',
+                )),
+            complete: jest.fn().mockResolvedValue(JSON.stringify({ steps: [] })),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['remote-command', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read']
+                    .includes(toolId)
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn().mockResolvedValue({
+                success: true,
+                toolId: 'remote-command',
+                data: {
+                    stdout: 'calan.demoserver2.buzz   calan-calendar   80',
+                    stderr: '',
+                    host: '10.0.0.5:22',
+                },
+            }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-harmony-remote-payload', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'Inspect the Calan ingress route on the server.',
+            sessionId: 'session-harmony-remote-payload',
+            executionProfile: 'remote-build',
+            stream: false,
+        });
+
+        expect(toolManager.executeTool).toHaveBeenCalledWith(
+            'remote-command',
+            expect.objectContaining({
+                command: 'kubectl get ingress -n web calan-calendar -o wide',
+            }),
+            expect.objectContaining({
+                sessionId: 'session-harmony-remote-payload',
+                executionProfile: 'remote-build',
+            }),
+        );
+        expect(llmClient.createResponse).toHaveBeenCalledTimes(2);
+        expect(result.output).toBe('The Calan ingress inspection ran and confirmed the route points at the calendar service.');
+    });
+
+    test('recovers leaked Harmony tool-doc-read calls by executing the documented tool', async () => {
+        const leakedPayload = 'Let me load the docs. <tool_call>tool-doc-read <arg_key>title</arg_key><arg_value>k3s-deploy</arg_value></tool_call>';
+        const llmClient = {
+            createResponse: jest.fn()
+                .mockResolvedValueOnce(buildResponse(leakedPayload, 'resp_invalid_harmony_tool_doc'))
+                .mockResolvedValueOnce(buildResponse(
+                    'Loaded the k3s-deploy docs and can continue with the deploy flow.',
+                    'resp_repaired_harmony_tool_doc',
+                )),
+            complete: jest.fn().mockResolvedValue(JSON.stringify({ steps: [] })),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['tool-doc-read', 'remote-command']
+                    .includes(toolId)
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn().mockResolvedValue({
+                success: true,
+                toolId: 'tool-doc-read',
+                data: {
+                    toolId: 'k3s-deploy',
+                    content: 'k3s deploy documentation',
+                },
+            }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-harmony-tool-doc', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        await orchestrator.executeConversation({
+            input: 'Use the k3s-deploy docs before deploying.',
+            sessionId: 'session-harmony-tool-doc',
+            executionProfile: 'remote-build',
+            stream: false,
+        });
+
+        expect(toolManager.executeTool).toHaveBeenCalledWith(
+            'tool-doc-read',
+            expect.objectContaining({
+                toolId: 'k3s-deploy',
+            }),
+            expect.objectContaining({
+                sessionId: 'session-harmony-tool-doc',
+            }),
+        );
     });
 
     test('repairs invalid final responses that surface serialized tool-call wrapper payloads', async () => {
@@ -8381,6 +8600,70 @@ describe('ConversationOrchestrator', () => {
                 cwd: '/srv/apps/weather',
             },
         });
+    });
+
+    test('anchors remote-cli-agent continuation prompts to the original task and prior session', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['remote-cli-agent', 'remote-command', 'web-search', 'tool-doc-read']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'continue working on it with the remote clie agent';
+        const session = {
+            controlState: {
+                remoteCliAgent: {
+                    lastTask: 'Build a cool and amazing Calan calendar app from the ground up and deploy it to calan.demoserver2.buzz.',
+                    sessionId: 'remote-code-session-1',
+                    mcpSessionId: 'mcp-session-1',
+                    cwd: '/srv/apps/calan-calendar',
+                },
+            },
+            metadata: {},
+        };
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            session,
+            toolPolicy,
+            toolContext: {},
+        });
+
+        expect(directAction).toEqual(expect.objectContaining({
+            tool: 'remote-cli-agent',
+            params: expect.objectContaining({
+                sessionId: 'remote-code-session-1',
+                mcpSessionId: 'mcp-session-1',
+                cwd: '/srv/apps/calan-calendar',
+            }),
+        }));
+        expect(directAction.params.task).toContain('Original task:');
+        expect(directAction.params.task).toContain('Build a cool and amazing Calan calendar app');
+        expect(directAction.params.task).toContain('Current user follow-up:');
+        expect(directAction.params.task).toContain('continue working on it');
+        expect(directAction.params.task).toContain('do not replace the task with a progress callback');
     });
 
     test('routes remote software deployment requests to remote-cli-agent with admin runner mode', () => {

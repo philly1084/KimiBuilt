@@ -404,9 +404,9 @@ function inferRequestedOutputFormat(text = '') {
     }
 
     const hasArtifactIntent = hasExplicitArtifactGenerationIntent(normalized);
-    const hasBuildIntent = /\b(create|make|generate|build|produce|render|prepare|draft)\b/.test(normalized);
+    const hasBuildIntent = /\b(create|make|generate|build|built|produce|render|prepare|draft)\b/.test(normalized);
     const hasWebsiteArtifactSubject = (
-        /\b(website|web page|webpage|landing page|homepage|microsite|marketing site|frontend demo|front-end demo|site mockup|site prototype)\b/.test(normalized)
+        /\b(website|web page|webpage|html page|page|landing page|homepage|microsite|marketing site|frontend demo|front-end demo|site mockup|site prototype)\b/.test(normalized)
         || isDashboardRequest(normalized)
     );
     const hasSandboxPreviewCue = /\b(sandbox|preview|browser preview|live preview|full screen preview|fullscreen preview)\b/.test(normalized);
@@ -468,6 +468,10 @@ function inferRequestedOutputFormat(text = '') {
         || (hasPrototypeHtmlCue && hasBuildIntent)
         || (hasSandboxPreviewCue && hasBuildIntent)
     )) {
+        return 'html';
+    }
+
+    if (hasExplicitHtmlCue && (hasBuildIntent || hasSandboxPreviewCue || hasArtifactIntent)) {
         return 'html';
     }
 

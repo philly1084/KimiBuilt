@@ -1102,6 +1102,19 @@ class FileManager {
       return;
     }
 
+    if (typeof window.artifactManager?.uploadFile === 'function') {
+      try {
+        await window.artifactManager.uploadFile(file);
+        this.showToast(`Uploaded ${file.name}`, 'success');
+        await this.refreshFiles();
+        return;
+      } catch (error) {
+        console.error('[FileManager] Upload failed:', error);
+        this.showToast(`Failed to upload ${file.name}`, 'error');
+        return;
+      }
+    }
+
     const formData = new FormData();
     formData.append('sessionId', sessionId);
     formData.append('mode', 'chat');

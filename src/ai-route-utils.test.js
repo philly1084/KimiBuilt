@@ -307,6 +307,7 @@ describe('ai-route-utils', () => {
         expect(inferRequestedOutputFormat('Make a webpage with NASA facts and a calendar of upcoming skywatching events')).toBe('html');
         expect(inferRequestedOutputFormat('Build a sandbox weather webpage with current conditions cards')).toBe('html');
         expect(inferRequestedOutputFormat('Create a weather web page with a browser preview')).toBe('html');
+        expect(inferRequestedOutputFormat('This was supposed to be a sandbox built HTML page')).toBe('html');
         expect(inferRequestedOutputFormat('Create website slides for a fintech launch that I can reuse as a Vite template')).toBe('html');
         expect(inferRequestedOutputFormat('Build an executive brief template as a frontend example for our web design system')).toBe('html');
     });

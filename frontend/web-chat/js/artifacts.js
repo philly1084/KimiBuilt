@@ -247,6 +247,35 @@
                 background: #ffffff;
             }
 
+            .artifact-generated-card .artifact-image-preview {
+                margin-bottom: 12px;
+                border: 1px solid rgba(168, 85, 247, 0.24);
+                border-radius: 12px;
+                overflow: hidden;
+                background: rgba(15, 23, 42, 0.08);
+            }
+
+            .artifact-generated-card .artifact-image-preview img {
+                display: block;
+                width: 100%;
+                max-height: min(420px, 62vh);
+                object-fit: contain;
+                background: #0f172a;
+            }
+
+            .artifact-generated-card .artifact-text-preview {
+                margin-bottom: 12px;
+                max-height: 220px;
+                overflow: auto;
+                padding: 12px;
+                border: 1px solid rgba(148, 163, 184, 0.24);
+                border-radius: 12px;
+                background: rgba(15, 23, 42, 0.08);
+                color: var(--text-primary);
+                font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+                white-space: pre-wrap;
+            }
+
             .site-preview-modal {
                 position: fixed;
                 inset: 0;
@@ -460,9 +489,10 @@
         if (!text) return '';
 
         const hasArtifactIntent = hasExplicitArtifactIntent(text);
-        const hasBuildIntent = /\b(create|make|generate|build|produce|render|prepare|draft)\b/.test(text);
-        const hasWebsiteArtifactSubject = /\b(website|web page|webpage|landing page|homepage|microsite|marketing site|frontend demo|front-end demo|site mockup|site prototype)\b/.test(text);
+        const hasBuildIntent = /\b(create|make|generate|build|built|produce|render|prepare|draft)\b/.test(text);
+        const hasWebsiteArtifactSubject = /\b(website|web page|webpage|html page|page|landing page|homepage|microsite|marketing site|frontend demo|front-end demo|site mockup|site prototype)\b/.test(text);
         const hasSandboxPreviewCue = /\b(sandbox|preview|browser preview|live preview|full screen preview|fullscreen preview)\b/.test(text);
+        const hasExplicitHtmlCue = /\bhtml\b/.test(text);
 
         if ((/\b(power\s*query|\.(pq|m)\b)/.test(text) && hasArtifactIntent)
             || /\b(power\s*query)\s+(?:file|script|artifact|export)\b/.test(text)) {
@@ -480,6 +510,7 @@
         if (/\bxml\b/.test(text) && hasArtifactIntent) return 'xml';
         if (hasExplicitMermaidIntent(text)) return 'mermaid';
         if (hasExplicitHtmlArtifactIntent(text)) return 'html';
+        if (hasExplicitHtmlCue && (hasBuildIntent || hasSandboxPreviewCue || hasArtifactIntent)) return 'html';
         if (hasWebsiteArtifactSubject && hasBuildIntent && hasSandboxPreviewCue) return 'html';
 
         return '';
@@ -501,7 +532,66 @@
             throw new Error(error.error?.message || `Upload failed (${response.status})`);
         }
 
+        const artifact = await response.json().catch(() => null);
         await fetchArtifacts();
+        if (artifact?.id) {
+            upsertArtifact(artifact);
+            selectArtifactForContext(artifact.id);
+            renderUploadedArtifactsMessage([artifact]);
+        }
+        return artifact;
+    }
+
+    function upsertArtifact(artifact) {
+        if (!artifact?.id) return;
+        state.artifacts = [
+            artifact,
+            ...state.artifacts.filter((entry) => entry?.id !== artifact.id),
+        ];
+        if (window.fileManager) {
+            window.fileManager.addFile(artifact, { sessionId: getCurrentSessionId() });
+        }
+    }
+
+    function selectArtifactForContext(id = '') {
+        const normalizedId = String(id || '').trim();
+        if (!normalizedId || state.selectedArtifactIds.includes(normalizedId)) {
+            return;
+        }
+        state.selectedArtifactIds.push(normalizedId);
+        renderSelectedChips();
+    }
+
+    function renderUploadedArtifactsMessage(artifacts = []) {
+        const files = (Array.isArray(artifacts) ? artifacts : []).filter((artifact) => artifact?.id);
+        const sessionId = getCurrentSessionId();
+        if (files.length === 0 || !sessionId || !window.sessionManager || !window.uiHelpers) {
+            return;
+        }
+
+        const message = {
+            id: window.uiHelpers.generateMessageId(),
+            role: 'user',
+            content: files.length === 1
+                ? `Uploaded ${files[0].filename || 'a file'}`
+                : `Uploaded ${files.length} files`,
+            artifacts: files,
+            excludeFromTranscript: true,
+            metadata: {
+                excludeFromTranscript: true,
+                uploadedArtifactIds: files.map((artifact) => artifact.id),
+            },
+            timestamp: new Date().toISOString(),
+        };
+        const savedMessage = window.sessionManager.addMessage(sessionId, message);
+        const container = document.getElementById('messages-container');
+        if (container) {
+            const messageEl = window.uiHelpers.renderMessage(savedMessage);
+            container.appendChild(messageEl);
+            window.uiHelpers.reinitializeIcons(messageEl);
+            window.uiHelpers.renderMermaidDiagrams?.(messageEl);
+            window.uiHelpers.scrollToBottom?.();
+        }
     }
 
     function renderSelectedChips() {
@@ -590,6 +680,41 @@
         return format === 'mermaid'
             || filename.endsWith('.mmd')
             || filename.endsWith('.mermaid');
+    }
+
+    function isImageArtifact(artifact = null) {
+        const format = String(artifact?.format || '').toLowerCase();
+        const mimeType = String(artifact?.mimeType || '').toLowerCase();
+        const filename = String(artifact?.filename || '').toLowerCase();
+        return mimeType.startsWith('image/')
+            || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(format)
+            || /\.(png|jpe?g|gif|webp|svg)$/i.test(filename);
+    }
+
+    function getArtifactImagePreviewUrl(artifact) {
+        if (!isImageArtifact(artifact)) {
+            return '';
+        }
+
+        const inlinePath = artifact?.inlinePath
+            || artifact?.inlineUrl
+            || artifact?.absoluteInlineUrl
+            || (artifact?.downloadUrl ? `${artifact.downloadUrl}?inline=1` : '');
+        return resolveApiUrl(inlinePath, { absolute: true });
+    }
+
+    function getArtifactTextPreview(artifact) {
+        if (!artifact || isMermaidArtifact(artifact) || isImageArtifact(artifact)) {
+            return '';
+        }
+        if (artifact.preview?.type === 'text') {
+            return String(artifact.preview.content || '').trim();
+        }
+        const format = String(artifact.format || '').toLowerCase();
+        if (['csv', 'xml', 'power-query'].includes(format) && typeof artifact.contentPreview === 'string') {
+            return artifact.contentPreview.trim();
+        }
+        return '';
     }
 
     function getFileIconClass(filename, artifact = null) {
@@ -756,6 +881,23 @@
                 </div>
             `
             : '';
+        const imagePreviewUrl = getArtifactImagePreviewUrl(artifact);
+        const imagePreview = imagePreviewUrl
+            ? `
+                <div class="artifact-image-preview">
+                    <img
+                        src="${escapeHtmlAttr(imagePreviewUrl)}"
+                        alt="${escapeHtmlAttr(artifact.filename || 'Uploaded image')}"
+                        loading="lazy"
+                        onclick="uiHelpers.openImageLightbox('${escapeHtmlAttr(imagePreviewUrl)}')"
+                    >
+                </div>
+            `
+            : '';
+        const textPreviewContent = getArtifactTextPreview(artifact);
+        const textPreview = textPreviewContent
+            ? `<pre class="artifact-text-preview">${escapeHtml(textPreviewContent.slice(0, 2400))}</pre>`
+            : '';
         const mermaidActions = mermaidArtifact
             ? `
                 <button
@@ -796,8 +938,10 @@
                 <div class="file-meta">
                     ${artifact.format?.toUpperCase() || 'FILE'} | ${formatFileSize(artifact.sizeBytes)}
                 </div>
+                ${imagePreview}
                 ${mermaidPreview}
                 ${htmlPreview}
+                ${textPreview}
                 <div class="file-actions">
                     <button class="primary" onclick="artifactManager.downloadArtifact('${artifact.id}', '${escapeHtml(artifact.filename)}')">
                         <i data-lucide="download" class="w-4 h-4"></i>
@@ -960,6 +1104,11 @@
                         : {}),
                     remoteBuildAutonomyApproved: true,
                 };
+            }
+
+            const inferredOutputFormat = inferRequestedOutputFormat(messages);
+            if (inferredOutputFormat && !nextRequestOptions.outputFormat) {
+                nextRequestOptions.outputFormat = inferredOutputFormat;
             }
 
             if (state.selectedArtifactIds.length > 0) {

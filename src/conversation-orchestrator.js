@@ -2907,6 +2907,52 @@ function buildActiveTaskFrame({
     });
 }
 
+function extractRemoteCliAgentControlStateFromToolEvents(toolEvents = []) {
+    const event = [...(Array.isArray(toolEvents) ? toolEvents : [])]
+        .reverse()
+        .find((entry) => {
+            const toolId = String(entry?.toolCall?.function?.name || entry?.result?.toolId || '').trim();
+            return toolId === 'remote-cli-agent';
+        });
+    if (!event) {
+        return null;
+    }
+
+    const params = parseToolCallArguments(event?.toolCall?.function?.arguments || '{}');
+    const data = event?.result?.data && typeof event.result.data === 'object' ? event.result.data : {};
+    const task = String(params.task || '').trim();
+    const remoteCliAgent = {
+        ...(task ? { lastTask: task } : {}),
+        lastTaskAt: new Date().toISOString(),
+        ...(event?.result?.success === false
+            ? {
+                lastFailure: {
+                    task,
+                    reason: String(event?.result?.error || 'remote-cli-agent failed').trim(),
+                    failedAt: new Date().toISOString(),
+                },
+            }
+            : {}),
+        ...(data.sessionId ? { sessionId: data.sessionId } : {}),
+        ...(data.mcpSessionId ? { mcpSessionId: data.mcpSessionId } : {}),
+        ...(data.targetId ? { targetId: data.targetId } : {}),
+        ...(data.cwd || params.cwd ? { cwd: data.cwd || params.cwd } : {}),
+        ...(data.remoteCodeSessionId ? { remoteCodeSessionId: data.remoteCodeSessionId } : {}),
+        ...(data.gitRepo ? { gitRepo: data.gitRepo } : {}),
+        ...(data.gitCommit ? { gitCommit: data.gitCommit } : {}),
+        ...(data.deployment ? { deployment: data.deployment } : {}),
+        ...(data.publicHost ? { publicHost: data.publicHost } : {}),
+        ...(data.uiCheckReport ? { uiCheckReport: data.uiCheckReport } : {}),
+        ...(Array.isArray(data.uiScreenshots) && data.uiScreenshots.length > 0 ? { uiScreenshots: data.uiScreenshots } : {}),
+        ...(data.model ? { model: data.model } : {}),
+    };
+
+    return {
+        lastToolIntent: 'remote-cli-agent',
+        remoteCliAgent,
+    };
+}
+
 function buildNotesSynthesisInstructions() {
     return [
         'You are editing a Lilly-style block-based notes document.',
@@ -4501,6 +4547,57 @@ function collectDsmlToolCallCandidatesFromText(text = '') {
     return candidates;
 }
 
+function decodeXmlEntityText(value = '') {
+    return String(value || '')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, '\'')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+        .trim();
+}
+
+function collectHarmonyToolCallCandidatesFromText(text = '') {
+    const source = String(text || '').trim();
+    if (!source || !/<\s*tool_call\b/i.test(source)) {
+        return [];
+    }
+
+    const candidates = [];
+    const toolCallPattern = /<\s*tool_call\b[^>]*>([\s\S]*?)<\s*\/\s*tool_call\s*>/gi;
+    let match;
+
+    while ((match = toolCallPattern.exec(source)) !== null) {
+        const body = String(match[1] || '').trim();
+        const toolName = decodeXmlEntityText(
+            body.match(/^\s*([a-z0-9_.:-]+)\b/i)?.[1]
+                || body.match(/<\s*tool_name\s*>([\s\S]*?)<\s*\/\s*tool_name\s*>/i)?.[1]
+                || '',
+        );
+        if (!toolName) {
+            continue;
+        }
+
+        const params = {};
+        const argPairPattern = /<\s*arg_key\s*>([\s\S]*?)<\s*\/\s*arg_key\s*>\s*<\s*arg_value\s*>([\s\S]*?)<\s*\/\s*arg_value\s*>/gi;
+        let argMatch;
+        while ((argMatch = argPairPattern.exec(body)) !== null) {
+            const key = decodeXmlEntityText(argMatch[1] || '');
+            if (!key) {
+                continue;
+            }
+            params[key] = decodeXmlEntityText(argMatch[2] || '');
+        }
+
+        candidates.push({
+            tool: toolName,
+            params,
+        });
+    }
+
+    return candidates;
+}
+
 function parsePayloadObject(value = null) {
     if (!value) {
         return null;
@@ -4608,38 +4705,72 @@ function isLeakedRemoteCommandPayloadText(text = '') {
     }
 
     return collectJsonCandidatesFromText(source).some((candidate) => Boolean(findRemoteCommandPayload(candidate)))
-        || collectDsmlToolCallCandidatesFromText(source).some((candidate) => Boolean(findRemoteCommandPayload(candidate)));
+        || collectDsmlToolCallCandidatesFromText(source).some((candidate) => Boolean(findRemoteCommandPayload(candidate)))
+        || collectHarmonyToolCallCandidatesFromText(source).some((candidate) => Boolean(findRemoteCommandPayload(candidate)));
 }
 
 function buildRecoveryPlanFromLeakedRemoteCommandPayload(text = '', toolPolicy = {}) {
     const remoteToolId = getPreferredRemoteToolId(toolPolicy) || 'remote-command';
-    if (!Array.isArray(toolPolicy?.candidateToolIds) || !toolPolicy.candidateToolIds.includes(remoteToolId)) {
+    const candidateToolIds = Array.isArray(toolPolicy?.candidateToolIds) ? toolPolicy.candidateToolIds : [];
+    if (candidateToolIds.length === 0) {
         return [];
     }
 
-    for (const candidate of collectJsonCandidatesFromText(text)) {
-        const payload = findRemoteCommandPayload(candidate);
-        if (!payload?.params?.command) {
-            continue;
+    if (candidateToolIds.includes(remoteToolId)) {
+        for (const candidate of collectJsonCandidatesFromText(text)) {
+            const payload = findRemoteCommandPayload(candidate);
+            if (!payload?.params?.command) {
+                continue;
+            }
+
+            return [{
+                tool: remoteToolId,
+                reason: 'Recover leaked remote-command JSON by executing it as a verified tool call.',
+                params: payload.params,
+            }];
         }
 
-        return [{
-            tool: remoteToolId,
-            reason: 'Recover leaked remote-command JSON by executing it as a verified tool call.',
-            params: payload.params,
-        }];
+        for (const candidate of collectDsmlToolCallCandidatesFromText(text)) {
+            const payload = findRemoteCommandPayload(candidate);
+            if (!payload?.params?.command) {
+                continue;
+            }
+
+            return [{
+                tool: remoteToolId,
+                reason: 'Recover leaked remote-command DSML by executing it as a verified tool call.',
+                params: payload.params,
+            }];
+        }
+
+        for (const candidate of collectHarmonyToolCallCandidatesFromText(text)) {
+            const payload = findRemoteCommandPayload(candidate);
+            if (!payload?.params?.command) {
+                continue;
+            }
+
+            return [{
+                tool: remoteToolId,
+                reason: 'Recover leaked remote-command Harmony tool call by executing it as a verified tool call.',
+                params: payload.params,
+            }];
+        }
     }
 
-    for (const candidate of collectDsmlToolCallCandidatesFromText(text)) {
-        const payload = findRemoteCommandPayload(candidate);
-        if (!payload?.params?.command) {
+    for (const candidate of collectHarmonyToolCallCandidatesFromText(text)) {
+        const tool = canonicalizeRemoteToolId(candidate.tool || '');
+        const params = candidate.params && typeof candidate.params === 'object' ? { ...candidate.params } : {};
+        if (!tool || !candidateToolIds.includes(tool) || Object.keys(params).length === 0) {
             continue;
         }
-
+        if (tool === 'tool-doc-read' && !params.toolId && params.title) {
+            params.toolId = params.title;
+            delete params.title;
+        }
         return [{
-            tool: remoteToolId,
-            reason: 'Recover leaked remote-command DSML by executing it as a verified tool call.',
-            params: payload.params,
+            tool,
+            reason: 'Recover leaked Harmony tool call by executing it as a verified tool call.',
+            params,
         }];
     }
 
@@ -4651,6 +4782,9 @@ function isInvalidRuntimeResponseText(text = '') {
         return true;
     }
     if (isLeakedRemoteCommandPayloadText(text)) {
+        return true;
+    }
+    if (collectHarmonyToolCallCandidatesFromText(text).length > 0) {
         return true;
     }
     const normalized = String(text || '').trim().toLowerCase().replace(/[â€™]/g, '\'');
@@ -4774,9 +4908,10 @@ function hasRemoteCliAgentAuthoringIntent(text = '') {
         return false;
     }
 
-    const explicitAssistedCli = /\b(remote cli agent|remote coding agent|remote code run|remote_code_run|agents sdk remote cli|assisted cli|cli tool)\b/.test(normalized);
+    const explicitAssistedCli = /\b(remote cli agent|remote clie agent|remote coding agent|remote code run|remote_code_run|agents sdk remote cli|assisted cli|cli tool)\b/.test(normalized);
     const authoringIntent = /\b(create|make|build|generate|implement|develop|write|update|fix|finish|continue|resume|complete|deploy|publish|launch|ship)\b/.test(normalized);
     const softwareTarget = /\b(app|application|site|website|web app|web page|webpage|frontend|dashboard|visualization|visualisation|viewer|map|globe|world|service)\b/.test(normalized);
+    const continuationTarget = /\b(it|that|same|work|project|task)\b/.test(normalized);
     const remoteTarget = /\b(remote|server|host|k3s|k8s|kubernetes|cluster|dns|domain|ingress|traefik|tls|deploy|deployment|live)\b/.test(normalized)
         || /\b[a-z0-9-]+(?:\.[a-z0-9-]+){1,}\b/.test(normalized);
     const deploymentIntent = /\b(deploy|redeploy|publish|launch|ship|go live|get (?:it|the app|the site|the website) (?:live|online|deployed)|bring (?:it|the app|the site|the website) (?:live|online)|route|ingress|tls|dns|domain|rollout)\b/.test(normalized);
@@ -4784,10 +4919,43 @@ function hasRemoteCliAgentAuthoringIntent(text = '') {
         && !/\b(create|make|build|implement|develop|write|update|fix|deploy|redeploy|publish|launch|ship)\b/.test(normalized);
 
     if (explicitAssistedCli) {
-        return authoringIntent && softwareTarget && remoteTarget;
+        return authoringIntent && (softwareTarget || continuationTarget) && (remoteTarget || explicitAssistedCli);
     }
 
     return authoringIntent && softwareTarget && remoteTarget && deploymentIntent && !infraOnly;
+}
+
+function hasRemoteCliAgentContinuationIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        /^(?:yes|yeah|yep|ok|okay)?\s*(?:continue|resume|finish|complete|keep going|keep working|go ahead|proceed)\b/,
+        /\b(?:continue|resume|finish|complete|keep going|keep working)\b[\s\S]{0,80}\b(?:it|that|same|app|site|project|work|task)\b/,
+        /\b(?:go ahead|proceed)\b[\s\S]{0,80}\b(?:remote cli agent|remote clie agent|remote coding agent|that app|the app|it)\b/,
+    ].some((pattern) => pattern.test(normalized));
+}
+
+function buildRemoteCliAgentTaskForPrompt({ objective = '', priorAgentState = {} } = {}) {
+    const currentRequest = String(objective || '').trim();
+    const priorTask = String(priorAgentState?.lastTask || '').trim();
+    if (!currentRequest || !priorTask || !hasRemoteCliAgentContinuationIntent(currentRequest)) {
+        return currentRequest;
+    }
+
+    return [
+        'Continue the prior remote-cli-agent task to completion.',
+        '',
+        'Original task:',
+        priorTask,
+        '',
+        'Current user follow-up:',
+        currentRequest,
+        '',
+        'Continuity requirement: keep the same remote session/workspace when available, do not replace the task with a progress callback or status-card text, and keep working through authoring, build, deploy, and live verification unless a real blocker requires user input.',
+    ].join('\n');
 }
 
 function hasManagedAppIntentText(text = '') {
@@ -6774,7 +6942,20 @@ function summarizeToolEventForUser(event = {}) {
         return summarizeImageGenerateToolEvent(event);
     }
 
-    if (tool === 'web-search') {
+    if (tool === 'remote-cli-agent') {
+        const finalOutput = String(data?.finalOutput || '').trim();
+        const continuity = [
+            data?.sessionId ? `remote session: ${data.sessionId}` : '',
+            data?.cwd ? `workspace: ${data.cwd}` : '',
+            data?.gitCommit ? `commit: ${data.gitCommit}` : '',
+            data?.deployment ? `deployment: ${data.deployment}` : '',
+            data?.publicHost ? `public host: ${data.publicHost}` : '',
+        ].filter(Boolean).join('; ');
+        preview = [
+            finalOutput ? truncateText(normalizeInlineText(finalOutput), 1200) : '',
+            continuity,
+        ].filter(Boolean).join(' ');
+    } else if (tool === 'web-search') {
         preview = summarizeSearchResults(data?.results || []);
     } else if (tool === 'asset-search') {
         preview = summarizeAssetSearchResults(data);
@@ -10299,16 +10480,21 @@ class ConversationOrchestrator extends EventEmitter {
 
         if (toolPolicy.candidateToolIds.includes('remote-cli-agent')
             && hasRemoteCliAgentAuthoringIntent(objective)) {
-            const cwd = resolvePreferredRemoteCliWorkspacePath({
-                session,
-                toolContext,
-            });
             const priorAgentState = getSessionControlState(session).remoteCliAgent || {};
+            const cwd = String(priorAgentState.cwd || '').trim()
+                || resolvePreferredRemoteCliWorkspacePath({
+                    session,
+                    toolContext,
+                });
+            const task = buildRemoteCliAgentTaskForPrompt({
+                objective,
+                priorAgentState,
+            });
             return finalizeAction({
                 tool: 'remote-cli-agent',
                 reason: 'The request asks an assisted remote CLI agent to own the coding, build, deploy, and verification loop.',
                 params: {
-                    task: objective,
+                    task,
                     waitMs: 30000,
                     adminMode: true,
                     ...(cwd ? { cwd } : {}),
@@ -10470,15 +10656,20 @@ class ConversationOrchestrator extends EventEmitter {
             const priorAgentState = getSessionControlState(session).remoteCliAgent || {};
             const cwd = String(
                 normalizedStep.params.cwd
+                || priorAgentState.cwd
                 || resolvePreferredRemoteCliWorkspacePath({
                     session,
                     toolContext,
                 })
                 || '',
             ).trim();
+            const rawTask = String(normalizedStep.params.task || objective || '').trim();
             normalizedStep.params = {
                 ...normalizedStep.params,
-                task: String(normalizedStep.params.task || objective || '').trim(),
+                task: buildRemoteCliAgentTaskForPrompt({
+                    objective: rawTask,
+                    priorAgentState,
+                }),
                 waitMs: Number(normalizedStep.params.waitMs || normalizedStep.params.wait_ms || 30000) || 30000,
                 ...(cwd ? { cwd } : {}),
                 ...(normalizedStep.params.sessionId || priorAgentState.sessionId ? { sessionId: normalizedStep.params.sessionId || priorAgentState.sessionId } : {}),
@@ -11543,6 +11734,12 @@ class ConversationOrchestrator extends EventEmitter {
             'Do not mention the local CLI environment, local workspace state, startup health, or shell behavior unless a verified tool result is directly about that.',
             'Do not claim a deployment is live, publicly reachable, or TLS-ready unless the verified tool results show that evidence directly.',
             'A successful rollout status or Ready pod alone is not enough to prove ingress, DNS, HTTPS, or website availability.',
+            ...(toolEvents.some((event) => String(event?.toolCall?.function?.name || event?.result?.toolId || '').trim() === 'remote-cli-agent')
+                ? [
+                    'For remote-cli-agent results, treat the remote agent final output and returned continuity markers as the authoritative work report.',
+                    'Do not answer from progress-card labels, callback envelopes, or generic foreground plan text when the remote-cli-agent result contains a final output.',
+                ]
+                : []),
             ...(toolPolicy?.classification?.groundingRequirement === 'required'
                 ? [
                     'This request requires grounded evidence.',
@@ -12051,10 +12248,14 @@ class ConversationOrchestrator extends EventEmitter {
             });
         }
         const harnessControlState = buildHarnessControlStateFromSummary(harnessSummary);
+        const remoteCliAgentControlState = extractRemoteCliAgentControlStateFromToolEvents(toolEvents);
         const finalControlStatePatch = mergeControlState(
             controlStatePatch,
             mergeControlState(
-                activeTaskFrame ? { activeTaskFrame } : {},
+                mergeControlState(
+                    activeTaskFrame ? { activeTaskFrame } : {},
+                    remoteCliAgentControlState || {},
+                ),
                 harnessControlState !== undefined ? { harness: harnessControlState } : {},
             ),
         );
@@ -12263,7 +12464,6 @@ class ConversationOrchestrator extends EventEmitter {
 
         const sshMetadata = extractSshSessionMetadataFromToolEvents(toolEvents);
         const nextControlState = mergeControlState(
-            controlStatePatch,
             {
                 ...(sshMetadata || {}),
                 ...(executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
@@ -12275,6 +12475,7 @@ class ConversationOrchestrator extends EventEmitter {
                     ? { autonomyApproved }
                     : {}),
             },
+            controlStatePatch,
         );
         try {
             clusterStateRegistry.recordToolEvents({

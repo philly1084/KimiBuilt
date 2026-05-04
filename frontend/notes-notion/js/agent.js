@@ -1054,18 +1054,20 @@ const Agent = (function() {
         const normalized = String(question || '').trim().toLowerCase();
         const blockCount = Number(pageContext?.blockCount || 0);
         const outlineCount = Array.isArray(pageContext?.outline) ? pageContext.outline.length : 0;
-        const wantsRebuild = /\b(rebuild|from scratch|start over|replace the page|turn this into|restyle|redesign|rework)\b/.test(normalized);
+        const wantsRebuild = /\b(rebuild|from scratch|start over|replace (?:the )?(?:whole |entire )?page|wipe (?:the )?page|reset (?:the )?page)\b/.test(normalized);
+        const wantsIncrementalEdit = /\b(add|additional|more|continue|insert|include|also|between|after|before|here|next|follow-up|follow up)\b/.test(normalized);
         const hasUsableSections = outlineCount >= 2 || blockCount >= 6;
 
         const lines = [
             '- Work in order: lead cluster first, then main sections, then support/source cluster, then a final polish pass.',
             blockCount === 0
                 ? '- The page is empty, so create the full section structure first before expanding the details.'
-                : (wantsRebuild || !hasUsableSections)
+                : (wantsRebuild || (!hasUsableSections && !wantsIncrementalEdit))
                     ? '- The current page is weak or mismatched enough that a rebuild_page response is acceptable if it produces a cleaner structure.'
-                    : '- Reuse the existing section anchors when they still fit the request; replace or move weak blocks instead of appending duplicate sections.',
+                    : '- Preserve existing page content by default; use section anchors, insert_between_sections, insert_after_section, insert_here, replace_section, or delete_here for multi-round edits.',
             '- Treat each section as a small editing job: decide its role, choose the right block mix, then write only that section.',
             '- Prefer section-level edits over append-only drift: replace weak blocks, insert support blocks beside them, and only append at the bottom for genuinely new trailing content.',
+            '- Use rebuild_page only when the user clearly asks to replace/reset the whole page or the page is effectively empty.',
             '- Finish with a polish pass: remove repeated wording, tighten headings, audit block variety, and make sure the first screenful has a focal block.',
         ];
 
@@ -1079,13 +1081,14 @@ const Agent = (function() {
             : null;
 
         return [
-            '- Full-page reset: use update_page + rebuild_page when the title, opening cluster, and section order all need to change together.',
+            '- Full-page reset: use update_page + rebuild_page only when the user explicitly wants a page reset or the page is empty.',
             firstBodyBlockId
                 ? `- Section upgrade: target an existing weak block like [${firstBodyBlockId}] with replace_block or update_block, then insert_after a richer support block beside it.`
                 : '- Section upgrade: replace a weak block and add one richer support block beside it instead of appending a duplicate section elsewhere.',
             firstHeadingId
                 ? `- Layout cleanup: move_block around a section anchor like [${firstHeadingId}] to reorder sections, then delete_block any duplicate leftovers.`
                 : '- Layout cleanup: use move_block and delete_block to remove duplicate sections once the new order is clear.',
+            '- Multi-round addition: use insert_between_sections, insert_after_section, insert_before_section, or insert_here so new material lands beside the relevant section without replacing earlier content.',
             '- Final polish: after the structure is correct, update page metadata if needed and add one focal callout, visual, database, bookmark, toggle, or divider where it strengthens the page.',
         ].join('\n');
     }
@@ -3014,9 +3017,12 @@ When the user asks you to edit, create, delete, or reorganize content, respond w
     { "op": "move_block", "blockId": "block_abc123", "targetBlockId": "block_xyz789", "position": "before" },
     { "op": "move_section", "headingBlockId": "block_heading123", "targetHeadingBlockId": "block_heading999", "position": "after" },
     { "op": "insert_after", "blockId": "block_abc123", "blocks": [{ "type": "callout", "content": { "text": "Key takeaway", "icon": "⚡" }, "color": "yellow" }] },
+    { "op": "insert_here", "blockId": "block_abc123", "position": "after", "blocks": [{ "type": "text", "content": "Inserted exactly here." }] },
     { "op": "insert_after_section", "headingBlockId": "block_heading123", "blocks": [{ "type": "heading_2", "content": "New Section" }] },
+    { "op": "insert_between_sections", "afterHeadingBlockId": "block_heading123", "beforeHeadingBlockId": "block_heading456", "blocks": [{ "type": "heading_2", "content": "Inserted Section" }] },
     { "op": "rebuild_page", "blocks": [{ "type": "heading_1", "content": "New Structure" }, { "type": "text", "content": "Fresh opening" }] },
     { "op": "delete_block", "blockId": "block_def456" },
+    { "op": "delete_here", "headingBlockId": "block_heading123", "scope": "section" },
     { "op": "delete_section", "headingBlockId": "block_heading123" },
     { "op": "append_to_page", "blocks": [{ "type": "text", "content": "Added at end" }] }
   ]
@@ -3034,8 +3040,11 @@ VALID OPERATIONS:
 - move_block: Reorder an existing block relative to another block (requires blockId, targetBlockId, optional position "before"|"after")
 - replace_section: Replace a heading and all following blocks until the next same-or-higher heading (requires headingBlockId or blockId, blocks array)
 - move_section: Move a whole heading section relative to another heading section (requires headingBlockId, targetHeadingBlockId, optional position "before"|"after")
+- insert_here: Insert block(s) immediately before or after a named block or section anchor (requires blockId or headingBlockId, blocks array, optional position "before"|"after", optional scope "block"|"section")
 - insert_after_section: Add block(s) after the complete section that starts at a heading (requires headingBlockId, blocks array)
 - insert_before_section: Add block(s) before the complete section that starts at a heading (requires headingBlockId, blocks array)
+- insert_between_sections: Add block(s) between two heading sections (requires afterHeadingBlockId or beforeHeadingBlockId, blocks array)
+- delete_here: Delete the named block or section anchor (requires blockId or headingBlockId, optional scope "block"|"section")
 - delete_section: Remove a heading and all following blocks until the next same-or-higher heading (requires headingBlockId or blockId)
 - insert_after: Add new block(s) after specified block (requires blockId, blocks array)
 - insert_before: Add new block(s) before specified block (requires blockId, blocks array)
@@ -3046,8 +3055,11 @@ VALID OPERATIONS:
 
 STRUCTURAL EDITING RULES:
 - You can use every visible block in BLOCKS IN THIS PAGE and TOP-LEVEL LAYOUT, not only the final block or final row.
+- On second and later page-edit requests, preserve existing content unless the user explicitly asks to replace/reset the whole page.
+- For "insert here", "insert between sections", "add this after/before that", or "delete here" requests, use insert_here, insert_between_sections, insert_after_section, insert_before_section, delete_here, or delete_section instead of rebuild_page.
 - When moving existing material, use move_block or move_section with the destination anchor ID; do not recreate the material at the end.
 - When a block is the right content but the wrong kind, use update_block with type or change_block_type/set_block_type. Do not leave JSON or markdown markers inside a code/text block to imply the new type.
+- Use change_block_type/set_block_type/update_block with type to convert a block in place. Keep the existing block ID whenever possible; do not delete and recreate the block just to change its type.
 - For full-page builds, return one notes-actions payload only. Do not put the JSON payload in the visible assistant_reply, and do not add a code block containing the request at the bottom of the page.
 - Keep block type names exact: text, heading_1, heading_2, heading_3, bulleted_list, numbered_list, todo, callout, quote, divider, image, ai_image, bookmark, database, toggle, mermaid, code, math.
 
@@ -3190,8 +3202,11 @@ When the user asks you to edit, create, delete, or reorganize content, respond w
     { "op": "update_block", "blockId": "block_abc123", "type": "text", "content": "New content here" },
     { "op": "move_block", "blockId": "block_abc123", "targetBlockId": "block_xyz789", "position": "before" },
     { "op": "insert_after", "blockId": "block_abc123", "blocks": [{ "type": "heading_2", "content": "New Section" }] },
+    { "op": "insert_here", "headingBlockId": "block_heading123", "scope": "section", "position": "after", "blocks": [{ "type": "heading_2", "content": "New Section" }] },
+    { "op": "insert_between_sections", "afterHeadingBlockId": "block_heading123", "beforeHeadingBlockId": "block_heading456", "blocks": [{ "type": "heading_2", "content": "Inserted Section" }] },
     { "op": "rebuild_page", "blocks": [{ "type": "heading_1", "content": "New Structure" }, { "type": "text", "content": "Fresh opening" }] },
     { "op": "delete_block", "blockId": "block_def456" },
+    { "op": "delete_here", "headingBlockId": "block_heading123", "scope": "section" },
     { "op": "append_to_page", "blocks": [{ "type": "text", "content": "Added at end" }] }
   ]
 }
@@ -3206,6 +3221,12 @@ VALID OPERATIONS:
 - highlight_text: Highlight a specific phrase inside an existing text-like block (requires blockId and text; optional color)
 - replace_block: Replace block with new block(s) (requires blockId, blocks array)
 - move_block: Reorder an existing block relative to another block (requires blockId, targetBlockId, optional position "before"|"after")
+- insert_here: Insert block(s) immediately before or after a named block or section anchor (requires blockId or headingBlockId, blocks array, optional position "before"|"after", optional scope "block"|"section")
+- insert_after_section: Add block(s) after the complete section that starts at a heading (requires headingBlockId, blocks array)
+- insert_before_section: Add block(s) before the complete section that starts at a heading (requires headingBlockId, blocks array)
+- insert_between_sections: Add block(s) between two heading sections (requires afterHeadingBlockId or beforeHeadingBlockId, blocks array)
+- delete_here: Delete the named block or section anchor (requires blockId or headingBlockId, optional scope "block"|"section")
+- delete_section: Remove a heading and all following blocks until the next same-or-higher heading (requires headingBlockId or blockId)
 - insert_after: Add new block(s) after specified block (requires blockId, blocks array)
 - insert_before: Add new block(s) before specified block (requires blockId, blocks array)
 - append_to_page: Add block(s) at end of page (requires blocks array)
@@ -3215,8 +3236,11 @@ VALID OPERATIONS:
 
 STRUCTURAL EDITING RULES:
 - You can use every visible block in BLOCKS IN THIS PAGE and TOP-LEVEL LAYOUT, not only the final block or final row.
+- On second and later page-edit requests, preserve existing content unless the user explicitly asks to replace/reset the whole page.
+- For "insert here", "insert between sections", "add this after/before that", or "delete here" requests, use insert_here, insert_between_sections, insert_after_section, insert_before_section, delete_here, or delete_section instead of rebuild_page.
 - When moving existing material, use move_block or move_section with the destination anchor ID; do not recreate the material at the end.
 - When a block is the right content but the wrong kind, use update_block with type or change_block_type/set_block_type. Do not leave JSON or markdown markers inside a code/text block to imply the new type.
+- Use change_block_type/set_block_type/update_block with type to convert a block in place. Keep the existing block ID whenever possible; do not delete and recreate the block just to change its type.
 - For full-page builds, return one notes-actions payload only. Do not put the JSON payload in the visible assistant_reply, and do not add a code block containing the request at the bottom of the page.
 - Keep block type names exact: text, heading_1, heading_2, heading_3, bulleted_list, numbered_list, todo, callout, quote, divider, image, ai_image, bookmark, database, toggle, mermaid, code, math.
 
@@ -3374,6 +3398,14 @@ GUIDELINES:
             target_heading_block_id: 'targetHeadingBlockId',
             targetsectionblockid: 'targetSectionBlockId',
             target_section_block_id: 'targetSectionBlockId',
+            afterheadingblockid: 'afterHeadingBlockId',
+            after_heading_block_id: 'afterHeadingBlockId',
+            beforeheadingblockid: 'beforeHeadingBlockId',
+            before_heading_block_id: 'beforeHeadingBlockId',
+            previousheadingblockid: 'previousHeadingBlockId',
+            previous_heading_block_id: 'previousHeadingBlockId',
+            nextheadingblockid: 'nextHeadingBlockId',
+            next_heading_block_id: 'nextHeadingBlockId',
             imageurl: 'imageUrl',
             image_url: 'imageUrl',
             imageassetid: 'imageAssetId',
@@ -5131,9 +5163,12 @@ GUIDELINES:
         const generatedBlockCount = Array.isArray(blocks) ? blocks.length : 0;
         const substantialText = String(sourceText || '').trim().length > 500;
         const structuralRequest = /\b(create|make|build|draft|write|expand|fill out|flesh out|turn|convert|organize|restructure|report|brief|spec|plan|guide|proposal|page)\b/.test(normalized);
+        const explicitPageReset = /\b(rebuild|from scratch|start over|replace (?:the )?(?:whole |entire )?page|wipe (?:the )?page|reset (?:the )?page|clear (?:the )?page)\b/.test(normalized);
+        const incrementalEdit = /\b(add|additional|more|continue|insert|include|also|between|after|before|here|next|follow-up|follow up|extend)\b/.test(normalized);
 
         return pageHasOnlyPlaceholderContent()
-            || (generatedBlockCount >= 4 && (existingBlockCount <= 3 || structuralRequest))
+            || (explicitPageReset && generatedBlockCount >= 2)
+            || (!incrementalEdit && generatedBlockCount >= 4 && existingBlockCount <= 3 && structuralRequest)
             || (substantialText && existingBlockCount <= 2);
     }
 
@@ -5401,6 +5436,8 @@ GUIDELINES:
                 'prepend_to_page',
                 'insert_after',
                 'insert_before',
+                'insert_here',
+                'insert_between_sections',
                 'insert_after_section',
                 'insert_before_section',
             ].includes(op)) {
@@ -5450,7 +5487,8 @@ Repair pass: the previous assistant reply did not apply changes to the current n
 Return only a valid JSON notes-actions payload.
 Do not return plain chat prose outside the JSON payload.
 If the previous reply drifted into HTML, artifact creation, download links, or standalone file language, ignore that and convert the answer into direct page edits.
-If the request is for a substantial page, brief, report, plan, or rewrite, prefer rebuild_page or replace_block over a tiny append.`;
+If the request adds to an existing page, prefer insert_here, insert_between_sections, insert_after_section, replace_section, or replace_block over rebuild_page.
+Use rebuild_page only when the user explicitly asked to reset or replace the whole page.`;
 
         const repairResponse = await apiClient.chat([
             { role: 'system', content: repairPrompt },
@@ -5492,7 +5530,7 @@ If the request is for a substantial page, brief, report, plan, or rewrite, prefe
                 : `Updated ${appliedCount} page change${appliedCount === 1 ? '' : 's'}.`;
         }
 
-        if (normalizedActions.some((action) => ['replace_section', 'delete_section', 'move_section', 'insert_after_section', 'insert_before_section'].includes(action?.op))) {
+        if (normalizedActions.some((action) => ['replace_section', 'delete_section', 'delete_here', 'move_section', 'insert_after_section', 'insert_before_section', 'insert_between_sections', 'insert_here'].includes(action?.op))) {
             return `Updated ${appliedCount} section-level page change${appliedCount === 1 ? '' : 's'}.`;
         }
 
@@ -5848,6 +5886,7 @@ ${normalizedExpansion}
 ${applicationBrief ? `Use this section-by-section application brief:\n${applicationBrief}\n\n` : ''}Preserve the chosen template's layout rhythm and block variety.
 Apply the page section by section instead of one-shotting the whole document.
 When a section has an existing heading anchor, prefer replace_section, insert_after_section, move_section, or delete_section over a full-page rebuild.
+For second-round additions, preserve earlier content and use insert_here or insert_between_sections when the user gives a local placement cue.
 Silently verify the lead cluster, section order, and final polish before returning the page edits.`
             }
         ];
@@ -6210,6 +6249,26 @@ Silently verify the lead cluster, section order, and final polish before returni
             move_block: 'move_block',
             movesection: 'move_section',
             move_section: 'move_section',
+            inserthere: 'insert_here',
+            insert_here: 'insert_here',
+            inserthereafter: 'insert_here',
+            insertherebefore: 'insert_here',
+            insertbetween: 'insert_between_sections',
+            insert_between: 'insert_between_sections',
+            insertbetweensections: 'insert_between_sections',
+            insert_between_sections: 'insert_between_sections',
+            insertsectionbetween: 'insert_between_sections',
+            insert_section_between: 'insert_between_sections',
+            insertaftersection: 'insert_after_section',
+            insert_after_section: 'insert_after_section',
+            insertbeforesection: 'insert_before_section',
+            insert_before_section: 'insert_before_section',
+            deletehere: 'delete_here',
+            delete_here: 'delete_here',
+            removehere: 'delete_here',
+            remove_here: 'delete_here',
+            deletesection: 'delete_section',
+            delete_section: 'delete_section',
             appendtopage: 'append_to_page',
             append_to_page: 'append_to_page',
             prependtopage: 'prepend_to_page',
@@ -7228,7 +7287,7 @@ Silently verify the lead cluster, section order, and final polish before returni
         if (typeof window.requestAnimationFrame !== 'function' || typeof document === 'undefined' || !document.body) {
             return false;
         }
-        return actions.some((action) => /^(replace_section|move_section|replace_block|move_block|reorder_block|move|replace_text|highlight_text)$/.test(String(action?.op || '').toLowerCase()));
+        return actions.some((action) => /^(replace_section|move_section|insert_after_section|insert_before_section|insert_between_sections|insert_here|delete_section|delete_here|replace_block|move_block|reorder_block|move|replace_text|highlight_text|change_block_type|set_block_type|convert_block_type)$/.test(String(action?.op || '').toLowerCase()));
     }
 
     function getActionStageDelay(action = {}, index = 0) {
@@ -7313,8 +7372,17 @@ Silently verify the lead cluster, section order, and final polish before returni
                                 ? rawAction.icon
                                 : existing.icon
                         }, { defaultType: nextType });
-                        editor.replaceBlockWithBlocks?.(targetBlockId, [replacement]);
-                        focusBlockId = replacement.id;
+                        const updated = editor.updateBlockFields
+                            ? editor.updateBlockFields(targetBlockId, replacement)
+                            : null;
+                        if (updated) {
+                            focusBlockId = targetBlockId;
+                            appliedCount++;
+                            break;
+                        }
+                        const inserted = editor.replaceBlockWithBlocks?.(targetBlockId, [replacement]) || [];
+                        if (!inserted.length) return;
+                        focusBlockId = inserted[0]?.id || replacement.id || targetBlockId;
                         appliedCount++;
                         break;
                     }
@@ -7324,7 +7392,13 @@ Silently verify the lead cluster, section order, and final polish before returni
                         if (!existing) return;
                         const replacement = replaceSpecificBlockText(existing, rawAction);
                         if (!replacement) return;
-                        editor.replaceBlockWithBlocks?.(targetBlockId, [replacement]);
+                        const updated = editor.updateBlockFields
+                            ? editor.updateBlockFields(targetBlockId, replacement)
+                            : null;
+                        if (!updated) {
+                            const inserted = editor.replaceBlockWithBlocks?.(targetBlockId, [replacement]) || [];
+                            if (!inserted.length) return;
+                        }
                         focusBlockId = targetBlockId;
                         appliedCount++;
                         break;
@@ -7335,7 +7409,13 @@ Silently verify the lead cluster, section order, and final polish before returni
                         if (!existing) return;
                         const replacement = addBlockTextHighlight(existing, rawAction);
                         if (!replacement) return;
-                        editor.replaceBlockWithBlocks?.(targetBlockId, [replacement]);
+                        const updated = editor.updateBlockFields
+                            ? editor.updateBlockFields(targetBlockId, replacement)
+                            : null;
+                        if (!updated) {
+                            const inserted = editor.replaceBlockWithBlocks?.(targetBlockId, [replacement]) || [];
+                            if (!inserted.length) return;
+                        }
                         focusBlockId = targetBlockId;
                         appliedCount++;
                         break;
@@ -7406,6 +7486,66 @@ Silently verify the lead cluster, section order, and final polish before returni
                             : editor.reorderBlocks?.(headingBlockId, destinationHeadingId, position);
                         if (!moved) return;
                         focusBlockId = headingBlockId;
+                        appliedCount++;
+                        break;
+                    }
+                    case 'insert_here': {
+                        const anchorBlockId = rawAction.headingBlockId
+                            || rawAction.sectionBlockId
+                            || rawAction.blockId
+                            || rawAction.targetBlockId
+                            || targetBlockId
+                            || null;
+                        if (!anchorBlockId) return;
+                        const position = String(rawAction.position || 'after').toLowerCase() === 'before' ? 'before' : 'after';
+                        const scope = String(rawAction.scope || rawAction.targetScope || '').toLowerCase();
+                        const blocksToInsert = blockDefinitions.length ? blockDefinitions : [{
+                            type: rawAction.type || 'text',
+                            content: rawAction.content || ''
+                        }];
+                        const normalizedBlocks = blocksToInsert.map((blockDef) => normalizeActionBlock(blockDef, {
+                            defaultType: rawAction.type || blockDef.type || 'text'
+                        }));
+                        const useSectionAnchor = scope === 'section'
+                            || rawAction.headingBlockId
+                            || rawAction.sectionBlockId;
+                        const inserted = useSectionAnchor
+                            ? (position === 'before'
+                                ? (editor.insertBlocksBeforeSection?.(anchorBlockId, normalizedBlocks) || editor.insertBlocksBefore?.(anchorBlockId, normalizedBlocks) || [])
+                                : (editor.insertBlocksAfterSection?.(anchorBlockId, normalizedBlocks) || editor.insertBlocksAfter?.(anchorBlockId, normalizedBlocks) || []))
+                            : (position === 'before'
+                                ? (editor.insertBlocksBefore?.(anchorBlockId, normalizedBlocks) || [])
+                                : (editor.insertBlocksAfter?.(anchorBlockId, normalizedBlocks) || []));
+                        if (!inserted.length) return;
+                        focusBlockId = inserted[inserted.length - 1]?.id || focusBlockId;
+                        appliedCount++;
+                        break;
+                    }
+                    case 'insert_between_sections': {
+                        const afterHeadingBlockId = rawAction.afterHeadingBlockId
+                            || rawAction.previousHeadingBlockId
+                            || rawAction.headingBlockId
+                            || rawAction.sectionBlockId
+                            || null;
+                        const beforeHeadingBlockId = rawAction.beforeHeadingBlockId
+                            || rawAction.nextHeadingBlockId
+                            || rawAction.targetHeadingBlockId
+                            || rawAction.targetSectionBlockId
+                            || null;
+                        const blocksToInsert = blockDefinitions.length ? blockDefinitions : [{
+                            type: rawAction.type || 'text',
+                            content: rawAction.content || ''
+                        }];
+                        const normalizedBlocks = blocksToInsert.map((blockDef) => normalizeActionBlock(blockDef, {
+                            defaultType: rawAction.type || blockDef.type || 'text'
+                        }));
+                        const inserted = afterHeadingBlockId
+                            ? (editor.insertBlocksAfterSection?.(afterHeadingBlockId, normalizedBlocks) || editor.insertBlocksAfter?.(afterHeadingBlockId, normalizedBlocks) || [])
+                            : (beforeHeadingBlockId
+                                ? (editor.insertBlocksBeforeSection?.(beforeHeadingBlockId, normalizedBlocks) || editor.insertBlocksBefore?.(beforeHeadingBlockId, normalizedBlocks) || [])
+                                : []);
+                        if (!inserted.length) return;
+                        focusBlockId = inserted[inserted.length - 1]?.id || focusBlockId;
                         appliedCount++;
                         break;
                     }
@@ -7540,6 +7680,25 @@ Silently verify the lead cluster, section order, and final polish before returni
                         if (Array.isArray(imported) ? imported.length > 0 : (!editor.getCurrentPage || window.Editor?.getCurrentPage?.()?.id === targetPageId)) {
                             appliedCount++;
                         }
+                        break;
+                    }
+                    case 'delete_here': {
+                        const headingBlockId = rawAction.headingBlockId
+                            || rawAction.sectionBlockId
+                            || null;
+                        const deleteBlockId = rawAction.blockId || rawAction.targetBlockId || targetBlockId;
+                        const scope = String(rawAction.scope || rawAction.targetScope || '').toLowerCase();
+                        if ((scope === 'section' || headingBlockId) && (headingBlockId || deleteBlockId)) {
+                            const deleted = editor.deleteSectionFromHeading
+                                ? editor.deleteSectionFromHeading(headingBlockId || deleteBlockId)
+                                : editor.deleteBlock?.(headingBlockId || deleteBlockId);
+                            if (!deleted && editor.deleteSectionFromHeading) return;
+                            appliedCount++;
+                            break;
+                        }
+                        if (!deleteBlockId) return;
+                        editor.deleteBlock?.(deleteBlockId);
+                        appliedCount++;
                         break;
                     }
                     case 'delete_block':
@@ -7959,6 +8118,10 @@ Silently verify the lead cluster, section order, and final polish before returni
             if (action.targetBlockId) blockIds.add(action.targetBlockId);
             if (action.targetHeadingBlockId) blockIds.add(action.targetHeadingBlockId);
             if (action.targetSectionBlockId) blockIds.add(action.targetSectionBlockId);
+            if (action.afterHeadingBlockId) blockIds.add(action.afterHeadingBlockId);
+            if (action.beforeHeadingBlockId) blockIds.add(action.beforeHeadingBlockId);
+            if (action.previousHeadingBlockId) blockIds.add(action.previousHeadingBlockId);
+            if (action.nextHeadingBlockId) blockIds.add(action.nextHeadingBlockId);
             if (action.draggedBlockId) blockIds.add(action.draggedBlockId);
             if (action.sourceBlockId) blockIds.add(action.sourceBlockId);
             if (action.destinationBlockId) blockIds.add(action.destinationBlockId);
@@ -10332,6 +10495,7 @@ Silently verify the lead cluster, section order, and final polish before returni
         _applyNotesActions: applyNotesActions,
         _extractNotesActionPlan: extractNotesActionPlan,
         _normalizeStructuredPageActions: normalizeStructuredPageActions,
+        _buildFallbackNotesActionsFromText: buildFallbackNotesActionsFromText,
         _hasNonPageRuntimeIntent: hasNonPageRuntimeIntent,
         _shouldForcePageEditActions: shouldForcePageEditActions,
         _shouldUseMultiPassNotesDraft: shouldUseMultiPassNotesDraft,
