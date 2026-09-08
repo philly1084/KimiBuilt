@@ -4,11 +4,13 @@ Give this document to the bot operator. Base URL: `https://lilly.secdevsolutions
 
 ## Verified live status — 2026-09-08
 
-The authenticated contract and invocation route are live at commit `e69a1d11`, mounted from immutable ConfigMap `lilly-remote-ops-e69a1d11f85e` over the preserved Lilly image `localhost/lilly-team-release:8e3e42246bcbbd7f`. Mounted files match committed SHA-256 hashes; unrelated deployment settings were preserved.
+The authenticated contract and invocation route are live at commit `08128643`, mounted from immutable ConfigMap `lilly-remote-ops-081286436ba8` over the preserved Lilly image `localhost/lilly-team-release:8e3e42246bcbbd7f`. Mounted files match committed SHA-256 hashes; unrelated deployment settings were preserved. The model-selection release passed 41 focused tests and advertises Astra and Luna.
 
 Real Codex `gpt-5.6-luna` on the main server read an uploaded XML artifact and returned byte-identical output through the same-session polling/result collection path. Public authenticated download matched all 68 bytes and SHA-256 `f1fa1f213af6bf10c569b4ab87f5dee7e8090716879564dad2c241e499f2d9a8`. Anonymous/invalid authentication and foreign-owner downloads were rejected.
 
-**Direct `k3s-deploy` is blocked pending a dedicated main-server credential.** Its live check returned SSH authentication failure; do not use it for mutations yet. A follow-up source patch adds a separate `LILLY_REMOTE_OPS_SSH_KEY_PATH` and fails closed when absent. That patch and credential provisioning are not yet deployed. Codex can be given an explicitly authorized deployment task through the working remote-agent lane.
+The Astra canary also completed through the public endpoint using top-level `model:"gpt-6-astra"`: the provider receipt reported `gpt-6-astra`, `reasoningEffort:high` was applied to the CLI invocation, and returned XML bytes matched the supplied file exactly. Evidence: session `385e46e8-332f-4d22-b6bb-5a1ff861fdae`, job `ragent_17039308d16c4e2195c2ce0db51908cb`, artifact `71b24495-da46-4fbf-a27c-fbc6dc69d066`.
+
+**Direct `k3s-deploy` is blocked pending a dedicated main-server credential.** Its earlier live check returned SSH authentication failure; do not use it for mutations yet. The deployed adapter now uses a separate `LILLY_REMOTE_OPS_SSH_KEY_PATH` and returns 503 when absent. Credential provisioning remains pending. Codex can be given an explicitly authorized deployment task through the working remote-agent lane.
 
 ## Authentication
 
@@ -75,7 +77,7 @@ The upload route accepts its existing formats, including XML, HTML, CSV, PDF, of
 
 ## Pending operator credential action
 
-After approval, generate a dedicated SSH key for this endpoint, add its public key to the main server's authorized keys, store the private key in a new `kimibuilt/lilly-remote-ops-primary-ssh` Kubernetes Secret, and mount it read-only at `/run/lilly-remote-ops/id_ed25519` with owner-only read permissions compatible with the backend UID. Set `LILLY_REMOTE_OPS_SSH_KEY_PATH` to that path. Roll out the prepared two-file credential patch under the coordinator lock, then repeat the read-only rollout check. Preserve all existing Secrets and secondary-server SSH settings. Private key material must never appear in console output or this document.
+After approval, generate a dedicated SSH key for this endpoint, add its public key to the main server's authorized keys, store the private key in a new `kimibuilt/lilly-remote-ops-primary-ssh` Kubernetes Secret, and mount it read-only at `/run/lilly-remote-ops/id_ed25519` with owner-only read permissions compatible with the backend UID. Set `LILLY_REMOTE_OPS_SSH_KEY_PATH` to that path under the coordinator lock, then repeat the read-only rollout check. Preserve all existing Secrets and secondary-server SSH settings. Private key material must never appear in console output or this document.
 
 Release maintenance: these two files are mounted from a ConfigMap and therefore override files in later images. Future releases must deliberately update or remove the `remote-ops-api` volume/mounts under the deployment coordinator after the same API exists in the new image. Rollback restores the prior volume/mount/annotation state recorded in `/tmp/lilly-remote-ops-e69a1d11f85e-before.json`; do not apply the whole old Deployment over concurrent changes.
 
