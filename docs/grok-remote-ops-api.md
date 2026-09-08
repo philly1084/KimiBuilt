@@ -36,7 +36,25 @@ Create one Lilly session per project/workflow with `POST /api/sessions`, JSON `{
 }
 ```
 
-The endpoint pins the main server's `k3s-primary` target, `provider-agent` transport and a Codex GPT model (`gpt-5.6-luna` by default). For authorized software changes/deployments set `adminMode:true` and describe the exact project, scope, desired result and verification. Inventory existing projects before creating anything. Public main-server hosts use `secdevsolutions.help`.
+The endpoint pins the main server's `k3s-primary` target and `provider-agent` transport. Choose the Codex model explicitly:
+
+```json
+{
+  "tool": "remote-cli-agent",
+  "sessionId": "YOUR_LILLY_SESSION_ID",
+  "params": {
+    "model": "gpt-6-astra",
+    "reasoningEffort": "high",
+    "task": "Inspect the requested project and report findings.",
+    "cwd": "/opt/lilly-agent-workbench",
+    "adminMode": false
+  }
+}
+```
+
+Use `gpt-6-astra` for Astra and `gpt-5.6-luna` for Luna. Omission still defaults to Luna for compatibility. Top-level `model` is also accepted; if both fields appear they must agree. `GET /api/tools/remote-ops` includes model-selection instructions and choices, while `/api/models` is the runtime catalog. Send the same choice on continuation/poll calls and check `data.data.providerModel` in responses. A running job keeps its original model; request a different model on the next turn, not by resubmitting an in-progress task.
+
+For authorized software changes/deployments set `adminMode:true` and describe the exact project, scope, desired result and verification. Inventory existing projects before creating anything. Public main-server hosts use `secdevsolutions.help`.
 
 The response preserves the existing tool envelope: outer `success` reports invocation transport, `data.success` reports tool execution, and `data.data` contains remote output. Inspect `completionStatus`, `blocker`, `resultFilesError`, `remoteCodeJobId`, `sessionId`, and verification fields. Do not equate HTTP 200 with completed work.
 

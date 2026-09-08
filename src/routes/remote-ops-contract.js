@@ -3,6 +3,11 @@
 const PRIMARY_HOST = '168.119.176.121';
 const PRIMARY_TARGET = 'k3s-primary';
 const ACTIONS = ['sync-repo', 'apply-manifests', 'set-image', 'rollout-status', 'sync-and-apply'];
+const DEFAULT_MODEL = 'gpt-5.6-luna';
+const MODELS = [
+  { id: 'gpt-6-astra', label: 'Astra', use: 'Complex coding, architecture and demanding tasks' },
+  { id: 'gpt-5.6-luna', label: 'Luna', use: 'Fast, economical everyday tasks' },
+];
 
 function contract(_req, res) {
   res.set('Cache-Control', 'no-store').json({
@@ -12,6 +17,11 @@ function contract(_req, res) {
     privilege: 'Uses existing Lilly operator permissions; this is not a separately scoped bot credential.',
     target: { host: PRIMARY_HOST, targetId: PRIMARY_TARGET, transport: 'provider-agent' },
     tools: ['remote-cli-agent', 'k3s-deploy'],
+    modelSelection: {
+      parameter: 'params.model', alternative: 'model', default: DEFAULT_MODEL,
+      models: MODELS, catalog: '/api/models',
+      instructions: 'Choose a model explicitly for each call, including continuation and polling. Use gpt-6-astra for Astra. A running job keeps the model it started with; select a different model on a new turn. Check data.data.providerModel in the result.',
+    },
     deploymentActions: ACTIONS,
     sessions: '/api/sessions',
     upload: '/api/artifacts/upload',
@@ -22,7 +32,7 @@ function contract(_req, res) {
     continuation: 'Keep the outer Lilly sessionId. For a running result, use its remoteCodeJobId as params.jobId and task="Check status" in that same session. For a new follow-up turn use the returned provider sessionId as params.sessionId.',
     completion: 'HTTP success is transport success only. Inspect data.success and data.data completionStatus/blocker/resultFilesError; independently download and verify returned artifacts.',
     retry: 'Do not automatically retry a timed-out mutation. Inspect the Lilly session and existing remote job first; this synchronous endpoint does not provide idempotency keys.',
-    example: { tool: 'remote-cli-agent', sessionId: '<Lilly session id>', params: { task: 'Inspect the requested project and report findings.', cwd: '/opt/kimibuilt', adminMode: false } },
+    example: { tool: 'remote-cli-agent', sessionId: '<Lilly session id>', params: { task: 'Inspect the requested project and report findings.', model: 'gpt-6-astra', reasoningEffort: 'high', cwd: '/opt/kimibuilt', adminMode: false } },
   });
 }
 
@@ -40,8 +50,11 @@ function normalizeRequest(req, res, next) {
     if (params.targetId && params.targetId !== PRIMARY_TARGET) return fail('This endpoint is pinned to the primary Codex target.');
     if (params.transport && params.transport !== 'provider-agent') return fail('Artifact sharing requires provider-agent transport.');
     if (['command', 'args', 'shell', 'executable'].some(key => key in params)) return fail('Use a task description, not raw shell fields.');
-    if (params.model && !/^gpt-/.test(params.model)) return fail('Select a Codex GPT model for this endpoint.');
-    Object.assign(params, { targetId: PRIMARY_TARGET, transport: 'provider-agent', model: params.model || 'gpt-5.6-luna' });
+    for (const model of [body.model, params.model]) {
+      if (model !== undefined && (typeof model !== 'string' || !/^gpt-[a-z0-9.-]+$/.test(model))) return fail('Select a Codex GPT model ID, such as gpt-6-astra.');
+    }
+    if (body.model && params.model && body.model !== params.model) return fail('model and params.model must agree.');
+    Object.assign(params, { targetId: PRIMARY_TARGET, transport: 'provider-agent', model: params.model || body.model || DEFAULT_MODEL });
     params.agentRunTimeoutMs = Math.min(Math.max(Number(params.agentRunTimeoutMs) || 45000, 1000), 45000);
   } else {
     if (!ACTIONS.includes(params.action)) return fail('An explicit supported deployment action is required.');
@@ -53,7 +66,7 @@ function normalizeRequest(req, res, next) {
     req.remoteOpsSshCredentials = { [PRIMARY_HOST]: { host: PRIMARY_HOST, username: 'root', port: 22, privateKeyPath } };
     Object.assign(params, { host: PRIMARY_HOST, username: 'root', port: 22 });
   }
-  req.body = { tool: body.tool, sessionId: body.sessionId.trim(), params, executionProfile: 'remote-build' };
+  req.body = { tool: body.tool, sessionId: body.sessionId.trim(), params, ...(body.tool === 'remote-cli-agent' ? { model: params.model } : {}), executionProfile: 'remote-build' };
   next();
 }
 

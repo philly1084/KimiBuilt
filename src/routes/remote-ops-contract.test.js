@@ -43,4 +43,22 @@ test('publishes file limits and existing privilege scope without caching', async
   expect(r.headers['cache-control']).toBe('no-store');
   expect(r.body.schema).toBe('LillyRemoteOps/v1');
   expect(r.body.limits.maxFiles).toBe(12);
+  expect(r.body.modelSelection.models.map(model => model.id)).toContain('gpt-6-astra');
+});
+
+test.each(['nested', 'top-level'])('passes Astra from %s through params and execution context', async location => {
+  const body = { tool: 'remote-cli-agent', sessionId: 'owned-session', params: { task: 'Inspect' } };
+  if (location === 'nested') body.params.model = 'gpt-6-astra';
+  else body.model = 'gpt-6-astra';
+  const r = await request(app).post('/').send(body);
+  expect(r.status).toBe(200);
+  expect(r.body.model).toBe('gpt-6-astra');
+  expect(r.body.params.model).toBe('gpt-6-astra');
+});
+test('rejects conflicting model choices instead of silently using Luna', async () => {
+  const r = await request(app).post('/').send({ tool: 'remote-cli-agent', sessionId: 'owned', model: 'gpt-6-astra', params: { task: 'Inspect', model: 'gpt-5.6-luna' } });
+  expect(r.status).toBe(400);
+});
+test.each([{}, 1, '', 'gpt-6-astra --flag'])('rejects malformed model %j', async model => {
+  expect((await call({ task: 'Inspect', model })).status).toBe(400);
 });
