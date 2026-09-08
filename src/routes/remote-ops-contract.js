@@ -48,6 +48,9 @@ function normalizeRequest(req, res, next) {
     if (!params.namespace || !params.deployment) return fail('Explicit namespace and deployment are required.');
     if (params.host && params.host !== PRIMARY_HOST) return fail('This endpoint is pinned to the main server.');
     if ((params.username && params.username !== 'root') || (params.port && params.port !== 22)) return fail('Use the configured primary SSH identity.');
+    const privateKeyPath = process.env.LILLY_REMOTE_OPS_SSH_KEY_PATH;
+    if (!privateKeyPath) return res.status(503).json({ success: false, error: 'Dedicated primary deployment credential is not configured.' });
+    req.remoteOpsSshCredentials = { [PRIMARY_HOST]: { host: PRIMARY_HOST, username: 'root', port: 22, privateKeyPath } };
     Object.assign(params, { host: PRIMARY_HOST, username: 'root', port: 22 });
   }
   req.body = { tool: body.tool, sessionId: body.sessionId.trim(), params, executionProfile: 'remote-build' };

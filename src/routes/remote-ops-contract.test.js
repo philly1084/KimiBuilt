@@ -17,8 +17,19 @@ test.each([{ targetId: 'k3s-secondary' }, { transport: 'mcp' }, { command: 'ls' 
   expect((await call({ task: 'Inspect', ...params })).status).toBe(400);
 });
 test('does not inherit secondary deployment defaults', async () => {
+  const old = process.env.LILLY_REMOTE_OPS_SSH_KEY_PATH;
+  process.env.LILLY_REMOTE_OPS_SSH_KEY_PATH = '/run/lilly-remote-ops/id_ed25519';
   const r = await call({ action: 'rollout-status', namespace: 'kimibuilt', deployment: 'backend' }, 'k3s-deploy');
+  if (old === undefined) delete process.env.LILLY_REMOTE_OPS_SSH_KEY_PATH;
+  else process.env.LILLY_REMOTE_OPS_SSH_KEY_PATH = old;
   expect(r.body.params).toMatchObject({ host: '168.119.176.121', username: 'root', port: 22 });
+});
+test('fails closed without a dedicated primary credential', async () => {
+  const old = process.env.LILLY_REMOTE_OPS_SSH_KEY_PATH;
+  delete process.env.LILLY_REMOTE_OPS_SSH_KEY_PATH;
+  const r = await call({ action: 'rollout-status', namespace: 'kimibuilt', deployment: 'backend' }, 'k3s-deploy');
+  if (old !== undefined) process.env.LILLY_REMOTE_OPS_SSH_KEY_PATH = old;
+  expect(r.status).toBe(503);
 });
 test.each([{ namespace: 'x', deployment: 'x' }, { action: 'rollout-status' }, { action: 'rollout-status', namespace: 'x', deployment: 'x', host: '162.55.163.199' }])('rejects ambiguous deployment %j', async params => {
   expect((await call(params, 'k3s-deploy')).status).toBe(400);

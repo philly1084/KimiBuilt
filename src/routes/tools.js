@@ -766,6 +766,7 @@ function buildToolExecutionContext(toolManager, req, sessionId = null, session =
     timestamp: new Date().toISOString(),
     route: req.originalUrl || req.path || '/api/tools/invoke',
     transport: 'http',
+    ...(req.remoteOpsSshCredentials ? { sshCredentials: req.remoteOpsSshCredentials } : {}),
     executionProfile: body.executionProfile || body.execution_profile || body.clientSurface || body.client_surface || 'tool-invoke',
     model: resolveRequestedToolModel(body) || session?.metadata?.model || null,
     timezone,

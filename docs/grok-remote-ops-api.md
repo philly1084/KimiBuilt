@@ -2,6 +2,14 @@
 
 Give this document to the bot operator. Base URL: `https://lilly.secdevsolutions.help`.
 
+## Verified live status — 2026-09-08
+
+The authenticated contract and invocation route are live at commit `e69a1d11`, mounted from immutable ConfigMap `lilly-remote-ops-e69a1d11f85e` over the preserved Lilly image `localhost/lilly-team-release:8e3e42246bcbbd7f`. Mounted files match committed SHA-256 hashes; unrelated deployment settings were preserved.
+
+Real Codex `gpt-5.6-luna` on the main server read an uploaded XML artifact and returned byte-identical output through the same-session polling/result collection path. Public authenticated download matched all 68 bytes and SHA-256 `f1fa1f213af6bf10c569b4ab87f5dee7e8090716879564dad2c241e499f2d9a8`. Anonymous/invalid authentication and foreign-owner downloads were rejected.
+
+**Direct `k3s-deploy` is blocked pending a dedicated main-server credential.** Its live check returned SSH authentication failure; do not use it for mutations yet. A follow-up source patch adds a separate `LILLY_REMOTE_OPS_SSH_KEY_PATH` and fails closed when absent. That patch and credential provisioning are not yet deployed. Codex can be given an explicitly authorized deployment task through the working remote-agent lane.
+
 ## Authentication
 
 Send `Authorization: Bearer $LILLY_API_TOKEN` on every request, including artifact downloads. Use the existing Lilly frontend API key from your secret manager, or a login token returned by `POST /api/auth/login` (complete MFA if enabled). Never put credentials in prompts, artifacts, query strings, source control, or logs. Login tokens expire; use their returned expiry. This route uses existing operator permissions: it is not a separately restricted bot account. Bots sharing one credential share one ownership identity.
@@ -44,6 +52,14 @@ This is a synchronous adapter, not an idempotent job-submission API. Never blind
 4. Read `GET /api/sessions/{sessionId}/artifacts` and download the returned outputs via `GET /api/artifacts/{artifactId}/download` with the same authentication. Verify file contents and available size/SHA-256 metadata; model prose alone is not proof.
 
 Limits: 12 handoff files, 4 MiB each, 6 MiB combined decoded bytes. Artifacts must belong to the active session. Pass IDs/bytes between bots with the same authorized session; download links do not grant anonymous access. The legacy MCP transport is deliberately rejected because it does not support the verified handoff contract.
+
+The upload route accepts its existing formats, including XML, HTML, CSV, PDF, office files and images. Plain `.txt` and `.md` uploads currently return 400; use inline `contextFiles` for those inputs. The live round trip used XML.
+
+## Pending operator credential action
+
+After approval, generate a dedicated SSH key for this endpoint, add its public key to the main server's authorized keys, store the private key in a new `kimibuilt/lilly-remote-ops-primary-ssh` Kubernetes Secret, and mount it read-only at `/run/lilly-remote-ops/id_ed25519` with owner-only read permissions compatible with the backend UID. Set `LILLY_REMOTE_OPS_SSH_KEY_PATH` to that path. Roll out the prepared two-file credential patch under the coordinator lock, then repeat the read-only rollout check. Preserve all existing Secrets and secondary-server SSH settings. Private key material must never appear in console output or this document.
+
+Release maintenance: these two files are mounted from a ConfigMap and therefore override files in later images. Future releases must deliberately update or remove the `remote-ops-api` volume/mounts under the deployment coordinator after the same API exists in the new image. Rollback restores the prior volume/mount/annotation state recorded in `/tmp/lilly-remote-ops-e69a1d11f85e-before.json`; do not apply the whole old Deployment over concurrent changes.
 
 ## Direct Kubernetes deployment
 
