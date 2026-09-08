@@ -1390,6 +1390,8 @@ router.get('/docs/:id', async (req, res) => {
  * GET /api/tools/:id
  * Get tool details
  */
+router.get('/remote-ops', require('./remote-ops-contract').contract);
+
 router.get('/:id', async (req, res) => {
   try {
     const toolManager = await ensureToolManagerInitialized();
@@ -1461,7 +1463,7 @@ router.get('/:id', async (req, res) => {
  * POST /api/tools/invoke
  * Invoke a tool
  */
-router.post('/invoke', async (req, res) => {
+async function invokeTool(req, res) {
   let resolvedSessionId = null;
   let toolId = null;
   let params = {};
@@ -1501,7 +1503,10 @@ router.post('/invoke', async (req, res) => {
       .catch((metadataError) => console.warn('[Tools API] Failed to record tool failure metadata:', metadataError?.message || metadataError));
     res.status(500).json({ success: false, error: error.message });
   }
-});
+}
+
+router.post('/invoke/remote-ops', require('./remote-ops-contract').normalizeRequest, invokeTool);
+router.post('/invoke', invokeTool);
 
 /**
  * POST /api/tools/invoke/:id
