@@ -258,6 +258,19 @@ describe('provider execution receipts and authoritative lifecycle', () => {
     expect(fetchImpl.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
   });
 
+  test('preserves unsuccessful handoffs without destructive result collection', async () => {
+    const handoff = await createRemoteAgentHandoff({ collectResultFiles: true }, { sessionId: 'owned' }, { operationId: 'cancelled-operation' });
+    const { runner, fetchImpl } = harness({ status: { status: 'terminated', exitCode: 143,
+      resultFilesUrl: '/admin/remote-agent-tasks/receipt-task/result-files',
+      handoff: { accepted: true, version: handoff.version, operationId: handoff.operationId,
+        inputManifestPath: handoff.manifestPath, resultManifestPath: handoff.output.manifestPath },
+    } });
+    const result = await runner.run({ task: 'Check the cancelled task.', jobId: 'receipt-task', handoff });
+    expect(result.completionStatus).toBe('blocked');
+    expect(result.remoteAgentHandoff.operationId).toBe(handoff.operationId);
+    expect(fetchImpl.mock.calls.some(([url]) => /\/(result-files|cancel)$/.test(url))).toBe(false);
+  });
+
   test('recovers completion evidence from the same job after a stream disconnect', async () => {
     const { runner, fetchImpl } = harness({ streamError: true, status: { status: 'completed', exitCode: 0 }, events: [{ type: 'output', data: proof }] });
     expect(await runner.run({ task: 'Create and test a file.' })).toMatchObject({ completionStatus: 'complete', remoteCodeJobId: 'receipt-task' });

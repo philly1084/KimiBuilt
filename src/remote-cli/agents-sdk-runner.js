@@ -2959,7 +2959,11 @@ class RemoteCliAgentsSdkRunner {
       });
       let resultFiles = null;
       let resultFilesError = null;
-      if (handoff?.output?.enabled) {
+      // Collection cleans the gateway handoff even without a valid manifest.
+      if (handoff?.output?.enabled && failed) {
+        resultFilesError = new Error('Unsuccessful job: automatic result collection skipped to preserve temporary handoff files. Gateway retention still applies.');
+      }
+      if (handoff?.output?.enabled && !failed) {
         try {
           resultFiles = await this.fetchRemoteAgentResultFiles({
             baseUrl,
