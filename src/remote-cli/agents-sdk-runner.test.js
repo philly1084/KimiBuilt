@@ -187,6 +187,19 @@ describe('provider execution receipts and authoritative lifecycle', () => {
     expect(fetchImpl.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
   });
 
+  test('answered questions printed from old checkpoints do not contaminate the final turn', async () => {
+    const oldCheckpoint = 'SUPPORT_AGENT_REQUIRED=Choose a heading\nBLOCKER=waiting for feedback\nREMOTE_AGENT_RESULT: failed waiting';
+    const finalAnswer = proof.replace('BLOCKER=none', 'BLOCKER=none.');
+    const { runner } = harness({ status: { status: 'completed', exitCode: 0 }, events: [
+      { type: 'output', data: JSON.stringify({ type: 'item.completed', item: { type: 'command_execution', aggregated_output: oldCheckpoint } }) + '\n' },
+      { type: 'output', data: JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: finalAnswer } }) + '\n' },
+    ] });
+    const result = await runner.run({ task: 'Apply the heading feedback', jobId: 'receipt-task' });
+    expect(result.completionStatus).toBe('complete');
+    expect(result.finalOutput).not.toContain('Choose a heading');
+    expect(result.blocker).toBeNull();
+  });
+
   test.each([1, 42, null])('a success marker cannot override CLI exit %s', async (exitCode) => {
     const { runner } = harness({ events: [{ type: 'output', data: proof }, { type: 'exit', exitCode }] });
     const result = await runner.run({ task: 'Create and test a file.' });

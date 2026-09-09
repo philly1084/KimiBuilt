@@ -438,7 +438,7 @@ function readMarkerLines(text = '', keys = []) {
 
 function normalizeOptionalProofValue(value = '') {
   const normalized = cleanMarkerValue(value);
-  if (/^(?:none|n\/a|na|not[_\s-]?available|not[_\s-]?applicable|unknown)$/i.test(normalized)) {
+  if (/^(?:none|n\/a|na|not[_\s-]?available|not[_\s-]?applicable|unknown)[.!]?$/i.test(normalized)) {
     return '';
   }
   return normalized;
@@ -1431,7 +1431,7 @@ function normalizeProviderAgentOutput(value = '') {
 }
 
 function readProviderAgentResultStatus(value = '') {
-  const terminalText = String(value || '')
+  const terminalText = (readRemoteFinalAssistantMessage(value) || String(value || ''))
     .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
     .replace(/\r/g, '\n');
   return terminalText.match(PROVIDER_AGENT_RESULT_PATTERN)?.[1]?.toLowerCase() || '';
@@ -2932,7 +2932,10 @@ class RemoteCliAgentsSdkRunner {
       }
 
       if (!terminalEvent) throw new Error('Remote agent stream ended without an authoritative terminal event.');
-      const output = normalizeProviderAgentOutput(outputParts.join('').trim());
+      const rawOutput = outputParts.join('').trim();
+      // A resumed CLI can print old checkpoints/questions in command output.
+      // Only its latest assistant answer describes the terminal turn outcome.
+      const output = normalizeProviderAgentOutput(readRemoteFinalAssistantMessage(rawOutput) || rawOutput);
       const failed = markerStatus === 'failed'
         || terminalEvent.exitCode == null || Number(terminalEvent.exitCode) !== 0
         || Boolean(terminalEvent.status && terminalEvent.status !== 'completed');
