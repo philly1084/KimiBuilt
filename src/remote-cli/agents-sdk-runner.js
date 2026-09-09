@@ -3259,7 +3259,7 @@ class RemoteCliAgentsSdkRunner {
       return body;
     };
     const body = await request(`/admin/remote-agent-tasks/${encodeURIComponent(jobId)}`);
-    const task = body.task || body;
+    const task = body.task && typeof body.task === 'object' ? body.task : body;
     if (task.id !== jobId || task.targetId !== targetId) throw Object.assign(new Error('Gateway job identity does not match the owned target.'), { statusCode: 409 });
     if (['completed', 'failed', 'terminated', 'timed_out'].includes(task.status)) return { jobId, status: task.status, alreadyTerminal: true, artifactsPreserved: true };
     if (!/^ps_[a-zA-Z0-9_-]+$/.test(task.sessionId || '')) throw new Error('Gateway provider session identity unavailable.');

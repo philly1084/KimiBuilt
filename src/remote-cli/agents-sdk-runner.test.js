@@ -3828,6 +3828,11 @@ describe('RemoteCliAgentsSdkRunner', () => {
 });
 
  describe('remote cancellation preserves data', () => {
+  test('accepts the gateway flat task summary with its task prompt string',async()=>{
+    const fetchImpl=jest.fn(async(_url,options)=>({ok:true,text:async()=>JSON.stringify(options.method==='DELETE'?{session:{status:'terminated'}}:{id:'ragent_owned',targetId:'k3s-primary',task:'Prompt text',sessionId:'ps_owned',status:'running'})}));
+    const runner=new RemoteCliAgentsSdkRunner({config:{codexAgentBaseUrl:'https://gateway.example',codexAgentApiKey:'test'},fetchImpl});
+    expect((await runner.cancelRemoteTask({jobId:'ragent_owned',targetId:'k3s-primary'})).status).toBe('terminated');
+  });
   test('terminates only the verified provider session and never calls destructive task cancel', async () => {
     const fetchImpl=jest.fn(async(url,options)=>({ok:true,status:200,text:async()=>JSON.stringify(options.method==='DELETE'?{session:{status:'terminated'}}:{task:{id:'ragent_owned',targetId:'k3s-primary',sessionId:'ps_owned',status:'running'}})}));
     const runner=new RemoteCliAgentsSdkRunner({config:{codexAgentBaseUrl:'https://gateway.example',codexAgentApiKey:'test'},fetchImpl});
