@@ -3248,6 +3248,28 @@ class RemoteCliAgentsSdkRunner {
     });
   }
 
+  async cancelRemoteTask({ jobId, targetId } = {}) {
+    if (!/^ragent_[a-zA-Z0-9_-]+$/.test(jobId || '')) throw new Error('An exact remote task ID is required.');
+    const base = resolveCodexAgentBaseUrl({}, this.config);
+    const apiKey = resolveCodexAgentApiKey({}, this.config);
+    const request = async (path, method = 'GET') => {
+      const response = await this.fetch(buildCodexAgentUrl(base, path), { method, headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' }, signal: AbortSignal.timeout(10000) });
+      const body = await this.readJsonResponse(response);
+      if (!response.ok) throw Object.assign(new Error(response.status === 404 ? 'Gateway job/session unavailable; cancellation cannot be confirmed.' : 'Gateway cancellation request failed.'), { statusCode: response.status === 404 ? 404 : 502 });
+      return body;
+    };
+    const body = await request(`/admin/remote-agent-tasks/${encodeURIComponent(jobId)}`);
+    const task = body.task || body;
+    if (task.id !== jobId || task.targetId !== targetId) throw Object.assign(new Error('Gateway job identity does not match the owned target.'), { statusCode: 409 });
+    if (['completed', 'failed', 'terminated', 'timed_out'].includes(task.status)) return { jobId, status: task.status, alreadyTerminal: true, artifactsPreserved: true };
+    if (!/^ps_[a-zA-Z0-9_-]+$/.test(task.sessionId || '')) throw new Error('Gateway provider session identity unavailable.');
+    // The task /cancel route removes handoff files. Terminate its verified provider
+    // session instead; do not delete project files or published Lilly artifacts.
+    const stopped = await request(`/admin/provider-sessions/${encodeURIComponent(task.sessionId)}`, 'DELETE');
+    const status = stopped.session?.status;
+    return { jobId, status: ['terminated', 'completed', 'failed', 'timed_out'].includes(status) ? status : 'cancellation_requested', artifactsPreserved: true, temporaryHandoffRetention: 'Gateway retention policy still applies; collect any published result files with status.' };
+  }
+
   async run(input = {}) {
     const task = normalizeText(input.task || input.prompt || input.message);
     if (!task) {

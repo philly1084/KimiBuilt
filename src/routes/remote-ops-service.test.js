@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { createHandler } = require('./remote-ops-service');
 const { readZipEntries } = require('../utils/zip');
 function fixture() {
+  let time = 100000; let autoAdvance = true; const now = () => time; const cancelTask = jest.fn(async () => ({ status: 'terminated', artifactsPreserved: true }));
   const session = { id: crypto.randomUUID(), metadata: { ownerId: 'owner' } };
   const store = new Map();
   const sessionStore = { getOwned: jest.fn(async (id, owner) => id === session.id && owner === 'owner' ? structuredClone(session) : null), update: jest.fn(async (_id, patch) => { Object.assign(session.metadata, patch.metadata); return structuredClone(session); }) };
@@ -20,11 +21,11 @@ function fixture() {
   });
   const app = () => {
     const a = express(); a.use(express.json({ limit: '10mb' })); a.use((req, _res, next) => { req.user = { username: req.get('x-owner') || 'owner' }; next(); });
-    a.post('/', createHandler({ invokeTool, sessionStore, artifactService, postgres: { enabled: false } })); return a;
+    a.post('/', createHandler({ invokeTool, sessionStore, artifactService, postgres: { enabled: false }, now, admission: () => 0, cancelTask })); return a;
   };
-  const call = (params, extra = {}) => request(app()).post('/').send({ tool: 'remote-cli-agent', sessionId: session.id, params, ...extra });
+  const call = (params, extra = {}) => { if (autoAdvance) time += 30001; return request(app()).post('/').send({ tool: 'remote-cli-agent', sessionId: session.id, params, ...extra }); };
   const shelf = (params, extra = {}) => call(params, { tool: 'artifact-store', ...extra });
-  return { app, session, store, call, shelf, invokeTool, artifactService, sessionStore, complete: () => { completion = 'complete'; }, reject: () => { rejectDispatch = true; } };
+  return { freeze: () => { autoAdvance = false; }, advance: ms => { time += ms; }, cancelTask, app, session, store, call, shelf, invokeTool, artifactService, sessionStore, complete: () => { completion = 'complete'; }, reject: () => { rejectDispatch = true; } };
 }
 test('Astra survives bounded observation, same-job polling and a checkpointed continuation', async () => {
   const f = fixture();
@@ -135,4 +136,47 @@ test('uncertain database unlock discards the connection', async () => {
   app.post('/', createHandler({ invokeTool: f.invokeTool, sessionStore: f.sessionStore, artifactService: f.artifactService, postgres: { enabled: true, getPool: () => ({ connect: async () => client }) } }));
   await request(app).post('/').send({ tool: 'remote-cli-agent', sessionId: f.session.id, params: { task: 'Build' } });
   expect(client.release).toHaveBeenCalledWith(true); expect(client.release).toHaveBeenCalledTimes(1);
+});
+
+
+test('enforces persisted 30-second polling across handlers and never re-fetches terminal results', async () => {
+  const f = fixture(); f.freeze();
+  await f.call({task:'Build'});
+  await f.call({action:'status'});
+  const calls=f.invokeTool.mock.calls.length;
+  const early=await f.call({action:'status'});
+  expect(early.status).toBe(429); expect(early.headers['retry-after']).toBe('30');
+  expect(f.invokeTool).toHaveBeenCalledTimes(calls);
+  f.advance(30001); f.complete();
+  const done=await f.call({action:'status'}); expect(done.body.stopPolling).toBe(true);
+  const doneCalls=f.invokeTool.mock.calls.length;
+  for(let i=0;i<10;i++) expect((await f.call({action:'status'})).body.cached).toBe(true);
+  expect(f.invokeTool).toHaveBeenCalledTimes(doneCalls);
+});
+
+test('exhausted gateway polling budget never dispatches again', async () => {
+  const f=fixture(); await f.call({task:'Build'});
+  f.session.metadata.remoteOps.poll={jobId:'job-1',count:600,nextAt:0};
+  const r=await f.call({action:'status'});expect(r.status).toBe(409);expect(r.body.stopPolling).toBe(true);expect(f.invokeTool).toHaveBeenCalledTimes(1);
+});
+
+test('cancel has a separate lane while an observation holds the session and is idempotent', async () => {
+  const f=fixture(); f.session.metadata.remoteOps={receipts:[],job:{jobId:'ragent_owned',targetId:'k3s-primary',status:'running'}};
+  let enter,release;const entered=new Promise(r=>{enter=r});
+  f.invokeTool.mockImplementationOnce(async(_req,res)=>{enter();await new Promise(r=>{release=r});res.json({success:true,data:{success:true,data:{remoteCodeJobId:'ragent_owned',completionStatus:'running'}}});});
+  const observing=f.call({action:'status'}).then(r=>r);await entered;
+  const cancelled=await f.call({action:'cancel',jobId:'ragent_owned'});expect(cancelled.status).toBe(200);
+  expect(cancelled.body.data.artifactsPreserved).toBe(true);
+  expect((await f.call({action:'cancel',jobId:'ragent_owned'})).body.replayed).toBe(true);
+  expect(f.cancelTask).toHaveBeenCalledTimes(1);expect(f.artifactService.deleteArtifact).not.toHaveBeenCalled();
+  release();await observing;
+  expect(f.session.metadata.remoteOpsCancel.status).toBe('terminated');
+});
+
+test('cancel requires exact owned job and does not accept another target', async()=>{
+  const f=fixture();f.session.metadata.remoteOps={receipts:[],job:{jobId:'ragent_owned',targetId:'k3s-primary',status:'running'}};
+  expect((await f.call({action:'cancel'})).status).toBe(400);
+  expect((await f.call({action:'cancel',jobId:'ragent_other'})).status).toBe(404);
+  expect((await f.call({action:'cancel',jobId:'ragent_owned',targetId:'k3s-secondary'})).status).toBe(409);
+  expect(f.cancelTask).not.toHaveBeenCalled();
 });

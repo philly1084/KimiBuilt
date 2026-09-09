@@ -128,15 +128,21 @@ class RemoteAgentTaskService {
         return task ? this.toPublicTask(task) : null;
     }
 
-    getTranscript(taskId = '', ownerId = null) {
+    getTranscript(taskId = '', ownerId = null, afterCursor = 0, requestedLimit = 200) {
         const task = this.getTask(taskId, ownerId);
         if (!task) {
             return null;
         }
 
+        const after = normalizeCursor(afterCursor);
+        const limit = Math.min(200, Math.max(1, Number(requestedLimit) || 200));
+        const remaining = task.transcript.filter(entry => entry.cursor > after);
+        const entries = remaining.slice(0, limit);
         return {
             task: this.toPublicTask(task),
-            transcript: task.transcript.map((entry) => ({ ...entry })),
+            transcript: entries.map((entry) => ({ ...entry })),
+            nextCursor: entries.at(-1)?.cursor || after,
+            hasMore: remaining.length > entries.length,
         };
     }
 
@@ -177,6 +183,7 @@ class RemoteAgentTaskService {
 
     async cancelTask(taskId = '', ownerId = null) {
         const task = this.requireTask(taskId, ownerId);
+        if (['cancelled', 'completed', 'failed', 'terminated', 'timed_out'].includes(task.status)) return { success: true, task: this.toPublicTask(task), alreadyTerminal: true };
         await this.providerSessionService.sendSignal(task.sessionId, ownerId, 'SIGTERM');
         task.status = 'cancelled';
         task.updatedAt = new Date().toISOString();

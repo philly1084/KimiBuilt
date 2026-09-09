@@ -139,3 +139,11 @@ describe('security middleware', () => {
         expect(response.body.error.code).toBe('rate_limited');
     });
 });
+
+test('polling saturation cannot exhaust the reserved cancellation lane', async () => {
+  const app=express(); app.use(express.json());app.use(createRateLimit({max:1,windowMs:60000,name:'tool-invoke'}));
+  app.post('/api/tools/invoke/remote-ops',(_req,res)=>res.json({ok:true}));
+  await request(app).post('/api/tools/invoke/remote-ops').send({tool:'remote-cli-agent',params:{action:'status'}});
+  expect((await request(app).post('/api/tools/invoke/remote-ops').send({tool:'remote-cli-agent',params:{action:'status'}})).status).toBe(429);
+  expect((await request(app).post('/api/tools/invoke/remote-ops').send({tool:'remote-cli-agent',params:{action:'cancel',jobId:'ragent_owned'}})).status).toBe(200);
+});

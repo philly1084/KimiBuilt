@@ -3,6 +3,18 @@
 const express = require('express');
 
 const router = express.Router();
+const { admit, limited } = require('./remote-ops-limits');
+const streams = new Set();
+router.use((req, res, next) => {
+    const cancelling = req.method === 'POST' && req.path.endsWith('/cancel');
+    const delay = admit(getOwnerId(req), cancelling ? 'legacy-cancel' : 'legacy-remote', { max: cancelling ? 6 : 30 });
+    if (delay) return limited(res, delay);
+    if (req.method === 'GET' && !req.path.endsWith('/stream')) {
+        const pollDelay = admit(`${getOwnerId(req)}:${req.path}`, 'legacy-poll', { max: 1, windowMs: 10000 });
+        if (pollDelay) return limited(res, pollDelay);
+    }
+    next();
+});
 
 function getOwnerId(req) {
     return String(req.user?.username || '').trim() || null;
@@ -33,7 +45,7 @@ router.get('/remote-agent-tasks/:id', async (req, res, next) => {
         const service = getService(req);
         const task = service.getPublicTask(req.params.id, getOwnerId(req));
         if (!task) {
-            return res.status(404).json({ error: { message: 'Remote agent task not found' } });
+            return res.status(404).json({ error: { message: 'Remote agent task not found' }, stopPolling: true });
         }
 
         res.json({ task });
@@ -45,7 +57,7 @@ router.get('/remote-agent-tasks/:id', async (req, res, next) => {
 router.get('/remote-agent-tasks/:id/transcript', async (req, res, next) => {
     try {
         const service = getService(req);
-        const transcript = service.getTranscript(req.params.id, getOwnerId(req));
+        const transcript = service.getTranscript(req.params.id, getOwnerId(req), req.query.after, req.query.limit);
         if (!transcript) {
             return res.status(404).json({ error: { message: 'Remote agent task not found' } });
         }
@@ -74,24 +86,37 @@ router.get('/remote-agent-tasks/:id/stream', async (req, res, next) => {
             return res.status(404).json({ error: { message: 'Remote agent task not found' } });
         }
 
+        const streamKey = `${ownerId}:${req.params.id}`;
+        if (streams.has(streamKey) || streams.size >= 32) return limited(res, 15, 'Only one stream per owned task is allowed.');
+        streams.add(streamKey);
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache, no-transform');
         res.setHeader('Connection', 'keep-alive');
         res.flushHeaders?.();
 
         existingEvents.forEach((event) => {
+            if (res.writableLength > 256 * 1024) { res.destroy(); return; }
             res.write(formatSseEvent(event));
         });
+        if (existingEvents.some(event => event.type === 'exit' || (event.type === 'status' && ['completed', 'cancelled', 'failed', 'terminated', 'timed_out'].includes(event.status)))) {
+            streams.delete(streamKey);
+            return res.end();
+        }
 
         const unsubscribe = service.subscribeToTask(req.params.id, ownerId, (event) => {
+            if (res.writableLength > 256 * 1024) { res.destroy(); return; }
             res.write(formatSseEvent(event));
+            if (event.type === 'exit' || (event.type === 'status' && ['completed', 'cancelled', 'failed', 'terminated', 'timed_out'].includes(event.status))) res.end();
         });
 
         const keepAlive = setInterval(() => {
             res.write(': keepalive\n\n');
         }, 15000);
+        const deadline = setTimeout(() => res.end(), 300000);
 
-        req.on('close', () => {
+        res.on('close', () => {
+            streams.delete(streamKey);
+            clearTimeout(deadline);
             clearInterval(keepAlive);
             unsubscribe?.();
             res.end();
@@ -107,6 +132,7 @@ router.post('/remote-agent-tasks/:id/cancel', async (req, res, next) => {
         const result = await service.cancelTask(req.params.id, getOwnerId(req));
         res.json(result);
     } catch (error) {
+        if (error.statusCode === 404) return res.status(404).json({ success: false, error: 'Remote agent task not found', stopPolling: true });
         next(error);
     }
 });

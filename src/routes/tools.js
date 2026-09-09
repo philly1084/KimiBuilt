@@ -1495,8 +1495,10 @@ async function invokeTool(req, res) {
       params,
       buildToolExecutionContext(toolManager, req, resolvedSessionId, resolvedSession),
     );
-    await recordRemoteToolRegistryEvent(resolvedSessionId, resolvedSession, toolId, params, result);
-    await updateSessionToolMetadata(resolvedSessionId, toolId, params, result);
+    if (!req.remoteOpsObservation || !['running', 'unknown'].includes(result?.data?.completionStatus)) {
+      await recordRemoteToolRegistryEvent(resolvedSessionId, resolvedSession, toolId, params, result);
+      await updateSessionToolMetadata(resolvedSessionId, toolId, params, result);
+    }
     
     res.json({ success: true, data: result, sessionId: resolvedSessionId });
   } catch (error) {

@@ -131,3 +131,23 @@ The previous model-selection release verified real Astra/high reasoning and Luna
 Runtime patches are immutable ConfigMap mounts over the preserved backend image. Future image releases must deliberately update/remove the `remote-ops-api` mounts under the coordinator; image contents alone do not replace mounted code. Rollback restores only this release's mount/config/annotation changes from its saved deployment snapshot, preserving concurrent changes.
 
 Running results may include data.data.progressOutput (the latest 16,000 characters of transcript). Treat it as unverified progress; gateway completionStatus remains authoritative. Explicit status calls never replace a missing job, including jobs without artifact inputs.
+
+## Polling limits and cancellation (revision 3)
+
+The remote-ops endpoint enforces a persisted **30-second minimum between gateway status checks per job**, with at most **600 checks per job**. HTTP 429 includes `Retry-After`; wait that long. On `stopPolling:true`, stop. Exhausting the observation budget does not cancel the remote work or delete its data. Completed responses are cached, so repeated status calls do not re-fetch transcripts, re-import files, or append repeated tool history.
+
+Admission limits are 60 requests/minute per authenticated owner per backend replica and four concurrent remote-ops requests per replica. Cancellation has its own reserved budget of six requests/minute per owner and bypasses the observation lock and normal polling limiter. Bots sharing credentials share these budgets.
+
+Cancel a running gateway job using the **same remote-ops invocation URL**:
+
+```json
+{
+  "tool":"remote-cli-agent",
+  "sessionId":"LILLY_SESSION_ID",
+  "params":{"action":"cancel","jobId":"ragent_EXACT_SAVED_JOB_ID"}
+}
+```
+
+The job ID must match the owned Lilly session. Repeated confirmed cancellation is idempotent. This stops the verified provider process without calling the gateway's handoff-deleting task-cancel operation. Already shared artifacts and project files are retained. Temporary handoff files still follow gateway retention; unfinished output that the agent never published may not be recoverable. Use the returned status request after its delay to collect any published results. A missing job returns 404 with `stopPolling:true`, not a claim that cancellation succeeded.
+
+The older `/admin/remote-agent-tasks/:id` API controls local task IDs, not gateway jobs from remote-ops. It now limits reads to once per URL every 10 seconds, 30 requests/minute per owner, and reserves six cancels/minute. Its transcript accepts `after` and `limit` (maximum 200 entries) and returns `nextCursor`/`hasMore`; advance the cursor rather than repeatedly downloading the entire transcript. Only one stream per owned task is allowed, with 32 streams per replica, a five-minute connection lifetime, and a bounded slow-client buffer. Reconnect using the last event cursor if the job is still active. Terminal streams close automatically; never reconnect in a tight loop.

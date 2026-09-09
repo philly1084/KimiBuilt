@@ -4,6 +4,10 @@ const { normalizeRequest, TARGETS, terminal } = require('./remote-ops-contract')
 const { executeArtifactAction, invalid } = require('./remote-ops-artifacts');
 const { normalizeRemoteAgentHandoffContinuation } = require('../remote-cli/agent-handoff');
 const localLocks = new Set();
+const { admit, limited } = require('./remote-ops-limits');
+const { cancelOwnedJob } = require('./remote-ops-cancel');
+const POLL_INTERVAL_MS = 30000;
+const MAX_JOB_POLLS = 600;
 function canonical(value) {
   if (Array.isArray(value)) return value.map(canonical);
   if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(k => [k, canonical(value[k])]));
@@ -25,17 +29,23 @@ function checkpointInstructions(target, feedback = '') {
 }
 function nextRequest(sessionId, job) {
   const running = !terminal(job.status);
-  return { action: running ? 'status' : 'continue', pollAfterMs: running ? 5000 : null, request: { tool: 'remote-cli-agent', sessionId, ...(!running ? { requestId: '<new unique operation id>' } : {}), params: { action: running ? 'status' : 'continue', targetId: job.targetId, model: job.model, ...(running ? { jobId: job.jobId } : { task: '<feedback or next checkpoint objective>' }) } } };
+  return { action: running ? 'status' : 'continue', pollAfterMs: running ? POLL_INTERVAL_MS : null, request: { tool: 'remote-cli-agent', sessionId, ...(!running ? { requestId: '<new unique operation id>' } : {}), params: { action: running ? 'status' : 'continue', targetId: job.targetId, model: job.model, ...(running ? { jobId: job.jobId } : { task: '<feedback or next checkpoint objective>' }) } } };
 }
-function createHandler({ invokeTool, sessionStore = require('../session-store').sessionStore, artifactService = require('../artifacts/artifact-service').artifactService, postgres = require('../postgres').postgres } = {}) {
+function createHandler({ invokeTool, sessionStore = require('../session-store').sessionStore, artifactService = require('../artifacts/artifact-service').artifactService, postgres = require('../postgres').postgres, now = Date.now, admission = admit, cancelTask } = {}) {
   return async (req, res) => {
     res.set('Cache-Control', 'no-store');
     const owner = req.user?.username; const sessionId = req.body?.sessionId;
     if (!owner) return res.status(401).json({ success: false, error: 'Authentication required.' });
     if (typeof sessionId !== 'string' || !sessionId.trim()) return res.status(400).json({ success: false, error: 'sessionId required.' });
+    const cancelling = req.body?.tool === 'remote-cli-agent' && req.body?.params?.action === 'cancel';
+    const delay = admission(owner, cancelling ? 'remote-ops-cancel' : 'remote-ops', { max: cancelling ? 6 : 60, now: now() });
+    if (delay) return limited(res, delay);
+    // Cancellation must remain available while an observation owns the session lock.
+    if (cancelling) return cancelOwnedJob(req, res, { sessionStore, cancelTask, now });
     const lockKey = sessionId.trim(); let client; let locked = false; let pgLocked = false;
     try {
-      if (localLocks.has(lockKey)) throw invalid('A request is already being observed for this session; wait and poll it.', 409);
+      if (localLocks.size >= 4 && !localLocks.has(lockKey)) return limited(res, 5, 'Remote operations concurrency limit reached.');
+      if (localLocks.has(lockKey)) { res.set('Retry-After', '30'); throw invalid('A request is already being observed for this session; wait and poll it.', 409); }
       localLocks.add(lockKey); locked = true;
       if (postgres.enabled) {
         client = await postgres.getPool().connect();
@@ -70,6 +80,13 @@ function createHandler({ invokeTool, sessionStore = require('../session-store').
           params.jobId = prior.jobId;
           // Status never stages new files or sends a new objective.
           for (const key of ['artifactIds', 'contextFiles', 'collectResultFiles', 'resultFileGlobs', 'supportAgentResponse']) if (params[key] !== undefined) throw invalid('Status only observes the saved job. Send files or feedback in a continuation turn.');
+          if (state.terminalResponse?.jobId === prior.jobId) return res.json({ ...state.terminalResponse.body, cached: true, stopPolling: true });
+          const poll = state.poll?.jobId === prior.jobId ? state.poll : { jobId: prior.jobId, count: 0, nextAt: 0 };
+          if (poll.count >= MAX_JOB_POLLS) return res.status(409).json({ success: false, code: 'poll_budget_exhausted', error: 'Gateway observation budget exhausted for this job. Stop polling; cancellation remains available.', stopPolling: true });
+          if (poll.nextAt > now()) return limited(res, Math.ceil((poll.nextAt - now()) / 1000), 'Poll this job no more than once every 30 seconds.');
+          state.poll = { ...poll, count: poll.count + 1, nextAt: now() + POLL_INTERVAL_MS };
+          await saveState();
+          req.remoteOpsObservation = true;
         } else {
           if (prior.jobId && !terminal(prior.status)) return res.status(409).json({ success: false, error: 'The saved job is still running or unconfirmed. Poll it before starting another turn.', next: nextRequest(session.id, prior) });
           if (state.receipts.some(r => !r.response && r.tool === 'remote-cli-agent')) throw invalid('An earlier dispatch is unconfirmed; inspect it before starting another task.', 409);
@@ -81,6 +98,7 @@ function createHandler({ invokeTool, sessionStore = require('../session-store').
             req.remoteOpsFreshRun = true;
           }
           params.task += checkpointInstructions(TARGETS[params.targetId], params.supportAgentResponse || '');
+          state.terminalResponse = null;
         }
       }
       let receipt;
@@ -92,6 +110,7 @@ function createHandler({ invokeTool, sessionStore = require('../session-store').
       let status = 200; let response;
       req.remoteOpsOnTaskStarted = async started => {
         state.job = { jobId: started.jobId, targetId: started.targetId, cwd: started.cwd, model: started.model, status: 'running', updatedAt: new Date().toISOString() };
+        state.poll = { jobId: started.jobId, count: 0, nextAt: now() + POLL_INTERVAL_MS };
         const remoteCliAgent = { remoteCodeJobId: started.jobId, sessionId: null, remoteCodeSessionId: null, targetId: started.targetId, cwd: started.cwd, model: started.model, completionStatus: 'running', remoteAgentHandoff: normalizeRemoteAgentHandoffContinuation(started.handoff) };
         if (sessionStore.updateControlState) await sessionStore.updateControlState(session.id, { remoteCliAgent });
         if (receipt) {
@@ -112,6 +131,13 @@ function createHandler({ invokeTool, sessionStore = require('../session-store').
           if (data?.remoteCodeJobId) {
             state.job = { jobId: data.remoteCodeJobId, providerSessionId: data.remoteCodeSessionId || data.sessionId, model: data.providerModel || params.model, targetId: data.targetId || params.targetId, cwd: data.cwd || params.cwd, status: data.completionStatus || 'unknown', updatedAt: new Date().toISOString(), checkpoint: String(data.finalOutput || '').slice(-16000) };
             response.next = nextRequest(session.id, state.job);
+            if (terminal(state.job.status)) {
+              const cached = JSON.parse(JSON.stringify(response));
+              if (cached.data?.sideEffects) delete cached.data.sideEffects;
+              if (Buffer.byteLength(JSON.stringify(cached)) <= 256 * 1024) state.terminalResponse = { jobId: state.job.jobId, body: cached };
+              else state.terminalResponse = { jobId: state.job.jobId, body: { success: true, sessionId: session.id, data: { success: true, data: state.job }, next: response.next, artifacts: `/api/sessions/${session.id}/artifacts` } };
+              response.stopPolling = true;
+            }
           } else if (response.data?.success === false && prior.jobId && params.action === 'status') response.next = nextRequest(session.id, prior);
           response.sharedStorage = { sessionId: session.id, artifacts: `/api/sessions/${session.id}/artifacts` };
           response.observationTimeoutMs = params.agentRunTimeoutMs;

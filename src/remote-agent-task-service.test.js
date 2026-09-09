@@ -187,3 +187,11 @@ remoteCliTargets:
         ]);
     });
 });
+
+test('transcript pagination is bounded and cancellation is idempotent for terminal tasks',async()=>{
+  const sendSignal=jest.fn();const service=new RemoteAgentTaskService({providerSessionService:{sendSignal}});
+  service.tasks.set('task',{id:'task',ownerId:'phill',status:'completed',transcript:Array.from({length:450},(_,i)=>({cursor:i+1,data:'line'}))});
+  const first=service.getTranscript('task','phill',0,99999);expect(first.transcript).toHaveLength(200);expect(first.nextCursor).toBe(200);expect(first.hasMore).toBe(true);
+  const next=service.getTranscript('task','phill',200,50);expect(next.transcript[0].cursor).toBe(201);expect(next.nextCursor).toBe(250);
+  await service.cancelTask('task','phill');await service.cancelTask('task','phill');expect(sendSignal).not.toHaveBeenCalled();
+});

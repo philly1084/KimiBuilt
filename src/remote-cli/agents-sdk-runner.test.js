@@ -3826,3 +3826,19 @@ describe('RemoteCliAgentsSdkRunner', () => {
     });
   });
 });
+
+ describe('remote cancellation preserves data', () => {
+  test('terminates only the verified provider session and never calls destructive task cancel', async () => {
+    const fetchImpl=jest.fn(async(url,options)=>({ok:true,status:200,text:async()=>JSON.stringify(options.method==='DELETE'?{session:{status:'terminated'}}:{task:{id:'ragent_owned',targetId:'k3s-primary',sessionId:'ps_owned',status:'running'}})}));
+    const runner=new RemoteCliAgentsSdkRunner({config:{codexAgentBaseUrl:'https://gateway.example',codexAgentApiKey:'test'},fetchImpl});
+    const result=await runner.cancelRemoteTask({jobId:'ragent_owned',targetId:'k3s-primary'});
+    expect(result.status).toBe('terminated');expect(result.artifactsPreserved).toBe(true);
+    expect(fetchImpl.mock.calls[1][0]).toBe('https://gateway.example/admin/provider-sessions/ps_owned');
+    expect(fetchImpl.mock.calls[1][1].method).toBe('DELETE');expect(fetchImpl.mock.calls.some(([url])=>url.endsWith('/cancel'))).toBe(false);
+  });
+  test('a mismatched gateway target cannot be cancelled',async()=>{
+    const fetchImpl=jest.fn(async()=>({ok:true,text:async()=>JSON.stringify({task:{id:'ragent_owned',targetId:'k3s-secondary',status:'running',sessionId:'ps_owned'}})}));
+    const runner=new RemoteCliAgentsSdkRunner({config:{codexAgentBaseUrl:'https://gateway.example',codexAgentApiKey:'test'},fetchImpl});
+    await expect(runner.cancelRemoteTask({jobId:'ragent_owned',targetId:'k3s-primary'})).rejects.toThrow('identity');expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+ });

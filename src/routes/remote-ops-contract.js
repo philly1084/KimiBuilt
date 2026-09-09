@@ -12,14 +12,14 @@ function inferredTarget(text) {
 }
 function contract(_req, res) {
   res.set('Cache-Control', 'no-store').json({
-    schema: 'LillyRemoteOps/v1', revision: 2, invoke: '/api/tools/invoke/remote-ops',
+    schema: 'LillyRemoteOps/v1', revision: 3, invoke: '/api/tools/invoke/remote-ops',
     authentication: 'Authorization: Bearer <existing Lilly API key or login token>',
     privilege: 'Existing Lilly operator permissions; bots sharing a credential share ownership.',
     targets: TARGETS, defaultTargetId: 'k3s-primary',
     targeting: 'Explicit targetId wins for new runs; otherwise infer from deploymentHost or task domain. Status and continue preserve saved target and workspace. New target means a new run.',
     tools: ['remote-cli-agent', 'k3s-deploy', 'artifact-store'], deploymentActions: ACTIONS,
     modelSelection: { parameter: 'params.model', alternative: 'model', default: DEFAULT_MODEL, models: [{ id: 'gpt-6-astra', label: 'Astra' }, { id: DEFAULT_MODEL, label: 'Luna' }], catalog: '/api/models', instructions: 'Use gpt-6-astra for long-horizon work. Follow-ups inherit the model; a running job retains its original model.' },
-    remoteActions: ['run', 'status', 'continue'],
+    remoteActions: ['run', 'status', 'continue', 'cancel'], polling: { minIntervalMs: 30000, maxGatewayChecksPerJob: 600, ownerRequestsPerMinute: 60, cancelRequestsPerMinute: 6, maxConcurrentRequestsPerReplica: 4, instructions: 'Honor HTTP 429 Retry-After. Stop on stopPolling:true. Terminal status is cached. Cancel requires the exact owned jobId, uses a reserved budget and does not delete shared artifacts or project files.' },
     timeouts: { defaultObservationMs: 45000, maxObservationMs: 240000, gatewayMaxLifetimeMs: 14400000, gatewayIdleTimeoutMs: 1800000, instructions: 'observationTimeoutMs (or agentRunTimeoutMs) controls this HTTP wait only. Poll the same running or unobserved job. Gateway lifetime/idle limits are separate. Emit progress during builds and save checkpoints before limits; extend work with a continuation turn.' },
     retries: 'Supply a unique requestId for each run/continue. Replay returns its receipt; changed content with the same ID is rejected. Uncertain dispatch is never automatically repeated. Status needs no requestId.',
     sessions: '/api/sessions', upload: '/api/artifacts/upload', artifacts: '/api/sessions/{sessionId}/artifacts', download: '/api/artifacts/{artifactId}/download',

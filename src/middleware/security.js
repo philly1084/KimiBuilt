@@ -100,7 +100,13 @@ function createRateLimit(options = {}) {
     const buckets = new Map();
 
     return (req, res, next) => {
-        if (skip(req)) {
+        const cancelPath = String(req.originalUrl || req.url || '').split('?')[0];
+        const reservedCancellation = req.method === 'POST' && (
+            (cancelPath === '/api/tools/invoke/remote-ops' && req.body?.tool === 'remote-cli-agent' && req.body?.params?.action === 'cancel')
+            || /^\/(?:api|admin)\/remote-agent-tasks\/[^/]+\/cancel$/.test(cancelPath)
+        );
+        // Each cancellation route has its own small budget, independent of polling.
+        if (skip(req) || (['api', 'tool-invoke'].includes(name) && reservedCancellation)) {
             return next();
         }
 
