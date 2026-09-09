@@ -129,3 +129,5 @@ The Codex handoff still accepts 12 files, 4 MiB each, 6 MiB combined. Packaging 
 The previous model-selection release verified real Astra/high reasoning and Luna artifact round trips on primary. Astra evidence: session `385e46e8-332f-4d22-b6bb-5a1ff861fdae`, job `ragent_17039308d16c4e2195c2ce0db51908cb`, output `71b24495-da46-4fbf-a27c-fbc6dc69d066`. The new long-horizon revision requires its own mounted-source and public API proof before being called live.
 
 Runtime patches are immutable ConfigMap mounts over the preserved backend image. Future image releases must deliberately update/remove the `remote-ops-api` mounts under the coordinator; image contents alone do not replace mounted code. Rollback restores only this release's mount/config/annotation changes from its saved deployment snapshot, preserving concurrent changes.
+
+Running results may include data.data.progressOutput (the latest 16,000 characters of transcript). Treat it as unverified progress; gateway completionStatus remains authoritative. Explicit status calls never replace a missing job, including jobs without artifact inputs.

@@ -2635,6 +2635,8 @@ class RemoteCliAgentsSdkRunner {
       const structuredResult = buildRemoteCliStructuredResult({ task, metadata: runMetadata, agentQuality });
       return {
         finalOutput, humanSummary: structuredResult.humanSummary, structuredResult,
+        // Progress is observational evidence; it must not override gateway completion state.
+        progressOutput: running ? outputParts.join('').slice(-16000) : null,
         transport: 'provider-agent', providerId: selection.providerId,
         providerModel: effectiveProviderModel || selection.providerModel,
         reasoningEffortReceipt, targetId, cwd,

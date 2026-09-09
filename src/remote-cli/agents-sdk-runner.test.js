@@ -175,6 +175,7 @@ describe('provider execution receipts and authoritative lifecycle', () => {
     const result = await runner.run({ task: 'Continue the same task.', jobId: 'receipt-task' });
     expect(result).toMatchObject({ completionStatus: 'running', cwd: '/opt/test', reasoningEffortReceipt: appliedReceipt });
     expect(result.structuredResult.completionStatus).not.toBe('complete');
+    expect(result.progressOutput).toContain('/opt/model-claimed');
     expect(fetchImpl.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
   });
 

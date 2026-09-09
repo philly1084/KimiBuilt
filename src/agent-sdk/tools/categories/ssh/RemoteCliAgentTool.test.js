@@ -20,6 +20,11 @@ function buildTool() {
 }
 
 describe('RemoteCliAgentTool', () => {
+  test('explicit status cannot replace a lost job even without an artifact handoff', async () => {
+    const { tool, runner } = buildTool();
+    await tool.execute({ action: 'status', task: 'Check status', jobId: 'missing-job', targetId: 'k3s-primary' }, {});
+    expect(runner.run.mock.calls[0][0].resumeOnly).toBe(true);
+  });
   test('selects project host before inheriting stale remote workspace and session', async () => {
     const { config } = require('../../../../config');
     const originalMap = config.remoteCliMcp.targetHostMap;

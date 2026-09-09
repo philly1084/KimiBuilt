@@ -658,7 +658,7 @@ class RemoteCliAgentTool extends ToolBase {
     const runParams = {
       ...params,
       handoff,
-      ...(priorHandoff ? { resumeOnly: true } : {}),
+      ...(priorHandoff || params.action === 'status' ? { resumeOnly: true } : {}),
       ...(typeof _context?.onProgress === 'function' ? { onProgress: _context.onProgress } : {}),
       ...(typeof _context?.onRemoteTaskStarted === 'function' ? { onTaskStarted: _context.onRemoteTaskStarted } : {}),
     };
