@@ -757,7 +757,7 @@ function buildToolExecutionContext(toolManager, req, sessionId = null, session =
     : null;
   return {
     sessionId,
-    session,
+    session: req.remoteOpsFreshRun ? { ...session, controlState: { ...session?.controlState, remoteCliAgent: {} }, metadata: { ...session?.metadata, remoteCliAgent: {} } } : session,
     sessionIsolation: isSessionIsolationEnabled({
       sessionIsolation: body.sessionIsolation || body.session_isolation,
       metadata,
@@ -767,6 +767,7 @@ function buildToolExecutionContext(toolManager, req, sessionId = null, session =
     route: req.originalUrl || req.path || '/api/tools/invoke',
     transport: 'http',
     ...(req.remoteOpsSshCredentials ? { sshCredentials: req.remoteOpsSshCredentials } : {}),
+    ...(req.remoteOpsOnTaskStarted ? { onRemoteTaskStarted: req.remoteOpsOnTaskStarted } : {}),
     executionProfile: body.executionProfile || body.execution_profile || body.clientSurface || body.client_surface || 'tool-invoke',
     model: resolveRequestedToolModel(body) || session?.metadata?.model || null,
     timezone,
@@ -1506,7 +1507,7 @@ async function invokeTool(req, res) {
   }
 }
 
-router.post('/invoke/remote-ops', require('./remote-ops-contract').normalizeRequest, invokeTool);
+router.post('/invoke/remote-ops', require('./remote-ops-service').createHandler({ invokeTool }));
 router.post('/invoke', invokeTool);
 
 /**

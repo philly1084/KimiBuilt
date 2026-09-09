@@ -9,12 +9,29 @@ app.post('/', normalizeRequest, (req, res) => res.json(req.body));
 const call = (params = {}, tool = 'remote-cli-agent') => request(app).post('/').send({ tool, sessionId: 'owned-session', params });
 
 test('pins Codex, bounds wait, and preserves artifact and continuation fields', async () => {
-  const r = await call({ task: 'Check status', jobId: 'job', sessionId: 'provider-session', artifactIds: ['file'], collectResultFiles: true, agentRunTimeoutMs: 999999 });
+  const r = await call({ task: 'Check status', jobId: 'job', sessionId: 'provider-session', artifactIds: ['file'], collectResultFiles: true, agentRunTimeoutMs: 240000 });
   expect(r.status).toBe(200);
-  expect(r.body.params).toMatchObject({ targetId: 'k3s-primary', transport: 'provider-agent', model: 'gpt-5.6-luna', jobId: 'job', sessionId: 'provider-session', artifactIds: ['file'], collectResultFiles: true, agentRunTimeoutMs: 45000 });
+  expect(r.body.params).toMatchObject({ targetId: 'k3s-primary', transport: 'provider-agent', model: 'gpt-5.6-luna', jobId: 'job', sessionId: 'provider-session', artifactIds: ['file'], collectResultFiles: true, agentRunTimeoutMs: 240000 });
 });
-test.each([{ targetId: 'k3s-secondary' }, { transport: 'mcp' }, { command: 'ls' }, { model: 'grok' }])('rejects incompatible remote overrides %j', async params => {
+test.each([{ targetId: 'elsewhere' }, { transport: 'mcp' }, { command: 'ls' }, { model: 'grok' }])('rejects incompatible remote overrides %j', async params => {
   expect((await call({ task: 'Inspect', ...params })).status).toBe(400);
+});
+test.each([['Build app.secdevsolutions.help', 'k3s-primary'], ['Build app.demoserver2.buzz', 'k3s-secondary']])('infers target from %s', async (task, targetId) => {
+  expect((await call({ task })).body.params.targetId).toBe(targetId);
+});
+test('explicit target overrides domain inference', async () => {
+  expect((await call({ task: 'Inspect app.demoserver2.buzz', targetId: 'k3s-primary' })).body.params.targetId).toBe('k3s-primary');
+});
+test('ambiguous domains require a target', async () => {
+  expect((await call({ task: 'Deploy both secdevsolutions.help and demoserver2.buzz' })).status).toBe(400);
+});
+test.each([0, 999, 240001, '60000', 1.5])('rejects invalid observation wait %j', async observationTimeoutMs => {
+  expect((await call({ task: 'Inspect', observationTimeoutMs })).status).toBe(400);
+});
+test('secondary direct deployment uses the existing secondary identity', async () => {
+  const r = await call({ action: 'rollout-status', targetId: 'k3s-secondary', namespace: 'kimibuilt', deployment: 'backend' }, 'k3s-deploy');
+  expect(r.status).toBe(200);
+  expect(r.body.params.host).toBe('162.55.163.199');
 });
 test('does not inherit secondary deployment defaults', async () => {
   const old = process.env.LILLY_REMOTE_OPS_SSH_KEY_PATH;

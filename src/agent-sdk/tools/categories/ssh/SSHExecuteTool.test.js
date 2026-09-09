@@ -27,6 +27,13 @@ jest.mock('../../../../research-buckets', () => ({
 }));
 
 const { SSHExecuteTool } = require('./SSHExecuteTool');
+test('explicit target key does not inherit another target password', async () => {
+  const settings = require('../../../../routes/admin/settings.controller');
+  settings.getEffectiveSshConfig.mockReturnValueOnce({ enabled: true, host: 'secondary', username: 'root', password: 'secondary-only', privateKeyPath: '' });
+  const connection = await new SSHExecuteTool().getConnectionConfig({ host: 'primary', context: { sshCredentials: { primary: { privateKeyPath: '/run/primary-key' } } } });
+  expect(connection.privateKeyPath).toBe('/run/primary-key');
+  expect(connection.password).toBe('');
+});
 const { artifactService } = require('../../../../artifacts/artifact-service');
 const { researchBucketService } = require('../../../../research-buckets');
 

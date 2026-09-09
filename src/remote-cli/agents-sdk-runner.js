@@ -2858,6 +2858,13 @@ class RemoteCliAgentsSdkRunner {
         }
         handoffAcknowledgement = resolveRemoteAgentHandoffAcknowledgement(startBody, handoff);
 
+        // Persist the execution handle before opening the observation stream. A
+        // client disconnect or backend restart must not lose a long-running job.
+        if (typeof input.onTaskStarted === 'function') {
+          preserveRunningTask = true;
+          await input.onTaskStarted({ jobId: taskId, targetId, cwd, model: effectiveProviderModel || selection.providerModel, handoff });
+        }
+
         emitProgress(`${selection.providerLabel} remote task ${taskId} started.`, { percent: 35, stage: 'streaming' });
         const absoluteStreamUrl = new URL(streamUrl, `${trimTrailingSlash(baseUrl)}/`).toString();
         if (new URL(absoluteStreamUrl).origin !== new URL(baseUrl).origin) {

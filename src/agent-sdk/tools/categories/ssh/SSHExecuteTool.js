@@ -238,7 +238,7 @@ class SSHExecuteTool extends ToolBase {
       host: host || contextual.host || defaultConfig.host,
       port: port || contextual.port || defaultConfig.port || 22,
       username: username || contextual.username || defaultConfig.username,
-      password: contextual.password || defaultConfig.password || '',
+      password: contextual.privateKeyPath ? '' : contextual.password || defaultConfig.password || '',
       privateKeyPath: contextual.privateKeyPath || defaultConfig.privateKeyPath || '',
     };
   }

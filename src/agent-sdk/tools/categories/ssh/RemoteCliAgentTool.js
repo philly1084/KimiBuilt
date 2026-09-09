@@ -660,6 +660,7 @@ class RemoteCliAgentTool extends ToolBase {
       handoff,
       ...(priorHandoff ? { resumeOnly: true } : {}),
       ...(typeof _context?.onProgress === 'function' ? { onProgress: _context.onProgress } : {}),
+      ...(typeof _context?.onRemoteTaskStarted === 'function' ? { onTaskStarted: _context.onRemoteTaskStarted } : {}),
     };
 
     const result = await this.runner.run(runParams);

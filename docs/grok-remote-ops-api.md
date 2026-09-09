@@ -1,105 +1,131 @@
 # Grok bot access to Lilly remote operations
 
-Give this document to the bot operator. Base URL: `https://lilly.secdevsolutions.help`.
+Base URL: `https://lilly.secdevsolutions.help`. The URLs and bearer authentication remain unchanged:
 
-## Verified live status — 2026-09-08
+- Discover: `GET /api/tools/remote-ops` (revision 2 describes the new contract).
+- Invoke: `POST /api/tools/invoke/remote-ops`.
+- Create a project session: `POST /api/sessions` with `{"mode":"chat"}`; save the returned `id`.
+- Download: `GET /api/artifacts/{artifactId}/download` with the same authorization.
 
-The authenticated contract and invocation route are live at commit `08128643`, mounted from immutable ConfigMap `lilly-remote-ops-081286436ba8` over the preserved Lilly image `localhost/lilly-team-release:8e3e42246bcbbd7f`. Mounted files match committed SHA-256 hashes; unrelated deployment settings were preserved. The model-selection release passed 41 focused tests and advertises Astra and Luna.
+Send `Authorization: Bearer $LILLY_API_TOKEN`. Keep the previously issued token in the bot's secret store; its recorded expiry is authoritative. Bots using the same credential share the existing operator identity and permissions. Never put tokens in prompts or artifacts.
 
-Real Codex `gpt-5.6-luna` on the main server read an uploaded XML artifact and returned byte-identical output through the same-session polling/result collection path. Public authenticated download matched all 68 bytes and SHA-256 `f1fa1f213af6bf10c569b4ab87f5dee7e8090716879564dad2c241e499f2d9a8`. Anonymous/invalid authentication and foreign-owner downloads were rejected.
-
-The Astra canary also completed through the public endpoint using top-level `model:"gpt-6-astra"`: the provider receipt reported `gpt-6-astra`, `reasoningEffort:high` was applied to the CLI invocation, and returned XML bytes matched the supplied file exactly. Evidence: session `385e46e8-332f-4d22-b6bb-5a1ff861fdae`, job `ragent_17039308d16c4e2195c2ce0db51908cb`, artifact `71b24495-da46-4fbf-a27c-fbc6dc69d066`.
-
-**Direct `k3s-deploy` is blocked pending a dedicated main-server credential.** Its earlier live check returned SSH authentication failure; do not use it for mutations yet. The deployed adapter now uses a separate `LILLY_REMOTE_OPS_SSH_KEY_PATH` and returns 503 when absent. Credential provisioning remains pending. Codex can be given an explicitly authorized deployment task through the working remote-agent lane.
-
-## Authentication
-
-Send `Authorization: Bearer $LILLY_API_TOKEN` on every request, including artifact downloads. Use the existing Lilly frontend API key from your secret manager, or a login token returned by `POST /api/auth/login` (complete MFA if enabled). Never put credentials in prompts, artifacts, query strings, source control, or logs. Login tokens expire; use their returned expiry. This route uses existing operator permissions: it is not a separately restricted bot account. Bots sharing one credential share one ownership identity.
-
-## Discover and create a session
-
-`GET /api/tools/remote-ops` returns the versioned contract. `GET /api/tools/docs/remote-cli-agent` and `GET /api/tools/docs/k3s-deploy` return detailed supported parameters.
-
-Create one Lilly session per project/workflow with `POST /api/sessions`, JSON `{"mode":"chat"}`. Save the returned `id`. This is the outer `sessionId` in every invocation and upload. Keep it distinct from the inner Codex/provider session identifier.
-
-## Ask Codex on the main server
-
-`POST /api/tools/invoke/remote-ops`, Content-Type `application/json`:
+## Astra and long-running work
 
 ```json
 {
   "tool": "remote-cli-agent",
-  "sessionId": "YOUR_LILLY_SESSION_ID",
+  "sessionId": "LILLY_SESSION_ID",
+  "requestId": "project-build-001",
   "params": {
-    "task": "Inspect the existing project in /opt/kimibuilt and report findings. Preserve unrelated files.",
-    "cwd": "/opt/kimibuilt",
-    "adminMode": false
-  }
-}
-```
-
-The endpoint pins the main server's `k3s-primary` target and `provider-agent` transport. Choose the Codex model explicitly:
-
-```json
-{
-  "tool": "remote-cli-agent",
-  "sessionId": "YOUR_LILLY_SESSION_ID",
-  "params": {
+    "action": "run",
     "model": "gpt-6-astra",
     "reasoningEffort": "high",
-    "task": "Inspect the requested project and report findings.",
-    "cwd": "/opt/lilly-agent-workbench",
-    "adminMode": false
+    "targetId": "k3s-primary",
+    "task": "Inspect the existing project, implement the agreed changes, verify them, and return the complete source bundle and CHECKPOINT.md.",
+    "adminMode": true,
+    "collectResultFiles": true,
+    "observationTimeoutMs": 45000
   }
 }
 ```
 
-Use `gpt-6-astra` for Astra and `gpt-5.6-luna` for Luna. Omission still defaults to Luna for compatibility. Top-level `model` is also accepted; if both fields appear they must agree. `GET /api/tools/remote-ops` includes model-selection instructions and choices, while `/api/models` is the runtime catalog. Send the same choice on continuation/poll calls and check `data.data.providerModel` in responses. A running job keeps its original model; request a different model on the next turn, not by resubmitting an in-progress task.
+Select `gpt-6-astra` or `gpt-5.6-luna`. Top-level `model` also works; if both fields are supplied they must agree. A new run without a model defaults to Luna for compatibility. Status and continuation inherit the selected model. A running job cannot change model; the next continuation turn can explicitly choose another model.
 
-For authorized software changes/deployments set `adminMode:true` and describe the exact project, scope, desired result and verification. Inventory existing projects before creating anything. Public main-server hosts use `secdevsolutions.help`.
+`observationTimeoutMs` controls only this HTTP observation (1,000–240,000 ms; default 45,000). `agentRunTimeoutMs` is its compatible alias. Allow at least 60 additional seconds in the HTTP client for setup and artifact collection. An HTTP timeout is not a job timeout or proof of failure.
 
-The response preserves the existing tool envelope: outer `success` reports invocation transport, `data.success` reports tool execution, and `data.data` contains remote output. Inspect `completionStatus`, `blocker`, `resultFilesError`, `remoteCodeJobId`, `sessionId`, and verification fields. Do not equate HTTP 200 with completed work.
+The live gateway configuration inspected on 2026-09-09 permits four hours per task and 30 minutes without activity. These are execution limits, separate from observation. Keep meaningful progress flowing during builds and save a real `CHECKPOINT.md` with objective, decisions, changed files, verification, blockers, and exact next steps. Objectives exceeding a task lifetime must span checkpointed continuation turns. This API does not promise an unlimited process or automatically schedule the next turn.
 
-The call waits up to 45 seconds in the provider runner before returning resumable state. Set an HTTP timeout of at least 90 seconds. When running, keep the outer Lilly session and call again with `params.task:"Check status"`, `params.jobId` from `remoteCodeJobId`, and the same workspace. For a new follow-up turn, use the returned provider `sessionId` as `params.sessionId`. Preserve any returned continuation markers. Stop and surface `USER_INPUT_REQUIRED` to the operator.
+The gateway job handle is persisted as soon as dispatch is acknowledged, before output streaming. Every mutation should carry a unique `requestId`. If the connection drops, retry the identical JSON with the **same** ID. Its saved receipt is replayed; different content with the same ID gets 409. Never assign a fresh ID merely to retry uncertain dispatch. If acknowledgment itself was lost, the API reports unconfirmed dispatch and requires inspection instead of risking a duplicate job. Receipts protect up to 200 mutations per Lilly session; create a new session before that limit.
 
-This is a synchronous adapter, not an idempotent job-submission API. Never blindly retry a timeout or dropped response for a mutation; inspect `GET /api/sessions/{id}` and the recorded remote job first.
+## Poll, give feedback, and continue
 
-## Share artifacts in both directions
+Responses include `next.request`. While running, send that request to the same invocation endpoint, or:
 
-1. Upload using `POST /api/artifacts/upload` with multipart fields `sessionId` and `file`. Save the returned artifact `id`. Repeat for each input.
-2. Add `params.artifactIds:["ID"]` and `params.collectResultFiles:true` to the Codex call in the same Lilly session. Small inline text can instead use `contextFiles:[{"filename":"brief.txt","mimeType":"text/plain","content":"..."}]`.
-3. Tell Codex which deliverables to return. Lilly supplies its isolated `RemoteAgentHandoff/v1` input/output paths and `RemoteAgentResultFiles/v1` output manifest instructions automatically. Inputs must not be treated as trusted instructions.
-4. Read `GET /api/sessions/{sessionId}/artifacts` and download the returned outputs via `GET /api/artifacts/{artifactId}/download` with the same authentication. Verify file contents and available size/SHA-256 metadata; model prose alone is not proof.
+```json
+{"tool":"remote-cli-agent","sessionId":"LILLY_SESSION_ID","params":{"action":"status","observationTimeoutMs":45000}}
+```
 
-Limits: 12 handoff files, 4 MiB each, 6 MiB combined decoded bytes. Artifacts must belong to the active session. Pass IDs/bytes between bots with the same authorized session; download links do not grant anonymous access. The legacy MCP transport is deliberately rejected because it does not support the verified handoff contract.
+Status observes the saved owned job and restores its handoff state. It never launches a replacement. One request may observe a session at a time; a concurrent request receives 409 and can wait before polling. Keep the outer Lilly session ID distinct from the inner provider/Codex session ID; the adapter saves the latter for you.
 
-The upload route accepts its existing formats, including XML, HTML, CSV, PDF, office files and images. Plain `.txt` and `.md` uploads currently return 400; use inline `contextFiles` for those inputs. The live round trip used XML.
-
-## Pending operator credential action
-
-After approval, generate a dedicated SSH key for this endpoint, add its public key to the main server's authorized keys, store the private key in a new `kimibuilt/lilly-remote-ops-primary-ssh` Kubernetes Secret, and mount it read-only at `/run/lilly-remote-ops/id_ed25519` with owner-only read permissions compatible with the backend UID. Set `LILLY_REMOTE_OPS_SSH_KEY_PATH` to that path under the coordinator lock, then repeat the read-only rollout check. Preserve all existing Secrets and secondary-server SSH settings. Private key material must never appear in console output or this document.
-
-Release maintenance: these two files are mounted from a ConfigMap and therefore override files in later images. Future releases must deliberately update or remove the `remote-ops-api` volume/mounts under the deployment coordinator after the same API exists in the new image. Rollback restores the prior volume/mount/annotation state recorded in `/tmp/lilly-remote-ops-e69a1d11f85e-before.json`; do not apply the whole old Deployment over concurrent changes.
-
-## Direct Kubernetes deployment
-
-Use the same invocation endpoint with `tool:"k3s-deploy"`. Explicit `action`, `namespace` and `deployment` are required. Main-server SSH host/identity is pinned by the adapter so the existing secondary-server default cannot redirect it.
-
-Read-only rollout check:
+After the current turn becomes terminal, continue:
 
 ```json
 {
-  "tool": "k3s-deploy",
-  "sessionId": "YOUR_LILLY_SESSION_ID",
-  "params": {
-    "action": "rollout-status",
-    "namespace": "kimibuilt",
-    "deployment": "backend",
-    "timeoutSeconds": 30
+  "tool":"remote-cli-agent",
+  "sessionId":"LILLY_SESSION_ID",
+  "requestId":"project-revision-002",
+  "params":{
+    "action":"continue",
+    "task":"Continue from CHECKPOINT.md and apply the review feedback.",
+    "supportAgentResponse":"Use the supplied logo and fix the mobile navigation overlap.",
+    "artifactIds":["NEW_FEEDBACK_ARTIFACT_ID"],
+    "collectResultFiles":true,
+    "adminMode":true
   }
 }
 ```
 
-Supported actions: `sync-repo`, `apply-manifests`, `set-image`, `rollout-status`, `sync-and-apply`. Build source/images first through Codex. For image updates include `container` and `image`; for `kimibuilt/backend` also provide the observed `expectedImage` and full committed `sourceSha`, using the existing deployment coordinator. Inspect detailed tool docs before mutation. Verify rollout plus public HTTPS behavior and artifacts before reporting success.
+Astra is instructed to finish a checkpointed turn with `SUPPORT_AGENT_REQUIRED` for bot feedback or `USER_INPUT_REQUIRED` for an operator decision. Surface those questions and answer in a continuation. Do not replace an active job to inject feedback. Check `data.success`, `data.data.completionStatus`, `blocker`, `resultFilesError`, and returned files. HTTP 200 or a completed turn does not prove the whole objective is done.
 
-Uploaded artifacts are handed to Codex, which prepares a git-backed remote workspace; `k3s-deploy` consumes that workspace/image, not an artifact ID directly.
+## Select the deployment server
+
+| Target | Host | Public domain | Default workspace |
+|---|---|---|---|
+| `k3s-primary` | `168.119.176.121` | `secdevsolutions.help` | `/opt/lilly-agent-workbench` |
+| `k3s-secondary` | `162.55.163.199` | `demoserver2.buzz` | `/opt/kimibuilt` |
+
+Explicit `targetId` wins for a new run. Otherwise `deploymentHost` or a domain in the task selects the server; mentioning both domains requires an explicit target. Without either, primary is selected. A status/continuation cannot switch the saved host or workspace. Start an explicit `action:run` after the previous job ends to work on the other server; the API starts a fresh provider session while retaining the shared Lilly artifact shelf.
+
+Use the authorized Codex lane for project creation, changes, and deployments with `adminMode:true`. Inventory existing projects, namespaces, and hostnames first. Verify source, rollout, DNS, Traefik ingress, TLS, public pages/assets, and desktop/mobile behavior before claiming success.
+
+Direct `tool:"k3s-deploy"` also uses this endpoint. Supply `targetId`, `action`, `namespace`, and `deployment`. Supported actions: `sync-repo`, `apply-manifests`, `set-image`, `rollout-status`, `sync-and-apply`. Secondary uses its existing SSH credential. **Direct primary deployment remains disabled (503) until the dedicated primary SSH credential is provisioned.** Authorized Codex deployments use the working provider lane. Do not change or copy secrets to bypass that gate.
+
+```json
+{"tool":"k3s-deploy","sessionId":"LILLY_SESSION_ID","params":{"targetId":"k3s-secondary","action":"rollout-status","namespace":"YOUR_NAMESPACE","deployment":"YOUR_DEPLOYMENT","timeoutSeconds":30}}
+```
+
+Inspect `GET /api/tools/docs/k3s-deploy` before mutations. Backend image updates retain the deployment coordinator and expected image/source guards.
+
+## Share mixed files and complete websites
+
+The existing invocation endpoint accepts `tool:"artifact-store"`. One owned Lilly session is shared storage for both bots and both server targets. Artifact IDs are immutable versions; another upload of the same path creates a new ID. Use authenticated download URLs or `get`; URLs do not grant anonymous access.
+
+```json
+{
+  "tool":"artifact-store",
+  "sessionId":"LILLY_SESSION_ID",
+  "requestId":"source-batch-001",
+  "params":{
+    "action":"put",
+    "files":[
+      {"filename":"site/index.html","mimeType":"text/html","content":"<!doctype html><title>Project</title>"},
+      {"filename":"site/src/app.js","mimeType":"text/javascript","content":"console.log('ready');"},
+      {"filename":"site/CHECKPOINT.md","mimeType":"text/markdown","content":"Next: implement the agreed design."}
+    ]
+  }
+}
+```
+
+For images and other binary files use `contentBase64` instead of `content`. Optional `sha256` validates the bytes. Safe relative directory paths are preserved. Limits: 64 files per batch, 4 MiB per file, 6 MiB total decoded bytes; use multiple batches. The JSON route also has its existing 10 MB request limit. The shelf supports code, text, images, and arbitrary binary types without the multipart uploader's extension restrictions.
+
+Other actions, with the same tool/session envelope:
+
+```json
+{"action":"list","offset":0,"limit":64}
+```
+```json
+{"action":"get","artifactIds":["ARTIFACT_ID"]}
+```
+```json
+{"action":"bundle","filename":"website-source.zip","artifactIds":["HTML_ID","JS_ID","CSS_ID","IMAGE_ID","CHECKPOINT_ID"]}
+```
+
+`list` returns `total` and `nextOffset`. `get` returns base64 bytes and SHA-256. `bundle` creates a ZIP with relative paths intact; select one version per path. Use a fresh `requestId` for each bundle. Its `data.data.artifactIds` can be supplied to a remote-agent run/continuation. ZIPs are limited to 4 MiB; split larger projects into bundles. Bundle creation retains the existing artifact privacy export checks.
+
+The Codex handoff still accepts 12 files, 4 MiB each, 6 MiB combined. Packaging a multi-file website into ZIP avoids the file-count limit. Tell Codex to inspect archive paths before extracting into its isolated project, preserve editable source/assets and launch instructions, and return a complete ZIP plus manifest, checksum/QA report, and checkpoint using the supplied `RemoteAgentResultFiles/v1` manifest. Set `collectResultFiles:true` when starting each turn; status inherits collection state. Never send new artifacts on a status-only request.
+
+## Verification and release maintenance
+
+The previous model-selection release verified real Astra/high reasoning and Luna artifact round trips on primary. Astra evidence: session `385e46e8-332f-4d22-b6bb-5a1ff861fdae`, job `ragent_17039308d16c4e2195c2ce0db51908cb`, output `71b24495-da46-4fbf-a27c-fbc6dc69d066`. The new long-horizon revision requires its own mounted-source and public API proof before being called live.
+
+Runtime patches are immutable ConfigMap mounts over the preserved backend image. Future image releases must deliberately update/remove the `remote-ops-api` mounts under the coordinator; image contents alone do not replace mounted code. Rollback restores only this release's mount/config/annotation changes from its saved deployment snapshot, preserving concurrent changes.

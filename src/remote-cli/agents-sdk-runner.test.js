@@ -1339,6 +1339,7 @@ describe('RemoteCliAgentsSdkRunner', () => {
   });
 
   test('uses the configured Codex provider when provider-agent has no explicit model', async () => {
+    let savedHandle;
     const fetchImpl = jest.fn(async (url, options = {}) => {
       if (url === 'https://gateway.example.com/admin/remote-agent-tasks') {
         expect(JSON.parse(options.body)).toMatchObject({
@@ -1359,6 +1360,7 @@ describe('RemoteCliAgentsSdkRunner', () => {
         };
       }
       if (url.includes('/task-codex-default/stream')) {
+        expect(savedHandle).toMatchObject({ jobId: 'task-codex-default', targetId: 'k3s-prod', model: 'gpt-5.6-sol' });
         return {
           ok: true,
           status: 200,
@@ -1393,7 +1395,7 @@ describe('RemoteCliAgentsSdkRunner', () => {
       fetchImpl,
     });
 
-    const result = await runner.run({ task: 'Verify the configured Codex provider.' });
+    const result = await runner.run({ task: 'Verify the configured Codex provider.', onTaskStarted: async handle => { savedHandle = handle; } });
 
     expect(result).toMatchObject({
       transport: 'provider-agent',
